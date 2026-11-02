@@ -1,0 +1,17 @@
+:root{
+--control-h:28px;        /* every button, input, icon button, tab */
+--row-h:32px;            /* filter bar row */
+--nav-item-h:28px;
+--eyebrow-h:36px;        /* "Marketing" / "Sales" nav section label */
+--appbar-h:45px;
+--sidebar-w:200px;
+--board-column-w:280px;
+--tabstrip-h:38px;
+
+--icon-6:6px;
+--icon-10:10px;
+--icon-10-5:10.5px;
+--icon-12:12px;
+--icon-14:14px;
+--icon-16:16px;
+}

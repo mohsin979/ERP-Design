@@ -1,0 +1,8 @@
+:root{
+/* The source is a static frame — no motion is specified in it.
+   These are the house defaults for this system: short, linear-ish, no bounce. */
+--duration-fast:100ms; /* @kind other */
+--duration-base:140ms; /* @kind other */
+--ease-standard:cubic-bezier(0.2,0,0.2,1); /* @kind other */
+--transition-control:background-color var(--duration-fast) var(--ease-standard),border-color var(--duration-fast) var(--ease-standard),color var(--duration-fast) var(--ease-standard);
+}

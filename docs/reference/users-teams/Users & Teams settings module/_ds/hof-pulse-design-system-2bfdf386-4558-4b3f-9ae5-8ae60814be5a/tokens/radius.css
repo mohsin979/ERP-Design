@@ -1,0 +1,7 @@
+:root{
+--radius-4:4px;         /* view tabs, filter dropdowns */
+--radius-8:8px;         /* the house radius: controls, inputs, cards, columns */
+--radius-9-33:9.333333969116211px;  /* edit-filter icon button */
+--radius-pill:999999px; /* stage pills, activity pills */
+--radius-badge:14px;    /* notification count */
+}

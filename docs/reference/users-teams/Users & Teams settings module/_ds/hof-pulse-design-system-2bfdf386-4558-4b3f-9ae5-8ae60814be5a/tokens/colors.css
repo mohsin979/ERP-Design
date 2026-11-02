@@ -1,0 +1,29 @@
+:root{
+/* ── Neutral ramp — transcribed from the Contacts screen ───────────── */
+--color-black:#000000;            /* primary action fill, active nav fill */
+--color-ink-900:#141414;           /* "Add contacts" fill, board pill text */
+--color-ink-800:#1C1C1C;
+--color-ink-700:#303030;
+--color-grey-600:#666666;          /* muted numeric value */
+--color-grey-500:#808080;
+--color-grey-400:#959595;          /* THE workhorse grey: icons, placeholders, secondary labels */
+--color-grey-300:#CCCCCC;          /* strong rule */
+--color-grey-200:#EFEFEF;          /* default border / hairline */
+--color-grey-150:#EEEEEE;
+--color-grey-100:#F8F8F8;
+--color-grey-050:#FBFBFB;          /* board-column surface */
+--color-grey-025:#FDFDFD;          /* control + input surface */
+--color-white-warm:#FFFEFE;
+--color-white:#FFFFFF;
+
+/* ── Brand + semantic hues ─────────────────────────────────────────── */
+--color-blue-600:#016DE5;          /* Pulse blue: wordmark, record links */
+--color-blue-050:#E8F3FF;          /* blue pill fill */
+--color-orange-600:#DF6800;        /* activity / ageing signal */
+--color-orange-050:#FFFCF5;        /* orange pill fill */
+--color-magenta-600:#D20688;       /* sales-qualified stage */
+--color-red-500:#FF1140;           /* notification count */
+
+/* ── Shadow ink ────────────────────────────────────────────────────── */
+--color-shadow:rgba(20,20,20,0.08);
+}

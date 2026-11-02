@@ -1,0 +1,74 @@
+:root{
+/* ── Text ─────────────────────────────────────────────────────────── */
+--text-primary:var(--color-black);
+--text-strong:var(--color-ink-900);
+--text-secondary:var(--color-grey-400);
+--text-muted:var(--color-grey-600);
+--text-placeholder:var(--color-grey-400);
+--text-inverse:var(--color-white);
+--text-link:var(--color-blue-600);
+--text-brand:var(--color-blue-600);
+
+/* ── Surfaces ─────────────────────────────────────────────────────── */
+--surface-app:var(--color-white);
+--surface-appbar:var(--color-white);
+--surface-sidebar:var(--color-white);
+--surface-card:var(--color-white);
+--surface-control:var(--color-grey-025);
+--surface-control-hover:var(--color-grey-100);
+--surface-board-column:var(--color-grey-050);
+--surface-selected:var(--color-black);
+--surface-tab-active:var(--color-white);
+
+/* ── Borders + rules ──────────────────────────────────────────────── */
+--border-default:var(--border-1) solid var(--color-grey-200);
+--border-hair:var(--border-hairline) solid var(--color-grey-200);
+--rule-color:var(--color-grey-200);
+--rule-color-strong:var(--color-grey-300);
+
+/* ── Action: primary (solid black) ────────────────────────────────── */
+--action-primary-bg:var(--color-black);
+--action-primary-bg-hover:var(--color-ink-800);
+--action-primary-bg-active:var(--color-ink-700);
+--action-primary-fg:var(--color-white);
+
+/* ── Action: secondary (white, hairline border) ───────────────────── */
+--action-secondary-bg:var(--color-white);
+--action-secondary-bg-hover:var(--color-grey-100);
+--action-secondary-bg-active:var(--color-grey-150);
+--action-secondary-fg:var(--color-grey-400);
+--action-secondary-border:var(--color-grey-200);
+
+/* ── Action: ghost (filter dropdowns, advanced filters) ───────────── */
+--action-ghost-fg:var(--color-grey-400);
+--action-ghost-bg-hover:var(--color-grey-100);
+
+/* ── Status tones — stage pills and activity pills ────────────────── */
+--tone-blue-fg:var(--color-blue-600);
+--tone-blue-bg:var(--color-blue-050);
+--tone-blue-border:var(--color-blue-600);
+--tone-orange-fg:var(--color-orange-600);
+--tone-orange-bg:var(--color-orange-050);
+--tone-orange-border:var(--color-orange-600);
+--tone-magenta-fg:var(--color-magenta-600);
+--tone-magenta-bg:var(--color-white);
+--tone-magenta-border:var(--color-magenta-600);
+--tone-neutral-fg:var(--color-ink-900);
+--tone-neutral-bg:var(--color-grey-050);
+--tone-neutral-border:var(--color-grey-050);
+--tone-danger-bg:var(--color-red-500);
+--tone-danger-fg:var(--color-white);
+
+/* ── Focus ────────────────────────────────────────────────────────── */
+--focus-ring:0 0 0 2px rgba(1,109,225,0.28);
+--focus-border:var(--color-blue-600);
+
+/* ── Icon ─────────────────────────────────────────────────────────── */
+--icon-default:var(--color-grey-400);
+--icon-strong:var(--color-black);
+--icon-inverse:var(--color-white);
+--icon-brand:var(--color-blue-600);
+}
+
+a{color:var(--text-link);text-decoration:none}
+a:hover{color:var(--color-black);text-decoration:underline}

@@ -1,0 +1,5 @@
+:root{
+/* One shadow in the whole screen: the selected segment of the view toggle. */
+--shadow-raised:0px 0.875px 7px 0px rgba(20,20,20,0.08);
+--shadow-none:none;
+}

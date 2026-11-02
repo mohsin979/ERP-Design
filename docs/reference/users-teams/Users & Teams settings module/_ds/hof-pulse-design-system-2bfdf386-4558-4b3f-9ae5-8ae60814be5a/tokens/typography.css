@@ -1,0 +1,25 @@
+:root{
+--font-sans:"DM Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+--font-script:"AllureMajestic",Georgia,serif;   /* wordmark / display face */
+
+--weight-light:300;
+--weight-regular:400;
+--weight-medium:500;
+--weight-semibold:600;
+--weight-bold:700;
+
+/* Sizes are the literal sizes present in the source — no rounding. */
+--size-9:9px;
+--size-10:10px;
+--size-12:12px;      /* the default UI size; ~80% of all text */
+--size-13:13px;
+--size-wordmark:13.064011573791504px;
+--size-wordmark-lg:16px;
+
+--leading-flat:100%;   /* nav items, inputs, most 12px labels */
+--leading-11:11px;     /* 9px notification count */
+--leading-14:14px;     /* button labels */
+--leading-18:18px;     /* board pills, counts */
+--leading-24:24px;     /* eyebrow section labels, tab labels */
+--leading-29:29px;     /* 13px page title */
+}

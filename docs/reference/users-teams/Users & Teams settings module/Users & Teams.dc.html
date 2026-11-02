@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/hof-pulse-design-system-2bfdf386-4558-4b3f-9ae5-8ae60814be5a/tokens/fonts.css">
+<link rel="stylesheet" href="_ds/hof-pulse-design-system-2bfdf386-4558-4b3f-9ae5-8ae60814be5a/tokens/colors.css">
+<link rel="stylesheet" href="_ds/hof-pulse-design-system-2bfdf386-4558-4b3f-9ae5-8ae60814be5a/tokens/typography.css">
+<link rel="stylesheet" href="_ds/hof-pulse-design-system-2bfdf386-4558-4b3f-9ae5-8ae60814be5a/tokens/spacing.css">
+<link rel="stylesheet" href="_ds/hof-pulse-design-system-2bfdf386-4558-4b3f-9ae5-8ae60814be5a/tokens/radius.css">
+<link rel="stylesheet" href="_ds/hof-pulse-design-system-2bfdf386-4558-4b3f-9ae5-8ae60814be5a/tokens/borders.css">
+<link rel="stylesheet" href="_ds/hof-pulse-design-system-2bfdf386-4558-4b3f-9ae5-8ae60814be5a/tokens/elevation.css">
+<link rel="stylesheet" href="_ds/hof-pulse-design-system-2bfdf386-4558-4b3f-9ae5-8ae60814be5a/tokens/sizing.css">
+<link rel="stylesheet" href="_ds/hof-pulse-design-system-2bfdf386-4558-4b3f-9ae5-8ae60814be5a/tokens/motion.css">
+<link rel="stylesheet" href="_ds/hof-pulse-design-system-2bfdf386-4558-4b3f-9ae5-8ae60814be5a/tokens/semantic.css">
+<link rel="stylesheet" href="_ds/hof-pulse-design-system-2bfdf386-4558-4b3f-9ae5-8ae60814be5a/styles.css">
+<script src="_ds/hof-pulse-design-system-2bfdf386-4558-4b3f-9ae5-8ae60814be5a/_ds_bundle.js"></script>
+<style>html,body{margin:0;height:100%}*{box-sizing:border-box}a{color:#016DE5;text-decoration:none}a:hover{color:#000;text-decoration:underline}input[type=checkbox]{accent-color:#141414;width:13px;height:13px;margin:0;cursor:pointer}
+header img[alt="Pulse"]{width:0!important;height:15px;padding-left:47px;background:url("assets/pulse-lockup.svg") no-repeat left center/contain}
+.ut-perm{display:none}
+tr:hover .ut-perm,tr:focus-within .ut-perm{display:flex}
+.qf-row .qf-tools{opacity:.55;transition:opacity 120ms cubic-bezier(0.2,0,0.2,1)}
+.qf-row:hover .qf-tools,.qf-row:focus-within .qf-tools{opacity:1}
+.qf-search input{width:100%!important;box-sizing:border-box!important}
+.qf-search>label,.qf-search>label>span{width:100%!important;box-sizing:border-box!important}</style>
+</helmet>
+<div style="position:relative;width:100%;min-width:1040px;height:100vh;min-height:720px;display:flex;flex-direction:column;overflow:hidden;background:#FFFFFF;font-family:'DM Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;-webkit-font-smoothing:antialiased">
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.AppBar" hint-size="100%,45px"></x-import>
+<div style="display:flex;flex:1;min-height:0;align-items:stretch">
+<nav style="box-sizing:border-box;display:flex;flex-direction:column;gap:17px;width:200px;flex-shrink:0;padding:12px;border:1px solid #EFEFEF;background:#FFFFFF;align-self:stretch">
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.NavItem" icon="home" hint-size="100%,28px">Home</x-import>
+<div style="height:1px;background:#EFEFEF;align-self:stretch"></div>
+<div style="display:flex;flex-direction:column;gap:7px;align-self:stretch">
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.NavItem" icon="contacts" hint-size="100%,28px">Contacts</x-import>
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.NavItem" icon="deals" hint-size="100%,28px">Deals</x-import>
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.NavItem" icon="tasks" hint-size="100%,28px">Tasks</x-import>
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.NavItem" icon="companies" hint-size="100%,28px">Companies</x-import>
+</div>
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.NavSection" title="Marketing" hint-size="100%,60px">
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.NavItem" icon="marketing-emails" hint-size="100%,28px">Marketing Emails</x-import>
+</x-import>
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.NavSection" title="Sales" hint-size="100%,90px">
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.NavItem" icon="receipt-text" hint-size="100%,28px">Sales Orders</x-import>
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.NavItem" icon="workflows" hint-size="100%,28px">Workflows</x-import>
+</x-import>
+<button type="button" style="display:flex;align-items:center;gap:5px;padding:0;border:none;background:transparent;font-family:inherit;font-size:13px;line-height:100%;color:#959595;cursor:pointer">
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.Icon" name="edit-nav" size="12" hint-size="12px,12px"></x-import>
+<span>Edit Nav</span>
+</button>
+</nav>
+
+<sc-if value="{{ settingsNavOpen }}" hint-placeholder-val="{{ true }}">
+<nav style="width:200px;flex-shrink:0;align-self:stretch;display:flex;flex-direction:column;gap:14px;padding:12px;border-right:1px solid #EFEFEF;background:#FFFFFF;overflow:hidden">
+<div style="display:flex;align-items:center;justify-content:space-between;gap:7px;flex-shrink:0">
+<button type="button" onClick="{{ closeSettingsNav }}" style="display:flex;align-items:center;gap:7px;height:29px;padding:0 8px;border:none;background:transparent;font-family:inherit;font-size:13px;line-height:100%;color:#959595;cursor:pointer;text-align:left" style-hover="background:#F8F8F8;border-radius:8px">
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.Icon" name="chevron-left" size="12" hint-size="12px,12px"></x-import>
+<span>Back</span>
+</button>
+</div>
+
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.SearchInput" placeholder="Search settings" iconPosition="leading" surface="control" hint-size="100%,28px" style="width: 100%;flex-shrink:0"></x-import><div id="pulse-settings-nav-list" style="display:flex;flex-direction:column;gap:14px;overflow-y:auto;min-height:0">
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.NavSection" title="General" hint-size="100%,90px">
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.NavItem" icon="sliders-horizontal" hint-size="100%,28px">General Settings</x-import>
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.NavItem" icon="bell" hint-size="100%,28px">Notifications</x-import>
+</x-import>
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.NavSection" title="Account Management" hint-size="100%,90px">
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.NavItem" icon="companies" hint-size="100%,28px">Accounts</x-import>
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.NavItem" icon="users" active="{{ true }}" hint-size="100%,28px">Users &amp; Teams</x-import>
+</x-import>
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.NavSection" title="Privacy" hint-size="100%,60px">
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.NavItem" icon="shield-check" hint-size="100%,28px">Privacy &amp; Security</x-import>
+</x-import>
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.NavSection" title="Data Management" hint-size="100%,90px">
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.NavItem" icon="database" hint-size="100%,28px">Objects</x-import><x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.NavItem" icon="tag" hint-size="100%,28px">Properties</x-import>
+
+</x-import>
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.NavSection" title="Tools" hint-size="100%,180px">
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.NavItem" icon="calendar" hint-size="100%,28px">Meetings</x-import>
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.NavItem" icon="phone" hint-size="100%,28px">Calls</x-import>
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.NavItem" icon="inbox" hint-size="100%,28px">Inbox</x-import>
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.NavItem" icon="megaphone" hint-size="100%,28px">Marketing</x-import>
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.NavItem" icon="file-text" hint-size="100%,28px">Content</x-import>
+</x-import>
+</div>
+</nav>
+</sc-if>
+
+<div style="flex:1;min-width:0;align-self:stretch;display:flex;flex-direction:column;gap:13px;padding:12px 16px;overflow:hidden;position:relative">
+<sc-if value="{{ settingsNavClosed }}" hint-placeholder-val="{{ false }}">
+<button type="button" aria-label="Open Settings navigation" title="Settings" onClick="{{ openSettingsNav }}" style="position:absolute;top:12px;right:16px;z-index:20;display:flex;align-items:center;justify-content:center;width:29px;height:29px;border:1px solid #CCCCCC;border-radius:4px;background:#FFFFFF;color:#141414;cursor:pointer;transition:background 120ms cubic-bezier(0.2,0,0.2,1)" style-hover="background:#F8F8F8">
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.Icon" name="settings" style="width:15px;height:15px;display:block" hint-size="15px,15px"></x-import>
+</button>
+</sc-if>
+
+<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:17px;flex-shrink:0">
+<div style="display:flex;flex-direction:column;gap:2px">
+<span style="font-size:14px;line-height:30px;color:#000000">Users &amp; Teams</span>
+<span style="font-size:13px;line-height:19px;color:#959595">Manage users, seats, teams, and permission presets across your CRM.</span>
+</div>
+<div style="display:flex;align-items:center;gap:9px;padding-top:4px">
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.Button" variant="primary" icon="plus" onClick="{{ openAdd }}" hint-size="96px,28px">Add user</x-import>
+</div>
+</div>
+
+<div id="ut-tabs" style="flex-shrink:0">
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.Tabs" tabs="{{ tabs }}" value="users" hint-size="100%,38px"></x-import>
+</div>
+
+<div style="display:flex;align-items:center;gap:17px;flex-wrap:wrap;flex-shrink:0">
+<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
+<sc-for list="{{ views }}" as="v" hint-placeholder-count="4">
+<button type="button" onClick="{{ v.select }}" style="display:flex;align-items:center;gap:7px;height:29px;padding:0 10px;border:1px solid {{ v.border }};border-radius:4px;background:{{ v.bg }};font-family:inherit;font-size:13px;line-height:100%;color:#959595;cursor:pointer;white-space:nowrap;box-shadow:{{ v.shadow }};transition:background 120ms cubic-bezier(0.2,0,0.2,1)" style-hover="background:#F8F8F8">
+<span style="display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:16px;padding:0 5px;border-radius:9999px;background:{{ v.countBg }};font-size:13px;font-weight:700;line-height:17px;color:{{ v.countFg }}">{{ v.count }}</span>
+<span style="color:{{ v.labelColor }};font-weight:{{ v.labelWeight }}">{{ v.label }}</span>
+</button>
+</sc-for>
+<div style="width:1px;height:21px;background:#EFEFEF;margin:0 2px"></div>
+<span style="position:relative;display:inline-flex">
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.Button" variant="secondary" icon="bookmark" onClick="{{ toggleSave }}" hint-size="104px,28px">Save view</x-import>
+<sc-if value="{{ saveOpen }}" hint-placeholder-val="{{ false }}">
+<div style="position:absolute;z-index:40;top:calc(100% + 6px);left:0;width:288px;padding:14px;border:1px solid #EFEFEF;border-radius:8px;background:#FFFFFF;box-shadow:0px 0.875px 7px 0px rgba(20,20,20,0.08);display:flex;flex-direction:column;gap:13px">
+<div style="display:flex;flex-direction:column;gap:2px">
+<span style="font-size:13px;font-weight:500;line-height:100%;color:#141414">Save as new view</span>
+<span style="font-size:13px;line-height:19px;color:#959595">{{ saveSummary }}</span>
+</div>
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.TextInput" label="View name" placeholder="Sales Pro · active" hint-size="100%,28px"></x-import>
+<label style="display:flex;align-items:center;gap:9px;font-size:13px;line-height:19px;color:#959595">
+<input type="checkbox">
+<span>Share with everyone in this account</span>
+</label>
+<div style="display:flex;align-items:center;justify-content:flex-end;gap:9px;padding-top:10px;border-top:1px solid #EFEFEF">
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.Button" variant="secondary" onClick="{{ toggleSave }}" hint-size="72px,28px">Cancel</x-import>
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.Button" variant="primary" onClick="{{ toggleSave }}" hint-size="84px,28px">Save view</x-import>
+</div>
+</div>
+</sc-if>
+</span>
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.Button" variant="secondary" icon="plus" onClick="{{ toggleSave }}" hint-size="96px,28px">Add view</x-import>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:9px;padding-top:6px;border-top:1px solid #EFEFEF;flex-shrink:0;position:relative">
+<div style="display:flex;align-items:center;gap:9px;flex-wrap:nowrap">
+<div style="display:flex;align-items:center;gap:2px;flex:0 1 auto;min-width:0;flex-wrap:nowrap;overflow-x:auto">
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.SearchInput" placeholder="Search" iconPosition="leading" width="{{ searchWidth }}" value="{{ query }}" onChange="{{ setQuery }}" hint-size="88px,28px" style="flex-shrink:0"></x-import>
+<sc-for list="{{ quickFilters }}" as="f" hint-placeholder-count="5">
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.FilterDropdown" label="{{ f.label }}" value="{{ f.value }}" onClick="{{ f.click }}" hint-size="96px,32px"></x-import>
+</sc-for>
+</div>
+<span style="display:inline-flex;align-items:center;gap:5px;flex-shrink:0">
+<button type="button" onClick="{{ clearAll }}" style="height:29px;padding:0 8px;border:none;border-radius:4px;background:transparent;font-family:inherit;font-size:13px;font-weight:500;line-height:15px;color:#959595;cursor:pointer;white-space:nowrap" style-hover="background:#F8F8F8;color:#141414">Clear</button>
+<span style="position:relative;display:inline-flex;flex-shrink:0">
+<button type="button" aria-label="Edit quick filters" title="Edit quick filters" onClick="{{ toggleAdd }}" style="display:flex;align-items:center;justify-content:center;width:29px;height:29px;border:1px solid #CCCCCC;border-radius:4px;background:{{ addBg }};color:#141414;cursor:pointer;transition:background 120ms cubic-bezier(0.2,0,0.2,1)" style-hover="background:#F8F8F8;border-color:#141414">
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.Icon" name="sliders-horizontal" style="width:15px;height:15px" hint-size="14px,14px"></x-import>
+</button>
+<sc-if value="{{ addFilterOpen }}" hint-placeholder-val="{{ false }}">
+<div style="position: absolute; z-index: 30; top: calc(100% + 6px); right: 0; width: 288px; padding: 14px; border: 1px solid #EFEFEF; border-radius: 8px; background: #FFFFFF; box-shadow: 0px 0.875px 7px 0px rgba(20,20,20,0.08); display: flex; flex-direction: column; gap: 14px">
+<div style="display:flex;align-items:baseline;justify-content:space-between;gap:9px">
+<span style="font-size:13px;font-weight:500;line-height:100%;color:#141414">Edit quick filters</span>
+<span style="display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:9999px;background:#F8F8F8;font-size:13px;font-weight:500;line-height:100%;color:#959595">{{ selectedCount }} of 5</span>
+</div>
+<div style="display:flex;flex-direction:column;gap:8px">
+<span style="font-size:11px;font-weight:500;letter-spacing:0.04em;text-transform:uppercase;line-height:100%;color:#959595">Shown in toolbar</span>
+<div style="display:flex;flex-direction:column;gap:1px;padding:4px;border:1px solid #EFEFEF;border-radius:8px;background:#FDFDFD">
+<sc-for list="{{ selectedFilters }}" as="s" hint-placeholder-count="5">
+<div class="qf-row" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 4px 0 8px;border-radius:6px;background:#FFFFFF" style-hover="background:#F8F8F8">
+<span style="flex:1;min-width:0;font-size:13px;line-height:100%;color:#141414;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ s.label }}</span>
+<span class="qf-tools" style="display:inline-flex;align-items:center;flex-shrink:0;border:1px solid #EFEFEF;border-radius:6px;overflow:hidden;background:#FFFFFF">
+<button type="button" aria-label="Move up" title="Move up" onClick="{{ s.up }}" style="display:flex;align-items:center;justify-content:center;width:24px;height:24px;border:none;background:transparent;color:#959595;cursor:pointer;transition:background 120ms cubic-bezier(0.2,0,0.2,1)" style-hover="background:#EFEFEF;color:#141414">
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.Icon" name="chevron-up" style="width:13px;height:13px;display:block" hint-size="13px,13px"></x-import>
+</button>
+<span style="width:1px;height:16px;background:#EFEFEF"></span>
+<button type="button" aria-label="Move down" title="Move down" onClick="{{ s.down }}" style="display:flex;align-items:center;justify-content:center;width:24px;height:24px;border:none;background:transparent;color:#959595;cursor:pointer;transition:background 120ms cubic-bezier(0.2,0,0.2,1)" style-hover="background:#EFEFEF;color:#141414">
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.Icon" name="chevron-down" style="width:13px;height:13px;display:block" hint-size="13px,13px"></x-import>
+</button>
+</span>
+<button class="qf-tools" type="button" aria-label="Remove filter" title="Remove from toolbar" onClick="{{ s.remove }}" style="display:flex;align-items:center;justify-content:center;width:24px;height:24px;flex-shrink:0;border:1px solid transparent;border-radius:6px;background:transparent;color:#959595;cursor:pointer;transition:background 120ms cubic-bezier(0.2,0,0.2,1)" style-hover="background:#F8F8F8;border-color:#EFEFEF;color:#141414">
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.Icon" name="close" style="width:13px;height:13px;display:block" hint-size="13px,13px"></x-import>
+</button>
+</div>
+</sc-for>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 10px; padding-top: 14px; border-top: 1px solid #EFEFEF">
+<span style="font-size:11px;font-weight:500;letter-spacing:0.04em;text-transform:uppercase;line-height:100%;color:#959595">Add a filter</span>
+<span class="qf-search" style="display:block;width:100%">
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.SearchInput" placeholder="Search filters" iconPosition="leading" width="100%" value="{{ addQuery }}" onChange="{{ setAddQuery }}" hint-size="100%,29px" style="display: block; width: 100%; height: 29px"></x-import>
+</span>
+<sc-if value="{{ atMax }}" hint-placeholder-val="{{ false }}">
+<span style="padding:0 2px;font-size:13px;line-height:19px;color:#959595">Remove one to add another.</span>
+</sc-if>
+<div style="display:flex;flex-direction:column;gap:1px;max-height:192px;overflow-y:auto">
+<sc-for list="{{ addable }}" as="a" hint-placeholder-count="5">
+<button type="button" onClick="{{ a.add }}" style="box-sizing: border-box; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 13px; height: 32px; padding: 0 8px; border: none; border-radius: 6px; background: transparent; font-family: inherit; font-size: 13px; line-height: 100%; color: {{ a.color }}; cursor: {{ a.cursor }}; text-align: left; width: 100%; flex-direction: row; transition: background 120ms cubic-bezier(0.2,0,0.2,1)" style-hover="background:#F8F8F8">
+<span>{{ a.label }}</span>
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.Icon" name="plus" style="width: 15px; height: 15px; display: block; flex-shrink: 0" hint-size="15px,15px"></x-import>
+</button>
+</sc-for>
+</div>
+<sc-if value="{{ noAddable }}" hint-placeholder-val="{{ false }}">
+<span style="padding:0 8px 4px;font-size:13px;line-height:19px;color:#959595">No filters match</span>
+</sc-if>
+</div>
+</div>
+</sc-if>
+</span>
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.Button" variant="secondary" icon="filter" hint-size="86px,29px" style="flex-shrink:0;padding:6px 9px">Filters</x-import>
+</span>
+<span style="display:inline-flex;align-items:center;gap:7px;flex-shrink:0;margin-left:auto">
+<button type="button" aria-label="Edit table" title="Edit table" style="display:flex;align-items:center;justify-content:center;width:29px;height:29px;border:1px solid #CCCCCC;border-radius:4px;background:#FFFFFF;color:#141414;cursor:pointer;transition:background 120ms cubic-bezier(0.2,0,0.2,1)" style-hover="background:#F8F8F8;border-color:#141414">
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.Icon" name="settings" style="width:15px;height:15px" hint-size="14px,14px"></x-import>
+</button>
+<button type="button" aria-label="Export data" title="Export data" style="display:flex;align-items:center;justify-content:center;width:29px;height:29px;border:1px solid #CCCCCC;border-radius:4px;background:#FFFFFF;color:#141414;cursor:pointer;transition:background 120ms cubic-bezier(0.2,0,0.2,1)" style-hover="background:#F8F8F8;border-color:#141414">
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.Icon" name="download" style="width:15px;height:15px" hint-size="14px,14px"></x-import>
+</button>
+</span>
+</div>
+
+<sc-if value="{{ filtersOpen }}" hint-placeholder-val="{{ false }}">
+<div style="position:absolute;z-index:30;top:calc(100% + 6px);right:0;width:340px;padding:14px;border:1px solid #EFEFEF;border-radius:8px;background:#FFFFFF;box-shadow:0px 0.875px 7px 0px rgba(20,20,20,0.08);display:flex;flex-direction:column;gap:13px">
+<div style="display:flex;align-items:center;justify-content:space-between">
+<span style="font-size:13px;font-weight:500;line-height:100%;color:#141414">Advanced Filters</span>
+<span style="font-size:13px;line-height:100%;color:#959595">1 applied</span>
+</div>
+<div style="display:flex;flex-direction:column;gap:11px">
+<div style="display:flex;align-items:center;justify-content:space-between;gap:9px">
+<span style="font-size:13px;line-height:100%;color:#959595">Status</span>
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.Select" options="{{ statusOptions }}" value="{{ statusValue }}" onSelect="{{ setStatus }}" width="180" hint-size="180px,28px"></x-import>
+</div>
+<div style="display:flex;align-items:center;justify-content:space-between;gap:9px">
+<span style="font-size:13px;line-height:100%;color:#959595">Seat</span>
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.Select" options="{{ seatOptions }}" placeholder="Any seat" width="180" hint-size="180px,28px"></x-import>
+</div>
+<div style="display:flex;align-items:center;justify-content:space-between;gap:9px">
+<span style="font-size:13px;line-height:100%;color:#959595">Team</span>
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.Select" options="{{ teamOptions }}" placeholder="Any team" width="180" hint-size="180px,28px"></x-import>
+</div>
+<div style="display:flex;align-items:center;justify-content:space-between;gap:9px">
+<span style="font-size:13px;line-height:100%;color:#959595">Permission Preset</span>
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.Select" options="{{ presetOptions }}" placeholder="Any preset" width="180" hint-size="180px,28px"></x-import>
+</div>
+<div style="display:flex;align-items:center;justify-content:space-between;gap:9px">
+<span style="font-size:13px;line-height:100%;color:#959595">Last Active</span>
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.Select" options="{{ lastActiveOptions }}" placeholder="Any time" width="180" hint-size="180px,28px"></x-import>
+</div>
+</div>
+<div style="display:flex;align-items:center;justify-content:space-between;gap:9px;padding-top:10px;border-top:1px solid #EFEFEF">
+<button type="button" onClick="{{ clearAll }}" style="height:29px;padding:0 8px;border:none;border-radius:4px;background:transparent;font-family:inherit;font-size:13px;font-weight:500;line-height:15px;color:#959595;cursor:pointer" style-hover="background:#F8F8F8">Clear</button>
+<div style="display:flex;align-items:center;gap:9px">
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.Button" variant="secondary" onClick="{{ toggleSave }}" hint-size="104px,28px">Save as view</x-import>
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.Button" variant="primary" onClick="{{ toggleFilters }}" hint-size="98px,28px">Apply filters</x-import>
+</div>
+</div>
+</div>
+</sc-if>
+
+</div>
+
+<div style="flex:1;min-height:0;border:1px solid #EFEFEF;border-radius:8px;background:#FFFFFF;overflow:auto">
+<table style="width:100%;min-width:900px;table-layout:fixed;border-collapse:collapse;font-family:inherit">
+<thead>
+<tr style="background:#FDFDFD">
+<th style="width:196px;height:33px;padding:0 12px;text-align:left;font-size:13px;font-weight:500;line-height:15px;color:#959595;border-bottom:1px solid #EFEFEF;white-space:nowrap">User</th>
+<th style="width:100px;height:33px;padding:0 12px;text-align:left;font-size:13px;font-weight:500;line-height:15px;color:#959595;border-bottom:1px solid #EFEFEF;white-space:nowrap">Seat</th>
+<th style="width:120px;height:33px;padding:0 12px;text-align:left;font-size:13px;font-weight:500;line-height:15px;color:#959595;border-bottom:1px solid #EFEFEF;white-space:nowrap">Team</th>
+<th style="width:128px;height:33px;padding:0 12px;text-align:left;font-size:13px;font-weight:500;line-height:15px;color:#959595;border-bottom:1px solid #EFEFEF;white-space:nowrap">Permission Preset</th>
+<th style="width:88px;height:33px;padding:0 12px;text-align:left;font-size:13px;font-weight:500;line-height:15px;color:#959595;border-bottom:1px solid #EFEFEF;white-space:nowrap">Status</th>
+<th style="width:96px;height:33px;padding:0 12px;text-align:left;font-size:13px;font-weight:500;line-height:15px;color:#959595;border-bottom:1px solid #EFEFEF;white-space:nowrap">Last Active</th>
+<th style="width:100px;height:33px;padding:0 12px;text-align:left;font-size:13px;font-weight:500;line-height:15px;color:#959595;border-bottom:1px solid #EFEFEF;white-space:nowrap">Created</th>
+<th style="width:72px;height:33px;padding:0 12px;text-align:right;font-size:13px;font-weight:500;line-height:15px;color:#959595;border-bottom:1px solid #EFEFEF;white-space:nowrap">Actions</th>
+</tr>
+</thead>
+<tbody>
+<sc-for list="{{ rows }}" as="u" hint-placeholder-count="9">
+<tr style="transition:background 120ms cubic-bezier(0.2,0,0.2,1)" style-hover="background:#F8F8F8">
+<td style="height:49px;padding:8px 12px;border-bottom:1px solid #EFEFEF">
+<div style="position:relative;display:flex;align-items:center;gap:11px">
+<span style="display:inline-flex;align-items:center;justify-content:center;width:27px;height:27px;flex-shrink:0;border-radius:9999px;background:#F8F8F8;border:1px solid #EFEFEF;font-size:13px;font-weight:600;line-height:100%;color:#141414">{{ u.initials }}</span>
+<span style="display:flex;flex-direction:column;gap:1px;min-width:0;padding-right:96px">
+<a href="#" style="font-size:14px;font-weight:600;line-height:19px;color:#016DE5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ u.name }}</a>
+<span style="font-size:13px;line-height:17px;color:#959595;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ u.email }}</span>
+</span>
+<button type="button" class="ut-perm" aria-label="Edit Permission" title="Edit Permission" style="position:absolute;right:0;top:0;align-items:center;gap:5px;height:19px;padding:0 8px 0 6px;border:1px solid #016DE5;border-radius:9999px;background:#E8F3FF;font-family:inherit;font-size:12px;font-weight:500;line-height:15px;color:#016DE5;cursor:pointer;white-space:nowrap" style-hover="background:#D7EAFF">
+
+<span style="display:block;line-height:15px">Edit Permission</span>
+</button>
+</div>
+</td>
+<td style="padding:0 12px;border-bottom:1px solid #EFEFEF;font-size:13px;line-height:19px;color:#141414;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="{{ u.seat }}">{{ u.seat }}</td>
+<td style="padding:0 12px;border-bottom:1px solid #EFEFEF;font-size:13px;line-height:19px;color:#141414;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="{{ u.team }}">{{ u.team }}</td>
+<td style="padding:0 12px;border-bottom:1px solid #EFEFEF;font-size:13px;line-height:19px;color:#141414;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="{{ u.preset }}">{{ u.preset }}</td>
+<td style="padding:0 12px;border-bottom:1px solid #EFEFEF;white-space:nowrap">
+<sc-if value="{{ dotStatus }}" hint-placeholder-val="{{ true }}">
+<span style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:500;line-height:19px;color:{{ u.statusText }}">
+<span style="width:6px;height:6px;flex-shrink:0;border-radius:9999px;background:{{ u.dot }}"></span>
+<span>{{ u.status }}</span>
+</span>
+</sc-if>
+<sc-if value="{{ pillStatus }}" hint-placeholder-val="{{ false }}">
+<span style="display:inline-flex;align-items:center;gap:7px;min-height:21px;padding:0 8px;border-radius:9999px;font-size:13px;font-weight:500;line-height:19px;background:{{ u.pillBg }};border:1px solid {{ u.dot }};color:{{ u.dot }}">{{ u.status }}</span>
+</sc-if>
+</td>
+<td style="padding: 0 12px; border-bottom: 1px solid #EFEFEF; font-size: 13px; line-height: 19px; color: #959595; white-space: nowrap; overflow:hidden; text-overflow:ellipsis" title="{{ u.lastActive }}">{{ u.lastActive }}</td>
+<td style="padding:0 12px;border-bottom:1px solid #EFEFEF;font-size:13px;line-height:19px;color:#959595;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="{{ u.created }}">{{ u.created }}</td>
+<td style="padding:0 12px;border-bottom:1px solid #EFEFEF">
+<div style="display:flex;align-items:center;justify-content:flex-end">
+<button type="button" title="Edit name, team or status" style="display: flex; align-items: center; gap: 8px; height: 25px; padding: 0 8px; border: 1px solid #EFEFEF; border-radius: 4px; background: #FFFFFF; font-family: inherit; font-size: 13px; font-weight: 500; line-height: 15px; color: #141414; cursor: pointer; white-space: nowrap; transition: background 120ms cubic-bezier(0.2,0,0.2,1); padding-left: 8px; padding-right: 8px" style-hover="background:#F8F8F8;border-color:#CCCCCC">
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.Icon" name="pencil" style="width: 17px; height: 17px; display: block; flex-shrink: 0" hint-size="13px,13px"></x-import>
+<span style="display:block;line-height:15px">Edit</span>
+</button>
+</div>
+</td>
+</tr>
+</sc-for>
+</tbody>
+</table>
+</div>
+
+<div style="display:flex;align-items:center;justify-content:space-between;gap:17px;height:29px;flex-shrink:0">
+<span style="font-size:13px;line-height:19px;color:#959595">{{ resultSummary }}</span>
+<div style="display:flex;align-items:center;gap:13px">
+<div style="display:flex;align-items:center;gap:5px">
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.IconButton" icon="chevron-left" iconSize="12" hairline="{{ true }}" label="Previous page" hint-size="28px,28px"></x-import>
+<span style="display:inline-flex;align-items:center;justify-content:center;width:25px;height:25px;border-radius:8px;background:#000000;font-size:13px;line-height:100%;color:#FFFFFF">1</span>
+<span style="display:inline-flex;align-items:center;justify-content:center;width:25px;height:25px;font-size:13px;line-height:100%;color:#959595">2</span>
+<span style="display:inline-flex;align-items:center;justify-content:center;width:25px;height:25px;font-size:13px;line-height:100%;color:#959595">3</span>
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.IconButton" icon="chevron-right" iconSize="12" hairline="{{ true }}" label="Next page" hint-size="28px,28px"></x-import>
+</div>
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.FilterDropdown" label="25 per page" hint-size="104px,32px"></x-import>
+</div>
+</div>
+
+</div>
+</div>
+
+<sc-if value="{{ addOpen }}" hint-placeholder-val="{{ false }}">
+<div style="position:absolute;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;background:rgba(20,20,20,0.18)">
+<div style="width:452px;border:1px solid #EFEFEF;border-radius:8px;background:#FFFFFF;box-shadow:0px 0.875px 7px 0px rgba(20,20,20,0.08);display:flex;flex-direction:column">
+<div style="display:flex;align-items:center;justify-content:space-between;gap:13px;padding:14px 16px;border-bottom:1px solid #EFEFEF">
+<span style="font-size:14px;font-weight:600;line-height:19px;color:#000000">Add user</span>
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.IconButton" icon="close" iconSize="12" label="Close" onClick="{{ closeAdd }}" hint-size="24px,24px" style="width:25px;height:25px;border:none;background:transparent"></x-import>
+</div>
+<div style="display:flex;flex-direction:column;gap:13px;padding:16px">
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.TextInput" label="Name" placeholder="Full name" hint-size="100%,28px"></x-import>
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.TextInput" label="Email" placeholder="name@hof-global.com" hint-size="100%,28px"></x-import>
+<div style="display:flex;flex-direction:column;gap:5px">
+<span style="font-size:11px;line-height:100%;color:#959595">Seat</span>
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.Select" options="{{ seatOptions }}" placeholder="Choose a seat" width="420" hint-size="420px,28px"></x-import>
+</div>
+<div style="display:flex;flex-direction:column;gap:5px">
+<span style="font-size:11px;line-height:100%;color:#959595">Team</span>
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.Select" options="{{ teamOptions }}" placeholder="Choose a team" width="420" hint-size="420px,28px"></x-import>
+</div>
+<div style="display:flex;flex-direction:column;gap:5px">
+<span style="font-size:11px;line-height:100%;color:#959595">Permission Preset</span>
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.Select" options="{{ presetOptions }}" placeholder="Choose a preset" width="420" hint-size="420px,28px"></x-import>
+</div>
+<label style="display:flex;align-items:center;gap:9px;font-size:13px;line-height:19px;color:#141414">
+<input type="checkbox" checked="">
+<span>Send an email invite to this user</span>
+</label>
+</div>
+<div style="display:flex;align-items:center;justify-content:flex-end;gap:9px;padding:12px 16px;border-top:1px solid #EFEFEF">
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.Button" variant="secondary" onClick="{{ closeAdd }}" hint-size="72px,28px">Cancel</x-import>
+<x-import component-from-global-scope="HOFPulseDesignSystem_2bfdf3.Button" variant="primary" onClick="{{ closeAdd }}" hint-size="88px,28px">Add user</x-import>
+</div>
+</div>
+</div>
+</sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1300,&quot;height&quot;:900},&quot;statusStyle&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dot&quot;,&quot;pill&quot;],&quot;default&quot;:&quot;dot&quot;,&quot;tsType&quot;:&quot;\&quot;dot\&quot; | \&quot;pill\&quot;&quot;}}">
+const USERS = [
+  { name: "Abdullah Javed", email: "abdullah.javed@hof-global.com", seat: "Core", team: "Revenue Ops", preset: "Super admin", status: "Active", lastActive: "2 hours ago" },
+  { name: "Abeera Rahim", email: "abeera.rahim@hof-global.com", seat: "Sales Pro", team: "Enterprise Sales", preset: "Sales manager", status: "Active", lastActive: "Today" },
+  { name: "Marcus Lindqvist", email: "marcus.l@hof-global.com", seat: "Sales Pro", team: "Enterprise Sales", preset: "Sales rep", status: "Active", lastActive: "Yesterday" },
+  { name: "Priya Nandakumar", email: "priya.n@hof-global.com", seat: "Marketing Pro", team: "Demand Gen", preset: "Marketing manager", status: "Active", lastActive: "3 days ago" },
+  { name: "Tomás Ferreira", email: "tomas.ferreira@hof-global.com", seat: "Service Pro", team: "Customer Success", preset: "Support agent", status: "Active", lastActive: "Today" },
+  { name: "Hana Okafor", email: "hana.okafor@hof-global.com", seat: "Core", team: "Partnerships", preset: "Read only", status: "Active", lastActive: "1 week ago" },
+  { name: "Leo Vandenberg", email: "leo.v@hof-global.com", seat: "Sales Pro", team: "Mid-Market Sales", preset: "Sales rep", status: "Pending", lastActive: "Never" },
+  { name: "Sofia Marchetti", email: "sofia.marchetti@hof-global.com", seat: "Marketing Pro", team: "Demand Gen", preset: "Marketing manager", status: "Pending", lastActive: "Never" },
+  { name: "Ravi Sundaram", email: "ravi.sundaram@hof-global.com", seat: "Core", team: "Revenue Ops", preset: "Sales rep", status: "Bounced Invite", lastActive: "Never" },
+  { name: "Nadia El-Amin", email: "nadia.elamin@hofmigration.com", seat: "Service Pro", team: "Customer Success", preset: "Support agent", status: "Bounced Invite", lastActive: "Never" },
+  { name: "Grace Whitmore", email: "grace.whitmore@hof-global.com", seat: "View only", team: "Finance", preset: "Read only", status: "Deactivated", lastActive: "2 months ago" },
+  { name: "Daniel Osei", email: "daniel.osei@hof-global.com", seat: "Sales Pro", team: "Mid-Market Sales", preset: "Sales rep", status: "Deactivated", lastActive: "5 months ago" },
+  { name: "Yuki Tanaka", email: "yuki.tanaka@hof-global.com", seat: "Core", team: "Revenue Ops", preset: "Sales manager", status: "Active", lastActive: "4 hours ago" },
+  { name: "Elena Rusu", email: "elena.rusu@hof-global.com", seat: "Marketing Pro", team: "Lifecycle", preset: "Marketing manager", status: "Active", lastActive: "Yesterday" },
+];
+
+const TONES = {
+  Active: { dot: "#016DE5", text: "#141414", bg: "#E8F3FF" },
+  Pending: { dot: "#DF6800", text: "#141414", bg: "#FFFCF5" },
+  "Bounced Invite": { dot: "#D20688", text: "#141414", bg: "#FFFFFF" },
+  Deactivated: { dot: "#959595", text: "#959595", bg: "#F8F8F8" },
+};
+
+const FILTER_ATTRS = ["Status", "Last Activity", "Team", "Permission Preset", "Name", "Seat", "Email domain", "Date added", "Invited by", "Job title", "Login method", "Two-factor auth"];
+
+const CREATED = ["12 Mar 2024", "04 Jun 2024", "27 Jan 2023", "18 Sep 2024", "02 Nov 2023", "23 Apr 2025", "09 Feb 2024", "31 Jul 2023", "15 May 2025", "06 Dec 2023"];
+
+function move(list, i, dir) {
+  const j = i + dir;
+  if (j < 0 || j >= list.length) return list;
+  const out = list.slice();
+  out[i] = list[j];
+  out[j] = list[i];
+  return out;
+}
+
+const VIEWS = [
+  { id: "Active", label: "Active Users", total: 142 },
+  { id: "Pending", label: "Pending Users", total: 6 },
+  { id: "Bounced Invite", label: "Bounced Invites", total: 2 },
+  { id: "Deactivated", label: "Deactivated Users", total: 24 },
+];
+
+class Component extends DCLogic {
+  state = {
+    view: "Active", query: "", filtersOpen: false, saveOpen: false, addOpen: false,
+    addFilterOpen: false, addQuery: "", settingsNavOpen: true,
+    quickFilters: ["Status", "Last Activity", "Team", "Permission Preset", "Name"],
+  };
+
+  renderVals() {
+    const { view, query } = this.state;
+    const q = query.trim().toLowerCase();
+    const statusStyle = this.props.statusStyle ?? "dot";
+    const rows = USERS.filter((u) => u.status === view)
+      .filter((u) => !q || u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q))
+      .map((u, i) => {
+        const t = TONES[u.status];
+        const created = CREATED[i % CREATED.length];
+        return {
+          ...u,
+          initials: u.name.split(" ").map((p) => p[0]).join("").slice(0, 2),
+          created,
+          dot: t.dot,
+          pillBg: t.bg,
+          statusText: t.text,
+        };
+      });
+
+    const activeView = VIEWS.find((v) => v.id === view);
+    const atMax = this.state.quickFilters.length >= 5;
+    const aq = this.state.addQuery.trim().toLowerCase();
+    const addable = FILTER_ATTRS
+      .filter((f) => !this.state.quickFilters.includes(f))
+      .filter((f) => !aq || f.toLowerCase().includes(aq));
+    return {
+      rows,
+      dotStatus: statusStyle !== "pill",
+      pillStatus: statusStyle === "pill",
+      tabs: [
+        { value: "users", label: "Users", icon: "users" },
+        { value: "seats", label: "Seats", icon: "ticket" },
+        { value: "teams", label: "Teams", icon: "users-round" },
+        { value: "presets", label: "Permission Presets", icon: "shield-check" },
+      ],
+      views: VIEWS.map((v) => {
+        const on = v.id === view;
+        return {
+          label: v.label,
+          count: v.total,
+          labelColor: on ? "#141414" : "#959595",
+          labelWeight: on ? "500" : "400",
+          border: on ? "#141414" : "#EFEFEF",
+          bg: on ? "#FFFFFF" : "#FDFDFD",
+          shadow: on ? "0px 0.875px 7px 0px rgba(20,20,20,0.08)" : "none",
+          countBg: on ? "#141414" : "#F8F8F8",
+          countFg: on ? "#FFFFFF" : "#141414",
+          select: () => this.setState({ view: v.id, query: "" }),
+        };
+      }),
+      quickFilters: this.state.quickFilters.map((f) => ({
+        label: f === "Last Activity" ? "Activity" : f === "Permission Preset" ? "Preset" : f,
+        value: undefined,
+        click: () => this.setState({ filtersOpen: true, saveOpen: false, addFilterOpen: false }),
+      })),
+      saveSummary: "From current filters: Status is " + view + (q ? ", search \u201c" + query.trim() + "\u201d" : ""),
+      addFilterOpen: this.state.addFilterOpen,
+      addBg: this.state.addFilterOpen ? "#F8F8F8" : "#FFFFFF",
+      addQuery: this.state.addQuery,
+      setAddQuery: (e) => this.setState({ addQuery: e.target.value }),
+      toggleAdd: () => this.setState((s) => ({ addFilterOpen: !s.addFilterOpen, filtersOpen: false, saveOpen: false, addQuery: "" })),
+      addable: addable.map((f) => ({
+        label: f,
+        color: atMax ? "#959595" : "#141414",
+        cursor: atMax ? "default" : "pointer",
+        add: () => {
+          if (atMax) return;
+          this.setState((s) => ({ quickFilters: s.quickFilters.concat(f), addQuery: "" }));
+        },
+      })),
+      noAddable: addable.length === 0,
+      searchWidth: 176,
+      atMax,
+      selectedCount: this.state.quickFilters.length,
+      selectedFilters: this.state.quickFilters.map((f, i) => ({
+        label: f,
+        up: () => this.setState((s) => ({ quickFilters: move(s.quickFilters, i, -1) })),
+        down: () => this.setState((s) => ({ quickFilters: move(s.quickFilters, i, 1) })),
+        remove: () => this.setState((s) => ({ quickFilters: s.quickFilters.filter((x) => x !== f) })),
+      })),
+      resultSummary: rows.length + " of " + activeView.total + " users in " + activeView.label,
+      statusFilterLabel: activeView.label.replace(" Users", "").replace(" Invites", " invite"),
+      statusValue: view,
+      statusOptions: ["Active", "Pending", "Bounced Invite", "Deactivated"],
+      seatOptions: ["Core", "Sales Pro", "Marketing Pro", "Service Pro", "View only"],
+      teamOptions: ["Revenue Ops", "Enterprise Sales", "Mid-Market Sales", "Demand Gen", "Customer Success", "Partnerships", "Finance", "Lifecycle"],
+      presetOptions: ["Super admin", "Sales manager", "Sales rep", "Marketing manager", "Support agent", "Read only"],
+      lastActiveOptions: ["Last 24 hours", "Last 7 days", "Last 30 days", "More than 90 days", "Never"],
+      query: this.state.query,
+      setQuery: (e) => this.setState({ query: e.target.value }),
+      setStatus: (v) => this.setState({ view: v }),
+      clearAll: () => this.setState({ view: "Active", query: "" }),
+      filtersOpen: this.state.filtersOpen,
+      saveOpen: this.state.saveOpen,
+      addOpen: this.state.addOpen,
+      toggleFilters: () => this.setState((s) => ({ filtersOpen: !s.filtersOpen, saveOpen: false, addFilterOpen: false })),
+      toggleSave: () => this.setState((s) => ({ saveOpen: !s.saveOpen, filtersOpen: false, addFilterOpen: false })),
+      settingsNavOpen: this.state.settingsNavOpen,
+      settingsNavClosed: !this.state.settingsNavOpen,
+      closeSettingsNav: () => this.setState({ settingsNavOpen: false }),
+      openSettingsNav: () => this.setState({ settingsNavOpen: true }),
+      openAdd: () => this.setState({ addOpen: true }),
+      closeAdd: () => this.setState({ addOpen: false }),
+    };
+  }
+}
+</script>
+</body>
+</html>

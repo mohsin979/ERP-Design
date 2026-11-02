@@ -1,0 +1,7 @@
+:root{
+--border-hairline:0.875px;  /* view-toggle + right-hand icon buttons */
+--border-1:1px;             /* default */
+--border-1-167:1.167px;     /* edit-filter icon button */
+--border-color:var(--color-grey-200);
+--border-color-strong:var(--color-grey-300);
+}

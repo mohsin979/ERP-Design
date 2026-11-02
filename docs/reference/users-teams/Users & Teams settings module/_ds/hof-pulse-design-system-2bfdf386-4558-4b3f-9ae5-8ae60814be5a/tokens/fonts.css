@@ -1,0 +1,14 @@
+/* HOF Pulse type sources.
+   DM Sans carries the UI. AllureMajestic is the wordmark/display face and is
+   hosted here from the supplied binaries (assets/fonts/). */
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&display=swap");
+@font-face{font-family:"AllureMajestic";src:url("../assets/fonts/alluremajestic-regular.ttf") format("truetype");font-weight:400;font-style:normal;font-display:swap}
+@font-face{font-family:"AllureMajestic";src:url("../assets/fonts/alluremajestic-italic.ttf") format("truetype");font-weight:400;font-style:italic;font-display:swap}
+@font-face{font-family:"AllureMajestic";src:url("../assets/fonts/alluremajestic-medium.ttf") format("truetype");font-weight:500;font-style:normal;font-display:swap}
+@font-face{font-family:"AllureMajestic";src:url("../assets/fonts/alluremajestic-mediumitalic.ttf") format("truetype");font-weight:500;font-style:italic;font-display:swap}
+@font-face{font-family:"AllureMajestic";src:url("../assets/fonts/alluremajestic-semibold.ttf") format("truetype");font-weight:600;font-style:normal;font-display:swap}
+@font-face{font-family:"AllureMajestic";src:url("../assets/fonts/alluremajestic-semibolditalic.ttf") format("truetype");font-weight:600;font-style:italic;font-display:swap}
+@font-face{font-family:"AllureMajestic";src:url("../assets/fonts/alluremajestic-bold.ttf") format("truetype");font-weight:700;font-style:normal;font-display:swap}
+@font-face{font-family:"AllureMajestic";src:url("../assets/fonts/alluremajestic-bolditalic.ttf") format("truetype");font-weight:700;font-style:italic;font-display:swap}
+@font-face{font-family:"AllureMajestic";src:url("../assets/fonts/alluremajestic-extrabold.ttf") format("truetype");font-weight:800;font-style:normal;font-display:swap}
+@font-face{font-family:"AllureMajestic";src:url("../assets/fonts/alluremajestic-extrabolditalic.ttf") format("truetype");font-weight:800;font-style:italic;font-display:swap}
