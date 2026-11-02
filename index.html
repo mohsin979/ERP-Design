@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Pulse — HOF ERP</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Fira+Sans+Extra+Condensed:wght@700&family=Playfair+Display:ital,wght@1,800&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin:0; padding:0; }
+    html, body, #root { height:100%; }
+    body { font-family: 'DM Sans', system-ui, sans-serif; -webkit-font-smoothing:antialiased; }
+    button { font-family: inherit; }
+    ::-webkit-scrollbar { width:10px; height:10px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #DDDFE4; border-radius:10px; border:2px solid #fff; }
+    ::-webkit-scrollbar-thumb:hover { background: #A5ACBA; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+  <!-- Every .jsx file is compiled for JSX only (data-presets="react", no extra plugins): modern
+       syntax runs as written. Babel's default object-rest transform would give each file a helper
+       with the same global name, and these classic scripts would overwrite each other's. -->
+
+  <script type="text/babel" data-presets="react" data-plugins="" src="shared.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="store.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="propertyTypes.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="emptyState.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="logos.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="moduleIcons.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="nav.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="contactActions.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="activities.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="board.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="settingsKit.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="cardSettings.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="panelSettings.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="profileEngine.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="profileExtractor.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="customerProfile.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="callPanel.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="contactOverview.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="activityCards.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="contactDetail.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="contacts.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="usersTeams.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="dataModel.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="settings.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="deals.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="dealDetail.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="customers.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="activityViews.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="workflows.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="pipelinePanel.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="workflowEngine.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="workflowsPage.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="workspaces.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="recordHub.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="files.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="emails.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="richText.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="services.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="quotes.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="accounting.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="forms.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="tools.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="templates.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="playbooks.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="overviewSettings.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="dashboard.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="businessData.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="bulkActions.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="extendedProps.jsx"></script>
+  <script type="text/babel" data-presets="react" data-plugins="" src="app.jsx"></script>
+</body>
+</html>

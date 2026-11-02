@@ -1,0 +1,260 @@
+/* HOF Pulse ERP — Settings → Templates: Email Templates, Email Sequences and Quote Templates.
+
+   Foundational for now (to be refined later):
+     Email Templates — reusable emails: a name, a subject and a message ({{first_name}} is filled
+       in for the recipient). Used by the email composer (emails.jsx) and by workflows.
+     Email Sequences — a named, ordered list of templates, each sent a set time after the one
+       before. Used by workflows' Enroll in Email Sequence ("Choose email sequence template").
+     Quote Templates — a configured quote saved from the quote builder (quotes.jsx): its services
+       and milestones, payment terms, discount and VAT, and terms; each has a code (QT-001…).
+       Listed, viewed, renamed and deleted here; new ones come from a quote (Save as template).
+   Email templates and sequences are created, viewed, edited and deleted here; a template or sequence a workflow (or a
+   sequence) uses can't be deleted until it's no longer used, so nothing that runs loses its email. */
+
+const TEMPLATE_TABS = [{id:'templates', label:'Email Templates', icon:'envelope'}, {id:'sequences', label:'Email Sequences', icon:'listBullets'}, {id:'quoteTemplates', label:'Quote Templates', icon:'quote'}, {id:'playbooks', label:'Playbooks', icon:'playbook'}];
+const SEQUENCE_UNITS = ['Hours', 'Days', 'Weeks'];
+const escHtml = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+/* A template's message as its email: the workspace's mark, then the paragraphs. */
+const templateHtmlOf = (body) => {
+  const brand = workspaceBrand();
+  const paras = String(body || '').split(/\n{2,}/).map(p => p.trim()).filter(Boolean)
+    .map(p => `<p style="margin:0 0 14px;font-size:15px;line-height:1.65;color:#2B2B2E">${escHtml(p).replace(/\n/g, '<br/>')}</p>`).join('');
+  return `<div style="font-family:'DM Sans',Arial,sans-serif;background:#fff;color:#2B2B2E"><div style="height:4px;background:${brand.colors.primary}"></div>`
+    + `<div style="padding:26px 40px 12px">${paras}</div></div>`;
+};
+/* The message a template's email reads as ({{first_name}} kept as it is): its paragraphs, list
+   items as bullets — without the branded footer (address, unsubscribe). */
+const templateBodyOf = (t) => {
+  if(t.body != null) return t.body;
+  const el = document.createElement('div');
+  el.innerHTML = String(t.html || '').replace(/<div style="padding:22px 40px 26px;background:#F6F6F7">[\s\S]*$/, '');
+  el.querySelectorAll('li').forEach(li => { li.textContent = `• ${li.textContent}`; });
+  return Array.from(el.querySelectorAll('h1, p, li, a')).map(n => n.textContent.trim()).filter(Boolean)
+    .reduce((out, line, i, all) => out + line + (i < all.length - 1 ? (/^•/.test(all[i + 1]) && /^•/.test(line) ? '\n' : '\n\n') : ''), '');
+};
+// Where a template or sequence is used: workflows (any of their settings) and, for templates, sequences.
+const usedInWorkflows = (data, id) => (data.workflows || []).filter(w => JSON.stringify(w).includes(`"${id}"`));
+
+function TemplateFormModal({initial, onCancel, onSave}){
+  const [t, setT] = React.useState(() => ({name:(initial && initial.name) || '', subject:(initial && initial.subject) || '', body: initial ? templateBodyOf(initial) : ''}));
+  const set = (p) => setT(x => ({...x, ...p}));
+  const ok = !!t.name.trim() && !!t.subject.trim() && !!t.body.trim();
+  return (
+    <StModal title={initial ? 'Edit email template' : 'New email template'} primary={initial ? 'Save changes' : 'Create template'} canSubmit={ok} width={600} onCancel={onCancel}
+      onSubmit={()=>onSave({name:t.name.trim(), subject:t.subject.trim(), body:t.body.trim()})}>
+      <div><label style={fieldLabel}>Name</label><input autoFocus value={t.name} onChange={e=>set({name:e.target.value})} placeholder="e.g. Document request" style={fieldInput}/></div>
+      <div><label style={fieldLabel}>Subject</label><input value={t.subject} onChange={e=>set({subject:e.target.value})} style={fieldInput}/></div>
+      <div><label style={fieldLabel}>Message</label>
+        <textarea value={t.body} onChange={e=>set({body:e.target.value})} rows={12} placeholder={'Hi {{first_name}},\n\n…'} style={{...fieldInput, resize:'vertical', lineHeight:1.55}}/>
+        <div style={{...stTextB, fontSize:12, marginTop:4}}>{'{{first_name}}'} is replaced with the recipient's first name.</div></div>
+    </StModal>
+  );
+}
+
+function SequenceFormModal({initial, templates, onCancel, onSave}){
+  const [s, setS] = React.useState(() => ({name:(initial && initial.name) || '',
+    emails:((initial && initial.emails) || [{templateId:'', delay:{amount:'1', unit:'Days'}}]).map((e, i) => ({key:`se-${i}-${Math.random().toString(36).slice(2, 6)}`, ...e, delay:{...e.delay}}))}));
+  const setEmail = (i, p) => setS(x => ({...x, emails:x.emails.map((e, j) => j === i ? {...e, ...p} : e)}));
+  const move = (i, d) => setS(x => { const n = x.emails.slice(); const [m] = n.splice(i, 1); n.splice(i + d, 0, m); return {...x, emails:n}; });
+  const ok = !!s.name.trim() && s.emails.length > 0 && s.emails.every(e => e.templateId && Number(e.delay.amount) >= 0 && e.delay.amount !== '');
+  const iconBtn = (icon, title, onClick, disabled) => <button type="button" title={title} disabled={disabled} onClick={onClick}
+    style={{border:'none', background:'transparent', cursor: disabled ? 'default' : 'pointer', display:'flex', padding:4, opacity: disabled ? .35 : 1}}><Icon name={icon} size={13} color={T.gray600}/></button>;
+  return (
+    <StModal title={initial ? 'Edit email sequence' : 'New email sequence'} primary={initial ? 'Save changes' : 'Create sequence'} canSubmit={ok} width={600} onCancel={onCancel}
+      onSubmit={()=>onSave({name:s.name.trim(), emails:s.emails.map(({key, ...e}) => e)})}>
+      <div><label style={fieldLabel}>Name</label><input autoFocus value={s.name} onChange={e=>setS(x => ({...x, name:e.target.value}))} placeholder="e.g. New client onboarding" style={fieldInput}/></div>
+      <div style={{maxHeight:'44vh', overflowY:'auto', display:'flex', flexDirection:'column', gap:8}}>
+        <label style={fieldLabel}>Emails</label>
+        {s.emails.map((e, i) => (
+          <div key={e.key} style={{border:`1px solid ${T.attioLine}`, borderRadius:10, padding:10, display:'flex', flexDirection:'column', gap:8}}>
+            <div style={{display:'flex', alignItems:'center', gap:6}}>
+              <span style={{fontSize:12.5, fontWeight:600, color:T.attioText, flex:1}}>Email {i + 1}</span>
+              {iconBtn('arrowUp', 'Move up', ()=>move(i, -1), i === 0)}
+              {iconBtn('arrowDown', 'Move down', ()=>move(i, 1), i === s.emails.length - 1)}
+              {iconBtn('trash', 'Remove email', ()=>setS(x => ({...x, emails:x.emails.filter((_, j) => j !== i)})), s.emails.length === 1)}
+            </div>
+            <FormSelect value={e.templateId} placeholder="Select email template" options={templates.map(t => ({value:t.id, label:t.name}))} onChange={(v)=>setEmail(i, {templateId:v})}/>
+            <div style={{display:'flex', alignItems:'center', gap:8}}>
+              <span style={{fontSize:12.5, color:T.gray600, whiteSpace:'nowrap'}}>{i === 0 ? 'Send after' : 'Then after'}</span>
+              <input value={e.delay.amount} onChange={ev=>setEmail(i, {delay:{...e.delay, amount:ev.target.value.replace(/[^0-9]/g, '')}})} inputMode="numeric" aria-label={`Email ${i + 1} delay`}
+                style={{...fieldInput, width:80, fontVariantNumeric:'tabular-nums'}}/>
+              <div style={{width:130}}><FormSelect value={e.delay.unit} placeholder="Unit" options={SEQUENCE_UNITS} onChange={(v)=>setEmail(i, {delay:{...e.delay, unit:v || 'Days'}})}/></div>
+            </div>
+          </div>
+        ))}
+        <button type="button" onClick={()=>setS(x => ({...x, emails:[...x.emails, {key:`se-${Date.now().toString(36)}`, templateId:'', delay:{amount:'1', unit:'Days'}}]}))}
+          style={{alignSelf:'flex-start', display:'inline-flex', alignItems:'center', gap:6, border:'none', background:'transparent', padding:'4px 0', fontSize:13, fontWeight:500, color:T.attioText, cursor:'pointer', fontFamily:'inherit'}}>
+          <Icon name="plus" size={13} color={T.gray600}/> Add email
+        </button>
+      </div>
+    </StModal>
+  );
+}
+
+/* Quote Templates: code, name, what it holds; View (the template's contents), Rename, Delete. */
+function QuoteTemplatesTab({data, setData, say}){
+  const list = quoteTemplatesOf(data);
+  const setList = (fn) => setData(d => ({...d, quoteTemplates:fn(quoteTemplatesOf(d))}));
+  const [openId, setOpenId] = React.useState(null);
+  const [renaming, setRenaming] = React.useState(null);   // {id, name}
+  const [deleting, setDeleting] = React.useState(null);
+  const open = list.find(t => t.id === openId) || null;
+  const cols = [{key:'code', label:'Code', width:110}, {key:'name', label:'Template Name', width:240}, {key:'services', label:'Services', width:280},
+    {key:'installments', label:'Installments', width:120}, {key:'createdBy', label:'Created By', width:160}, {key:'created', label:'Created', width:150}];
+  const rows = list.map(t => ({id:t.id, code:t.code, name:t.name, services:(t.items || []).map(it => it.name).join(', '), installments:(t.installments || []).length,
+    createdBy:t.createdBy, created:fmtQuoteDate(t.createdAt)}));
+  const actions = (t) => [{label:'View template', onClick:()=>setOpenId(t.id)}, {label:'Rename template', onClick:()=>setRenaming({id:t.id, name:t.name})},
+    {label:'Delete template', danger:true, onClick:()=>setDeleting(t)}];
+  const schema = {
+    properties:cols, noun:'template', searchKeys:['code', 'name', 'services'], canCreateProperty:false, boards:false, selectable:false,
+    filterProps:[{key:'name', label:'Name', type:'text'}, {key:'createdBy', label:'Created By', type:'select'}], selectValues:{createdBy:[...new Set(list.map(t => t.createdBy).filter(Boolean))]},
+    renderCell:(key, r) => key === 'name' ? <ContactName name={r.name} onOpen={()=>setOpenId(r.id)} style={{fontSize:'inherit', fontWeight:500}}/>
+      : key === 'installments' ? <span style={{fontVariantNumeric:'tabular-nums'}}>{r.installments}</span> : undefined,
+    renderActions:(r) => <RowActionsMenu title="Actions" width={MENU_W} items={actions(list.find(t => t.id === r.id))}/>,
+  };
+  const section = {fontSize:11, fontWeight:600, color:T.attioFaint, textTransform:'uppercase', letterSpacing:.4, marginBottom:8};
+  const totals = open ? quoteTotals(open) : null;
+  const row = (l, v, key) => <div key={key} style={{display:'flex', justifyContent:'space-between', gap:12, fontSize:13, color:T.attioText, padding:'4px 0'}}><span>{l}</span><span style={{fontVariantNumeric:'tabular-nums'}}>{v}</span></div>;
+  return (
+    <div style={{display:'flex', flexDirection:'column', flex:1, minHeight:0}}>
+      <RecordViewsModule schema={schema} rows={rows} columns={cols.map(c => c.key)} storeKey="views:templates-quoteTemplates"
+        defaultViews={[{id:'tv-quoteTemplates', name:'All Quote Templates', sort:{key:'code', dir:'asc'}}]}
+        overlay={open && <PageSidePanel width={560} title={open.name} subtitle={open.code} onClose={()=>setOpenId(null)} menuItems={actions(open).filter(it => !/^View/.test(it.label))}>
+          <div style={{flex:1, overflowY:'auto', padding:'4px 20px 24px', display:'flex', flexDirection:'column', gap:20}}>
+            <div>
+              <div style={section}>Services · {(open.items || []).length}</div>
+              {(open.items || []).map(it => (
+                <div key={it.id} style={{padding:'8px 0', borderTop:`1px solid ${T.attioLine}`}}>
+                  <div style={{display:'flex', justifyContent:'space-between', gap:12}}><span style={{fontSize:13.5, fontWeight:600, color:T.attioText}}>{it.name}</span>
+                    <span style={{fontSize:13, fontVariantNumeric:'tabular-nums'}}>{fmtMoney(quoteItemTotal(it))}</span></div>
+                  {(it.milestones || []).map(m => <div key={m.id} style={{display:'flex', justifyContent:'space-between', gap:12, fontSize:12.5, color:T.attioMuted, padding:'3px 0 0 12px'}}>
+                    <span>{m.name}</span><span style={{fontVariantNumeric:'tabular-nums'}}>{fmtMoney(m.price)}</span></div>)}
+                </div>
+              ))}
+            </div>
+            <div>
+              <div style={section}>Payment terms</div>
+              {(open.installments || []).map((x, i) => row(`${i + 1}. ${x.description}`, `${x.percent}%`, x.id || i))}
+              {!(open.installments || []).length && <div style={{fontSize:13, color:T.attioMuted}}>No installments.</div>}
+            </div>
+            <div>
+              <div style={section}>Discount & tax</div>
+              {row('Services subtotal', fmtMoney(totals.subtotal))}
+              {row(`Discount${open.discount && open.discount.type === 'percent' ? ` (${open.discount.value}%)` : ''}`, `− ${fmtMoney(totals.discount)}`)}
+              {row(`VAT (${totals.vatRate}%)`, fmtMoney(totals.vat))}
+              <div style={{borderTop:`1px solid ${T.attioText}`, marginTop:4}}>{row('Total', fmtMoney(totals.total))}</div>
+            </div>
+            <div>
+              <div style={section}>Terms & conditions</div>
+              {richIsEmpty(richHtmlOf(open.terms)) ? <div style={{fontSize:13, color:T.attioMuted}}>None.</div> : <RichTextView html={open.terms} style={{fontSize:12.5}}/>}
+            </div>
+          </div>
+        </PageSidePanel>}/>
+      {renaming && <StModal title="Rename template" primary="Save" canSubmit={!!renaming.name.trim()} onCancel={()=>setRenaming(null)}
+        onSubmit={()=>{ setList(ts => ts.map(t => t.id === renaming.id ? {...t, name:renaming.name.trim()} : t)); setRenaming(null); say('Saved'); }}>
+        <div><label style={fieldLabel}>Template name</label><input autoFocus value={renaming.name} onChange={e=>setRenaming(r => ({...r, name:e.target.value}))} style={fieldInput}/></div>
+      </StModal>}
+      {deleting && <StModal title="Delete template" primary="Delete" danger onCancel={()=>setDeleting(null)}
+        onSubmit={()=>{ setList(ts => ts.filter(t => t.id !== deleting.id)); if(openId === deleting.id) setOpenId(null); setDeleting(null); say('Deleted'); }}>
+        <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>{deleting.code} · {deleting.name} will be deleted. Quotes made from it keep what they were given.</div>
+      </StModal>}
+    </div>
+  );
+}
+
+function TemplatesSettings({data, setData}){
+  const [tab, setTab] = React.useState('templates');
+  const [form, setForm] = React.useState(null);        // {kind, initial?}
+  const [openId, setOpenId] = React.useState(null);
+  const [deleting, setDeleting] = React.useState(null);  // {kind, item}
+  const [toast, setToast] = React.useState(null);
+  const say = (m) => { setToast(m); setTimeout(()=>setToast(null), 1800); };
+  const templates = emailTemplatesOf(data), sequences = emailSequencesOf(data);
+  const setTemplates = (fn) => setData(d => ({...d, emailTemplates:fn(emailTemplatesOf(d))}));
+  const setSequences = (fn) => setData(d => ({...d, emailSequences:fn(emailSequencesOf(d))}));
+  const templateName = (id) => (templates.find(t => t.id === id) || {}).name || 'Deleted template';
+  const usage = (kind, id) => {
+    const ws = usedInWorkflows(data, id);
+    const seqs = kind === 'templates' ? sequences.filter(s => s.emails.some(e => e.templateId === id)) : [];
+    return [...ws.map(w => `${w.name || 'Workflow'} (workflow)`), ...seqs.map(s => `${s.name} (sequence)`)];
+  };
+  const isT = tab === 'templates';
+  const list = isT ? templates : sequences;
+  const open = list.find(x => x.id === openId) || null;
+  const cols = isT ? [{key:'name', label:'Template Name', width:240}, {key:'subject', label:'Subject', width:320}, {key:'usedBy', label:'Used By', width:120}]
+    : [{key:'name', label:'Sequence Name', width:240}, {key:'steps', label:'Emails', width:110}, {key:'span', label:'Templates', width:380}, {key:'usedBy', label:'Used By', width:120}];
+  const rows = list.map(x => isT ? {id:x.id, name:x.name, subject:x.subject, usedBy:usage('templates', x.id).length}
+    : {id:x.id, name:x.name, steps:x.emails.length, span:x.emails.map(e => templateName(e.templateId)).join(' → '), usedBy:usage('sequences', x.id).length});
+  const noun = isT ? 'template' : 'sequence';
+  // Bulk Actions: Delete — one in use (by a sequence or a workflow) is skipped, as its Delete refuses.
+  const listBulk = useTableBulkDelete({rows:list, noun, canDelete:(x) => !usage(tab, x.id).length, skipNote:'in use',
+    remove:(ids) => { (isT ? setTemplates : setSequences)(xs => xs.filter(x => !ids.includes(x.id))); if(ids.includes(openId)) setOpenId(null); }, onDone:(n) => say(`${bulkPlural(n, noun)} deleted`)});
+  const schema = {
+    properties:cols, noun, searchKeys:['name', 'subject'], fillWidth:true, canCreateProperty:false, boards:false, bulkActions:listBulk.bulkActions,
+    filterProps:[{key:'name', label:'Name', type:'text'}, {key:'usedBy', label:'Used By', type:'number'}], selectValues:{},
+    renderCell:(key, r) => key === 'name' ? <ContactName name={r.name} onOpen={()=>setOpenId(r.id)} style={{fontSize:'inherit', fontWeight:500}}/> : undefined,
+    renderActions:(r) => <RowActionsMenu title="Actions" width={MENU_W} items={[{label:`View ${noun}`, onClick:()=>setOpenId(r.id)},
+      {label:`Edit ${noun}`, onClick:()=>setForm({kind:tab, initial:list.find(x => x.id === r.id)})},
+      {label:`Delete ${noun}`, danger:true, onClick:()=>setDeleting({kind:tab, item:list.find(x => x.id === r.id)})}]}/>,
+  };
+  const save = (vals) => {
+    const editing = form.initial;
+    if(form.kind === 'templates'){
+      const unchanged = editing && templateBodyOf(editing) === vals.body;
+      const t = {...vals, html: unchanged ? editing.html : templateHtmlOf(vals.body)};
+      if(editing) setTemplates(ts => ts.map(x => x.id === editing.id ? {...x, ...t} : x));
+      else setTemplates(ts => [...ts, {id:`et-${Date.now().toString(36)}`, ...t}]);
+    } else {
+      if(editing) setSequences(ss => ss.map(x => x.id === editing.id ? {...x, ...vals} : x));
+      else setSequences(ss => [...ss, {id:`es-${Date.now().toString(36)}`, ...vals}]);
+    }
+    say(editing ? 'Saved' : `${form.kind === 'templates' ? 'Template' : 'Sequence'} created`);
+    setForm(null);
+  };
+  const used = deleting ? usage(deleting.kind, deleting.item.id) : [];
+  return (
+    <div style={{position:'relative', flex:1, minHeight:0, display:'flex', flexDirection:'column', overflow:'hidden'}}>
+      <SettingsPage fill>
+        <div style={{display:'flex', alignItems:'center', gap:4, marginBottom:8}}>
+          {TEMPLATE_TABS.map(t => <UtTab key={t.id} icon={t.icon} label={t.label} active={tab === t.id} onClick={()=>{ setTab(t.id); setOpenId(null); }}/>)}
+        </div>
+        {tab === 'quoteTemplates' ? <QuoteTemplatesTab data={data} setData={setData} say={say}/> :
+        tab === 'playbooks' ? <PlaybooksTab data={data} setData={setData} say={say}/> :
+        <div style={{display:'flex', flexDirection:'column', flex:1, minHeight:0}}>
+          <RecordViewsModule key={tab} schema={schema} rows={rows} columns={cols.map(c => c.key)} storeKey={`views:templates-${tab}`}
+            defaultViews={[{id:`tv-${tab}`, name: isT ? 'All Templates' : 'All Sequences', sort:{key:'name', dir:'asc'}}]}
+            actions={() => <StCta icon="plus" label={isT ? 'New template' : 'New sequence'} onClick={()=>setForm({kind:tab})}/>}
+            overlay={open && <PageSidePanel width={isT ? 620 : 480} title={open.name} subtitle={isT ? open.subject : plural(open.emails.length, 'email')} onClose={()=>setOpenId(null)}
+              menuItems={[{label:`Edit ${noun}`, onClick:()=>setForm({kind:tab, initial:open})}, {label:`Delete ${noun}`, danger:true, onClick:()=>setDeleting({kind:tab, item:open})}]}>
+              <div style={{flex:1, overflowY:'auto', padding:'4px 20px 24px'}}>
+                {isT ? <div style={{border:`1px solid ${T.border}`, borderRadius:10, overflow:'hidden'}} dangerouslySetInnerHTML={{__html:open.html || ''}}/>
+                  : <ol style={{margin:0, padding:0, listStyle:'none', display:'flex', flexDirection:'column', gap:10}}>
+                      {open.emails.map((e, i) => (
+                        <li key={i} style={{display:'flex', gap:10, alignItems:'baseline'}}>
+                          <span style={{fontSize:12, color:T.attioMuted, width:70, flexShrink:0}}>{i === 0 ? 'After' : 'Then'} {e.delay.amount} {String(e.delay.unit).toLowerCase()}</span>
+                          <span style={{fontSize:13, color:T.attioText}}>{templateName(e.templateId)}</span>
+                        </li>
+                      ))}
+                    </ol>}
+                {usage(tab, open.id).length > 0 && <div style={{...stTextB, marginTop:16}}>Used by {usage(tab, open.id).join(', ')}.</div>}
+              </div>
+            </PageSidePanel>}/>
+        </div>}
+      </SettingsPage>
+      {form && (form.kind === 'templates'
+        ? <TemplateFormModal initial={form.initial} onCancel={()=>setForm(null)} onSave={save}/>
+        : <SequenceFormModal initial={form.initial} templates={templates} onCancel={()=>setForm(null)} onSave={save}/>)}
+      {listBulk.bulkModal}
+      {deleting && <StModal title={`Delete ${deleting.kind === 'templates' ? 'template' : 'sequence'}`} primary={used.length ? null : 'Delete'} danger onCancel={()=>setDeleting(null)}
+        onSubmit={()=>{ (deleting.kind === 'templates' ? setTemplates : setSequences)(xs => xs.filter(x => x.id !== deleting.item.id)); if(openId === deleting.item.id) setOpenId(null); setDeleting(null); say('Deleted'); }}>
+        <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>
+          {used.length ? `${deleting.item.name} is used by ${used.join(', ')}. Remove it there first, then delete it.` : `${deleting.item.name} will be deleted.`}
+        </div>
+      </StModal>}
+      <CopyToast message={toast}/>
+    </div>
+  );
+}
+SETTINGS_PAGES['settings.templates'] = TemplatesSettings;
+
+Object.assign(window, {TemplatesSettings, templateHtmlOf});

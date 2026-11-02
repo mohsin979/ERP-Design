@@ -1,0 +1,727 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HOF Pulse Design System</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<!--
+  HOF Pulse Design System — v1.0 (15 Oct 2026)
+  One design system for the whole ERP: CRM, People (HRMS), Accounting, Case Management, Petition Studio, Settings.
+  Extracted from the built CRM (HOF Pulse prototype) — every value below is what the CRM uses today.
+
+  HOW TO USE THIS FILE
+  - Designers: open it in a browser; every component is a live specimen with its spec.
+  - Builders / AI assistants: the <style id="hof-ds"> block is the token + component stylesheet;
+    the <script id="hof-tokens" type="application/json"> block is the same tokens as data.
+    Follow "Rules for new modules" (section 9) exactly. Do not introduce new colours, fonts,
+    radii or component variants; if something is missing, ask the product designer.
+-->
+<style id="hof-ds">
+/* ═══════════════════════ TOKENS ═══════════════════════ */
+:root{
+  /* Brand & neutrals */
+  --hof-blue:#1869EC;            /* primary blue — selection, active borders, accents */
+  --hof-blue-light:#EAF2FE;      /* blue tint — selected/hover backgrounds, icon tiles */
+  --hof-black:#000000;           /* primary buttons, active nav, active view pill */
+  --hof-gray-800:#1A1A1A;        /* default control text */
+  --hof-gray-600:#5B5B5B;        /* secondary text, icons, labels */
+  --hof-gray-400:#949494;        /* placeholder, disabled, group labels */
+  --hof-border:#EEEEEE;          /* hairline dividers, panel edges */
+  --hof-border-strong:#E4E4E4;   /* control borders (inputs, buttons, cards) */
+  --hof-surface:#FFFFFF;
+  --hof-page-bg:#FAFBFC;         /* app background behind content */
+  --hof-header-bg:#FAFAFA;       /* hover rows, active tab fill, table frozen cells */
+  --hof-red:#D92D20;             /* errors, conflicts, destructive */
+  /* Record (data) text — tables, record names, panels */
+  --hof-text:#15141B;            /* body text in records */
+  --hof-text-muted:#6B6A70;      /* column headers, property labels, meta */
+  --hof-text-faint:#A4A4A9;      /* empty values, faint meta */
+  --hof-link:#2B6DF1;            /* link-style values (email), checkbox fill */
+  --hof-line:#EEEFF1;            /* table grid lines (both axes), card rules */
+  --hof-name-underline:#D7D6DA;  /* record-name underline (darkens to muted on hover) */
+  --hof-checkbox-border:#C1BFC6;
+  --hof-toggle:#0A77FF;
+  --hof-column-bg:#F3F4F6;       /* board column fill */
+  /* Status tones (pill text / pill background) */
+  --hof-success:#027A48; --hof-success-bg:#ECFDF3;
+  --hof-danger:#D92D20;  --hof-danger-bg:#FEF3F2;  --hof-danger-border:#FDA29B;
+  --hof-info:#1869EC;    --hof-info-bg:#EAF2FE;
+  --hof-warn:#B54708;    --hof-warn-bg:#FFFAEB;
+  --hof-neutral:#5B5B5B; --hof-neutral-bg:#FAFAFA;
+  --hof-hot:#D9480F; --hof-warm:#B25E09; --hof-good:#0E9F6E;
+  /* Type */
+  --hof-font:'DM Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  /* Radii */
+  --hof-r-xs:4px;   /* checkbox */
+  --hof-r-sm:6px;   /* menu items, nav items, segmented inner */
+  --hof-r-md:8px;   /* inputs, buttons, view pills, toolbar controls */
+  --hof-r-lg:10px;  /* menus, board cards, workflow nodes */
+  --hof-r-xl:12px;  /* modals, radio cards, event cards */
+  --hof-r-2xl:14px; /* board columns */
+  --hof-r-pill:9999px;
+  /* Elevation */
+  --hof-shadow-xs:0 1px 2px rgba(16,24,40,.05);
+  --hof-shadow-menu:0 4px 16px rgba(16,24,40,.12);
+  --hof-shadow-popover:0 8px 24px rgba(16,24,40,.16);
+  --hof-shadow-toast:0 8px 20px rgba(16,24,40,.2);
+  --hof-shadow-modal:0 16px 40px rgba(16,24,40,.2);
+  --hof-shadow-drawer:-8px 0 24px rgba(16,24,40,.12);
+  --hof-overlay:rgba(16,24,40,.35);
+  /* Layout */
+  --hof-sidebar-w:200px; --hof-sidebar-w-collapsed:56px; --hof-header-h:45px; --hof-row-h:36px; --hof-modal-w:440px;
+}
+
+/* ═══════════════════════ BASE ═══════════════════════ */
+.hof, .hof *{box-sizing:border-box}
+.hof{font-family:var(--hof-font); font-size:13px; color:var(--hof-gray-800); -webkit-font-smoothing:antialiased}
+.hof button, .hof input, .hof select, .hof textarea{font-family:inherit}
+
+/* ═══════════════════════ COMPONENTS ═══════════════════════ */
+/* Buttons */
+.hof-btn-primary{display:inline-flex; align-items:center; justify-content:center; gap:6px; height:29px; padding:0 12px; border-radius:var(--hof-r-md); border:none;
+  background:var(--hof-black); color:#fff; font-size:14px; font-weight:500; cursor:pointer; white-space:nowrap}
+.hof-btn-primary:disabled{background:var(--hof-gray-400); cursor:default}
+.hof-btn-secondary{display:inline-flex; align-items:center; gap:6px; height:29px; padding:0 12px; border-radius:var(--hof-r-md); border:1px solid var(--hof-border-strong);
+  background:#fff; color:var(--hof-gray-800); font-size:13px; cursor:pointer; white-space:nowrap}
+.hof-btn-secondary:disabled{color:var(--hof-gray-400); cursor:default}
+.hof-btn-toolbar{display:inline-flex; align-items:center; gap:6px; border:1px solid var(--hof-border-strong); background:#fff; border-radius:var(--hof-r-md);
+  padding:7px 12px; font-size:13px; color:var(--hof-gray-800); cursor:pointer; white-space:nowrap}
+.hof-btn-icon{width:32px; height:32px; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--hof-border-strong); background:#fff;
+  border-radius:var(--hof-r-md); cursor:pointer}
+.hof-btn-ghost-icon{width:30px; height:30px; display:inline-flex; align-items:center; justify-content:center; border:none; background:transparent; border-radius:var(--hof-r-md); cursor:pointer}
+.hof-btn-ghost-icon:hover, .hof-btn-card-icon:hover{background:var(--hof-header-bg)}
+.hof-btn-card-icon{width:28px; height:28px; display:inline-flex; align-items:center; justify-content:center; border:none; background:transparent; border-radius:var(--hof-r-md); cursor:pointer}
+.hof-btn-event{display:inline-flex; align-items:center; gap:8px; height:32px; padding:0 14px; border-radius:var(--hof-r-md); font-size:13px; font-weight:500; cursor:pointer;
+  border:none; background:var(--hof-black); color:#fff}
+.hof-text-action{border:none; background:transparent; padding:0; cursor:pointer; font-size:13px; color:var(--hof-gray-600); text-underline-offset:2px}
+.hof-text-action:hover{text-decoration:underline}
+.hof-text-action.danger:hover{color:var(--hof-red)}
+.hof-underline-action{border:none; background:transparent; padding:0; cursor:pointer; font-size:13px; font-weight:500; color:var(--hof-text);
+  text-decoration:underline; text-underline-offset:2px; text-decoration-color:var(--hof-name-underline); transition:color .12s, text-decoration-color .12s}
+.hof-underline-action:hover{color:var(--hof-black); text-decoration-color:var(--hof-text-muted)}
+.hof-record-link{font-size:13.5px; font-weight:600; color:var(--hof-text); cursor:pointer; text-decoration:underline; text-underline-offset:2px;
+  text-decoration-color:var(--hof-name-underline); transition:text-decoration-color .12s}
+.hof-record-link:hover{text-decoration-color:var(--hof-text-muted)}
+/* Form fields */
+.hof-label{display:block; font-size:12.5px; color:var(--hof-gray-600); margin-bottom:6px}
+.hof-input, .hof-select select, .hof-textarea{width:100%; border:1px solid var(--hof-border-strong); border-radius:var(--hof-r-md); padding:8px 10px; font-size:13px;
+  color:var(--hof-text); background:#fff; outline:none}
+.hof-input::placeholder, .hof-textarea::placeholder{color:var(--hof-gray-400)}
+.hof-input:focus, .hof-select select:focus, .hof-textarea:focus{border-color:var(--hof-blue)}
+.hof-input.invalid{border-color:var(--hof-red)}
+.hof-textarea{resize:vertical; line-height:1.5}
+.hof-select{position:relative}
+.hof-select select{appearance:none; -webkit-appearance:none; padding-right:32px; cursor:pointer}
+.hof-select .chev{position:absolute; right:10px; top:50%; transform:translateY(-50%); pointer-events:none; display:flex}
+.hof-search{position:relative; display:inline-block}
+.hof-search .ico{position:absolute; left:10px; top:50%; transform:translateY(-50%); pointer-events:none; display:flex}
+.hof-search input{padding:7px 10px 7px 30px; font-size:13px; border:1px solid var(--hof-border-strong); border-radius:var(--hof-r-md); width:200px; outline:none}
+.hof-help{font-size:13px; color:var(--hof-gray-600); line-height:1.4}
+/* Checkbox, toggle, radio card, segmented */
+.hof-checkbox{width:16px; height:16px; border-radius:var(--hof-r-xs); border:1.5px solid var(--hof-checkbox-border); background:#fff; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; flex-shrink:0}
+.hof-checkbox.on{border-color:var(--hof-link); background:var(--hof-link)}
+.hof-toggle{width:24px; height:14px; border-radius:14px; padding:1.75px; background:var(--hof-border-strong); display:inline-flex; justify-content:flex-start; cursor:pointer; transition:background .12s}
+.hof-toggle::after{content:''; width:10.5px; height:10.5px; border-radius:112px; background:#fff; box-shadow:0 .7px 2.1px rgba(16,24,40,.1)}
+.hof-toggle.on{background:var(--hof-toggle); justify-content:flex-end}
+.hof-radio-card{display:flex; gap:10px; align-items:flex-start; padding:12px 16px; border-radius:var(--hof-r-xl); border:1px solid var(--hof-border-strong); background:#fff; cursor:pointer}
+.hof-radio-card .t{font-size:14px; font-weight:500; color:var(--hof-black); line-height:1.4}
+.hof-radio-card .d{font-size:13px; color:var(--hof-gray-600); line-height:1.4}
+.hof-radio-card .dot{width:16px; height:16px; border-radius:99px; flex-shrink:0; margin-top:2px; border:1.5px solid var(--hof-gray-400)}
+.hof-radio-card.on{border-color:var(--hof-blue)}
+.hof-radio-card.on .t{color:var(--hof-blue)}
+.hof-radio-card.on .dot{border:none; background:var(--hof-blue); display:flex; align-items:center; justify-content:center}
+.hof-segmented{display:inline-flex; gap:2px; border:1px solid var(--hof-border-strong); border-radius:var(--hof-r-md); padding:2px}
+.hof-segmented button{border:none; border-radius:var(--hof-r-sm); padding:6px 8px; cursor:pointer; display:flex; background:transparent}
+.hof-segmented button.on{background:var(--hof-header-bg)}
+.hof-switch-choice{display:inline-flex; border:1px solid var(--hof-border-strong); border-radius:var(--hof-r-md); overflow:hidden; background:#fff}
+.hof-switch-choice button{border:none; cursor:pointer; padding:4px 12px; font-size:12px; font-weight:600; background:transparent; color:var(--hof-gray-600)}
+.hof-switch-choice button.on{background:var(--hof-link); color:#fff}
+/* Tabs & view pills */
+.hof-tabs{display:flex; align-items:flex-end; gap:4px}
+.hof-tab{display:flex; flex-direction:column; gap:8px; cursor:pointer}
+.hof-tab .in{display:flex; align-items:center; gap:8px; height:30px; padding:4px 12px; border-radius:var(--hof-r-md); font-size:13px; color:var(--hof-gray-600); white-space:nowrap}
+.hof-tab .bar{height:1px; background:transparent}
+.hof-tab.on .in{background:var(--hof-header-bg); color:var(--hof-black)}
+.hof-tab.on .bar{background:var(--hof-black)}
+.hof-view-pill{border:1px solid var(--hof-border-strong); background:#fff; cursor:pointer; font-size:13px; padding:6px 12px; border-radius:var(--hof-r-md); font-weight:500; color:var(--hof-gray-800)}
+.hof-view-pill.on{border-color:var(--hof-black); background:var(--hof-black); color:#fff; font-weight:600}
+.hof-workspace-tab{display:flex; align-items:center; gap:6px; padding:12px 10px; font-size:13px; color:var(--hof-gray-600); border-bottom:2px solid transparent; cursor:pointer}
+.hof-workspace-tab.on{color:var(--hof-black); border-bottom-color:var(--hof-black)}
+/* Menus */
+.hof-menu{width:200px; background:#fff; border:1px solid var(--hof-border); border-radius:var(--hof-r-lg); box-shadow:var(--hof-shadow-menu); padding:6px; font-weight:400}
+.hof-menu-item{display:flex; align-items:center; gap:8px; padding:7px 10px; border-radius:var(--hof-r-sm); font-size:13px; color:#1A1A1A; cursor:pointer}
+.hof-menu-item:hover{background:var(--hof-header-bg)}
+.hof-menu-item.danger{color:var(--hof-red)}
+.hof-menu-item.disabled{color:var(--hof-gray-400); cursor:default; background:transparent}
+.hof-menu-item .grow{flex:1}
+.hof-menu-section{padding:4px 10px 6px; font-size:11.5px; color:var(--hof-gray-400)}
+/* Pills & tags */
+.hof-pill{display:inline-flex; align-items:center; height:20px; padding:0 8px; border-radius:var(--hof-r-pill); font-size:11.5px; font-weight:500; white-space:nowrap}
+.hof-pill.success{color:var(--hof-success); background:var(--hof-success-bg)} .hof-pill.danger{color:var(--hof-danger); background:var(--hof-danger-bg)}
+.hof-pill.info{color:var(--hof-info); background:var(--hof-info-bg)} .hof-pill.warn{color:var(--hof-warn); background:var(--hof-warn-bg)}
+.hof-pill.neutral{color:var(--hof-neutral); background:var(--hof-neutral-bg)}
+.hof-tag{height:24px; min-width:24px; border-radius:var(--hof-r-pill); display:inline-flex; align-items:center; justify-content:center; font-size:11px; font-weight:600; padding:0 9px;
+  border:1.5px solid var(--hof-border-strong); color:var(--hof-text); font-variant-numeric:tabular-nums}
+.hof-chip-count{display:inline-flex; align-items:center; gap:4px; height:22px; padding:0 7px; border-radius:var(--hof-r-pill); font-size:11.5px; font-weight:600;
+  border:1px solid var(--hof-danger-border); background:var(--hof-danger-bg); color:var(--hof-red)}
+.hof-badge-count{min-width:18px; height:18px; padding:0 5px; border-radius:var(--hof-r-pill); background:var(--hof-red); color:#fff; font-size:11px; font-weight:700; display:inline-flex; align-items:center; justify-content:center}
+/* Table */
+.hof-table{border-collapse:collapse; table-layout:fixed; font-size:14px; width:100%; background:#fff}
+.hof-table th, .hof-table td{height:var(--hof-row-h); border-bottom:1px solid var(--hof-line); border-right:1px solid var(--hof-line); padding:0 12px; text-align:left;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.hof-table th{font-weight:500; color:var(--hof-text-muted); background:#fff}
+.hof-table td{color:var(--hof-text)}
+.hof-table td.empty{color:var(--hof-text-faint)}
+.hof-table td.link{color:var(--hof-link)}
+.hof-table th:last-child, .hof-table td:last-child{border-right:none}
+.hof-table .gutter{width:44px; padding:0 0 0 14px; border-right:none}
+/* Cards, board */
+.hof-board-column{width:320px; background:var(--hof-column-bg); border-radius:var(--hof-r-2xl); padding:14px 12px 12px; display:flex; flex-direction:column; gap:8px}
+.hof-card{background:#fff; border:1px solid var(--hof-border-strong); border-radius:var(--hof-r-lg); overflow:hidden}
+.hof-card .row{padding:14px 16px; border-top:1px solid var(--hof-line)}
+.hof-card .row:first-child{border-top:none}
+.hof-prop{display:flex; justify-content:space-between; gap:12px; font-size:12.5px}
+.hof-prop .k{color:var(--hof-text-muted)} .hof-prop .v{color:var(--hof-text)}
+/* Overlays */
+.hof-modal{width:var(--hof-modal-w); max-width:calc(100vw - 32px); background:#fff; border-radius:var(--hof-r-xl); box-shadow:var(--hof-shadow-modal)}
+.hof-modal-head{display:flex; align-items:center; justify-content:space-between; padding:16px 20px; border-bottom:1px solid var(--hof-border)}
+.hof-modal-title{font-size:15px; font-weight:600; color:var(--hof-text)}
+.hof-modal-body{padding:18px 20px; display:flex; flex-direction:column; gap:14px}
+.hof-modal-foot{display:flex; justify-content:flex-end; align-items:center; gap:8px; padding:14px 20px; border-top:1px solid var(--hof-border)}
+.hof-drawer{background:#fff; display:flex; flex-direction:column; box-shadow:var(--hof-shadow-drawer)}
+.hof-drawer-head{height:45px; display:flex; align-items:center; gap:12px; padding:0 12px; border-bottom:1px solid var(--hof-border-strong)}
+.hof-drawer-foot{height:46px; display:flex; align-items:center; justify-content:flex-end; gap:12px; padding:0 12px; border-top:1px solid var(--hof-border-strong)}
+.hof-panel-head{display:flex; align-items:center; gap:10px; padding:16px 14px 12px 20px}
+.hof-panel-title{font-size:17px; font-weight:600; color:var(--hof-text)}
+.hof-panel-sub{font-size:12.5px; color:var(--hof-text-muted)}
+.hof-toast{display:inline-flex; align-items:center; gap:12px; background:var(--hof-text); color:#fff; font-size:12.5px; padding:8px 14px; border-radius:var(--hof-r-md); box-shadow:var(--hof-shadow-toast)}
+.hof-toast button{border:none; background:transparent; padding:0; cursor:pointer; font-size:12.5px; font-weight:600; color:#fff; text-decoration:underline; text-underline-offset:2px}
+.hof-stub{width:320px; background:#fff; border-radius:var(--hof-r-lg); box-shadow:var(--hof-shadow-popover)}
+.hof-stub-head{display:flex; align-items:center; justify-content:space-between; padding:14px 16px; border-bottom:1px solid var(--hof-border); font-size:14px; font-weight:600; color:var(--hof-gray-800)}
+.hof-stub-body{padding:20px 16px; font-size:13px; color:var(--hof-gray-400)}
+.hof-empty{padding:64px 24px; display:flex; flex-direction:column; align-items:center; text-align:center}
+.hof-empty .title{font-size:14px; font-weight:500; color:var(--hof-text); margin-top:18px}
+.hof-empty .desc{font-size:13px; color:var(--hof-text-muted); margin-top:4px}
+.hof-empty .act{margin-top:18px}
+.hof-btn-empty{height:32px; padding:0 16px 0 14px; border-radius:var(--hof-r-md); border:none; background:var(--hof-black); color:#fff; font-size:13px; font-weight:600; cursor:pointer}
+.hof-avatar{border-radius:9999px; background:var(--hof-header-bg); display:inline-flex; align-items:center; justify-content:center; font-weight:600; color:var(--hof-black)}
+/* Navigation */
+.hof-nav{width:var(--hof-sidebar-w); background:#fff; border-right:1px solid var(--hof-border); padding:16px 12px}
+.hof-nav-group{display:flex; align-items:center; gap:4px; padding:2px 2px 6px; color:var(--hof-gray-400); font-size:11.5px; margin-top:18px; cursor:pointer}
+.hof-nav-item{display:flex; align-items:center; gap:8px; padding:7px 10px; border-radius:var(--hof-r-sm); font-size:13px; color:var(--hof-gray-600); cursor:pointer; margin-bottom:2px}
+.hof-nav-item:hover{background:var(--hof-header-bg)}
+.hof-nav-item.on{background:var(--hof-black); color:#fff}
+.hof-header{height:var(--hof-header-h); background:#fff; border-bottom:1px solid var(--hof-border); display:flex; align-items:center; gap:16px; padding:0 16px}
+/* Event cards (workflow conflicts / automatic actions) */
+.hof-event-line{border-left:2px solid var(--hof-red); padding:1px 0 1px 12px; display:flex; flex-direction:column; gap:4px}
+</style>
+
+<style>
+/* ═══ Documentation page chrome (not part of the system) ═══ */
+html,body{margin:0}
+body{background:var(--hof-page-bg)}
+.doc{display:grid; grid-template-columns:240px minmax(0,1fr); min-height:100vh}
+.doc-nav{position:sticky; top:0; height:100vh; overflow-y:auto; background:#fff; border-right:1px solid var(--hof-border); padding:20px 14px}
+.doc-nav a{display:block; padding:6px 10px; border-radius:6px; font-size:13px; color:var(--hof-gray-600); text-decoration:none}
+.doc-nav a:hover{background:var(--hof-header-bg); color:var(--hof-black)}
+.doc-nav .grp{font-size:11.5px; color:var(--hof-gray-400); margin:16px 10px 6px}
+.doc-main{padding:40px 48px 120px; max-width:1180px}
+.doc h1{font-size:34px; font-weight:700; letter-spacing:-.01em; margin:12px 0 8px; color:var(--hof-text)}
+.doc h2{font-size:22px; font-weight:600; margin:64px 0 6px; color:var(--hof-text); scroll-margin-top:24px}
+.doc h3{font-size:15px; font-weight:600; margin:28px 0 10px; color:var(--hof-text)}
+.doc p, .doc li{font-size:13.5px; line-height:1.6; color:var(--hof-gray-600)}
+.doc .lead{font-size:15px; color:var(--hof-gray-600); max-width:760px}
+.doc code{font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px; background:var(--hof-header-bg); border:1px solid var(--hof-border); border-radius:4px; padding:1px 5px; color:var(--hof-text)}
+.spec{background:#fff; border:1px solid var(--hof-border); border-radius:12px; overflow:hidden; margin:12px 0}
+.spec .stage{padding:28px; display:flex; flex-wrap:wrap; gap:16px; align-items:center; border-bottom:1px solid var(--hof-border)}
+.spec .stage.col{flex-direction:column; align-items:stretch}
+.spec .stage.grey{background:var(--hof-page-bg)}
+.spec table{width:100%; border-collapse:collapse; font-size:12.5px}
+.spec td{padding:8px 16px; border-top:1px solid var(--hof-line); color:var(--hof-gray-600); vertical-align:top}
+.spec tr:first-child td{border-top:none}
+.spec td:first-child{width:200px; color:var(--hof-text); font-weight:500}
+.grid{display:grid; gap:12px}
+.g4{grid-template-columns:repeat(auto-fill, minmax(200px, 1fr))}
+.g6{grid-template-columns:repeat(auto-fill, minmax(150px, 1fr))}
+.sw{background:#fff; border:1px solid var(--hof-border); border-radius:10px; overflow:hidden}
+.sw .chip{height:64px; border-bottom:1px solid var(--hof-border)}
+.sw .meta{padding:10px 12px}
+.sw .n{font-size:12.5px; font-weight:600; color:var(--hof-text)}
+.sw .h{font-size:12px; color:var(--hof-gray-600); font-family:ui-monospace, Menlo, monospace}
+.sw .u{font-size:11.5px; color:var(--hof-gray-400); margin-top:4px; line-height:1.4}
+.ico-grid{display:grid; grid-template-columns:repeat(auto-fill, minmax(96px, 1fr)); gap:8px}
+.ico-cell{background:#fff; border:1px solid var(--hof-border); border-radius:8px; padding:12px 6px 8px; display:flex; flex-direction:column; align-items:center; gap:8px}
+.ico-cell span{font-size:10.5px; color:var(--hof-gray-600); font-family:ui-monospace, Menlo, monospace; word-break:break-all; text-align:center}
+.dd{display:grid; grid-template-columns:1fr 1fr; gap:12px}
+.do, .dont{background:#fff; border:1px solid var(--hof-border); border-radius:10px; padding:14px 16px}
+.do b{color:var(--hof-success)} .dont b{color:var(--hof-red)}
+.do ul, .dont ul{margin:6px 0 0; padding-left:18px}
+pre.code{background:#0F1117; color:#E6E8EE; border-radius:12px; padding:18px 20px; overflow:auto; font-size:12px; line-height:1.55; max-height:520px}
+.copy{float:right}
+.tscale td:nth-child(2){color:var(--hof-text)}
+.shell{border:1px solid var(--hof-border-strong); border-radius:12px; overflow:hidden; background:var(--hof-page-bg); display:grid; grid-template-columns:200px 1fr; height:420px}
+@media (max-width:900px){ .doc{grid-template-columns:1fr} .doc-nav{position:static; height:auto} .doc-main{padding:24px 16px} .dd{grid-template-columns:1fr} .shell{grid-template-columns:1fr} .shell .hof-nav{display:none} }
+</style>
+</head>
+<body class="hof">
+<div class="doc">
+<nav class="doc-nav">
+  <div style="display:flex; align-items:center; gap:8px; padding:0 10px 8px"><svg width="22" height="20" viewBox="0 0 36 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect width="24" height="32" rx="6" fill="black"/>
+<rect x="4" width="32" height="32" rx="6" fill="#1869EC"/>
+<path d="M17.3487 21.0608V16.8704H21.4095C22.2639 16.8704 22.8735 16.6976 23.2383 16.352C23.6127 16.0064 23.7999 15.4544 23.7999 14.696V13.9616C23.7999 13.2032 23.6127 12.6512 23.2383 12.3056C22.8735 11.9504 22.2639 11.7728 21.4095 11.7728H17.3487V7.5968H21.8703C24.3087 7.5968 26.0991 8.1296 27.2415 9.1952C28.3839 10.2512 28.9551 11.7872 28.9551 13.8032V14.8688C28.9551 16.8944 28.3839 18.4352 27.2415 19.4912C26.0991 20.5376 24.3183 21.0608 21.8991 21.0608H17.3487ZM13.8351 26V7.5968H18.9327V18.0368L18.9615 20.4128V26H13.8351Z" fill="white"/>
+</svg><span style="font-size:14px; font-weight:600; color:var(--hof-text)">Design System</span></div>
+  <div class="grp">Start</div>
+  <a href="#overview">Overview</a><a href="#principles">Principles</a>
+  <div class="grp">Foundations</div>
+  <a href="#color">Colour</a><a href="#type">Typography</a><a href="#space">Spacing &amp; radii</a><a href="#elevation">Elevation &amp; layers</a><a href="#icons">Icons</a>
+  <div class="grp">Layout</div>
+  <a href="#shell">App shell</a><a href="#record-page">Record page</a><a href="#settings-page">Settings page</a>
+  <div class="grp">Components</div>
+  <a href="#buttons">Buttons &amp; links</a><a href="#fields">Form fields</a><a href="#selection">Selection controls</a><a href="#tabs">Tabs &amp; view pills</a>
+  <a href="#menus">Menus</a><a href="#pills">Pills, tags &amp; counts</a><a href="#table">Table</a><a href="#board">Board &amp; cards</a>
+  <a href="#overlays">Modals, drawers &amp; panels</a><a href="#feedback">Toast, placeholder &amp; empty state</a><a href="#people">Avatar &amp; record name</a>
+  <div class="grp">Rules</div>
+  <a href="#content">Content &amp; terminology</a><a href="#new-modules">Rules for new modules</a><a href="#tokens">Tokens (CSS &amp; JSON)</a>
+</nav>
+
+<main class="doc-main">
+<section id="overview">
+  <div style="display:flex; align-items:center; gap:12px"><svg width="36" height="32" viewBox="0 0 36 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect width="24" height="32" rx="6" fill="black"/>
+<rect x="4" width="32" height="32" rx="6" fill="#1869EC"/>
+<path d="M17.3487 21.0608V16.8704H21.4095C22.2639 16.8704 22.8735 16.6976 23.2383 16.352C23.6127 16.0064 23.7999 15.4544 23.7999 14.696V13.9616C23.7999 13.2032 23.6127 12.6512 23.2383 12.3056C22.8735 11.9504 22.2639 11.7728 21.4095 11.7728H17.3487V7.5968H21.8703C24.3087 7.5968 26.0991 8.1296 27.2415 9.1952C28.3839 10.2512 28.9551 11.7872 28.9551 13.8032V14.8688C28.9551 16.8944 28.3839 18.4352 27.2415 19.4912C26.0991 20.5376 24.3183 21.0608 21.8991 21.0608H17.3487ZM13.8351 26V7.5968H18.9327V18.0368L18.9615 20.4128V26H13.8351Z" fill="white"/>
+</svg><span class="hof-pill info">v1.0 · 15 Oct 2026</span></div>
+  <h1>HOF Pulse Design System</h1>
+  <p class="lead">One design system for the whole ERP (CRM, People / HRMS, Accounting, Case Management, Petition Studio and Settings), so every module looks and behaves like one product. Every value here comes from the built CRM. Use it as the source of truth when designing or building any module.</p>
+  <div class="spec"><table>
+    <tr><td>Font</td><td>DM Sans: 400 Regular, 500 Medium, 600 SemiBold, 700 Bold (Google Fonts).</td></tr>
+    <tr><td>Icons</td><td>Phosphor Icons, Regular weight only (phosphoricons.com, MIT). Module tiles on the ERP home screen use the hand-drawn module artwork.</td></tr>
+    <tr><td>Base text size</td><td>13px for controls and UI text, 14px for table data and primary buttons.</td></tr>
+    <tr><td>Control height</td><td>29–32px. Inputs are 8px/10px padding at 13px. Table rows are 36px.</td></tr>
+    <tr><td>Corner radius</td><td>8px for every control. Larger surfaces step up: 10 (menus, cards), 12 (modals), 14 (board columns).</td></tr>
+    <tr><td>Accent</td><td>One blue <code>#1869EC</code> for selection and active states. Black <code>#000</code> for primary actions and the active navigation item.</td></tr>
+  </table></div>
+</section>
+
+<section id="principles">
+  <h2>Principles</h2>
+  <div class="grid g4">
+    <div class="spec" style="margin:0"><div style="padding:16px"><h3 style="margin:0 0 6px">Quiet surfaces</h3><p style="margin:0">White surfaces on a near-white page, hairline greys, almost no shadow. Colour is only for state: selection, status, errors.</p></div></div>
+    <div class="spec" style="margin:0"><div style="padding:16px"><h3 style="margin:0 0 6px">Black is the action</h3><p style="margin:0">A screen has one primary action and it's black. Everything else is a white bordered or text-only control.</p></div></div>
+    <div class="spec" style="margin:0"><div style="padding:16px"><h3 style="margin:0 0 6px">Dense, readable data</h3><p style="margin:0">36px rows, 13–14px text and a grid on both axes, so a lot of records stay scannable.</p></div></div>
+    <div class="spec" style="margin:0"><div style="padding:16px"><h3 style="margin:0 0 6px">Same thing, same pattern</h3><p style="margin:0">A table, filter, modal or record panel works the same in every module. Reuse before creating.</p></div></div>
+  </div>
+</section>
+
+<!-- ═══════════ FOUNDATIONS ═══════════ -->
+<section id="color">
+  <h2>Colour</h2>
+  <p>Use tokens only; never hard-code a new hex value. Brand and neutral tokens are for app chrome and controls; record tokens are for data (tables, record panels, cards).</p>
+  <h3>Brand &amp; neutrals</h3><div class="grid g6" id="sw-brand"></div>
+  <h3>Record (data) text &amp; lines</h3><div class="grid g6" id="sw-record"></div>
+  <h3>Status tones</h3>
+  <p>A tone is a text colour on a tinted background. It appears on pills and on the left accent line of event cards.</p>
+  <div class="grid g6" id="sw-status"></div>
+</section>
+
+<section id="type">
+  <h2>Typography</h2>
+  <p>DM Sans throughout. Sizes are deliberately small and close together, and hierarchy comes from weight and colour more than size. Line-height is 1.4 for UI and 1.5 for paragraphs.</p>
+  <div class="spec"><table class="tscale" id="tscale"></table></div>
+</section>
+
+<section id="space">
+  <h2>Spacing &amp; radii</h2>
+  <h3>Spacing scale (px)</h3>
+  <div class="spec"><div class="stage" id="space-stage" style="align-items:flex-end"></div>
+  <table>
+    <tr><td>Control gaps</td><td>6 (icon ↔ label), 8 (between controls), 10–12 (toolbar groups), 16 (header items)</td></tr>
+    <tr><td>Field stack</td><td>Label → input 6; field → field 14–20</td></tr>
+    <tr><td>Container padding</td><td>Modal 18/20 · drawer body 16 · panel 20 · settings page 12/16 · card section 14/16</td></tr>
+    <tr><td>Section spacing</td><td>Groups in navigation 18 · settings header → content 20 · page sections 24</td></tr>
+  </table></div>
+  <h3>Radii</h3>
+  <div class="spec"><div class="stage" id="radius-stage"></div></div>
+</section>
+
+<section id="elevation">
+  <h2>Elevation &amp; layers</h2>
+  <div class="spec"><div class="stage grey" id="elev-stage"></div>
+  <table>
+    <tr><td>Overlay (scrim)</td><td><code>rgba(16,24,40,.35)</code> behind modals and drawers; <code>.25</code> behind the "Not defined yet" placeholder</td></tr>
+    <tr><td>Layer order</td><td>Page 0 · sticky table header 4–7 · menus 60 · side panel 70 · header 85 · modals and drawers 100 · floating submenus 120 · toasts 120 · placeholder over a modal 130</td></tr>
+  </table></div>
+</section>
+
+<section id="icons">
+  <h2>Icons</h2>
+  <p>Phosphor Regular, drawn on a 256 grid and filled (no strokes). Sizes: <b>13–15px</b> in controls and menus, <b>15px</b> in navigation, <b>16px</b> in primary buttons, <b>14px</b> for every chevron. Default colour <code>--hof-gray-600</code>; white on black buttons; blue on blue tiles. The set below is everything the CRM uses. In a new module, pick from Phosphor Regular in the same way.</p>
+  <div class="ico-grid" id="icons-grid"></div>
+</section>
+
+<!-- ═══════════ LAYOUT ═══════════ -->
+<section id="shell">
+  <h2>App shell</h2>
+  <p>Every module uses the same shell: a 200px left navigation (collapsible to 56px), a 45px header over the content (search, then the right-hand icons), and the content area on <code>--hof-page-bg</code>. The ERP home lists the modules as tiles; entering a module shows its shell.</p>
+  <div class="shell">
+    <div class="hof-nav" style="border-right:1px solid var(--hof-border)">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; padding:0 2px">
+        <span style="display:flex; align-items:center; gap:6px"><i data-i="arrowLeft" data-s="14"></i><b style="font-size:14px; color:var(--hof-text)">People</b></span><i data-i="collapse" data-s="16"></i>
+      </div>
+      <div class="hof-nav-item"><i data-i="dashboard" data-s="15"></i>Dashboard</div>
+      <div class="hof-nav-group" style="margin-top:18px"><i data-i="chevDown" data-s="14" data-c="#949494"></i>Workforce</div>
+      <div class="hof-nav-item on"><i data-i="contacts" data-s="15" data-c="#fff"></i>Employees</div>
+      <div class="hof-nav-item"><i data-i="usersThree" data-s="15"></i>Teams</div>
+      <div class="hof-nav-item"><i data-i="calendar" data-s="15"></i>Leave</div>
+      <div class="hof-nav-group"><i data-i="chevDown" data-s="14" data-c="#949494"></i>Time</div>
+      <div class="hof-nav-item"><i data-i="clock" data-s="15"></i>Attendance</div>
+      <div class="hof-nav-item"><i data-i="settingsGear" data-s="15"></i>Settings</div>
+    </div>
+    <div style="display:flex; flex-direction:column; min-width:0">
+      <div class="hof-header"><div class="hof-search" style="width:320px"><span class="ico"><i data-i="search" data-s="13" data-c="#949494"></i></span><input placeholder="Find or Ask" style="width:320px"></div>
+        <div style="flex:1"></div><i data-i="clock" data-s="15"></i><i data-i="notification" data-s="15"></i><span class="hof-avatar" style="width:24px; height:24px; font-size:11px; background:var(--hof-black); color:#fff">WZ</span></div>
+      <div style="flex:1; background:#fff; margin:0; padding:16px 20px; color:var(--hof-gray-400); font-size:13px">Content area: record pages, settings pages, boards.</div>
+    </div>
+  </div>
+  <p style="margin-top:10px">The People mock above uses placeholder navigation items. The structure is the rule: groups have an 11.5px grey label with a chevron; the active item is black with white text and icon.</p>
+</section>
+
+<section id="record-page">
+  <h2>Record page</h2>
+  <p>A list of records (Contacts, Deals, Employees…) is two toolbar rows over a table or board. There's no page title, because the navigation already says where you are.</p>
+  <div class="spec"><div class="stage col" style="padding:0; gap:0">
+    <div style="display:flex; align-items:center; gap:16px; padding:16px 20px 12px; border-bottom:1px solid var(--hof-border)">
+      <div style="display:flex; gap:8px; flex:1"><button class="hof-view-pill on">All employees</button><button class="hof-view-pill">My team</button></div>
+      <button class="hof-btn-toolbar"><i data-i="sliders" data-s="13"></i>View Settings</button>
+      <button class="hof-btn-toolbar" disabled style="color:var(--hof-gray-400)">Save View <i data-i="chevDown" data-s="14" data-c="#949494"></i></button>
+      <div class="hof-segmented"><button class="on"><i data-i="tableView" data-s="15" data-c="#1A1A1A"></i></button><button><i data-i="kanbanView" data-s="15" data-c="#949494"></i></button></div>
+      <button class="hof-btn-toolbar"><i data-i="export" data-s="13"></i>Export</button>
+      <button class="hof-btn-icon"><i data-i="plus" data-s="14" data-c="#1A1A1A"></i></button>
+    </div>
+    <div style="display:flex; align-items:center; gap:10px; padding:12px 20px; border-bottom:1px solid var(--hof-border)">
+      <div class="hof-search"><span class="ico"><i data-i="search" data-s="13" data-c="#949494"></i></span><input placeholder="Find or Ask"></div>
+      <button class="hof-btn-toolbar"><i data-i="filter" data-s="13"></i>Filters</button>
+    </div>
+    <table class="hof-table">
+      <thead><tr><th class="gutter"><span class="hof-checkbox"></span></th><th>Name ↑</th><th>Email</th><th>Department</th><th>Manager</th><th>Status</th><th style="width:80px">Actions</th></tr></thead>
+      <tbody>
+        <tr><td class="gutter"><span class="hof-checkbox"></span></td><td><span class="hof-record-link" style="font-size:inherit; font-weight:500">Ayesha Bhat</span></td><td class="link">ayesha.bhat@hof-global.com</td><td>Sales</td><td>Hamza Siddiqui</td><td><span class="hof-pill success">Active</span></td><td><i data-i="moreDots" data-s="15"></i></td></tr>
+        <tr><td class="gutter"><span class="hof-checkbox on"><svg width="10" height="10" viewBox="0 0 20 20" fill="none"><path d="M4 10.5L8 14.5L16 5.5" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span></td><td><span class="hof-record-link" style="font-size:inherit; font-weight:500">Bilal Ahmed</span></td><td class="link">bilal.ahmed@hof-global.com</td><td>Operations</td><td class="empty">—</td><td><span class="hof-pill neutral">On leave</span></td><td><i data-i="moreDots" data-s="15"></i></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <table>
+    <tr><td>Row 1</td><td>View pills (left, scroll if many) · View Settings · Save View · Table / Board switch · Export · + (create). Padding 16/20/12.</td></tr>
+    <tr><td>Row 2</td><td>Search ("Find or Ask", 200px, search icon at 10px) · Filters. Padding 12/20.</td></tr>
+    <tr><td>Table</td><td>36px rows, grid lines on both axes, muted 500 headers, the record name as an underlined link that opens the record's side panel, "—" for empty values.</td></tr>
+  </table></div>
+</section>
+
+<section id="settings-page">
+  <h2>Settings page</h2>
+  <div class="spec"><div class="stage col">
+    <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:16px">
+      <div style="padding-top:4px"><div style="font-size:15px; font-weight:500; color:var(--hof-black)">Leave Types</div><div class="hof-help" style="margin-top:2px">The leave employees can request, and how much they get each year.</div></div>
+      <button class="hof-btn-primary"><i data-i="plus" data-s="16" data-c="#fff"></i>Add Leave Type</button>
+    </div>
+  </div>
+  <table><tr><td>Header</td><td>Title 15/500 black, description 13 grey-600 under it, actions on the right (one black primary). Header → content 20. Page padding 12/16/24 on white.</td></tr></table></div>
+</section>
+
+<!-- ═══════════ COMPONENTS ═══════════ -->
+<section id="buttons">
+  <h2>Buttons &amp; links</h2>
+  <div class="spec"><div class="stage">
+    <button class="hof-btn-primary">Save</button>
+    <button class="hof-btn-primary"><i data-i="plus" data-s="16" data-c="#fff"></i>Add Employee</button>
+    <button class="hof-btn-primary" disabled>Save</button>
+    <button class="hof-btn-secondary">Cancel</button>
+    <button class="hof-btn-toolbar"><i data-i="filter" data-s="13"></i>Filters</button>
+    <button class="hof-btn-icon"><i data-i="plus" data-s="14" data-c="#1A1A1A"></i></button>
+    <button class="hof-btn-ghost-icon" title="Close"><i data-i="close" data-s="13"></i></button>
+    <button class="hof-btn-card-icon" title="Call"><i data-i="call" data-s="15"></i></button>
+    <button class="hof-text-action">Edit</button>
+    <button class="hof-text-action danger">Remove</button>
+    <button class="hof-underline-action">Choose email template</button>
+  </div><table>
+    <tr><td><code>.hof-btn-primary</code></td><td>Black, white 14/500, 29px high, 0/12 padding, radius 8, optional 16px icon at 6 gap. Disabled → <code>--hof-gray-400</code> fill. One per screen or footer.</td></tr>
+    <tr><td><code>.hof-btn-secondary</code></td><td>White, 1px <code>--hof-border-strong</code>, 13px <code>--hof-gray-800</code>, 29px. Cancel, Back, alternatives.</td></tr>
+    <tr><td><code>.hof-btn-toolbar</code></td><td>White bordered, 7/12 padding, 13px, 13px icon. Toolbars and canvas actions ("Add Trigger").</td></tr>
+    <tr><td><code>.hof-btn-icon</code></td><td>32×32 bordered: create (+) in toolbars.</td></tr>
+    <tr><td><code>.hof-btn-ghost-icon</code> / <code>.hof-btn-card-icon</code></td><td>30×30 / 28×28, no border, <code>--hof-header-bg</code> on hover. Close, more (⋯), card quick actions.</td></tr>
+    <tr><td><code>.hof-text-action</code></td><td>13px grey text; underline on hover; red on hover when destructive. Row-level secondary actions.</td></tr>
+    <tr><td><code>.hof-underline-action</code></td><td>13/500 text with a light underline that darkens on hover. Inline choices inside panels.</td></tr>
+    <tr><td>Footers</td><td>Right-aligned: Cancel (secondary) then the primary. A text-only action may sit alone on the left.</td></tr>
+  </table></div>
+</section>
+
+<section id="fields">
+  <h2>Form fields</h2>
+  <div class="spec"><div class="stage" style="align-items:flex-start">
+    <div style="width:260px"><label class="hof-label">Full name</label><input class="hof-input" placeholder="Enter name" value="Ayesha Bhat"></div>
+    <div style="width:220px"><label class="hof-label">Department</label><div class="hof-select"><select><option>Sales</option><option>Operations</option></select><span class="chev"><i data-i="chevDown" data-s="14"></i></span></div></div>
+    <div style="width:220px"><label class="hof-label">Start date <span style="color:var(--hof-red)">*</span></label><input class="hof-input invalid" placeholder="Select date"></div>
+    <div style="width:300px"><label class="hof-label">Notes</label><textarea class="hof-textarea" rows="3" placeholder="Write a note"></textarea></div>
+    <div><label class="hof-label">Search</label><div class="hof-search"><span class="ico"><i data-i="search" data-s="13" data-c="#949494"></i></span><input placeholder="Find or Ask"></div></div>
+  </div><table>
+    <tr><td><code>.hof-label</code></td><td>12.5px <code>--hof-gray-600</code>, 6px above the control. Required: a red <code>*</code> after the label.</td></tr>
+    <tr><td><code>.hof-input</code> / select / textarea</td><td>Full width, 1px <code>--hof-border-strong</code>, radius 8, 8/10 padding, 13px <code>--hof-text</code>; placeholder <code>--hof-gray-400</code>. Invalid → red border. Selects are native with a 14px chevron 10px from the right.</td></tr>
+    <tr><td>Help text</td><td><code>.hof-help</code> 13px grey-600, line-height 1.4, under the field or section title.</td></tr>
+    <tr><td>Section label</td><td>Uppercase 11.5/600 grey-400 with letter-spacing .4 (e.g. TRIGGER SCOPE, PERMISSIONS) above a group of fields in a panel.</td></tr>
+  </table></div>
+</section>
+
+<section id="selection">
+  <h2>Selection controls</h2>
+  <div class="spec"><div class="stage">
+    <span class="hof-checkbox"></span><span class="hof-checkbox on"><svg width="10" height="10" viewBox="0 0 20 20" fill="none"><path d="M4 10.5L8 14.5L16 5.5" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+    <span class="hof-toggle"></span><span class="hof-toggle on"></span>
+    <div class="hof-segmented"><button class="on"><i data-i="tableView" data-s="15" data-c="#1A1A1A"></i></button><button><i data-i="kanbanView" data-s="15" data-c="#949494"></i></button></div>
+    <div class="hof-switch-choice"><button class="on">All</button><button>Any</button></div>
+  </div>
+  <div class="stage" style="align-items:stretch">
+    <div class="hof-radio-card on" style="width:320px"><span class="dot"><svg width="10" height="10" viewBox="0 0 20 20" fill="none"><path d="M4 10.5L8 14.5L16 5.5" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span><div><div class="t">Required</div><div class="d">The user must resolve the workflow requirement.</div></div></div>
+    <div class="hof-radio-card" style="width:320px"><span class="dot"></span><div><div class="t">Automatic</div><div class="d">The system executes the action without requiring user intervention.</div></div></div>
+  </div><table>
+    <tr><td><code>.hof-checkbox</code></td><td>16×16, radius 4, 1.5px <code>#C1BFC6</code>; checked fills <code>--hof-link</code> with a white check. Indeterminate: a white 8×2 bar.</td></tr>
+    <tr><td><code>.hof-toggle</code></td><td>24×14 track, 10.5px knob; on = <code>#0A77FF</code>. Settings that switch on or off at once.</td></tr>
+    <tr><td><code>.hof-radio-card</code></td><td>For choosing one of 2–4 options with a description. Radius 12, 12/16 padding; selected = blue border, blue title and a filled blue check.</td></tr>
+    <tr><td><code>.hof-segmented</code></td><td>Icon switch (Table / Board): 2px inner padding, active item on <code>--hof-header-bg</code>.</td></tr>
+    <tr><td><code>.hof-switch-choice</code></td><td>Two-word choice inline in a card (All / Any): active = blue fill, white 12/600.</td></tr>
+  </table></div>
+</section>
+
+<section id="tabs">
+  <h2>Tabs &amp; view pills</h2>
+  <div class="spec"><div class="stage col">
+    <div class="hof-tabs"><div class="hof-tab on"><div class="in">Users</div><div class="bar"></div></div><div class="hof-tab"><div class="in">Teams</div><div class="bar"></div></div><div class="hof-tab"><div class="in">Seats</div><div class="bar"></div></div></div>
+    <div style="display:flex; gap:2px; border-bottom:1px solid var(--hof-border)"><div class="hof-workspace-tab on"><i data-i="overview" data-s="14" data-c="#000"></i>Overview</div><div class="hof-workspace-tab"><i data-i="activity" data-s="14"></i>Activity</div><div class="hof-workspace-tab"><i data-i="tasks" data-s="14"></i>Tasks</div><div class="hof-workspace-tab"><i data-i="folder" data-s="14"></i>Files</div></div>
+    <div style="display:flex; gap:8px"><button class="hof-view-pill on">All Deals</button><button class="hof-view-pill">My Deals</button><button class="hof-view-pill">Closing this month</button></div>
+  </div><table>
+    <tr><td><code>.hof-tab</code></td><td>Page or section tabs (Users / Teams; Builder / Runs): 13px, 30px item; active = <code>--hof-header-bg</code> fill, black text and a 1px black underline.</td></tr>
+    <tr><td><code>.hof-workspace-tab</code></td><td>Tabs across a full record (Overview, Activity, Calls…): icon + label, 2px black underline when active.</td></tr>
+    <tr><td><code>.hof-view-pill</code></td><td>Saved views in the record toolbar: bordered 13/500; active = black fill, white 600.</td></tr>
+  </table></div>
+</section>
+
+<section id="menus">
+  <h2>Menus</h2>
+  <div class="spec"><div class="stage grey" style="align-items:flex-start">
+    <div class="hof-menu">
+      <div class="hof-menu-item"><i data-i="edit" data-s="14"></i>Edit</div>
+      <div class="hof-menu-item"><i data-i="userSwitch" data-s="14"></i>Change owner</div>
+      <div class="hof-menu-item"><i data-i="kanbanView" data-s="14"></i><span class="grow">Stage-Based Actions</span><i data-i="chevDown" data-s="12" style="transform:rotate(-90deg)"></i></div>
+      <div class="hof-menu-item disabled"><i data-i="cube" data-s="14" data-c="#949494"></i>Record Events</div>
+      <div class="hof-menu-item danger">Delete</div>
+    </div>
+    <div class="hof-menu" style="width:260px">
+      <div class="hof-menu-section">Conflicts</div>
+      <div class="hof-menu-item"><i data-i="forward" data-s="14"></i>Move to CCL Sent</div>
+      <div class="hof-menu-item"><i data-i="edit" data-s="14"></i>Update properties</div>
+    </div>
+  </div><table>
+    <tr><td><code>.hof-menu</code></td><td>White, 1px <code>--hof-border</code>, radius 10, menu shadow, 6px padding, opens 4px below its trigger (or above, or right-aligned when there's no room). Width 180–260.</td></tr>
+    <tr><td><code>.hof-menu-item</code></td><td>7/10 padding, radius 6, 13px, optional 14px icon at 8 gap; hover <code>--hof-header-bg</code>. Danger = red text (no icon needed). Disabled = grey-400, no hover.</td></tr>
+    <tr><td>Submenus</td><td>An item with a right chevron opens its submenu beside it (right, or left without room), using the same shell.</td></tr>
+    <tr><td>Section label</td><td>11.5px grey-400 at the top of a list of grouped items.</td></tr>
+  </table></div>
+</section>
+
+<section id="pills">
+  <h2>Pills, tags &amp; counts</h2>
+  <div class="spec"><div class="stage">
+    <span class="hof-pill success">Active</span><span class="hof-pill info">Scheduled</span><span class="hof-pill warn">Prompted</span><span class="hof-pill danger">Failed</span><span class="hof-pill neutral">Cancelled</span>
+    <span class="hof-tag" style="border-color:var(--hof-hot); color:var(--hof-hot)">Hot</span><span class="hof-tag" style="border-color:var(--hof-warm); color:var(--hof-warm)">Warm</span><span class="hof-tag" style="width:24px; padding:0">0</span>
+    <span class="hof-chip-count"><i data-i="warning" data-s="12" data-c="#D92D20"></i>2</span>
+    <button class="hof-btn-toolbar" style="border-color:var(--hof-danger-border); color:var(--hof-red); font-weight:500"><i data-i="warning" data-s="13" data-c="#D92D20"></i>Conflicts <span class="hof-badge-count">3</span></button>
+  </div><table>
+    <tr><td><code>.hof-pill.&lt;tone&gt;</code></td><td>Status of a record or step: 20px, 11.5/500, a tone colour on its tint. Tones: success, info, warn, danger, neutral.</td></tr>
+    <tr><td><code>.hof-tag</code></td><td>Card tags (temperature, health, scores): 24px, 1.5px outline in the meaning colour, 11/600, tabular numbers.</td></tr>
+    <tr><td>Counts</td><td>Red marker chip on a record (open conflicts) and a red 18px count badge inside a button.</td></tr>
+  </table></div>
+</section>
+
+<section id="table">
+  <h2>Table</h2>
+  <div class="spec"><div class="stage" style="padding:0">
+    <table class="hof-table">
+      <thead><tr><th class="gutter"><span class="hof-checkbox"></span></th><th>Employee</th><th>Email</th><th>Phone Number</th><th>Joining Date</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr><td class="gutter"><span class="hof-checkbox"></span></td><td><span class="hof-record-link" style="font-size:inherit; font-weight:500">Hamza Siddiqui</span></td><td class="link">hamza@hof-global.com</td><td>+92 300 1234567</td><td>Sep 4, 2026</td><td><span class="hof-pill success">Active</span></td></tr>
+        <tr><td class="gutter"><span class="hof-checkbox"></span></td><td><span class="hof-record-link" style="font-size:inherit; font-weight:500">Sana Mirza</span></td><td class="link">sana@hof-global.com</td><td class="empty">—</td><td>Aug 21, 2026</td><td><span class="hof-pill warn">Probation</span></td></tr>
+      </tbody>
+    </table>
+  </div><table>
+    <tr><td>Grid</td><td>Fixed layout, 14px, 36px rows, 1px <code>--hof-line</code> grid on both axes (no outer border on the last column).</td></tr>
+    <tr><td>Header</td><td>500 weight, <code>--hof-text-muted</code>, white, sticky. The column ⋯ menu appears on hover (move, sort). A sort arrow follows the label.</td></tr>
+    <tr><td>Cells</td><td>12px side padding, ellipsis. Text <code>--hof-text</code>; empty "—" in <code>--hof-text-faint</code>; emails in <code>--hof-link</code>. The primary column is the record name link.</td></tr>
+    <tr><td>Selection</td><td>A 44px checkbox gutter is always first; the Actions column (⋯) is always last. Frozen columns sit on <code>--hof-header-bg</code>.</td></tr>
+    <tr><td>Pagination</td><td>"← Prev 1 2 … 4 Next →" at the bottom right; the current page has a blue outline.</td></tr>
+  </table></div>
+</section>
+
+<section id="board">
+  <h2>Board &amp; cards</h2>
+  <div class="spec"><div class="stage grey" style="align-items:flex-start">
+    <div class="hof-board-column">
+      <div style="display:flex; align-items:center; gap:8px; padding:0 4px 2px"><b style="font-size:13.5px; color:var(--hof-text)">Probation</b><span style="font-size:12.5px; color:var(--hof-text-muted)">2</span></div>
+      <div class="hof-card">
+        <div class="row" style="display:flex; align-items:center; gap:10px"><span class="hof-avatar" style="width:27px; height:27px; font-size:12px">SM</span><div><span class="hof-record-link">Sana Mirza</span><div class="hof-panel-sub">Operations · Lahore</div></div></div>
+        <div class="row" style="display:flex; gap:4px; padding:8px 12px"><button class="hof-btn-card-icon"><i data-i="call" data-s="15"></i></button><button class="hof-btn-card-icon"><i data-i="envelope" data-s="15"></i></button><button class="hof-btn-card-icon"><i data-i="tasks" data-s="15"></i></button><button class="hof-btn-card-icon"><i data-i="notepad" data-s="15"></i></button></div>
+        <div class="row" style="display:flex; flex-direction:column; gap:10px"><div class="hof-prop"><span class="k">Manager</span><span class="v">Hamza Siddiqui</span></div><div class="hof-prop"><span class="k">Joining Date</span><span class="v">Aug 21, 2026</span></div></div>
+      </div>
+    </div>
+  </div><table>
+    <tr><td><code>.hof-board-column</code></td><td>320px wide, <code>#F3F4F6</code> fill, radius 14, no border; becomes <code>--hof-blue-light</code> with a blue border while a card is dragged over it.</td></tr>
+    <tr><td><code>.hof-card</code></td><td>White, 1px <code>--hof-border-strong</code>, radius 10. Sections are separated by <code>--hof-line</code> rules: name, quick actions (28px icon buttons), tags, properties (12.5px muted label ↔ value).</td></tr>
+  </table></div>
+</section>
+
+<section id="overlays">
+  <h2>Modals, drawers &amp; panels</h2>
+  <div class="spec"><div class="stage grey" style="align-items:flex-start">
+    <div class="hof-modal">
+      <div class="hof-modal-head"><span class="hof-modal-title">Add Employee</span><i data-i="close" data-s="14"></i></div>
+      <div class="hof-modal-body"><div><label class="hof-label">Full name</label><input class="hof-input" placeholder="Enter name"></div><div><label class="hof-label">Department</label><div class="hof-select"><select><option>Select department</option></select><span class="chev"><i data-i="chevDown" data-s="14"></i></span></div></div></div>
+      <div class="hof-modal-foot"><button class="hof-btn-secondary">Cancel</button><button class="hof-btn-primary">Add Employee</button></div>
+    </div>
+    <div class="hof-drawer" style="width:420px; height:300px; border-radius:12px 0 0 12px; overflow:hidden">
+      <div class="hof-drawer-head"><i data-i="close" data-s="14"></i><span style="font-size:14px; font-weight:500; color:var(--hof-black)">Edit Permissions</span><span class="hof-help">Sales preset</span></div>
+      <div style="flex:1; padding:16px" class="hof-help">Drawer body: settings that need room (permission tables, builders).</div>
+      <div class="hof-drawer-foot"><button class="hof-btn-secondary" style="background:var(--hof-header-bg); color:var(--hof-gray-600); font-size:14px">Cancel</button><button class="hof-btn-primary">Save</button></div>
+    </div>
+    <div style="width:360px; background:#fff; border:1px solid var(--hof-border); border-radius:12px">
+      <div class="hof-panel-head"><div style="flex:1"><div class="hof-panel-title">Sana Mirza</div><div class="hof-panel-sub">Operations · Probation</div></div><button class="hof-btn-ghost-icon"><i data-i="close" data-s="13"></i></button><button class="hof-btn-ghost-icon"><i data-i="moreDots" data-s="15"></i></button></div>
+      <div style="padding:0 20px 20px" class="hof-help">Record side panel: opens from the record name, sits over the right of the page, and can expand to the full record.</div>
+    </div>
+  </div><table>
+    <tr><td><code>.hof-modal</code></td><td>440px default (wider for content-heavy events), radius 12, modal shadow on a 35% scrim. Header 16/20 with a 15/600 title and ×; body 18/20 with 14 gap; footer right-aligned. Clicking the scrim cancels.</td></tr>
+    <tr><td><code>.hof-drawer</code></td><td>Slides in from the right, full height. 45px header (× first, 14/500 title, grey subtitle), 46px footer (Cancel on grey + black Save). For large editors.</td></tr>
+    <tr><td>Side panel</td><td>Record preview: 17/600 title, 12.5 muted subtitle, close and ⋯ at the top right; header padding 16/14/12/20. It's a panel, not a modal: the page stays visible.</td></tr>
+  </table></div>
+</section>
+
+<section id="feedback">
+  <h2>Toast, placeholder &amp; empty state</h2>
+  <div class="spec"><div class="stage grey" style="align-items:flex-start">
+    <span class="hof-toast">Copied to clipboard</span>
+    <span class="hof-toast">Workflow Deal Lost restriction: Moved to Postponed · Kamran Iqbal <button>View</button></span>
+    <div class="hof-stub"><div class="hof-stub-head">Export<i data-i="close" data-s="12"></i></div><div class="hof-stub-body">Not defined yet.</div></div>
+    <div style="background:#fff; border:1px solid var(--hof-border); border-radius:12px; width:360px"><div class="hof-empty"><svg preserveAspectRatio="none" overflow="visible" style="display: block;" width="131" height="131" viewBox="0 0 131 131" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="Icon">
+<path id="Vector" d="M32.7502 29.8854C52.8096 28.0432 76.5534 28.6572 98.0456 30.09C101.935 30.2947 104.186 32.751 104.391 36.64C105.414 56.0854 105.21 77.5775 104.186 96.4088C103.981 100.298 101.525 102.549 97.6362 102.754C76.144 103.982 53.4237 104.187 32.7502 102.754C28.8612 102.549 26.6096 100.298 26.4049 96.4088C25.3815 77.1682 25.3815 55.8807 26.4049 36.4354C26.6096 32.751 29.0659 30.0901 32.7502 29.8854Z" fill="#0C6FFF" fill-opacity="0.14"/>
+<path id="Vector_2" d="M26.4048 22.9247C46.4641 21.2872 70.2079 21.9012 91.7001 23.334C95.3845 23.5387 97.636 25.7903 97.8407 29.6794C98.8641 48.7153 98.8641 70.4122 97.8407 89.4481C97.636 93.1325 95.3845 95.384 91.4954 95.5887C70.2079 96.8169 47.2829 96.8169 26.8141 95.7934C22.9251 95.5887 20.6735 93.3372 20.4688 89.4481C19.4454 70.2075 19.6501 48.92 20.6735 29.4747C20.8782 25.7903 22.9251 23.334 26.4048 22.9247Z" stroke="#020202" stroke-width="3.275" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="Vector_3" d="M44.8267 37.6618C50.3533 37.4571 54.447 41.7555 54.2423 47.0774C54.0376 52.3993 49.7392 56.2883 44.622 56.0836C39.3001 55.8789 35.6158 51.7852 35.8204 46.668C36.0251 41.5508 39.9142 37.8664 44.8267 37.6618Z" fill="#0C6FFF" stroke="#020202" stroke-width="3.275" stroke-linejoin="round"/>
+<path id="Vector_4" d="M31.3176 72.4594C33.5692 64.4766 38.6864 60.3828 45.0317 60.3828C51.5817 60.3828 56.4942 64.6812 58.5411 72.2547" stroke="#020202" stroke-width="3.275" stroke-linecap="round"/>
+<path id="Vector_5" d="M66.319 42.5752C74.3018 42.1658 81.8752 42.1658 88.2205 42.7799" stroke="#020202" stroke-width="3.275" stroke-linecap="round"/>
+<path id="Vector_6" d="M66.5234 53.6292C72.2547 53.2198 77.5766 53.4245 81.875 53.8339" stroke="#020202" stroke-width="3.275" stroke-linecap="round"/>
+<path id="Vector_7" d="M31.931 83.1021C49.3295 82.2834 68.1607 82.4881 87.8107 83.3068" stroke="#020202" stroke-width="3.275" stroke-linecap="round"/>
+<path id="Vector_8" d="M109.713 11.8723C110.531 17.3989 112.783 19.6505 118.31 20.4692C112.783 21.288 110.531 23.5395 109.713 29.0661C108.894 23.5395 106.642 21.288 101.116 20.4692C106.642 19.6505 108.894 17.3989 109.713 11.8723Z" fill="#0C6FFF"/>
+</g>
+</svg><div class="title">No customer profile yet</div><div class="act"><button class="hof-btn-empty">Create profile</button></div></div></div>
+  </div><table>
+    <tr><td><code>.hof-toast</code></td><td>Bottom centre, 28px from the bottom, dark <code>--hof-text</code>, 12.5px white, an optional underlined action. Auto-dismisses.</td></tr>
+    <tr><td>"Not defined yet."</td><td>Any action whose behaviour isn't designed yet opens this small placeholder (320px, top right). Never invent behaviour behind a button.</td></tr>
+    <tr><td><code>.hof-empty</code></td><td>64/24 padding, centred: a 131px illustration (no tile behind it) → 18 → 14/500 title → 18 → black 32px action. An optional 13px muted description.</td></tr>
+    <tr><td>Illustration style</td><td>Hand-drawn wobbly line work in near-black <code>#020202</code> (~3.3px round strokes at 131px), blue <code>#0C6FFF</code> accents: one solid key shape, the same blue at 14% as an offset shadow, and a small four-point spark top-right.</td></tr>
+  </table></div>
+</section>
+
+<section id="people">
+  <h2>Avatar &amp; record name</h2>
+  <div class="spec"><div class="stage">
+    <span class="hof-avatar" style="width:20px; height:20px; font-size:9px">AK</span><span class="hof-avatar" style="width:27px; height:27px; font-size:12px">AK</span><span class="hof-avatar" style="width:40px; height:40px; font-size:18px">AK</span>
+    <span class="hof-record-link">Ali Khan</span>
+    <div class="hof-event-line"><span style="font-size:14px; color:var(--hof-text)">Workflow Triggered</span><span style="font-size:13px; color:var(--hof-red); display:flex; align-items:center; gap:6px"><i data-i="workflows" data-s="13" data-c="#D92D20"></i>Deal Lost restriction</span></div>
+  </div><table>
+    <tr><td><code>.hof-avatar</code></td><td>Initials (two letters), 600 weight at 46% of the size, black on <code>#FAFAFA</code>. Sizes 20 / 27 / 40.</td></tr>
+    <tr><td><code>.hof-record-link</code></td><td>The primary-record treatment everywhere (tables, cards, modals): 13.5/600 (500 inside tables) with a <code>#D7D6DA</code> underline that darkens on hover. It opens the record's side panel.</td></tr>
+    <tr><td>Event line</td><td>A 2px left line in the event tone (red: Conflict, Automatic action), then the title and the source.</td></tr>
+  </table></div>
+</section>
+
+<!-- ═══════════ RULES ═══════════ -->
+<section id="content">
+  <h2>Content &amp; terminology</h2>
+  <div class="dd">
+    <div class="do"><b>Do</b><ul>
+      <li>Title Case for buttons, menu items, tabs and view names: "Add Employee", "Save View", "View Settings".</li>
+      <li>Sentence case for descriptions, help text and messages.</li>
+      <li>Dates: <code>Sep 4, 2026</code>; date-time <code>Sep 4, 2026, 10:15 AM</code>. Money: <code>AED 4,000</code> with thousands separators.</li>
+      <li>Empty values show "—". Placeholder search text is "Find or Ask".</li>
+      <li>Undefined actions open "Not defined yet."</li>
+      <li>Use the shared names: Object, Record, Property, Pipeline, Stage, Owner, Team. A person is one record across modules (Contact → Customer → Employee links, never a copy).</li>
+    </ul></div>
+    <div class="dont"><b>Don't</b><ul>
+      <li>Don't write "Warning". Workflow behaviours are only <b>Required</b> and <b>Automatic</b>.</li>
+      <li>Don't add page titles above record lists; the navigation already says where you are.</li>
+      <li>Don't add explanatory copy the design doesn't call for.</li>
+      <li>Don't use a second accent colour, gradients or heavy shadows in product UI.</li>
+      <li>Don't rename an existing concept in a new module (e.g. "Application" for a Case).</li>
+    </ul></div>
+  </div>
+</section>
+
+<section id="new-modules">
+  <h2>Rules for new modules (People / HRMS and others)</h2>
+  <p>A checklist to design or build any module so it matches the CRM. If a needed pattern isn't here, reuse the closest one, or ask before inventing.</p>
+  <div class="spec"><table>
+    <tr><td>1 · Tokens only</td><td>Colours, radii, shadows and spacing come from the tokens below. No new hex values, fonts or radii.</td></tr>
+    <tr><td>2 · Shell</td><td>Same 200px navigation (groups + items, active = black) and 45px header. The module name sits at the top of the navigation, with ← back to the ERP home.</td></tr>
+    <tr><td>3 · Record lists</td><td>Employees, Leave requests, Attendance… use the record page: view pills, View Settings / Save View, Table / Board, Export, +, search, Filters, then the 36px table.</td></tr>
+    <tr><td>4 · Records</td><td>A record opens in the side panel from its underlined name, and expands to the full record with workspace tabs (Overview, Activity, Files…).</td></tr>
+    <tr><td>5 · Create &amp; edit</td><td>Create and edit in a 440px modal (fields: label + input); large editors in a right drawer.</td></tr>
+    <tr><td>6 · Status</td><td>Status is a pill with a tone. Ownership (Owner, Manager, Team) is a separate property, never combined with status.</td></tr>
+    <tr><td>7 · Settings</td><td>Settings pages use the settings header (title, description, one black action) and tables, menus and radio cards from this file.</td></tr>
+    <tr><td>8 · States</td><td>Every list has an empty state in the illustration style. Every undefined action opens "Not defined yet." Errors use red text, red borders or a red pill only.</td></tr>
+    <tr><td>9 · Icons &amp; type</td><td>Phosphor Regular at the sizes above; DM Sans at the type scale above. No other icon sets or fonts.</td></tr>
+  </table></div>
+</section>
+
+<section id="tokens">
+  <h2>Tokens (CSS &amp; JSON)</h2>
+  <p>Copy the CSS into a project to get the tokens and every <code>.hof-*</code> component class used on this page. The JSON is the same set of tokens for tools and AI assistants.</p>
+  <h3>CSS <button class="hof-btn-secondary copy" data-copy="css-out">Copy CSS</button></h3>
+  <pre class="code" id="css-out"></pre>
+  <h3>JSON <button class="hof-btn-secondary copy" data-copy="json-out">Copy JSON</button></h3>
+  <pre class="code" id="json-out"></pre>
+</section>
+</main>
+</div>
+
+<script id="hof-tokens" type="application/json">{"name": "HOF Pulse Design System", "version": "1.0", "date": "2026-10-15", "source": "HOF Pulse CRM (built prototype)", "font": {"family": "DM Sans", "fallback": "system-ui, -apple-system, 'Segoe UI', sans-serif", "weights": [400, 500, 600, 700], "url": "https://fonts.google.com/specimen/DM+Sans"}, "icons": {"library": "Phosphor Icons", "weight": "Regular", "url": "https://phosphoricons.com", "sizes": {"control": "13-15", "nav": 15, "primaryButton": 16, "chevron": 14}}, "color": {"brand": [{"name": "blue", "token": "--hof-blue", "hex": "#1869EC", "use": "Selection, active borders, accents"}, {"name": "blue-light", "token": "--hof-blue-light", "hex": "#EAF2FE", "use": "Selected / hover tint, icon tiles"}, {"name": "black", "token": "--hof-black", "hex": "#000000", "use": "Primary buttons, active nav and view pill"}, {"name": "gray-800", "token": "--hof-gray-800", "hex": "#1A1A1A", "use": "Default control text"}, {"name": "gray-600", "token": "--hof-gray-600", "hex": "#5B5B5B", "use": "Secondary text, icons, labels"}, {"name": "gray-400", "token": "--hof-gray-400", "hex": "#949494", "use": "Placeholder, disabled, group labels"}, {"name": "border", "token": "--hof-border", "hex": "#EEEEEE", "use": "Hairline dividers, panel edges"}, {"name": "border-strong", "token": "--hof-border-strong", "hex": "#E4E4E4", "use": "Control borders"}, {"name": "surface", "token": "--hof-surface", "hex": "#FFFFFF", "use": "Surfaces"}, {"name": "page-bg", "token": "--hof-page-bg", "hex": "#FAFBFC", "use": "App background"}, {"name": "header-bg", "token": "--hof-header-bg", "hex": "#FAFAFA", "use": "Hover rows, active tab, frozen cells"}, {"name": "red", "token": "--hof-red", "hex": "#D92D20", "use": "Errors, conflicts, destructive"}], "record": [{"name": "text", "token": "--hof-text", "hex": "#15141B", "use": "Record text"}, {"name": "text-muted", "token": "--hof-text-muted", "hex": "#6B6A70", "use": "Column headers, property labels"}, {"name": "text-faint", "token": "--hof-text-faint", "hex": "#A4A4A9", "use": "Empty values"}, {"name": "link", "token": "--hof-link", "hex": "#2B6DF1", "use": "Link values, checkbox fill"}, {"name": "line", "token": "--hof-line", "hex": "#EEEFF1", "use": "Table grid, card rules"}, {"name": "name-underline", "token": "--hof-name-underline", "hex": "#D7D6DA", "use": "Record-name underline"}, {"name": "toggle", "token": "--hof-toggle", "hex": "#0A77FF", "use": "Toggle on"}, {"name": "column-bg", "token": "--hof-column-bg", "hex": "#F3F4F6", "use": "Board columns"}], "status": [{"name": "success", "text": "#027A48", "bg": "#ECFDF3", "use": "Done, active", "example": "Active"}, {"name": "info", "text": "#1869EC", "bg": "#EAF2FE", "use": "Scheduled, in progress", "example": "Scheduled"}, {"name": "warn", "text": "#B54708", "bg": "#FFFAEB", "use": "Waiting on someone", "example": "Prompted"}, {"name": "danger", "text": "#D92D20", "bg": "#FEF3F2", "use": "Failed, violated, conflict", "example": "Failed"}, {"name": "neutral", "text": "#5B5B5B", "bg": "#FAFAFA", "use": "Cancelled, skipped, inactive", "example": "Cancelled"}], "meaning": {"hot": "#D9480F", "warm": "#B25E09", "good": "#0E9F6E", "dangerBorder": "#FDA29B"}}, "type": {"lineHeight": {"ui": 1.4, "paragraph": 1.5}, "scale": [{"size": 11, "weight": 600, "sample": "Context", "upper": true, "color": "#5B5B5B", "use": "Uppercase tabs & section labels (letter-spacing .4)"}, {"size": 11.5, "weight": 400, "sample": "Workforce", "color": "#949494", "use": "Nav group labels, menu sections; pills at 500"}, {"size": 12, "weight": 400, "sample": "Number of No Answer calls < 4", "color": "#6B6A70", "use": "Small meta, secondary lines in rows"}, {"size": 12.5, "weight": 400, "sample": "Full name", "color": "#5B5B5B", "use": "Field labels, property labels, subtitles, toasts"}, {"size": 13, "weight": 400, "sample": "Find or Ask \u00b7 Filters \u00b7 Edit", "use": "Default UI text: controls, menus, nav, help"}, {"size": 13.5, "weight": 600, "sample": "Ali Khan", "use": "Record name link (500 inside tables)"}, {"size": 14, "weight": 400, "sample": "ayesha.bhat@hof-global.com", "use": "Table data; 500 for primary buttons, radio-card titles, empty-state titles"}, {"size": 15, "weight": 600, "sample": "Add Employee", "use": "Modal & panel section titles; 500 for settings page titles"}, {"size": 17, "weight": 600, "sample": "Sana Mirza", "use": "Record side panel title"}]}, "space": [2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 24, 32, 40, 64], "radius": {"xs": 4, "sm": 6, "md": 8, "lg": 10, "xl": 12, "2xl": 14, "pill": 9999}, "shadow": {"xs": "0 1px 2px rgba(16,24,40,.05)", "menu": "0 4px 16px rgba(16,24,40,.12)", "popover": "0 8px 24px rgba(16,24,40,.16)", "toast": "0 8px 20px rgba(16,24,40,.2)", "modal": "0 16px 40px rgba(16,24,40,.2)", "drawer": "-8px 0 24px rgba(16,24,40,.12)"}, "overlay": "rgba(16,24,40,.35)", "layout": {"sidebarWidth": 200, "sidebarCollapsed": 56, "headerHeight": 45, "tableRowHeight": 36, "modalWidth": 440, "boardColumnWidth": 320, "searchWidth": {"header": 320, "toolbar": 200}}, "components": {"buttonPrimary": {"height": 29, "padding": "0 12px", "radius": 8, "bg": "#000", "text": "#fff 14/500"}, "buttonSecondary": {"height": 29, "padding": "0 12px", "radius": 8, "border": "#E4E4E4", "text": "#1A1A1A 13"}, "toolbarButton": {"padding": "7px 12px", "radius": 8, "border": "#E4E4E4", "text": "13"}, "iconButton": {"size": 32, "radius": 8, "border": "#E4E4E4"}, "input": {"padding": "8px 10px", "radius": 8, "border": "#E4E4E4", "text": "#15141B 13", "label": "#5B5B5B 12.5, 6 below"}, "menu": {"radius": 10, "padding": 6, "item": "7px 10px, radius 6, 13px, hover #FAFAFA"}, "modal": {"width": 440, "radius": 12, "header": "16px 20px", "body": "18px 20px gap 14", "footer": "14px 20px right-aligned"}, "drawer": {"header": 45, "footer": 46, "side": "right"}, "table": {"row": 36, "font": 14, "grid": "#EEEFF1 both axes", "header": "500 #6B6A70"}, "pill": {"height": 20, "padding": "0 8px", "font": "11.5/500"}, "emptyState": {"padding": "64px 24px", "illustration": 131, "title": "14/500", "action": "black 32px"}}, "content": {"buttons": "Title Case", "descriptions": "Sentence case", "date": "Sep 4, 2026", "dateTime": "Sep 4, 2026, 10:15 AM", "money": "AED 4,000", "empty": "\u2014", "search": "Find or Ask", "undefinedAction": "Not defined yet.", "neverUse": ["Warning"], "workflowBehaviors": ["Required", "Automatic"]}}</script>
+<script>
+/* Icons: Phosphor Regular paths, as used in the CRM (256 grid, filled). <i data-i="name" data-s="size" data-c="color"> */
+const ICONS = {"call": "M222.37,158.46l-47.11-21.11-.13-.06a16,16,0,0,0-15.17,1.4,8.12,8.12,0,0,0-.75.56L134.87,160c-15.42-7.49-31.34-23.29-38.83-38.51l20.78-24.71c.2-.25.39-.5.57-.77a16,16,0,0,0,1.32-15.06l0-.12L97.54,33.64a16,16,0,0,0-16.62-9.52A56.26,56.26,0,0,0,32,80c0,79.4,64.6,144,144,144a56.26,56.26,0,0,0,55.88-48.92A16,16,0,0,0,222.37,158.46ZM176,208A128.14,128.14,0,0,1,48,80,40.2,40.2,0,0,1,82.87,40a.61.61,0,0,0,0,.12l21,47L83.2,111.86a6.13,6.13,0,0,0-.57.77,16,16,0,0,0-1,15.7c9.06,18.53,27.73,37.06,46.46,46.11a16,16,0,0,0,15.75-1.14,8.44,8.44,0,0,0,.74-.56L168.89,152l47,21.05h0s.08,0,.11,0A40.21,40.21,0,0,1,176,208Z", "notification": "M221.8,175.94C216.25,166.38,208,139.33,208,104a80,80,0,1,0-160,0c0,35.34-8.26,62.38-13.81,71.94A16,16,0,0,0,48,200H88.81a40,40,0,0,0,78.38,0H208a16,16,0,0,0,13.8-24.06ZM128,216a24,24,0,0,1-22.62-16h45.24A24,24,0,0,1,128,216ZM48,184c7.7-13.24,16-43.92,16-80a64,64,0,1,1,128,0c0,36.05,8.28,66.73,16,80Z", "search": "M229.66,218.34l-50.07-50.06a88.11,88.11,0,1,0-11.31,11.31l50.06,50.07a8,8,0,0,0,11.32-11.32ZM40,112a72,72,0,1,1,72,72A72.08,72.08,0,0,1,40,112Z", "settingsGear": "M128,80a48,48,0,1,0,48,48A48.05,48.05,0,0,0,128,80Zm0,80a32,32,0,1,1,32-32A32,32,0,0,1,128,160Zm88-29.84q.06-2.16,0-4.32l14.92-18.64a8,8,0,0,0,1.48-7.06,107.21,107.21,0,0,0-10.88-26.25,8,8,0,0,0-6-3.93l-23.72-2.64q-1.48-1.56-3-3L186,40.54a8,8,0,0,0-3.94-6,107.71,107.71,0,0,0-26.25-10.87,8,8,0,0,0-7.06,1.49L130.16,40Q128,40,125.84,40L107.2,25.11a8,8,0,0,0-7.06-1.48A107.6,107.6,0,0,0,73.89,34.51a8,8,0,0,0-3.93,6L67.32,64.27q-1.56,1.49-3,3L40.54,70a8,8,0,0,0-6,3.94,107.71,107.71,0,0,0-10.87,26.25,8,8,0,0,0,1.49,7.06L40,125.84Q40,128,40,130.16L25.11,148.8a8,8,0,0,0-1.48,7.06,107.21,107.21,0,0,0,10.88,26.25,8,8,0,0,0,6,3.93l23.72,2.64q1.49,1.56,3,3L70,215.46a8,8,0,0,0,3.94,6,107.71,107.71,0,0,0,26.25,10.87,8,8,0,0,0,7.06-1.49L125.84,216q2.16.06,4.32,0l18.64,14.92a8,8,0,0,0,7.06,1.48,107.21,107.21,0,0,0,26.25-10.88,8,8,0,0,0,3.93-6l2.64-23.72q1.56-1.48,3-3L215.46,186a8,8,0,0,0,6-3.94,107.71,107.71,0,0,0,10.87-26.25,8,8,0,0,0-1.49-7.06Zm-16.1-6.5a73.93,73.93,0,0,1,0,8.68,8,8,0,0,0,1.74,5.48l14.19,17.73a91.57,91.57,0,0,1-6.23,15L187,173.11a8,8,0,0,0-5.1,2.64,74.11,74.11,0,0,1-6.14,6.14,8,8,0,0,0-2.64,5.1l-2.51,22.58a91.32,91.32,0,0,1-15,6.23l-17.74-14.19a8,8,0,0,0-5-1.75h-.48a73.93,73.93,0,0,1-8.68,0,8,8,0,0,0-5.48,1.74L100.45,215.8a91.57,91.57,0,0,1-15-6.23L82.89,187a8,8,0,0,0-2.64-5.1,74.11,74.11,0,0,1-6.14-6.14,8,8,0,0,0-5.1-2.64L46.43,170.6a91.32,91.32,0,0,1-6.23-15l14.19-17.74a8,8,0,0,0,1.74-5.48,73.93,73.93,0,0,1,0-8.68,8,8,0,0,0-1.74-5.48L40.2,100.45a91.57,91.57,0,0,1,6.23-15L69,82.89a8,8,0,0,0,5.1-2.64,74.11,74.11,0,0,1,6.14-6.14A8,8,0,0,0,82.89,69L85.4,46.43a91.32,91.32,0,0,1,15-6.23l17.74,14.19a8,8,0,0,0,5.48,1.74,73.93,73.93,0,0,1,8.68,0,8,8,0,0,0,5.48-1.74L155.55,40.2a91.57,91.57,0,0,1,15,6.23L173.11,69a8,8,0,0,0,2.64,5.1,74.11,74.11,0,0,1,6.14,6.14,8,8,0,0,0,5.1,2.64l22.58,2.51a91.32,91.32,0,0,1,6.23,15l-14.19,17.74A8,8,0,0,0,199.87,123.66Z", "sparkle": "M197.58,129.06,146,110l-19-51.62a15.92,15.92,0,0,0-29.88,0L78,110l-51.62,19a15.92,15.92,0,0,0,0,29.88L78,178l19,51.62a15.92,15.92,0,0,0,29.88,0L146,178l51.62-19a15.92,15.92,0,0,0,0-29.88ZM137,164.22a8,8,0,0,0-4.74,4.74L112,223.85,91.78,169A8,8,0,0,0,87,164.22L32.15,144,87,123.78A8,8,0,0,0,91.78,119L112,64.15,132.22,119a8,8,0,0,0,4.74,4.74L191.85,144ZM144,40a8,8,0,0,1,8-8h16V16a8,8,0,0,1,16,0V32h16a8,8,0,0,1,0,16H184V64a8,8,0,0,1-16,0V48H152A8,8,0,0,1,144,40ZM248,88a8,8,0,0,1-8,8h-8v8a8,8,0,0,1-16,0V96h-8a8,8,0,0,1,0-16h8V72a8,8,0,0,1,16,0v8h8A8,8,0,0,1,248,88Z", "chevDown": "M213.66,101.66l-80,80a8,8,0,0,1-11.32,0l-80-80A8,8,0,0,1,53.66,90.34L128,164.69l74.34-74.35a8,8,0,0,1,11.32,11.32Z", "arrowUp": "M205.66,117.66a8,8,0,0,1-11.32,0L136,59.31V216a8,8,0,0,1-16,0V59.31L61.66,117.66a8,8,0,0,1-11.32-11.32l72-72a8,8,0,0,1,11.32,0l72,72A8,8,0,0,1,205.66,117.66Z", "arrowLeft": "M224,128a8,8,0,0,1-8,8H59.31l58.35,58.34a8,8,0,0,1-11.32,11.32l-72-72a8,8,0,0,1,0-11.32l72-72a8,8,0,0,1,11.32,11.32L59.31,120H216A8,8,0,0,1,224,128Z", "home": "M219.31,108.68l-80-80a16,16,0,0,0-22.62,0l-80,80A15.87,15.87,0,0,0,32,120v96a8,8,0,0,0,8,8h64a8,8,0,0,0,8-8V160h32v56a8,8,0,0,0,8,8h64a8,8,0,0,0,8-8V120A15.87,15.87,0,0,0,219.31,108.68ZM208,208H160V152a8,8,0,0,0-8-8H104a8,8,0,0,0-8,8v56H48V120l80-80,80,80Z", "leads": "M256,136a8,8,0,0,1-8,8H232v16a8,8,0,0,1-16,0V144H200a8,8,0,0,1,0-16h16V112a8,8,0,0,1,16,0v16h16A8,8,0,0,1,256,136Zm-57.87,58.85a8,8,0,0,1-12.26,10.3C165.75,181.19,138.09,168,108,168s-57.75,13.19-77.87,37.15a8,8,0,0,1-12.25-10.3c14.94-17.78,33.52-30.41,54.17-37.17a68,68,0,1,1,71.9,0C164.6,164.44,183.18,177.07,198.13,194.85ZM108,152a52,52,0,1,0-52-52A52.06,52.06,0,0,0,108,152Z", "contacts": "M83.19,174.4a8,8,0,0,0,11.21-1.6,52,52,0,0,1,83.2,0,8,8,0,1,0,12.8-9.6A67.88,67.88,0,0,0,163,141.51a40,40,0,1,0-53.94,0A67.88,67.88,0,0,0,81.6,163.2,8,8,0,0,0,83.19,174.4ZM112,112a24,24,0,1,1,24,24A24,24,0,0,1,112,112Zm96-88H64A16,16,0,0,0,48,40V64H32a8,8,0,0,0,0,16H48v40H32a8,8,0,0,0,0,16H48v40H32a8,8,0,0,0,0,16H48v24a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V40A16,16,0,0,0,208,24Zm0,192H64V40H208Z", "deals": "M254.3,107.91,228.78,56.85a16,16,0,0,0-21.47-7.15L182.44,62.13,130.05,48.27a8.14,8.14,0,0,0-4.1,0L73.56,62.13,48.69,49.7a16,16,0,0,0-21.47,7.15L1.7,107.9a16,16,0,0,0,7.15,21.47l27,13.51,55.49,39.63a8.06,8.06,0,0,0,2.71,1.25l64,16a8,8,0,0,0,7.6-2.1l55.07-55.08,26.42-13.21a16,16,0,0,0,7.15-21.46Zm-54.89,33.37L165,113.72a8,8,0,0,0-10.68.61C136.51,132.27,116.66,130,104,122L147.24,80h31.81l27.21,54.41ZM41.53,64,62,74.22,36.43,125.27,16,115.06Zm116,119.13L99.42,168.61l-49.2-35.14,28-56L128,64.28l9.8,2.59-45,43.68-.08.09a16,16,0,0,0,2.72,24.81c20.56,13.13,45.37,11,64.91-5L188,152.66Zm62-57.87-25.52-51L214.47,64,240,115.06Zm-87.75,92.67a8,8,0,0,1-7.75,6.06,8.13,8.13,0,0,1-1.95-.24L80.41,213.33a7.89,7.89,0,0,1-2.71-1.25L51.35,193.26a8,8,0,0,1,9.3-13l25.11,17.94L126,208.24A8,8,0,0,1,131.82,217.94Z", "tasks": "M173.66,98.34a8,8,0,0,1,0,11.32l-56,56a8,8,0,0,1-11.32,0l-24-24a8,8,0,0,1,11.32-11.32L112,148.69l50.34-50.35A8,8,0,0,1,173.66,98.34ZM224,48V208a16,16,0,0,1-16,16H48a16,16,0,0,1-16-16V48A16,16,0,0,1,48,32H208A16,16,0,0,1,224,48ZM208,208V48H48V208H208Z", "workflows": "M245.66,74.34l-32-32a8,8,0,0,0-11.32,11.32L220.69,72H208c-49.33,0-61.05,28.12-71.38,52.92-9.38,22.51-16.92,40.59-49.48,42.84a40,40,0,1,0,.1,16c43.26-2.65,54.34-29.15,64.14-52.69C161.41,107,169.33,88,208,88h12.69l-18.35,18.34a8,8,0,0,0,11.32,11.32l32-32A8,8,0,0,0,245.66,74.34ZM48,200a24,24,0,1,1,24-24A24,24,0,0,1,48,200Z", "analytical": "M224,200h-8V40a8,8,0,0,0-8-8H152a8,8,0,0,0-8,8V80H96a8,8,0,0,0-8,8v40H48a8,8,0,0,0-8,8v64H32a8,8,0,0,0,0,16H224a8,8,0,0,0,0-16ZM160,48h40V200H160ZM104,96h40V200H104ZM56,144H88v56H56Z", "orders": "M72,104a8,8,0,0,1,8-8h96a8,8,0,0,1,0,16H80A8,8,0,0,1,72,104Zm8,40h96a8,8,0,0,0,0-16H80a8,8,0,0,0,0,16ZM232,56V208a8,8,0,0,1-11.58,7.15L192,200.94l-28.42,14.21a8,8,0,0,1-7.16,0L128,200.94,99.58,215.15a8,8,0,0,1-7.16,0L64,200.94,35.58,215.15A8,8,0,0,1,24,208V56A16,16,0,0,1,40,40H216A16,16,0,0,1,232,56Zm-16,0H40V195.06l20.42-10.22a8,8,0,0,1,7.16,0L96,199.06l28.42-14.22a8,8,0,0,1,7.16,0L160,199.06l28.42-14.22a8,8,0,0,1,7.16,0L216,195.06Z", "filter": "M176,80a8,8,0,0,1,8-8h32a8,8,0,0,1,0,16H184A8,8,0,0,1,176,80ZM40,88H144v16a8,8,0,0,0,16,0V56a8,8,0,0,0-16,0V72H40a8,8,0,0,0,0,16Zm176,80H120a8,8,0,0,0,0,16h96a8,8,0,0,0,0-16ZM88,144a8,8,0,0,0-8,8v16H40a8,8,0,0,0,0,16H80v16a8,8,0,0,0,16,0V152A8,8,0,0,0,88,144Z", "tableView": "M224,48H32a8,8,0,0,0-8,8V192a16,16,0,0,0,16,16H216a16,16,0,0,0,16-16V56A8,8,0,0,0,224,48ZM40,112H80v32H40Zm56,0H216v32H96ZM216,64V96H40V64ZM40,160H80v32H40Zm176,32H96V160H216v32Z", "kanbanView": "M104,32H64A16,16,0,0,0,48,48V208a16,16,0,0,0,16,16h40a16,16,0,0,0,16-16V48A16,16,0,0,0,104,32Zm0,176H64V48h40ZM192,32H152a16,16,0,0,0-16,16V208a16,16,0,0,0,16,16h40a16,16,0,0,0,16-16V48A16,16,0,0,0,192,32Zm0,176H152V48h40Z", "export": "M216,112v96a16,16,0,0,1-16,16H56a16,16,0,0,1-16-16V112A16,16,0,0,1,56,96H80a8,8,0,0,1,0,16H56v96H200V112H176a8,8,0,0,1,0-16h24A16,16,0,0,1,216,112ZM93.66,69.66,120,43.31V136a8,8,0,0,0,16,0V43.31l26.34,26.35a8,8,0,0,0,11.32-11.32l-40-40a8,8,0,0,0-11.32,0l-40,40A8,8,0,0,0,93.66,69.66Z", "eye": "M247.31,124.76c-.35-.79-8.82-19.58-27.65-38.41C194.57,61.26,162.88,48,128,48S61.43,61.26,36.34,86.35C17.51,105.18,9,124,8.69,124.76a8,8,0,0,0,0,6.5c.35.79,8.82,19.57,27.65,38.4C61.43,194.74,93.12,208,128,208s66.57-13.26,91.66-38.34c18.83-18.83,27.3-37.61,27.65-38.4A8,8,0,0,0,247.31,124.76ZM128,192c-30.78,0-57.67-11.19-79.93-33.25A133.47,133.47,0,0,1,25,128,133.33,133.33,0,0,1,48.07,97.25C70.33,75.19,97.22,64,128,64s57.67,11.19,79.93,33.25A133.46,133.46,0,0,1,231.05,128C223.84,141.46,192.43,192,128,192Zm0-112a48,48,0,1,0,48,48A48.05,48.05,0,0,0,128,80Zm0,80a32,32,0,1,1,32-32A32,32,0,0,1,128,160Z", "eyeOff": "M53.92,34.62A8,8,0,1,0,42.08,45.38L61.32,66.55C25,88.84,9.38,123.2,8.69,124.76a8,8,0,0,0,0,6.5c.35.79,8.82,19.57,27.65,38.4C61.43,194.74,93.12,208,128,208a127.11,127.11,0,0,0,52.07-10.83l22,24.21a8,8,0,1,0,11.84-10.76Zm47.33,75.84,41.67,45.85a32,32,0,0,1-41.67-45.85ZM128,192c-30.78,0-57.67-11.19-79.93-33.25A133.16,133.16,0,0,1,25,128c4.69-8.79,19.66-33.39,47.35-49.38l18,19.75a48,48,0,0,0,63.66,70l14.73,16.2A112,112,0,0,1,128,192Zm6-95.43a8,8,0,0,1,3-15.72,48.16,48.16,0,0,1,38.77,42.64,8,8,0,0,1-7.22,8.71,6.39,6.39,0,0,1-.75,0,8,8,0,0,1-8-7.26A32.09,32.09,0,0,0,134,96.57Zm113.28,34.69c-.42.94-10.55,23.37-33.36,43.8a8,8,0,1,1-10.67-11.92A132.77,132.77,0,0,0,231.05,128a133.15,133.15,0,0,0-23.12-30.77C185.67,75.19,158.78,64,128,64a118.37,118.37,0,0,0-19.36,1.57A8,8,0,1,1,106,49.79,134,134,0,0,1,128,48c34.88,0,66.57,13.26,91.66,38.35,18.83,18.83,27.3,37.62,27.65,38.41A8,8,0,0,1,247.31,131.26Z", "freeze": "M235.32,81.37,174.63,20.69a16,16,0,0,0-22.63,0L98.37,74.49c-10.66-3.34-35-7.37-60.4,13.14a16,16,0,0,0-1.29,23.78L85,159.71,42.34,202.34a8,8,0,0,0,11.32,11.32L96.29,171l48.29,48.29A16,16,0,0,0,155.9,224c.38,0,.75,0,1.13,0a15.93,15.93,0,0,0,11.64-6.33c19.64-26.1,17.75-47.32,13.19-60L235.33,104A16,16,0,0,0,235.32,81.37ZM224,92.69h0l-57.27,57.46a8,8,0,0,0-1.49,9.22c9.46,18.93-1.8,38.59-9.34,48.62L48,100.08c12.08-9.74,23.64-12.31,32.48-12.31A40.13,40.13,0,0,1,96.81,91a8,8,0,0,0,9.25-1.51L163.32,32,224,92.68Z", "unfreeze": "M53.92,34.62A8,8,0,1,0,42.08,45.38L67.37,73.2A69.82,69.82,0,0,0,38,87.63a16,16,0,0,0-1.29,23.78L85,159.71,42.34,202.34a8,8,0,0,0,11.32,11.32L96.29,171l48.29,48.29A16,16,0,0,0,155.9,224c.38,0,.75,0,1.13,0a15.93,15.93,0,0,0,11.64-6.33,89.75,89.75,0,0,0,11.58-20.27l21.84,24a8,8,0,1,0,11.84-10.76ZM155.9,208,48,100.08C58.23,91.83,69.2,87.72,80.66,87.81l87.16,95.88C165.59,193.56,160.24,202.23,155.9,208Zm79.42-104-44.64,44.79a8,8,0,1,1-11.33-11.3L224,92.7,163.32,32,122.1,73.35a8,8,0,0,1-11.33-11.29L152,20.7a16,16,0,0,1,22.63,0l60.69,60.68A16,16,0,0,1,235.32,104Z", "clock": "M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm64-88a8,8,0,0,1-8,8H128a8,8,0,0,1-8-8V72a8,8,0,0,1,16,0v48h48A8,8,0,0,1,192,128Z", "clockIn": "M141.66,133.66l-40,40a8,8,0,0,1-11.32-11.32L116.69,136H24a8,8,0,0,1,0-16h92.69L90.34,93.66a8,8,0,0,1,11.32-11.32l40,40A8,8,0,0,1,141.66,133.66ZM200,32H136a8,8,0,0,0,0,16h56V208H136a8,8,0,0,0,0,16h64a8,8,0,0,0,8-8V40A8,8,0,0,0,200,32Z", "clockOut": "M120,216a8,8,0,0,1-8,8H48a8,8,0,0,1-8-8V40a8,8,0,0,1,8-8h64a8,8,0,0,1,0,16H56V208h56A8,8,0,0,1,120,216Zm109.66-93.66-40-40a8,8,0,0,0-11.32,11.32L204.69,120H112a8,8,0,0,0,0,16h92.69l-26.35,26.34a8,8,0,0,0,11.32,11.32l40-40A8,8,0,0,0,229.66,122.34Z", "breakStart": "M80,56V24a8,8,0,0,1,16,0V56a8,8,0,0,1-16,0Zm40,8a8,8,0,0,0,8-8V24a8,8,0,0,0-16,0V56A8,8,0,0,0,120,64Zm32,0a8,8,0,0,0,8-8V24a8,8,0,0,0-16,0V56A8,8,0,0,0,152,64Zm96,56v8a40,40,0,0,1-37.51,39.91,96.59,96.59,0,0,1-27,40.09H208a8,8,0,0,1,0,16H32a8,8,0,0,1,0-16H56.54A96.3,96.3,0,0,1,24,136V88a8,8,0,0,1,8-8H208A40,40,0,0,1,248,120ZM200,96H40v40a80.27,80.27,0,0,0,45.12,72h69.76A80.27,80.27,0,0,0,200,136Zm32,24a24,24,0,0,0-16-22.62V136a95.78,95.78,0,0,1-1.2,15A24,24,0,0,0,232,128Z", "breakEnd": "M173.66,98.34a8,8,0,0,1,0,11.32l-56,56a8,8,0,0,1-11.32,0l-24-24a8,8,0,0,1,11.32-11.32L112,148.69l50.34-50.35A8,8,0,0,1,173.66,98.34ZM232,128A104,104,0,1,1,128,24,104.11,104.11,0,0,1,232,128Zm-16,0a88,88,0,1,0-88,88A88.1,88.1,0,0,0,216,128Z", "dashboard": "M104,40H56A16,16,0,0,0,40,56v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V56A16,16,0,0,0,104,40Zm0,64H56V56h48v48Zm96-64H152a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V56A16,16,0,0,0,200,40Zm0,64H152V56h48v48Zm-96,32H56a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V152A16,16,0,0,0,104,136Zm0,64H56V152h48v48Zm96-64H152a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V152A16,16,0,0,0,200,136Zm0,64H152V152h48v48Z", "campaigns": "M248,120a48.05,48.05,0,0,0-48-48H160.2c-2.91-.17-53.62-3.74-101.91-44.24A16,16,0,0,0,32,40V200a16,16,0,0,0,26.29,12.25c37.77-31.68,77-40.76,93.71-43.3v31.72A16,16,0,0,0,159.12,214l11,7.33A16,16,0,0,0,194.5,212l11.77-44.36A48.07,48.07,0,0,0,248,120ZM48,199.93V40h0c42.81,35.91,86.63,45,104,47.24v65.48C134.65,155,90.84,164.07,48,199.93Zm131,8,0,.11-11-7.33V168h21.6ZM200,152H168V88h32a32,32,0,1,1,0,64Z", "seo": "M128,24h0A104,104,0,1,0,232,128,104.12,104.12,0,0,0,128,24Zm88,104a87.61,87.61,0,0,1-3.33,24H174.16a157.44,157.44,0,0,0,0-48h38.51A87.61,87.61,0,0,1,216,128ZM102,168H154a115.11,115.11,0,0,1-26,45A115.27,115.27,0,0,1,102,168Zm-3.9-16a140.84,140.84,0,0,1,0-48h59.88a140.84,140.84,0,0,1,0,48ZM40,128a87.61,87.61,0,0,1,3.33-24H81.84a157.44,157.44,0,0,0,0,48H43.33A87.61,87.61,0,0,1,40,128ZM154,88H102a115.11,115.11,0,0,1,26-45A115.27,115.27,0,0,1,154,88Zm52.33,0H170.71a135.28,135.28,0,0,0-22.3-45.6A88.29,88.29,0,0,1,206.37,88ZM107.59,42.4A135.28,135.28,0,0,0,85.29,88H49.63A88.29,88.29,0,0,1,107.59,42.4ZM49.63,168H85.29a135.28,135.28,0,0,0,22.3,45.6A88.29,88.29,0,0,1,49.63,168Zm98.78,45.6a135.28,135.28,0,0,0,22.3-45.6h35.66A88.29,88.29,0,0,1,148.41,213.6Z", "socials": "M176,160a39.89,39.89,0,0,0-28.62,12.09l-46.1-29.63a39.8,39.8,0,0,0,0-28.92l46.1-29.63a40,40,0,1,0-8.66-13.45l-46.1,29.63a40,40,0,1,0,0,55.82l46.1,29.63A40,40,0,1,0,176,160Zm0-128a24,24,0,1,1-24,24A24,24,0,0,1,176,32ZM64,152a24,24,0,1,1,24-24A24,24,0,0,1,64,152Zm112,72a24,24,0,1,1,24-24A24,24,0,0,1,176,224Z", "ads": "M221.87,83.16A104.1,104.1,0,1,1,195.67,49l22.67-22.68a8,8,0,0,1,11.32,11.32l-96,96a8,8,0,0,1-11.32-11.32l27.72-27.72a40,40,0,1,0,17.87,31.09,8,8,0,1,1,16-.9,56,56,0,1,1-22.38-41.65L184.3,60.39a87.88,87.88,0,1,0,23.13,29.67,8,8,0,0,1,14.44-6.9Z", "forms": "M168,152a8,8,0,0,1-8,8H96a8,8,0,0,1,0-16h64A8,8,0,0,1,168,152Zm-8-40H96a8,8,0,0,0,0,16h64a8,8,0,0,0,0-16Zm56-64V216a16,16,0,0,1-16,16H56a16,16,0,0,1-16-16V48A16,16,0,0,1,56,32H92.26a47.92,47.92,0,0,1,71.48,0H200A16,16,0,0,1,216,48ZM96,64h64a32,32,0,0,0-64,0ZM200,48H173.25A47.93,47.93,0,0,1,176,64v8a8,8,0,0,1-8,8H88a8,8,0,0,1-8-8V64a47.93,47.93,0,0,1,2.75-16H56V216H200Z", "brand": "M200.77,53.89A103.27,103.27,0,0,0,128,24h-1.07A104,104,0,0,0,24,128c0,43,26.58,79.06,69.36,94.17A32,32,0,0,0,136,192a16,16,0,0,1,16-16h46.21a31.81,31.81,0,0,0,31.2-24.88,104.43,104.43,0,0,0,2.59-24A103.28,103.28,0,0,0,200.77,53.89Zm13,93.71A15.89,15.89,0,0,1,198.21,160H152a32,32,0,0,0-32,32,16,16,0,0,1-21.31,15.07C62.49,194.3,40,164,40,128a88,88,0,0,1,87.09-88h.9a88.35,88.35,0,0,1,88,87.25A88.86,88.86,0,0,1,213.81,147.6ZM140,76a12,12,0,1,1-12-12A12,12,0,0,1,140,76ZM96,100A12,12,0,1,1,84,88,12,12,0,0,1,96,100Zm0,56a12,12,0,1,1-12-12A12,12,0,0,1,96,156Zm88-56a12,12,0,1,1-12-12A12,12,0,0,1,184,100Z", "customers": "M244.8,150.4a8,8,0,0,1-11.2-1.6A51.6,51.6,0,0,0,192,128a8,8,0,0,1-7.37-4.89,8,8,0,0,1,0-6.22A8,8,0,0,1,192,112a24,24,0,1,0-23.24-30,8,8,0,1,1-15.5-4A40,40,0,1,1,219,117.51a67.94,67.94,0,0,1,27.43,21.68A8,8,0,0,1,244.8,150.4ZM190.92,212a8,8,0,1,1-13.84,8,57,57,0,0,0-98.16,0,8,8,0,1,1-13.84-8,72.06,72.06,0,0,1,33.74-29.92,48,48,0,1,1,58.36,0A72.06,72.06,0,0,1,190.92,212ZM128,176a32,32,0,1,0-32-32A32,32,0,0,0,128,176ZM72,120a8,8,0,0,0-8-8A24,24,0,1,1,87.24,82a8,8,0,1,0,15.5-4A40,40,0,1,0,37,117.51,67.94,67.94,0,0,0,9.6,139.19a8,8,0,1,0,12.8,9.61A51.6,51.6,0,0,1,64,128,8,8,0,0,0,72,120Z", "services": "M216,56H176V48a24,24,0,0,0-24-24H104A24,24,0,0,0,80,48v8H40A16,16,0,0,0,24,72V200a16,16,0,0,0,16,16H216a16,16,0,0,0,16-16V72A16,16,0,0,0,216,56ZM96,48a8,8,0,0,1,8-8h48a8,8,0,0,1,8,8v8H96ZM216,72v41.61A184,184,0,0,1,128,136a184.07,184.07,0,0,1-88-22.38V72Zm0,128H40V131.64A200.19,200.19,0,0,0,128,152a200.25,200.25,0,0,0,88-20.37V200ZM104,112a8,8,0,0,1,8-8h32a8,8,0,0,1,0,16H112A8,8,0,0,1,104,112Z", "forward": "M229.66,109.66l-48,48a8,8,0,0,1-11.32-11.32L204.69,112H128a88.1,88.1,0,0,0-88,88,8,8,0,0,1-16,0A104.11,104.11,0,0,1,128,96h76.69L170.34,61.66a8,8,0,0,1,11.32-11.32l48,48A8,8,0,0,1,229.66,109.66Z", "videoCamera": "M251.77,73a8,8,0,0,0-8.21.39L208,97.05V72a16,16,0,0,0-16-16H32A16,16,0,0,0,16,72V184a16,16,0,0,0,16,16H192a16,16,0,0,0,16-16V159l35.56,23.71A8,8,0,0,0,248,184a8,8,0,0,0,8-8V80A8,8,0,0,0,251.77,73ZM192,184H32V72H192V184Zm48-22.95-32-21.33V116.28L240,95Z", "sliders": "M40,88H73a32,32,0,0,0,62,0h81a8,8,0,0,0,0-16H135a32,32,0,0,0-62,0H40a8,8,0,0,0,0,16Zm64-24A16,16,0,1,1,88,80,16,16,0,0,1,104,64ZM216,168H199a32,32,0,0,0-62,0H40a8,8,0,0,0,0,16h97a32,32,0,0,0,62,0h17a8,8,0,0,0,0-16Zm-48,24a16,16,0,1,1,16-16A16,16,0,0,1,168,192Z", "usersThree": "M244.8,150.4a8,8,0,0,1-11.2-1.6A51.6,51.6,0,0,0,192,128a8,8,0,0,1-7.37-4.89,8,8,0,0,1,0-6.22A8,8,0,0,1,192,112a24,24,0,1,0-23.24-30,8,8,0,1,1-15.5-4A40,40,0,1,1,219,117.51a67.94,67.94,0,0,1,27.43,21.68A8,8,0,0,1,244.8,150.4ZM190.92,212a8,8,0,1,1-13.84,8,57,57,0,0,0-98.16,0,8,8,0,1,1-13.84-8,72.06,72.06,0,0,1,33.74-29.92,48,48,0,1,1,58.36,0A72.06,72.06,0,0,1,190.92,212ZM128,176a32,32,0,1,0-32-32A32,32,0,0,0,128,176ZM72,120a8,8,0,0,0-8-8A24,24,0,1,1,87.24,82a8,8,0,1,0,15.5-4A40,40,0,1,0,37,117.51,67.94,67.94,0,0,0,9.6,139.19a8,8,0,1,0,12.8,9.61A51.6,51.6,0,0,1,64,128,8,8,0,0,0,72,120Z", "cube": "M223.68,66.15,135.68,18h0a15.88,15.88,0,0,0-15.36,0l-88,48.17a16,16,0,0,0-8.32,14v95.64a16,16,0,0,0,8.32,14l88,48.17a15.88,15.88,0,0,0,15.36,0l88-48.17a16,16,0,0,0,8.32-14V80.18A16,16,0,0,0,223.68,66.15ZM128,32h0l80.34,44L128,120,47.66,76ZM40,90l80,43.78v85.79L40,175.82Zm96,129.57V133.82L216,90v85.78Z", "listBullets": "M80,64a8,8,0,0,1,8-8H216a8,8,0,0,1,0,16H88A8,8,0,0,1,80,64Zm136,56H88a8,8,0,0,0,0,16H216a8,8,0,0,0,0-16Zm0,64H88a8,8,0,0,0,0,16H216a8,8,0,0,0,0-16ZM44,52A12,12,0,1,0,56,64,12,12,0,0,0,44,52Zm0,64a12,12,0,1,0,12,12A12,12,0,0,0,44,116Zm0,64a12,12,0,1,0,12,12A12,12,0,0,0,44,180Z", "files": "M213.66,66.34l-40-40A8,8,0,0,0,168,24H88A16,16,0,0,0,72,40V56H56A16,16,0,0,0,40,72V216a16,16,0,0,0,16,16H168a16,16,0,0,0,16-16V200h16a16,16,0,0,0,16-16V72A8,8,0,0,0,213.66,66.34ZM168,216H56V72h76.69L168,107.31v84.53c0,.06,0,.11,0,.16s0,.1,0,.16V216Zm32-32H184V104a8,8,0,0,0-2.34-5.66l-40-40A8,8,0,0,0,136,56H88V40h76.69L200,75.31Zm-56-32a8,8,0,0,1-8,8H88a8,8,0,0,1,0-16h48A8,8,0,0,1,144,152Zm0,32a8,8,0,0,1-8,8H88a8,8,0,0,1,0-16h48A8,8,0,0,1,144,184Z", "arrowsDownUp": "M117.66,170.34a8,8,0,0,1,0,11.32l-32,32a8,8,0,0,1-11.32,0l-32-32a8,8,0,0,1,11.32-11.32L72,188.69V48a8,8,0,0,1,16,0V188.69l18.34-18.35A8,8,0,0,1,117.66,170.34Zm96-96-32-32a8,8,0,0,0-11.32,0l-32,32a8,8,0,0,0,11.32,11.32L168,67.31V208a8,8,0,0,0,16,0V67.31l18.34,18.35a8,8,0,0,0,11.32-11.32Z", "shield": "M208,40H48A16,16,0,0,0,32,56v56c0,52.72,25.52,84.67,46.93,102.19,23.06,18.86,46,25.27,47,25.53a8,8,0,0,0,4.2,0c1-.26,23.91-6.67,47-25.53C198.48,196.67,224,164.72,224,112V56A16,16,0,0,0,208,40Zm0,72c0,37.07-13.66,67.16-40.6,89.42A129.3,129.3,0,0,1,128,223.62a128.25,128.25,0,0,1-38.92-21.81C61.82,179.51,48,149.3,48,112l0-56,160,0Z", "seat": "M224,232a8,8,0,0,1-8,8H112a8,8,0,0,1,0-16H216A8,8,0,0,1,224,232Zm0-72v32a16,16,0,0,1-16,16H114.11a15.93,15.93,0,0,1-14.32-8.85l-58.11-116a16.1,16.1,0,0,1,0-14.32l22.12-44A16,16,0,0,1,85,17.56l33.69,14.22.47.22a16,16,0,0,1,7.15,21.46,1.51,1.51,0,0,1-.11.22L112,80l31.78,64L208,144A16,16,0,0,1,224,160Zm-16,0H143.77a15.91,15.91,0,0,1-14.31-8.85l-31.79-64a16.07,16.07,0,0,1,0-14.29l.12-.22L112,46.32,78.57,32.21A4.84,4.84,0,0,1,78.1,32L56,76,114.1,192H208Z", "lock": "M208,80H176V56a48,48,0,0,0-96,0V80H48A16,16,0,0,0,32,96V208a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V96A16,16,0,0,0,208,80ZM96,56a32,32,0,0,1,64,0V80H96ZM208,208H48V96H208V208Zm-68-56a12,12,0,1,1-12-12A12,12,0,0,1,140,152Z", "user": "M230.92,212c-15.23-26.33-38.7-45.21-66.09-54.16a72,72,0,1,0-73.66,0C63.78,166.78,40.31,185.66,25.08,212a8,8,0,1,0,13.85,8c18.84-32.56,52.14-52,89.07-52s70.23,19.44,89.07,52a8,8,0,1,0,13.85-8ZM72,96a56,56,0,1,1,56,56A56.06,56.06,0,0,1,72,96Z", "googleLogo": "M224,128a96,96,0,1,1-21.95-61.09,8,8,0,1,1-12.33,10.18A80,80,0,1,0,207.6,136H128a8,8,0,0,1,0-16h88A8,8,0,0,1,224,128Z", "outlookLogo": "M120,128a32,32,0,1,0-32,32A32,32,0,0,0,120,128Zm-48,0a16,16,0,1,1,16,16A16,16,0,0,1,72,128Zm152-24H208V40a8,8,0,0,0-8-8H104a8,8,0,0,0-8,8V64H40A16,16,0,0,0,24,80v96a16,16,0,0,0,16,16H72v16a16,16,0,0,0,16,16H216a16,16,0,0,0,16-16V112A8,8,0,0,0,224,104Zm-58.34,60L216,127.65v72.7ZM112,48h80v77.24l-40,28.89V80a16,16,0,0,0-16-16H112ZM40,80h96v77.9c0,.12,0,.24,0,.36V176H40ZM88,192h48a16,16,0,0,0,16-16v-2.13L199.26,208H88Z", "teamsLogo": "M112,104a8,8,0,0,1-8,8H96v40a8,8,0,0,1-16,0V112H72a8,8,0,0,1,0-16h32A8,8,0,0,1,112,104ZM232,92.74V152a40,40,0,0,1-36.63,39.85,64,64,0,0,1-118.7.15H40a16,16,0,0,1-16-16V80A16,16,0,0,1,40,64H96.81a40,40,0,0,1,73.31-28.85A32,32,0,0,1,211.69,80h7.57A12.76,12.76,0,0,1,232,92.74ZM112,56a23.82,23.82,0,0,0,1.38,8H136a16,16,0,0,1,15.07,10.68A24,24,0,1,0,112,56Zm24,120h0V80H40v96h96Zm48-80H152v80a16,16,0,0,1-16,16H94.44A48,48,0,0,0,184,168Zm16-32a16,16,0,0,0-24.4-13.6A39.89,39.89,0,0,1,168,80h16A16,16,0,0,0,200,64Zm16,32H200v72a62.76,62.76,0,0,1-.36,6.75A24,24,0,0,0,216,152Z", "arrowDown": "M205.66,149.66l-72,72a8,8,0,0,1-11.32,0l-72-72a8,8,0,0,1,11.32-11.32L120,196.69V40a8,8,0,0,1,16,0V196.69l58.34-58.35a8,8,0,0,1,11.32,11.32Z", "externalLink": "M224,104a8,8,0,0,1-16,0V59.32l-66.33,66.34a8,8,0,0,1-11.32-11.32L196.68,48H152a8,8,0,0,1,0-16h64a8,8,0,0,1,8,8Zm-40,24a8,8,0,0,0-8,8v72H48V80h72a8,8,0,0,0,0-16H48A16,16,0,0,0,32,80V208a16,16,0,0,0,16,16H176a16,16,0,0,0,16-16V136A8,8,0,0,0,184,128Z", "reply": "M232,200a8,8,0,0,1-16,0,88.1,88.1,0,0,0-88-88H51.31l34.35,34.34a8,8,0,0,1-11.32,11.32l-48-48a8,8,0,0,1,0-11.32l48-48A8,8,0,0,1,85.66,61.66L51.31,96H128A104.11,104.11,0,0,1,232,200Z", "edit": "M227.31,73.37,182.63,28.68a16,16,0,0,0-22.63,0L36.69,152A15.86,15.86,0,0,0,32,163.31V208a16,16,0,0,0,16,16H92.69A15.86,15.86,0,0,0,104,219.31L227.31,96a16,16,0,0,0,0-22.63ZM92.69,208H48V163.31l88-88L180.69,120ZM192,108.68,147.31,64l24-24L216,84.68Z", "copy": "M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z", "trash": "M216,48H176V40a24,24,0,0,0-24-24H104A24,24,0,0,0,80,40v8H40a8,8,0,0,0,0,16h8V208a16,16,0,0,0,16,16H192a16,16,0,0,0,16-16V64h8a8,8,0,0,0,0-16ZM96,40a8,8,0,0,1,8-8h48a8,8,0,0,1,8,8v8H96Zm96,168H64V64H192ZM112,104v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Zm48,0v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Z", "plus": "M224,128a8,8,0,0,1-8,8H136v80a8,8,0,0,1-16,0V136H40a8,8,0,0,1,0-16h80V40a8,8,0,0,1,16,0v80h80A8,8,0,0,1,224,128Z", "close": "M205.66,194.34a8,8,0,0,1-11.32,11.32L128,139.31,61.66,205.66a8,8,0,0,1-11.32-11.32L116.69,128,50.34,61.66A8,8,0,0,1,61.66,50.34L128,116.69l66.34-66.35a8,8,0,0,1,11.32,11.32L139.31,128Z", "moreDots": "M144,128a16,16,0,1,1-16-16A16,16,0,0,1,144,128ZM60,112a16,16,0,1,0,16,16A16,16,0,0,0,60,112Zm136,0a16,16,0,1,0,16,16A16,16,0,0,0,196,112Z", "dragHandle": "M104,60A12,12,0,1,1,92,48,12,12,0,0,1,104,60Zm60,12a12,12,0,1,0-12-12A12,12,0,0,0,164,72ZM92,116a12,12,0,1,0,12,12A12,12,0,0,0,92,116Zm72,0a12,12,0,1,0,12,12A12,12,0,0,0,164,116ZM92,184a12,12,0,1,0,12,12A12,12,0,0,0,92,184Zm72,0a12,12,0,1,0,12,12A12,12,0,0,0,164,184Z", "envelope": "M224,48H32a8,8,0,0,0-8,8V192a16,16,0,0,0,16,16H216a16,16,0,0,0,16-16V56A8,8,0,0,0,224,48Zm-96,85.15L52.57,64H203.43ZM98.71,128,40,181.81V74.19Zm11.84,10.85,12,11.05a8,8,0,0,0,10.82,0l12-11.05,58,53.15H52.57ZM157.29,128,216,74.18V181.82Z", "notepad": "M168,128a8,8,0,0,1-8,8H96a8,8,0,0,1,0-16h64A8,8,0,0,1,168,128Zm-8,24H96a8,8,0,0,0,0,16h64a8,8,0,0,0,0-16ZM216,40V200a32,32,0,0,1-32,32H72a32,32,0,0,1-32-32V40a8,8,0,0,1,8-8H72V24a8,8,0,0,1,16,0v8h32V24a8,8,0,0,1,16,0v8h32V24a8,8,0,0,1,16,0v8h24A8,8,0,0,1,216,40Zm-16,8H184v8a8,8,0,0,1-16,0V48H136v8a8,8,0,0,1-16,0V48H88v8a8,8,0,0,1-16,0V48H56V200a16,16,0,0,0,16,16H184a16,16,0,0,0,16-16Z", "archive": "M224,48H32A16,16,0,0,0,16,64V88a16,16,0,0,0,16,16v88a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V104a16,16,0,0,0,16-16V64A16,16,0,0,0,224,48ZM208,192H48V104H208ZM224,88H32V64H224V88ZM96,136a8,8,0,0,1,8-8h48a8,8,0,0,1,0,16H104A8,8,0,0,1,96,136Z", "flame": "M143.38,17.85a8,8,0,0,0-12.63,3.41l-22,60.41L84.59,58.26a8,8,0,0,0-11.93.89C51,87.53,40,116.08,40,144a88,88,0,0,0,176,0C216,84.55,165.21,36,143.38,17.85Zm40.51,135.49a57.6,57.6,0,0,1-46.56,46.55A7.65,7.65,0,0,1,136,200a8,8,0,0,1-1.32-15.89c16.57-2.79,30.63-16.85,33.44-33.45a8,8,0,0,1,15.78,2.68Z", "calendar": "M208,32H184V24a8,8,0,0,0-16,0v8H88V24a8,8,0,0,0-16,0v8H48A16,16,0,0,0,32,48V208a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V48A16,16,0,0,0,208,32ZM72,48v8a8,8,0,0,0,16,0V48h80v8a8,8,0,0,0,16,0V48h24V80H48V48ZM208,208H48V96H208V208Z", "userSwitch": "M253.66,133.66l-24,24a8,8,0,0,1-11.32,0l-24-24a8,8,0,0,1,11.32-11.32L216,132.69V128A88,88,0,0,0,56.49,76.67a8,8,0,0,1-13-9.34A104,104,0,0,1,232,128v4.69l10.34-10.35a8,8,0,0,1,11.32,11.32Zm-41.18,55A104,104,0,0,1,24,128v-4.69L13.66,133.66A8,8,0,0,1,2.34,122.34l24-24a8,8,0,0,1,11.32,0l24,24a8,8,0,0,1-11.32,11.32L40,123.31V128a87.62,87.62,0,0,0,22.24,58.41A79.66,79.66,0,0,1,98.3,157.66a48,48,0,1,1,59.4,0,79.59,79.59,0,0,1,36.08,28.78,89.68,89.68,0,0,0,5.71-7.11,8,8,0,0,1,13,9.34ZM128,152a32,32,0,1,0-32-32A32,32,0,0,0,128,152Zm0,64a88.2,88.2,0,0,0,53.92-18.49,64,64,0,0,0-107.84,0A87.57,87.57,0,0,0,128,216Z", "openRecord": "M216,48H40A16,16,0,0,0,24,64V192a16,16,0,0,0,16,16H216a16,16,0,0,0,16-16V64A16,16,0,0,0,216,48ZM40,64H216v56H136a8,8,0,0,0-8,8v64H40ZM216,192H144V136h72v56Z", "expand": "M216,48V96a8,8,0,0,1-16,0V67.31l-50.34,50.35a8,8,0,0,1-11.32-11.32L188.69,56H160a8,8,0,0,1,0-16h48A8,8,0,0,1,216,48ZM106.34,138.34,56,188.69V160a8,8,0,0,0-16,0v48a8,8,0,0,0,8,8H96a8,8,0,0,0,0-16H67.31l50.35-50.34a8,8,0,0,0-11.32-11.32Z", "collapse": "M213.66,53.66,163.31,104H192a8,8,0,0,1,0,16H144a8,8,0,0,1-8-8V64a8,8,0,0,1,16,0V92.69l50.34-50.35a8,8,0,0,1,11.32,11.32ZM112,136H64a8,8,0,0,0,0,16H92.69L42.34,202.34a8,8,0,0,0,11.32,11.32L104,163.31V192a8,8,0,0,0,16,0V144A8,8,0,0,0,112,136Z", "overview": "M104,40H56A16,16,0,0,0,40,56v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V56A16,16,0,0,0,104,40Zm0,64H56V56h48v48Zm96-64H152a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V56A16,16,0,0,0,200,40Zm0,64H152V56h48v48Zm-96,32H56a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V152A16,16,0,0,0,104,136Zm0,64H56V152h48v48Zm96-64H152a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V152A16,16,0,0,0,200,136Zm0,64H152V152h48v48Z", "activity": "M240,128a8,8,0,0,1-8,8H204.94l-37.78,75.58A8,8,0,0,1,160,216h-.4a8,8,0,0,1-7.08-5.14L95.35,60.76,63.28,131.31A8,8,0,0,1,56,136H24a8,8,0,0,1,0-16H50.85L88.72,36.69a8,8,0,0,1,14.76.46l57.51,151,31.85-63.71A8,8,0,0,1,200,120h32A8,8,0,0,1,240,128Z", "profile": "M200,112a8,8,0,0,1-8,8H152a8,8,0,0,1,0-16h40A8,8,0,0,1,200,112Zm-8,24H152a8,8,0,0,0,0,16h40a8,8,0,0,0,0-16Zm40-80V200a16,16,0,0,1-16,16H40a16,16,0,0,1-16-16V56A16,16,0,0,1,40,40H216A16,16,0,0,1,232,56ZM216,200V56H40V200H216Zm-80.26-34a8,8,0,1,1-15.5,4c-2.63-10.26-13.06-18-24.25-18s-21.61,7.74-24.25,18a8,8,0,1,1-15.5-4,39.84,39.84,0,0,1,17.19-23.34,32,32,0,1,1,45.12,0A39.76,39.76,0,0,1,135.75,166ZM96,136a16,16,0,1,0-16-16A16,16,0,0,0,96,136Z", "folder": "M216,72H130.67L102.93,51.2a16.12,16.12,0,0,0-9.6-3.2H40A16,16,0,0,0,24,64V200a16,16,0,0,0,16,16H216.89A15.13,15.13,0,0,0,232,200.89V88A16,16,0,0,0,216,72Zm0,128H40V64H93.33L123.2,86.4A8,8,0,0,0,128,88h88Z", "quote": "M72,104a8,8,0,0,1,8-8h96a8,8,0,0,1,0,16H80A8,8,0,0,1,72,104Zm8,40h96a8,8,0,0,0,0-16H80a8,8,0,0,0,0,16ZM232,56V208a8,8,0,0,1-11.58,7.15L192,200.94l-28.42,14.21a8,8,0,0,1-7.16,0L128,200.94,99.58,215.15a8,8,0,0,1-7.16,0L64,200.94,35.58,215.15A8,8,0,0,1,24,208V56A16,16,0,0,1,40,40H216A16,16,0,0,1,232,56Zm-16,0H40V195.06l20.42-10.22a8,8,0,0,1,7.16,0L96,199.06l28.42-14.22a8,8,0,0,1,7.16,0L160,199.06l28.42-14.22a8,8,0,0,1,7.16,0L216,195.06Z", "playbook": "M232,48H160a40,40,0,0,0-32,16A40,40,0,0,0,96,48H24a8,8,0,0,0-8,8V200a8,8,0,0,0,8,8H96a24,24,0,0,1,24,24,8,8,0,0,0,16,0,24,24,0,0,1,24-24h72a8,8,0,0,0,8-8V56A8,8,0,0,0,232,48ZM96,192H32V64H96a24,24,0,0,1,24,24V200A39.81,39.81,0,0,0,96,192Zm128,0H160a39.81,39.81,0,0,0-24,8V88a24,24,0,0,1,24-24h64Z", "thermometer": "M136,153V88a8,8,0,0,0-16,0v65a32,32,0,1,0,16,0Zm-8,47a16,16,0,1,1,16-16A16,16,0,0,1,128,200Zm40-66V48a40,40,0,0,0-80,0v86a64,64,0,1,0,80,0Zm-40,98a48,48,0,0,1-27.42-87.4A8,8,0,0,0,104,138V48a24,24,0,0,1,48,0v90a8,8,0,0,0,3.42,6.56A48,48,0,0,1,128,232Z", "gauge": "M207.06,72.67A111.24,111.24,0,0,0,128,40h-.4C66.07,40.21,16,91,16,153.13V176a16,16,0,0,0,16,16H224a16,16,0,0,0,16-16V152A111.25,111.25,0,0,0,207.06,72.67ZM224,176H119.71l54.76-75.3a8,8,0,0,0-12.94-9.42L99.92,176H32V153.13c0-3.08.15-6.12.43-9.13H56a8,8,0,0,0,0-16H35.27c10.32-38.86,44-68.24,84.73-71.66V80a8,8,0,0,0,16,0V56.33A96.14,96.14,0,0,1,221,128H200a8,8,0,0,0,0,16h23.67c.21,2.65.33,5.31.33,8Z", "coins": "M184,89.57V84c0-25.08-37.83-44-88-44S8,58.92,8,84v40c0,20.89,26.25,37.49,64,42.46V172c0,25.08,37.83,44,88,44s88-18.92,88-44V132C248,111.3,222.58,94.68,184,89.57ZM232,132c0,13.22-30.79,28-72,28-3.73,0-7.43-.13-11.08-.37C170.49,151.77,184,139,184,124V105.74C213.87,110.19,232,122.27,232,132ZM72,150.25V126.46A183.74,183.74,0,0,0,96,128a183.74,183.74,0,0,0,24-1.54v23.79A163,163,0,0,1,96,152,163,163,0,0,1,72,150.25Zm96-40.32V124c0,8.39-12.41,17.4-32,22.87V123.5C148.91,120.37,159.84,115.71,168,109.93ZM96,56c41.21,0,72,14.78,72,28s-30.79,28-72,28S24,97.22,24,84,54.79,56,96,56ZM24,124V109.93c8.16,5.78,19.09,10.44,32,13.57v23.37C36.41,141.4,24,132.39,24,124Zm64,48v-4.17c2.63.1,5.29.17,8,.17,3.88,0,7.67-.13,11.39-.35A121.92,121.92,0,0,0,120,171.41v23.46C100.41,189.4,88,180.39,88,172Zm48,26.25V174.4a179.48,179.48,0,0,0,24,1.6,183.74,183.74,0,0,0,24-1.54v23.79a165.45,165.45,0,0,1-48,0Zm64-3.38V171.5c12.91-3.13,23.84-7.79,32-13.57V172C232,180.39,219.59,189.4,200,194.87Z", "warning": "M236.8,188.09,149.35,36.22h0a24.76,24.76,0,0,0-42.7,0L19.2,188.09a23.51,23.51,0,0,0,0,23.72A24.35,24.35,0,0,0,40.55,224h174.9a24.35,24.35,0,0,0,21.33-12.19A23.51,23.51,0,0,0,236.8,188.09ZM222.93,203.8a8.5,8.5,0,0,1-7.48,4.2H40.55a8.5,8.5,0,0,1-7.48-4.2,7.59,7.59,0,0,1,0-7.72L120.52,44.21a8.75,8.75,0,0,1,15,0l87.45,151.87A7.59,7.59,0,0,1,222.93,203.8ZM120,144V104a8,8,0,0,1,16,0v40a8,8,0,0,1-16,0Zm20,36a12,12,0,1,1-12-12A12,12,0,0,1,140,180Z", "warningCircle": "M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm-8-80V80a8,8,0,0,1,16,0v56a8,8,0,0,1-16,0Zm20,36a12,12,0,1,1-12-12A12,12,0,0,1,140,172Z", "check": "M232.49,80.49l-128,128a12,12,0,0,1-17,0l-56-56a12,12,0,1,1,17-17L96,183,215.51,63.51a12,12,0,0,1,17,17Z", "paperclip": "M209.66,122.34a8,8,0,0,1,0,11.32l-82.05,82a56,56,0,0,1-79.2-79.21L147.67,35.73a40,40,0,1,1,56.61,56.55L105,193A24,24,0,1,1,71,159L154.3,74.38A8,8,0,1,1,165.7,85.6L82.39,170.31a8,8,0,1,0,11.27,11.36L192.93,81A24,24,0,1,0,159,47L59.76,147.68a40,40,0,1,0,56.53,56.62l82.06-82A8,8,0,0,1,209.66,122.34Z", "mic": "M128,176a48.05,48.05,0,0,0,48-48V64a48,48,0,0,0-96,0v64A48.05,48.05,0,0,0,128,176ZM96,64a32,32,0,0,1,64,0v64a32,32,0,0,1-64,0Zm40,143.6V240a8,8,0,0,1-16,0V207.6A80.11,80.11,0,0,1,48,128a8,8,0,0,1,16,0,64,64,0,0,0,128,0,8,8,0,0,1,16,0A80.11,80.11,0,0,1,136,207.6Z"};
+const svg = (name, size, color) => {
+  const d = ICONS[name]; if(!d) return '';
+  return `<svg width="${size}" height="${size}" viewBox="0 0 256 256" fill="${color}" style="display:block;flex-shrink:0" aria-hidden="true"><path d="${d}"/></svg>`;
+};
+document.querySelectorAll('i[data-i]').forEach(el => {
+  const s = el.dataset.s || 14, c = el.dataset.c || '#5B5B5B';
+  el.outerHTML = el.dataset.i === 'collapse'
+    ? `<svg width="${s}" height="${s}" viewBox="0 0 256 256" fill="${c}"><path d="M216,40H40A16,16,0,0,0,24,56V200a16,16,0,0,0,16,16H216a16,16,0,0,0,16-16V56A16,16,0,0,0,216,40ZM40,56H80V200H40ZM216,200H96V56H216V200Z"/></svg>`
+    : `<span style="display:inline-flex;${el.getAttribute('style') || ''}">${svg(el.dataset.i, s, c)}</span>`;
+});
+document.getElementById('icons-grid').innerHTML = Object.keys(ICONS).map(n => `<div class="ico-cell">${svg(n, 20, '#1A1A1A')}<span>${n}</span></div>`).join('');
+
+const TOK = JSON.parse(document.getElementById('hof-tokens').textContent);
+const swatch = (n, h, u, border) => `<div class="sw"><div class="chip" style="background:${h};${border ? 'box-shadow:inset 0 -1px 0 #EEE' : ''}"></div><div class="meta"><div class="n">${n}</div><div class="h">${h}</div><div class="u">${u}</div></div></div>`;
+document.getElementById('sw-brand').innerHTML = TOK.color.brand.map(c => swatch(c.name, c.hex, c.use, /^#F|#FFF/i.test(c.hex))).join('');
+document.getElementById('sw-record').innerHTML = TOK.color.record.map(c => swatch(c.name, c.hex, c.use, /^#E|^#F/i.test(c.hex))).join('');
+document.getElementById('sw-status').innerHTML = TOK.color.status.map(t => `<div class="sw"><div class="chip" style="background:${t.bg}; display:flex; align-items:center; justify-content:center"><span class="hof-pill" style="color:${t.text}; background:${t.bg}; border:1px solid ${t.text}22">${t.example}</span></div><div class="meta"><div class="n">${t.name}</div><div class="h">${t.text} / ${t.bg}</div><div class="u">${t.use}</div></div></div>`).join('');
+document.getElementById('tscale').innerHTML = TOK.type.scale.map(t => `<tr><td><span style="font-size:${t.size}px; font-weight:${t.weight}; color:${t.color || '#15141B'}; ${t.upper ? 'text-transform:uppercase; letter-spacing:.4px;' : ''}">${t.sample}</span></td><td>${t.size}px · ${t.weight}</td><td>${t.use}</td></tr>`).join('');
+document.getElementById('space-stage').innerHTML = TOK.space.map(s => `<div style="display:flex; flex-direction:column; align-items:center; gap:6px"><div style="width:${s}px; height:${s}px; background:#1869EC; border-radius:2px"></div><span style="font-size:11px; color:#5B5B5B">${s}</span></div>`).join('');
+document.getElementById('radius-stage').innerHTML = Object.entries(TOK.radius).map(([k, v]) => `<div style="display:flex; flex-direction:column; align-items:center; gap:8px"><div style="width:72px; height:48px; border:1.5px solid #1869EC; background:#EAF2FE; border-radius:${v === 9999 ? '9999px' : v + 'px'}"></div><span style="font-size:11.5px; color:#15141B">${k}</span><span style="font-size:11px; color:#949494">${v === 9999 ? 'pill' : v + 'px'}</span></div>`).join('');
+document.getElementById('elev-stage').innerHTML = Object.entries(TOK.shadow).map(([k, v]) => `<div style="width:150px; height:84px; background:#fff; border-radius:10px; box-shadow:${v}; display:flex; align-items:flex-end; padding:10px; font-size:11.5px; color:#5B5B5B">${k}</div>`).join('');
+document.getElementById('css-out').textContent = document.getElementById('hof-ds').textContent.trim();
+document.getElementById('json-out').textContent = JSON.stringify(TOK, null, 2);
+document.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(document.getElementById(b.dataset.copy).textContent); b.textContent = 'Copied'; setTimeout(() => b.textContent = b.dataset.copy === 'css-out' ? 'Copy CSS' : 'Copy JSON', 1500); } catch(e){}
+}));
+</script>
+</body>
+</html>
