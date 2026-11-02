@@ -101,4 +101,4 @@ Persistent notes for sessions opened in `hof-erp` live in `/Users/hf/.claude/pro
 | `docs/hof-pulse-design-system.html` | The shared ERP design system page. |
 | `docs/module-icons-source/` | `Edit-Pen-Write-Paper` (the only source icon not already in `assets/`). |
 
-Git: `docs/specs` and `docs/reference` were added after the last commit and aren't committed yet (commit only when Mohsin asks).
+Git: everything is committed and pushed to `github.com/mohsin979/ERP-Design`, branch `erp-prototype` (commit / push only when Mohsin asks).
