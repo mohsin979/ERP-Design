@@ -33,7 +33,7 @@ const SAMPLE_CUSTOMERS = () => {
        (the deal or contact it came from), Customer Since and Associated Company (its contact's). */
     const pl = DEFAULT_PIPELINES().find(x => x.id === pipeline), st = pl && pl.stages.find(x => x.id === stage);
     return {id:`cust-${n}`, name, email:own.email ?? (c && name === c.name ? c.email : ''), phone:own.phone ?? (c && name === c.name ? c.phone : ''),
-      owner, pipeline, stage, status:own.status || (st && st.outcome ? 'Closed' : 'Active'), source:dealIds.length ? 'Deal' : 'Contact',
+      owner, pipeline, stage, status:own.status || (st && isClosedStage(st) ? 'Closed' : 'Active'), source:dealIds.length ? 'Deal' : 'Contact',
       customerSince:dateOnly(created), company:own.company ?? (c ? c.company || '' : ''), contactId:c ? c.id : null, dealIds, created};
   };
   const NIW = 'usa-niw-service', CA = 'canada-aus-service';

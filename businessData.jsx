@@ -192,7 +192,8 @@ function generateBusinessData({users, services, now = new Date(), takenNames = [
     const [stage, stageEnteredAt] = reached[reached.length - 1];
     const enteredOf = (s) => (path.find(p => p[0] === s && p[1] <= NOW) || [])[1];
     const won = stage === 'deal-won', lost = stage === 'deal-lost';
-    const closedAt = won || lost ? stageEnteredAt : null;
+    // Every closed stage (Won, Lost, Undecided — Postponed) has its Actual Close Date.
+    const closedAt = won || lost || stage === 'postponed' ? stageEnteredAt : null;
     const lastPastAt = stageEnteredAt;
     // The quote only as far as it had got by now.
     const qs = quote && quote.draftAt <= NOW ? {status: quote.signedAt && quote.signedAt <= NOW ? 'signed' : quote.sentAt <= NOW ? 'sent' : 'draft'} : null;
@@ -290,7 +291,7 @@ function generateBusinessData({users, services, now = new Date(), takenNames = [
     if(won){
       const pl = CUSTOMER_PIPELINE_FOR_DEAL[pipeline];
       const plDef = DEFAULT_PIPELINES().find(p => p.id === pl);
-      const open = plDef.stages.filter(s => !s.outcome), outcomes = plDef.stages.filter(s => s.outcome);
+      const open = plDef.stages.filter(s => !isClosedStage(s)), outcomes = plDef.stages.filter(isClosedStage);
       const since = (NOW - closedAt) / BIZ_DAY;
       const closedOut = since > 200 && chance(.25);
       const cst = closedOut ? outcomes[outcomes.length - 1] : open[Math.min(open.length - 1, Math.floor(since / between(14, 24)))];

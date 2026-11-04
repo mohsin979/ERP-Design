@@ -12,7 +12,8 @@
 
    Only a pipeline whose stages belong to it (source:'record' — Deals) can have its stages
    edited; a property-driven pipeline's stages are its property's values (Types of Contact), so
-   they're shown, with workflows, but not reordered, added or deleted here.
+   they're shown, with workflows, but not reordered, added or deleted here. Every pipeline's
+   stages show their Stage Type; Edit (⋯) changes it, on property-driven pipelines too.
 
    Workflows open in this same panel through the generic WorkflowEditor (workflows.jsx). Opened
    from a stage, a new workflow's context is prefilled (Object, Pipeline, Stage) and its origin
@@ -84,11 +85,12 @@ function PipelinePanel({data, setData, pipelineId, deals = [], onClose, onStub, 
     // Minimum widths that fit the panel's stage column (gutter 44 + these + Actions 120 ≤ ~520px,
     // so nothing is cropped on the right); fillWidth stretches them to its width.
     {key:'name', label:'Stage Name', width:150},
+    {key:'stageType', label:'Stage Type', width:96},
     ...(countsDeals ? [{key:'records', label:objName, width:64}] : []),
     // Workflows only where the pipeline's Object supports them (Deals); Contacts' pipelines have none.
     ...(showsWorkflows ? [{key:'workflows', label:'Workflows', width:140}] : []),
   ];
-  const rows = pipeline.stages.map(st => ({id:st.id, name:st.label, records: countsDeals ? String(dealsIn(st.id)) : '', stage:st,
+  const rows = pipeline.stages.map(st => ({id:st.id, name:st.label, stageType:stageTypeLabel(stageTypeOf(st)), records: countsDeals ? String(dealsIn(st.id)) : '', stage:st,
     stageWorkflows: workflows.filter(w => stageOfWorkflow(w) === st.id)}));
   const schema = {
     properties:columns, filterProps:[], selectValues:{}, noun:'stage', searchKeys:['name'], selectable:false, boards:false,
@@ -186,7 +188,7 @@ function PipelinePanel({data, setData, pipelineId, deals = [], onClose, onStub, 
     </div>
     {editingPipeline && <EditPipelineModal pipeline={pipeline} setData={setData} onClose={()=>setEditingPipeline(false)}/>}
     {adding && <AddStageModal stages={pipeline.stages} onCancel={()=>setAdding(false)}
-      onAdd={(label) => { setStages(list => [...list, {id:`${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${Date.now().toString(36)}`, label}]); setAdding(false); }}/>}
+      onAdd={(label, type) => { setStages(list => [...list, {id:`${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${Date.now().toString(36)}`, label, type}]); setAdding(false); }}/>}
     {deleting && (() => {
       const n = workflows.filter(w => stageOfWorkflow(w) === deleting.id).length;
       return (
@@ -211,26 +213,27 @@ const pipelineMenuItems = (pipeline, deals, onEdit, noun = 'deal') => {
   const own = pipeline.source === 'record';
   // Settings & Administration → Pipelines: Edit and Delete, for the pipeline's record type.
   return [
-    ...(pipelineAdminCan(pipeline.objectId, 'edit', pipeline) ? [{label:'Edit', disabled:!own, onClick:onEdit}] : []),
+    ...(pipelineAdminCan(pipeline.objectId, 'edit', pipeline) ? [{label:'Edit', onClick:onEdit}] : []),
     ...(pipelineAdminCan(pipeline.objectId, 'delete', pipeline) ? [{label: n ? `Delete · ${n} ${noun}${n === 1 ? '' : 's'}` : 'Delete', danger: own && !n, disabled:true, onClick:()=>{}}] : []),
   ];
 };
 
-/* Edit pipeline: its name and its stages' names. A renamed stage is the same stage (same id), so
-   every deal in it shows the new name; nothing moves. A Deal pipeline's stages can be marked as
-   outcome stages (e.g. Deal Won, Postponed, Deal Lost): they sit outside the ordered stages that
-   Stage Movement Forward / Backward and Move Stage Forward / Backward follow. */
+/* Edit pipeline: its name, its stages' names and each stage's Stage Type (Open, Won, Lost,
+   Undecided — board.jsx). A renamed stage is the same stage (same id), so every record in it shows
+   the new name; nothing moves. Closed stages (Won, Lost, Undecided) sit outside the ordered stages
+   that Stage Movement Forward / Backward and Move Stage Forward / Backward follow. A
+   property-driven pipeline's stage names are its property's values: only their types change here. */
 function EditPipelineModal({pipeline, setData, onClose}){
   const [label, setLabel] = React.useState(pipeline.label);
   const [names, setNames] = React.useState(() => Object.fromEntries(pipeline.stages.map(s => [s.id, s.label])));
-  const [outcomes, setOutcomes] = React.useState(() => Object.fromEntries(pipeline.stages.map(s => [s.id, !!s.outcome])));
-  const withOutcomes = pipeline.source === 'record';
+  const [types, setTypes] = React.useState(() => Object.fromEntries(pipeline.stages.map(s => [s.id, stageTypeOf(s)])));
+  const ownNames = pipeline.source === 'record';
   const trimmed = pipeline.stages.map(s => (names[s.id] || '').trim());
   const dupes = trimmed.some((n, i) => n && trimmed.findIndex(x => x.toLowerCase() === n.toLowerCase()) !== i);
   const ok = !!label.trim() && trimmed.every(Boolean) && !dupes;
   const save = () => {
     setData(d => ({...d, pipelines:d.pipelines.map(p => p.id !== pipeline.id ? p
-      : {...p, label:label.trim(), stages:p.stages.map(s => ({...s, label:(names[s.id] || s.label).trim(), ...(withOutcomes ? {outcome:!!outcomes[s.id]} : {})}))})}));
+      : {...p, label:label.trim(), stages:p.stages.map(s => ({...withStageType(s), ...(ownNames ? {label:(names[s.id] || s.label).trim()} : {}), type:types[s.id] || 'open'}))})}));
     onClose();
   };
   return (
@@ -240,18 +243,18 @@ function EditPipelineModal({pipeline, setData, onClose}){
         <input id="pipeline-name" value={label} onChange={e=>setLabel(e.target.value)} style={fieldInput}/>
       </div>
       <div>
-        <label style={fieldLabel}>Stages</label>
+        <div style={{display:'flex', alignItems:'baseline'}}>
+          <label style={{...fieldLabel, flex:1}}>Stages</label>
+          <span style={{...fieldLabel, width:130, flexShrink:0}}>Stage Type</span>
+        </div>
         {/* Plain rows, in pipeline order. */}
         <div style={{display:'flex', flexDirection:'column', gap:8, maxHeight:340, overflowY:'auto'}}>
           {pipeline.stages.map((s, i) => (
             <div key={s.id} style={{display:'flex', alignItems:'center', gap:10}}>
               <span style={{width:18, fontSize:12.5, color:T.gray400, fontVariantNumeric:'tabular-nums', flexShrink:0}}>{i + 1}</span>
-              <input value={names[s.id]} onChange={e=>setNames(m => ({...m, [s.id]:e.target.value}))} style={fieldInput}/>
-              {withOutcomes && (
-                <label onClick={()=>setOutcomes(m => ({...m, [s.id]:!m[s.id]}))} style={{display:'flex', alignItems:'center', gap:8, fontSize:12.5, color:T.gray800, whiteSpace:'nowrap', cursor:'pointer', flexShrink:0}}>
-                  <RowCheckbox checked={!!outcomes[s.id]} onChange={()=>setOutcomes(m => ({...m, [s.id]:!m[s.id]}))}/>Outcome stage
-                </label>
-              )}
+              <input value={names[s.id]} disabled={!ownNames} onChange={e=>setNames(m => ({...m, [s.id]:e.target.value}))}
+                style={{...fieldInput, ...(ownNames ? {} : {background:T.headerBg, color:T.attioMuted})}}/>
+              <div style={{width:130, flexShrink:0}}><StageTypeSelect value={types[s.id]} onChange={v=>setTypes(m => ({...m, [s.id]:v}))}/></div>
             </div>
           ))}
         </div>
@@ -263,15 +266,20 @@ function EditPipelineModal({pipeline, setData, onClose}){
 
 function AddStageModal({stages, onCancel, onAdd}){
   const [label, setLabel] = React.useState('');
+  const [type, setType] = React.useState('open');
   const l = label.trim();
   const taken = stages.some(s => s.label.toLowerCase() === l.toLowerCase());
   return (
-    <StModal title="Add Stage" primary="Add stage" canSubmit={!!l && !taken} onCancel={onCancel} onSubmit={()=>onAdd(l)}>
+    <StModal title="Add Stage" primary="Add stage" canSubmit={!!l && !taken} onCancel={onCancel} onSubmit={()=>onAdd(l, type)}>
       <div>
         <label style={fieldLabel} htmlFor="stage-name">Stage name</label>
         <input id="stage-name" autoFocus value={label} onChange={e=>setLabel(e.target.value)} placeholder="e.g. Documents Received" style={fieldInput}
-          onKeyDown={e=>{ if(e.key === 'Enter' && l && !taken) onAdd(l); }}/>
+          onKeyDown={e=>{ if(e.key === 'Enter' && l && !taken) onAdd(l, type); }}/>
         {taken && <div style={{fontSize:12, color:T.red, marginTop:4}}>This pipeline already has a stage with this name.</div>}
+      </div>
+      <div>
+        <label style={fieldLabel}>Stage Type</label>
+        <StageTypeSelect value={type} onChange={setType}/>
       </div>
     </StModal>
   );

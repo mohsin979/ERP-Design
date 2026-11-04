@@ -850,7 +850,7 @@ const actionSummary = (data, a, context) => {
     case 'moveStageBackward': {
       const dir = a.type === 'moveStageForward' ? 'forward' : 'backward';
       // From the context's stage the next one is known; otherwise it's whichever stage comes next.
-      const order = pipeline ? pipeline.stages.filter(st => !st.outcome) : [];
+      const order = pipeline ? pipeline.stages.filter(st => !isClosedStage(st)) : [];
       const i = order.findIndex(st => st.id === ctx.stage), next = i >= 0 ? order[i + (dir === 'forward' ? 1 : -1)] : null;
       return next ? `Move ${dir} to ${next.label}` : `Move to the ${dir === 'forward' ? 'next' : 'previous'} stage`;
     }
@@ -1498,7 +1498,7 @@ function ClearPropertyConfig(props){
 }
 
 /* ── Move Stage ── within the trigger's pipeline. Forward / Backward go to the next / previous
-   ordered stage (outcome stages are outside that order; at either end nothing moves). */
+   ordered stage (closed stages — Won, Lost, Undecided — are outside that order; at either end nothing moves). */
 function MoveStageConfig({config, setConfig, data, context, type}){
   const pipeline = (data.pipelines || []).find(p => p.id === (context || {}).pipeline);
   return (
@@ -1591,7 +1591,7 @@ function MoveToPipelineConfig({config, setConfig, data, context}){
   const pipelines = objectPipelines(data, ctx.object).filter(p => p.source !== 'property'), pl = pipelines.find(p => p.id === c.pipeline);
   return cfgPad(<>
     {cfgField('Pipeline', <FormSelect value={c.pipeline || ''} placeholder="Select pipeline" options={pipelines.map(p => ({value:p.id, label:p.label}))} onChange={(v)=>setConfig({...c, pipeline:v, stage:''})}/>)}
-    {pl && cfgField('Destination stage', <FormSelect value={c.stage || ''} placeholder={`First stage (${(pl.stages.find(s => !s.outcome) || pl.stages[0] || {}).label || '—'})`}
+    {pl && cfgField('Destination stage', <FormSelect value={c.stage || ''} placeholder={`First stage (${(pl.stages.find(s => !isClosedStage(s)) || pl.stages[0] || {}).label || '—'})`}
       options={pl.stages.map(s => ({value:s.id, label:s.label}))} onChange={(v)=>setConfig({...c, stage:v})}/>)}
     {behaviorField('moveToPipeline', c, setConfig)}
   </>);

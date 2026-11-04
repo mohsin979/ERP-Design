@@ -692,6 +692,7 @@ function App(){
   // Task pipelines (Settings → Tasks), for every task's stage (activities.jsx).
   setTaskPipelines(taskPipelinesOf(settingsData));
   setContactPipelines(objectPipelines(settingsData, 'contacts'));
+  setStagePipelines(settingsData.pipelines);
   setAccessContext({user:signedInUser, users:settingsData.users, data:settingsData,
     history:(object, id) => object === 'contacts' ? contactActivities[id] : object === 'deals' ? dealActivities[id] : object === 'customers' ? customerActivities[id] : []});
   /* The workflow engine: every deal and customer change goes through engine.setDeals /

@@ -221,7 +221,9 @@ const migrateDataModel = (d) => {
     return {...rest, type, ...(currencyOnly ? {currencyOnly:true} : {})};
   });
   const pipelines = (d.pipelines || []).filter(p => has(p.objectId) && !REMOVED_PIPELINE_IDS.includes(p.id))
-    .map(p => p.objectId === 'contacts' && p.source === 'property' ? {...p, stages:p.stages.filter(st => !REMOVED_CONTACT_STAGES.includes(st.value))} : p);
+    .map(p => p.objectId === 'contacts' && p.source === 'property' ? {...p, stages:p.stages.filter(st => !REMOVED_CONTACT_STAGES.includes(st.value))} : p)
+    // Every stage has a Stage Type; an "Outcome stage" saved before takes its type from its name.
+    .map(p => ({...p, stages:(p.stages || []).map(withStageType)}));
   // Customer Profile forms (Settings → Customer Profile): saved ones as saved, shipped ones added.
   // The assessment templates of the discarded scoring system go.
   const profileForms = withSeedProfileForms(d.profileForms);
@@ -234,18 +236,20 @@ const migrateDataModel = (d) => {
    Canada — one pipeline — with the same stages (its own copy; no workflows yet). Stage names are kept exactly
    as given; entering / leaving / skipping / reversing stages is not defined yet. */
 const stageList = (labels) => labels.map(label => ({id:label.toLowerCase().replace(/[^a-z0-9]+/g, '-'), label}));
-// Deal Won, Postponed and Deal Lost are outcome stages — outside the ordered stages (Edit Pipeline).
+// Each stage's Stage Type (board.jsx): Open unless given. Closed stages sit outside the ordered stages.
+const typed = (types) => (s) => ({...s, type:types[s.id] || 'open'});
+// Deal Won, Postponed and Deal Lost close a deal: Won, Undecided, Lost.
 const US_NIW_STAGES = stageList(['Qualified Client', 'CCL Sent', 'Last Month Rollover', 'Expected Sale', 'Payment Made', 'Deal Won', 'Postponed', 'Deal Lost'])
-  .map(s => ({...s, outcome:['deal-won', 'postponed', 'deal-lost'].includes(s.id)}));
-/* Customer service pipelines, stage names exactly as given. The closing stages are outcome stages
-   (outside the ordered stages, as Deal Won / Deal Lost on deals). */
+  .map(typed({'deal-won':'won', 'postponed':'undecided', 'deal-lost':'lost'}));
+/* Customer service pipelines, stage names exactly as given. The closing stages are closed types,
+   as Deal Won / Deal Lost on deals. */
 const CANADA_AUS_SERVICE_STAGES = stageList(['Initial Welcome Call', 'ECA', 'IELTS', 'Spouse Sponsorship', 'Express Entry & PNP', 'NOI/ITA',
   'Waiting for Nomination', 'COPR', 'Resubmission', 'Completely Closed', 'Visa Granted - Completely Closed'])
-  .map(s => ({...s, outcome:['completely-closed', 'visa-granted-completely-closed'].includes(s.id)}));
+  .map(typed({'completely-closed':'undecided', 'visa-granted-completely-closed':'won'}));
 const USA_NIW_SERVICE_STAGES = stageList(['Welcome Call', 'Phase 1 Document Collection', 'IEE', 'Phase 2 Document Collection', 'Brainstorming',
   'Petition Preparation', 'Petition Review', 'Forms Filing', 'Merging', 'Petition Filed', 'Tracking Notice', 'RFE Received', 'Re-Send Petition',
   'Waiting for Appointment', 'Appointment Received', 'Visa Granted', 'Visa Denied'])
-  .map(s => ({...s, outcome:['visa-granted', 'visa-denied'].includes(s.id)}));
+  .map(typed({'visa-granted':'won', 'visa-denied':'lost'}));
 const DEFAULT_PIPELINES = () => [
   ...PIPELINES.map(p => ({...p, objectId:'contacts'})),
   {id:'us-niw', label:'US NIW', objectId:'deals', source:'record', stages:US_NIW_STAGES},
@@ -986,8 +990,8 @@ const PIPELINE_COLS = [
 
 /* ── New Pipeline (Settings → Pipelines → +) ── the creation side panel, as for Calls, Notes and
    the other tools: the pipeline's name, the record it appears on, and its type —
-     Manual:         its stages are defined here (in order; on Deals and Customers a stage can be
-                     an outcome stage, as in Edit Pipeline).
+     Manual:         its stages are defined here, in order, each with its Stage Type (Open by
+                     default; Won, Lost, Undecided — as in Edit Pipeline).
      Property-based: its stages are the values of one of that record's single-choice properties
                      (Dropdown select / Radio select), and follow the property.
    Saved into the pipelines every board and record form reads. */
@@ -995,14 +999,18 @@ const PIPELINE_PROPERTY_TYPES = ['Single Selection'];
 const pipelineStageId = (label) => label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'stage';
 // Stage ids from their names, kept unique within the pipeline.
 const pipelineStageIds = (labels) => { const seen = {}; return labels.map(l => { const b = pipelineStageId(l); seen[b] = (seen[b] || 0) + 1; return seen[b] > 1 ? `${b}-${seen[b]}` : b; }); };
+// A stage's Stage Type picker (New Pipeline, Edit Pipeline, Add Stage): Open, Won, Lost, Undecided.
+function StageTypeSelect({value, onChange}){
+  return <Select value={value || 'open'} options={STAGE_TYPES.map(t => ({value:t.id, label:t.label}))} onChange={v=>v && onChange(v)}/>;
+}
 // `records`: each record type's records ({contacts, deals, customers}) — a property-based pipeline's stages show how many are in each.
 function NewPipelinePanel({data, records = {}, onCancel, onSave}){
   const [name, setName] = React.useState('');
   const [objectId, setObjectId] = React.useState('');
   const [kind, setKind] = React.useState('manual');
-  const [stages, setStages] = React.useState(() => [{id:`ns-${Date.now()}`, label:'', outcome:false}]);
+  const [stages, setStages] = React.useState(() => [{id:`ns-${Date.now()}`, label:'', type:'open'}]);
   const [propertyKey, setPropertyKey] = React.useState('');
-  const withOutcomes = objectId === 'deals' || objectId === 'customers';
+  const [valueTypes, setValueTypes] = React.useState({});   // a property-based pipeline's Stage Type per value
   const props = objectId ? objectProperties(data, objectId).filter(p => PIPELINE_PROPERTY_TYPES.includes(propertyTypeId(p.type)) && (p.options || []).some(o => String(o).trim())) : [];
   const property = props.find(p => p.key === propertyKey) || null;
   const values = property ? [...new Set(property.options.map(o => String(o).trim()).filter(Boolean))] : [];
@@ -1024,11 +1032,11 @@ function NewPipelinePanel({data, records = {}, onCancel, onSave}){
   const save = () => {
     if(!ok) return;
     const base = {id:`pl-${Date.now().toString(36)}`, label:name.trim(), objectId};
-    if(kind === 'property'){ const ids = pipelineStageIds(values); return onSave({...base, source:'property', propertyKey, stages:values.map((v, i) => ({id:ids[i], label:v, value:v}))}); }
+    if(kind === 'property'){ const ids = pipelineStageIds(values); return onSave({...base, source:'property', propertyKey, stages:values.map((v, i) => ({id:ids[i], label:v, value:v, type:valueTypes[v] || 'open'}))}); }
     const ids = pipelineStageIds(stages.map(s => s.label));
     // A manual pipeline: a deal or customer is in one of them ('record'). Contacts have none.
     onSave({...base, source:'record',
-      stages:stages.map((s, i) => ({id:ids[i], label:s.label.trim(), ...(withOutcomes ? {outcome:!!s.outcome} : {})}))});
+      stages:stages.map((s, i) => ({id:ids[i], label:s.label.trim(), type:s.type || 'open'}))});
   };
   const iconBtn = (icon, title, onClick, disabled) => <button type="button" title={title} disabled={disabled} onClick={onClick}
     style={{border:'none', background:'transparent', cursor: disabled ? 'default' : 'pointer', display:'flex', padding:4, opacity: disabled ? .35 : 1}}>
@@ -1061,23 +1069,15 @@ function NewPipelinePanel({data, records = {}, onCancel, onSave}){
                 <div key={s.id} style={{display:'flex', alignItems:'center', gap:6}}>
                   <span style={{width:18, fontSize:12.5, color:T.gray400, fontVariantNumeric:'tabular-nums', flexShrink:0}}>{i + 1}</span>
                   <input value={s.label} onChange={e=>setStage(s.id, {label:e.target.value})} placeholder="Stage name" aria-label={`Stage ${i + 1} name`} style={{...fieldText, flex:1, minWidth:0}}/>
+                  <div style={{width:118, flexShrink:0}}><StageTypeSelect value={s.type} onChange={v=>setStage(s.id, {type:v})} label={`Stage ${i + 1} type`}/></div>
                   {iconBtn('arrowUp', 'Move up', ()=>move(i, -1), i === 0)}
                   {iconBtn('arrowDown', 'Move down', ()=>move(i, 1), i === stages.length - 1)}
                   {iconBtn('trash', 'Remove stage', ()=>setStages(list => list.filter(x => x.id !== s.id)), stages.length === 1)}
                 </div>
               ))}
-              {withOutcomes && stages.some(s => s.label.trim()) && (
-                <div style={{display:'flex', flexWrap:'wrap', gap:'6px 14px', paddingLeft:24}}>
-                  {stages.filter(s => s.label.trim()).map(s => (
-                    <label key={s.id} onClick={()=>setStage(s.id, {outcome:!s.outcome})} style={{display:'flex', alignItems:'center', gap:6, fontSize:12.5, color:T.gray800, cursor:'pointer'}}>
-                      <RowCheckbox checked={!!s.outcome} onChange={()=>setStage(s.id, {outcome:!s.outcome})}/>{s.label.trim()} is an outcome stage
-                    </label>
-                  ))}
-                </div>
-              )}
               {dupes && <div style={{fontSize:12, color:T.red}}>Two stages can't have the same name.</div>}
               <div><StSecondary label={<span style={{display:'inline-flex', alignItems:'center', gap:6}}><Icon name="plus" size={12} color={T.gray800}/>Add stage</span>}
-                onClick={()=>setStages(list => [...list, {id:`ns-${Date.now()}-${list.length}`, label:'', outcome:false}])}/></div>
+                onClick={()=>setStages(list => [...list, {id:`ns-${Date.now()}-${list.length}`, label:'', type:'open'}])}/></div>
             </div>
           </Field>
         ) : (<>
@@ -1093,6 +1093,7 @@ function NewPipelinePanel({data, records = {}, onCancel, onSave}){
                   <thead>
                     <tr style={{background:T.headerBg}}>
                       <th style={{textAlign:'left', fontWeight:500, color:T.attioMuted, fontSize:12.5, padding:'7px 12px'}}>Stage</th>
+                      <th style={{textAlign:'left', fontWeight:500, color:T.attioMuted, fontSize:12.5, padding:'7px 12px', width:140}}>Stage Type</th>
                       <th style={{textAlign:'right', fontWeight:500, color:T.attioMuted, fontSize:12.5, padding:'7px 12px', width:110}}>Total Entries</th>
                     </tr>
                   </thead>
@@ -1100,6 +1101,7 @@ function NewPipelinePanel({data, records = {}, onCancel, onSave}){
                     {values.map(v => (
                       <tr key={v} style={{borderTop:`1px solid ${T.attioLine}`}}>
                         <td style={{padding:'7px 12px', color:T.attioText}}>{v}</td>
+                        <td style={{padding:'4px 12px'}}><StageTypeSelect value={valueTypes[v]} onChange={t=>setValueTypes(m => ({...m, [v]:t}))} label={`${v} stage type`}/></td>
                         <td style={{padding:'7px 12px', color:T.attioText, textAlign:'right', fontVariantNumeric:'tabular-nums'}}>{stageCounts[v] || 0}</td>
                       </tr>
                     ))}
@@ -1166,5 +1168,5 @@ function PipelinesSettings({data, setData, records = {}, onWorkflowOpen, target,
   );
 }
 
-Object.assign(window, {CUSTOMER_PIPELINE_FOR_DEAL, REMOVED_PIPELINE_IDS, PipelinesSettings, DEFAULT_PIPELINES, objectPipelines, recordPipelines, recordInPipeline, DEAL_TYPES, PROPERTY_SET_VERSION, SYSTEM_PROPERTY_TYPES, PROPERTY_TYPES, RELATIONSHIP_TYPES, OBJECT_GROUPS, DEFAULT_DATA_MODEL, PropertyInput, storePropertyValue, inputPropertyValue,
+Object.assign(window, {StageTypeSelect, CUSTOMER_PIPELINE_FOR_DEAL, REMOVED_PIPELINE_IDS, PipelinesSettings, DEFAULT_PIPELINES, objectPipelines, recordPipelines, recordInPipeline, DEAL_TYPES, PROPERTY_SET_VERSION, SYSTEM_PROPERTY_TYPES, PROPERTY_TYPES, RELATIONSHIP_TYPES, OBJECT_GROUPS, DEFAULT_DATA_MODEL, PropertyInput, storePropertyValue, inputPropertyValue,
   isEmptyValue, migrateDataModel, propertyFilterMeta, PROPERTY_HOLDERS, userDefaultProperties, customerDefaultProperties, customContactSchema, propertyFilterType, creationAssociations, RECORD_OBJECTS, objectFormProperties, ObjectsSettings, PropertiesSettings, inverseRelationship});

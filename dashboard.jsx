@@ -1,13 +1,20 @@
 /* HOF Pulse ERP — CRM Dashboard.
 
-   Layout (each section its own component, so more can be added later):
-     Greeting            — the time of day and the signed-in person; View Settings and the KPIs /
-                           Graph switcher; under it, Ask Spring (the AI prompt box).
-     KPIs                — Total Cash Invoiced (prominent), Received, Forecasted, Deals Closed — or
-                           (Graph) a line graph of the three cash KPIs over the period.
-     Key Indicators      — tabs: Revenue, Volume, Compliance, Speed (sales professionals ranked, a
-                           table with column menus and pagination), Business Velocity, Deal Won, Deal Lost.
-     Today's Tasks       — the signed-in person's tasks due today; each opens the task.
+   Layout — configurable, not a fixed set (the Super Admin's Dashboard View Settings; one workspace
+   dashboard for now, kept by id so role or personal dashboards can follow):
+     Greeting            — the time of day and the signed-in person; under it, Ask Spring (the AI
+                           prompt box).
+     Controls            — the date filter; All KPIs (every KPI and its value, in a side panel), View
+                           Settings (Super Admin) and the KPIs / Graph switcher.
+     KPIs                — one KPI pinned first (blue, twice as wide) and up to four more, from the KPI
+                           catalogue (DASH_KPI_DEFS) — or (Graph) a line graph of the three cash KPIs.
+     Widgets             — a three-column grid (DashWidgetGrid) of the shown widgets from the widget
+                           catalogue (DASH_WIDGET_DEFS), each spanning its width (1, 2 or 3 columns):
+                           Key Indicator User (Revenue, Volume, Compliance, Speed — sales
+                           professionals ranked), Total Tasks, Business Velocity, Deal Won, Deal Lost.
+     Rearrange           — from View Settings: the four KPIs after the pinned one and the widgets
+                           drag to reorder (live), and any of the four can be pinned as first; Done
+                           saves and the dashboard returns to viewing.
    One date filter (Today / This Week / This Month / Custom range) drives the KPIs, trends and Key
    Indicators.
    The same records give each user's statistics (USER_STATS): their profile panel's figures and
@@ -18,15 +25,21 @@
      Cash Received    payments recorded in Accounting, by payment date.
      Cash Invoiced    installments invoiced (their invoice date) — issuing isn't payment.
      Forecasted Cash  installments due in the period — expected, paid or not.
-     Volume           deals that reached an outcome stage (Deal Won, Deal Lost — Actual Close Date —
-                      or Postponed) in the period; Won and Lost of them.
+     Stage Types      every record's stage has a Stage Type (board.jsx): Open, or closed — Won, Lost,
+                      Undecided. Total Open: the records in an Open stage now. Total Closed and its
+                      Won / Lost / Undecided: the records that reached a closed stage in the period
+                      (deals: Actual Close Date; customers: when they entered the stage; contacts:
+                      when the pipeline's property last changed). Contacts count by their first
+                      pipeline. Win Rate = Won ÷ Closed. The KPIs are per record type.
+     Volume           deals that reached a closed stage in the period; Won and Lost of them.
      Compliance       the open workflow violations, by the owner of the violation's record, when raised.
      Speed            per deal closed in the period: Contact → Deal Closed (ranks; lowest first),
                       Contact → Deal, Contact → Customer (its customer created), Qualified Client →
                       Deal Won (days; deals start in Qualified Client).
-     Velocity         deals created (Contact → Deal), deals won (Qualified Client → Deal Won), the
-                      client's replies (an email received / call in, after the team's last email /
-                      call out — Client Response Time), payments (Invoice to Cash: invoiced → paid). */
+     Velocity         deals created (Contact to Deal), customers created from deals (Deal to
+                      Customer: deal created → customer created), the client's replies (an email
+                      received / call in, after the team's last email / call out — Client Response
+                      Time), payments (Invoice to Cash: invoiced → paid). */
 
 const DASH_PERIODS = [{id:'today', label:'Today'}, {id:'week', label:'This Week'}, {id:'month', label:'This Month'}];
 const DASH_DAY = 864e5;
@@ -48,7 +61,7 @@ function dashBusinessData({deals = [], customers = [], contacts = [], accounting
   const people = new Map();
   const person = (ownerId) => {
     if(ownerId == null || ownerId === '') return null;
-    if(!people.has(ownerId)){ const u = users.find(x => x.id === ownerId || x.name === ownerId); people.set(ownerId, {id:String(ownerId), name:u ? u.name : String(ownerId), ev:{invoices:[], installments:[], payments:[], closed:[], created:[], responses:[]}}); }
+    if(!people.has(ownerId)){ const u = users.find(x => x.id === ownerId || x.name === ownerId); people.set(ownerId, {id:String(ownerId), name:u ? u.name : String(ownerId), ev:{invoices:[], installments:[], payments:[], closed:[], created:[], responses:[], converted:[]}}); }
     return people.get(ownerId);
   };
   const contactById = new Map(contacts.map(c => [String(c.id), c]));
@@ -59,7 +72,8 @@ function dashBusinessData({deals = [], customers = [], contacts = [], accounting
     const dc = d.createdAt || dashTime(d.created), c = contactById.get(String(d.contactId)), cc = c ? dashTime(c.created) : null;
     const days = (a, b) => a != null && b != null ? Math.max(0, (a - b) / DASH_DAY) : null;
     if(dc) p.ev.created.push({at:dc, contactToDeal:days(dc, cc)});
-    const outcome = d.stage === 'deal-won' ? 'won' : d.stage === 'deal-lost' ? 'lost' : d.stage === 'postponed' ? 'postponed' : null;
+    // The deal's stage type, when it's closed: 'won' | 'lost' | 'undecided'.
+    const type = recordStageType('deals', d), outcome = CLOSED_STAGE_TYPES.includes(type) ? type : null;
     if(outcome){
       const at = dashTime(d.actualCloseDate) || d.stageEnteredAt || dc, cust = customerOfDeal.get(d.id);
       p.ev.closed.push({at, outcome, deal:{id:d.id, name:d.name}, contactToDeal:days(dc, cc), contactToClosed:days(at, cc),
@@ -74,6 +88,13 @@ function dashBusinessData({deals = [], customers = [], contacts = [], accounting
       if(reply && lastOut != null && t > lastOut && t - lastOut < 14 * DASH_DAY){ p.ev.responses.push({at:t, hours:(t - lastOut) / 36e5}); lastOut = null; }
       if(out) lastOut = t;
     });
+  });
+  // Deal to Customer: each customer, from its (first) deal's creation to the customer's — the deal owner's.
+  const dealById = new Map(deals.map(d => [d.id, d]));
+  customers.forEach(c => {
+    const d = (c.dealIds || []).map(id => dealById.get(id)).find(Boolean), p = d && person(d.owner); if(!p) return;
+    const dc = d.createdAt || dashTime(d.created), at = dashTime(c.created);
+    if(dc != null && at != null && at >= dc) p.ev.converted.push({at, hours:(at - dc) / 36e5});
   });
   // Accounting: each installment invoiced, due and paid — the record's owner's.
   accounting.forEach(sched => {
@@ -126,7 +147,7 @@ const USER_STATS = [
 ];
 const userStat = (key) => USER_STATS.find(s => s.key === key) || null;
 const USER_STAT_ALL_TIME = [-Infinity, Infinity];
-const NO_PERSON = {ev:{invoices:[], installments:[], payments:[], closed:[], created:[], responses:[]}};
+const NO_PERSON = {ev:{invoices:[], installments:[], payments:[], closed:[], created:[], responses:[], converted:[]}};
 // The person's events (dashBusinessData) — someone who owns nothing has none.
 const userStatPerson = (data, userId) => (data.people || []).find(p => p.id === String(userId)) || NO_PERSON;
 const userStatValue = (person, key, range) => { const s = userStat(key); return s ? s.read(person, range) : null; };
@@ -154,17 +175,30 @@ function companyKpis(data, range){
     received: dashSum(all('payments').filter(x => dashIn(x.at, range)), x => x.amount),
     invoiced: dashSum(all('invoices').filter(x => dashIn(x.at, range)), x => x.amount),
     forecast: dashSum(all('installments').filter(x => dashIn(x.due, range)), x => x.amount),
-    closed: all('closed').filter(x => dashIn(x.at, range)).length,
-    won: all('closed').filter(x => x.outcome === 'won' && dashIn(x.at, range)).length,
-    lost: all('closed').filter(x => x.outcome === 'lost' && dashIn(x.at, range)).length,
   };
+}
+/* The Stage Type totals of one record type (see the header): open now; closed in the range. */
+function dashClosedAt(object, r){
+  if(object === 'deals') return dashTime(r.actualCloseDate) || r.stageEnteredAt || dashTime(r.created);
+  if(object === 'customers') return r.stageEnteredAt || dashTime(r.created);
+  const pl = STAGE_PIPELINES.find(p => p.objectId === 'contacts');
+  return (pl && (r.changedAt || {})[pl.propertyKey]) || dashTime(r.created);
+}
+function stageTotals(records, object, range){
+  const k = {open:0, won:0, lost:0, undecided:0};
+  (records || []).forEach(r => {
+    const t = recordStageType(object, r);
+    if(t === 'open') k.open++;
+    else if(CLOSED_STAGE_TYPES.includes(t)){ const at = dashClosedAt(object, r); if(at != null && dashIn(at, range)) k[t]++; }
+  });
+  return {...k, closed:k.won + k.lost + k.undecided};
 }
 function companyVelocity(data, range){
   const all = (k) => data.people.flatMap(p => p.ev[k]);
   const paid = all('payments').filter(x => x.sent != null && dashIn(x.at, range));
   return {
     contactToDeal: dashAvg(all('created').filter(x => dashIn(x.at, range)), x => x.contactToDeal == null ? null : x.contactToDeal * 24),
-    qualifiedToWon: dashAvg(all('closed').filter(x => x.outcome === 'won' && dashIn(x.at, range)), x => x.qualifiedToWon * 24),
+    dealToCustomer: dashAvg(all('converted').filter(x => dashIn(x.at, range)), x => x.hours),
     response: dashAvg(all('responses').filter(x => dashIn(x.at, range)), x => x.hours),
     invoiceToCash: dashAvg(paid, x => Math.max(0, x.at - x.sent) / 36e5),
   };
@@ -208,22 +242,47 @@ function DateFilter({value, onChange}){
   );
 }
 
-/* The KPIs (Figma reference): Total Cash Invoiced the prominent card — blue, about twice as wide;
-   then Received, Forecasted, Deals Closed and Win Rate as light-grey cards — all the same height.
-   Each: an icon chip and the label at the top, the figure (the Time Clock's Fira Sans Extra
-   Condensed) low in the card with its unit under it. The cash KPIs' `accent` draws their line in
-   the Graph view. */
+/* ── KPIs ── a catalogue of KPI definitions (DASH_KPI_DEFS); the dashboard shows the ones its
+   configuration selects (dashConfigOf): one KPI pinned first — the blue card, about twice as wide —
+   then up to four more, light grey, all the same height. Each: an icon chip and the label at the
+   top, the figure (the Time Clock's Fira Sans Extra Condensed) low in the card with its unit or
+   note under it. A new KPI is one more definition: {id, group, label, icon, kind ('money' |
+   'count' | 'percent' | 'hours'), read(ctx) → number | null, sub(ctx)?, accounting?}. `ctx`:
+   {data, range, records}. The cash KPIs' `accent` draws their line in the Graph view. */
 const DASH_KPIS = [
   {key:'invoiced', label:'Total Cash Invoiced',   icon:'quote',    accent:'#3A5BF9', unit:'AED', hint:'Invoices issued in the period'},
   {key:'received', label:'Total Cash Received',   icon:'coins',    accent:'#1C1C1F', unit:'AED', hint:'Payments received in the period'},
   {key:'forecast', label:'Total Cash Forecasted', icon:'calendar', accent:'#A6A6AD', unit:'AED', hint:'Installments due in the period'},
 ];
-/* Deals Closed shows its outcome split (Won / Lost) under the figure; Win Rate = Won ÷ (Won + Lost) × 100,
-   whole percent (— when nothing was won or lost). */
-const dashWinRate = (k) => k.won + k.lost ? Math.round(k.won / (k.won + k.lost) * 100) : null;
-const DASH_CARDS = [...DASH_KPIS,
-  {key:'closed', label:'Total Deals Closed', icon:'deals', hint:'Deals that reached an outcome in the period', sub:(k) => `${k.won} Won / ${k.lost} Lost`},
-  {key:'winRate', label:'Win Rate', icon:'gauge', hint:'Deals won ÷ (deals won + deals lost)', suffix:'%', sub:() => 'Won ÷ (Won + Lost)'}];
+// Win Rate = Won ÷ Closed × 100, whole percent (— when nothing closed).
+const dashWinRate = (k) => k.closed ? Math.round(k.won / k.closed * 100) : null;
+const DASH_KPI_GROUPS = ['Financial', 'Conversion', 'Record Volume', 'Business Performance'];
+const dashStage = (ctx, object) => stageTotals((ctx.records || {})[object], object, ctx.range);
+const DASH_RECORD_NOUN = {contacts:'Contacts', deals:'Deals', customers:'Customers'};
+const DASH_RECORD_ONE = {contacts:'Contact', deals:'Deal', customers:'Customer'};
+const DASH_KPI_DEFS = [
+  ...DASH_KPIS.map(k => ({id:k.key, group:'Financial', label:k.label, icon:k.icon, kind:'money', accounting:true, hint:k.hint,
+    read:(ctx) => companyKpis(ctx.data, ctx.range)[k.key]})),
+  ...['contacts', 'deals', 'customers'].map(o => ({id:`winRate:${o}`, group:'Conversion', label:`Total ${DASH_RECORD_ONE[o]} Win Rate`, icon:'gauge', kind:'percent',
+    hint:`${DASH_RECORD_NOUN[o]} won ÷ ${DASH_RECORD_NOUN[o].toLowerCase()} closed in the period`, read:(ctx) => dashWinRate(dashStage(ctx, o)), sub:() => 'Won ÷ Closed'})),
+  ...['contacts', 'deals', 'customers'].map(o => ({id:`open:${o}`, group:'Record Volume', label:`Total Open ${DASH_RECORD_NOUN[o]}`, icon:o, kind:'count',
+    hint:`${DASH_RECORD_NOUN[o]} in an Open stage now`, read:(ctx) => dashStage(ctx, o).open, sub:() => 'In an Open stage'})),
+  ...['contacts', 'deals', 'customers'].map(o => ({id:`closed:${o}`, group:'Record Volume', label:`Total Closed ${DASH_RECORD_NOUN[o]}`, icon:o, kind:'count',
+    hint:`${DASH_RECORD_NOUN[o]} that reached a Won, Lost or Undecided stage in the period`, read:(ctx) => dashStage(ctx, o).closed,
+    sub:(ctx) => { const k = dashStage(ctx, o); return `W ${k.won} / L ${k.lost} / U ${k.undecided}`; }})),
+  {id:'contactToDeal', group:'Business Performance', label:'Contact to Deal', icon:'contacts', kind:'hours', hint:'Business Velocity: average time from first contact to deal creation',
+    read:(ctx) => companyVelocity(ctx.data, ctx.range).contactToDeal, sub:() => 'Business Velocity'},
+  {id:'dealToCustomer', group:'Business Performance', label:'Deal to Customer', icon:'customers', kind:'hours', hint:'Business Velocity: average time from deal creation to its customer being created',
+    read:(ctx) => companyVelocity(ctx.data, ctx.range).dealToCustomer, sub:() => 'Business Velocity'},
+  {id:'response', group:'Business Performance', label:'Client Response Time', icon:'envelope', kind:'hours', hint:'Business Velocity: average time for a client to reply to a call or email',
+    read:(ctx) => companyVelocity(ctx.data, ctx.range).response, sub:() => 'Business Velocity'},
+  {id:'invoiceToCash', group:'Business Performance', label:'Invoice to Cash', icon:'coins', kind:'hours', accounting:true, hint:'Average time from an installment invoiced to it paid',
+    read:(ctx) => companyVelocity(ctx.data, ctx.range).invoiceToCash, sub:() => 'Invoiced to paid'},
+];
+const dashKpiDef = (id) => DASH_KPI_DEFS.find(k => k.id === id) || null;
+// What the viewer may see: accounting KPIs need View Payment Terms.
+const dashKpiVisible = (k) => !!k && (!k.accounting || accountingViewAny());
+const DASH_KPI_MAX_OTHERS = 4;
 const DASH_FIGURE_FONT = "'Fira Sans Extra Condensed', 'DM Sans', sans-serif";
 const DASH_BLUE = '#3A5BF9';
 /* A KPI figure counting up from zero to its value — on load and whenever the range changes
@@ -265,41 +324,113 @@ const DASH_SILVER = {
   filter:'drop-shadow(0 1px 2px rgba(10,20,90,.22))',
 };
 
-// Five cards in one row, all the same height: the blue hero twice the width of the others; labels,
-// figures and units on the same lines across them (one vertical padding).
-function FinancialKpis({kpis, replay}){
-  const all = {...kpis, winRate:dashWinRate(kpis)};
-  // The cash cards need View Payment Terms; without it only the deal cards show.
-  const cards = accountingViewAny() ? DASH_CARDS : DASH_CARDS.filter(c => !DASH_KPIS.includes(c));
-  return (
-    <div style={{display:'flex', alignItems:'stretch', gap:14}}>
-      {cards.map((t, i) => {
-        const hero = i === 0 && accountingViewAny(), ink = hero ? '#fff' : '#111113';
-        return (
-          <div key={t.key} title={t.hint} style={{flex: hero ? '2 1 0' : '1 1 0', minWidth:0, minHeight:240, borderRadius:22,
-            background: hero ? DASH_HERO_BG : '#F2F2F3', border:`1px solid ${hero ? DASH_BLUE : '#E4E4E7'}`, padding: hero ? '20px 24px 22px' : '20px 18px 22px',
-            display:'flex', flexDirection:'column', position:'relative', overflow:'hidden', isolation:'isolate'}}>
-            {hero && <>
-              <div aria-hidden="true" style={{position:'absolute', inset:0, backgroundImage:DASH_WARP, backgroundSize:'600px 600px', mixBlendMode:'soft-light', opacity:.35, zIndex:-1, pointerEvents:'none'}}/>
-              <div aria-hidden="true" style={{position:'absolute', inset:0, backgroundImage:DASH_GRAIN, backgroundSize:'200px 200px', mixBlendMode:'overlay', opacity:.5, zIndex:-1, pointerEvents:'none'}}/>
-            </>}
-            <span style={{display:'flex', alignItems:'flex-start', gap:8, fontSize: hero ? 14 : 13, fontWeight:500, color:ink, minWidth:0, lineHeight:'20px'}}>
-              <span style={{width:20, height:20, borderRadius:6, background: hero ? '#fff' : DASH_BLUE, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0}}>
-                <Icon name={t.icon} size={11} color={hero ? DASH_BLUE : '#fff'}/>
-              </span>
-              {/* A label that doesn't fit wraps (narrow windows) rather than being cut. */}
-              <span style={{minWidth:0, overflowWrap:'anywhere'}}>{t.label}</span>
-            </span>
-            <div style={{marginTop:'auto', paddingTop:28}}>
-              <div style={{fontFamily:DASH_FIGURE_FONT, fontWeight:700, fontSize: hero ? 56 : 42, lineHeight:.95, color:ink, fontVariantNumeric:'tabular-nums', letterSpacing: hero ? -1.5 : -1,
-                whiteSpace:'nowrap', ...(hero ? DASH_SILVER : {})}}>
-                {all[t.key] == null ? '—' : <CountUp value={all[t.key] || 0} replay={replay} suffix={t.suffix}/>}
-              </div>
-              <div style={{fontSize:10.5, fontWeight:800, color:ink, letterSpacing:.7, marginTop:9, textTransform:'uppercase', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{t.sub ? t.sub(kpis) : t.unit}</div>
-            </div>
+/* Live drag-to-reorder (Rearrange). While an item is dragged, the list already shows where it
+   would land: the others slide aside (animated — FLIP on their layout positions) and the dragged one
+   sits faded in its new place. Dropping keeps that order (onCommit(ids)); a drag that ends anywhere
+   else puts it back. An item just swapped with isn't swapped back until the pointer has left it,
+   so items of different sizes don't flicker. `box`: the container's ref (it's the items'
+   positioned parent); `register(id)`: each item's ref; `itemProps(id)` / `containerProps`: the
+   drag handlers. */
+function useLiveReorder(ids, onCommit){
+  const [preview, setPreview] = React.useState(null);   // the order while dragging
+  const [dragging, setDragging] = React.useState(null);
+  const box = React.useRef(null), nodes = React.useRef({}), last = React.useRef({});
+  const swapped = React.useRef(null), dropped = React.useRef(false);
+  const order = preview || ids;
+  React.useLayoutEffect(() => {
+    const next = {};
+    Object.entries(nodes.current).forEach(([id, el]) => {
+      if(!el || !el.isConnected) return;
+      next[id] = {x:el.offsetLeft, y:el.offsetTop};
+      const p = last.current[id];
+      // Only a drag animates; anything else (a widget growing) just lands.
+      if(dragging && p && (p.x !== next[id].x || p.y !== next[id].y)){
+        el.style.transition = 'none';
+        el.style.transform = `translate(${p.x - next[id].x}px, ${p.y - next[id].y}px)`;
+        requestAnimationFrame(() => { el.style.transition = 'transform 220ms cubic-bezier(.2,.8,.2,1)'; el.style.transform = ''; });
+      }
+    });
+    last.current = next;
+  });
+  const end = () => { if(dropped.current && preview) onCommit(preview); dropped.current = false; swapped.current = null; setPreview(null); setDragging(null); };
+  return {
+    order, dragging, box,
+    register:(id) => (el) => { nodes.current[id] = el; },
+    itemProps:(id) => ({
+      draggable:true,
+      onDragStart:(e) => {
+        e.dataTransfer.effectAllowed = 'move';
+        try { e.dataTransfer.setData('text/plain', id); } catch(_){}
+        dropped.current = false; swapped.current = null;
+        // After the browser has taken the drag image, so the faded look isn't in it.
+        setTimeout(() => { setDragging(id); setPreview(ids); }, 0);
+      },
+      onDragOver:(e) => {
+        if(!dragging) return;
+        e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+        if(id === dragging){ swapped.current = null; return; }
+        if(id === swapped.current) return;
+        swapped.current = id;
+        setPreview(o => { const cur = o || ids; return moveItem(cur, cur.indexOf(dragging), cur.indexOf(id)); });
+      },
+      onDrop:(e) => { e.preventDefault(); dropped.current = true; },
+      onDragEnd:end,
+    }),
+    containerProps:{onDragOver:(e) => { if(dragging) e.preventDefault(); }, onDrop:(e) => { e.preventDefault(); dropped.current = true; }},
+  };
+}
+
+/* The KPI row: the KPI pinned first (blue, twice as wide), then the others in their order — all the
+   same height; labels, figures and notes on the same lines across them. While rearranging
+   (`arrange`), the pinned card stays as it is — it can't move and nothing changes on it — and the
+   other four drag among themselves (live, useLiveReorder); each has Pin as first. */
+function DashKpiRow({ids, ctx, replay, arrange}){
+  const shown = ids.map(dashKpiDef).filter(dashKpiVisible);
+  const pinned = shown[0], others = shown.slice(1);
+  const live = useLiveReorder(others.map(t => t.id), (next) => arrange && arrange.onReorder(next));
+  const byId = Object.fromEntries(others.map(t => [t.id, t]));
+  const card = (t, hero, props = {}) => {
+    const ink = hero ? '#fff' : '#111113', v = t.read(ctx), movable = arrange && !hero, dragged = live.dragging === t.id;
+    return (
+      <div key={t.id} title={t.hint} {...props} style={{flex: hero ? '2 1 0' : '1 1 0', minWidth:0, minHeight:240, borderRadius:22,
+        background: hero ? DASH_HERO_BG : '#F2F2F3', border:`1px solid ${hero ? DASH_BLUE : '#E4E4E7'}`, padding: hero ? '20px 24px 22px' : '20px 18px 22px',
+        display:'flex', flexDirection:'column', position:'relative', overflow:'hidden', isolation:'isolate',
+        cursor: movable ? 'grab' : 'default', opacity: dragged ? .4 : 1,
+        outline: movable ? `2px dashed ${dragged ? T.attioBlue : T.borderStrong}` : 'none', outlineOffset: movable ? -6 : 0}}>
+        {hero && <>
+          <div aria-hidden="true" style={{position:'absolute', inset:0, backgroundImage:DASH_WARP, backgroundSize:'600px 600px', mixBlendMode:'soft-light', opacity:.35, zIndex:-1, pointerEvents:'none'}}/>
+          <div aria-hidden="true" style={{position:'absolute', inset:0, backgroundImage:DASH_GRAIN, backgroundSize:'200px 200px', mixBlendMode:'overlay', opacity:.5, zIndex:-1, pointerEvents:'none'}}/>
+        </>}
+        <span style={{display:'flex', alignItems:'flex-start', gap:8, fontSize: hero ? 14 : 13, fontWeight:500, color:ink, minWidth:0, lineHeight:'20px'}}>
+          <span style={{width:20, height:20, borderRadius:6, background: hero ? '#fff' : DASH_BLUE, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0}}>
+            <Icon name={t.icon} size={11} color={hero ? DASH_BLUE : '#fff'}/>
+          </span>
+          {/* A label that doesn't fit wraps (narrow windows) rather than being cut. */}
+          <span style={{minWidth:0, overflowWrap:'anywhere', flex:1}}>{t.label}</span>
+          {movable && <Icon name="dragHandle" size={14} color={T.gray400}/>}
+        </span>
+        {movable && (
+          <button type="button" onClick={()=>arrange.onPin(t.id)}
+            style={{alignSelf:'flex-start', marginTop:10, border:`1px solid ${T.borderStrong}`, background:'#fff', borderRadius:8, padding:'5px 10px', fontSize:12, fontFamily:'inherit', color:T.attioText, cursor:'pointer'}}>
+            Pin as first
+          </button>
+        )}
+        <div style={{marginTop:'auto', paddingTop:28}}>
+          <div style={{fontFamily:DASH_FIGURE_FONT, fontWeight:700, fontSize: t.kind === 'hours' ? (hero ? 44 : 32) : hero ? 56 : 42, lineHeight:.95, color:ink, fontVariantNumeric:'tabular-nums', letterSpacing: hero ? -1.5 : -1,
+            whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', ...(hero ? DASH_SILVER : {})}}>
+            {v == null ? '—' : t.kind === 'hours' ? fmtHours(v) : <CountUp value={v || 0} replay={replay} suffix={t.kind === 'percent' ? '%' : ''}/>}
           </div>
-        );
-      })}
+          <div style={{fontSize:10.5, fontWeight:800, color:ink, letterSpacing:.7, marginTop:9, textTransform:'uppercase', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>
+            {t.sub ? t.sub(ctx) : t.kind === 'money' ? 'AED' : ''}
+          </div>
+        </div>
+      </div>
+    );
+  };
+  return (
+    <div ref={live.box} {...(arrange ? live.containerProps : {})} style={{position:'relative', display:'flex', alignItems:'stretch', gap:14}}>
+      {pinned && card(pinned, true)}
+      {live.order.map(id => byId[id]).filter(Boolean).map(t => card(t, false, {ref:live.register(t.id), ...(arrange ? live.itemProps(t.id) : {})}))}
     </div>
   );
 }
@@ -576,48 +707,59 @@ function FameTable({tab, rows, order, sort, onSort, onMove, onOpenUser, onOpenDe
 /* Key Indicators: the ranking tabs (Revenue / Volume / Compliance / Speed — each keeps its own sort
    and column order, opening on its ranking), then Business Velocity, Deal Won and Deal Lost — all for
    the selected range. */
-const KI_TABS = [...FAME_TABS.map(t => ({id:t.id, label:t.label})), {id:'velocity', label:'Business Velocity'}, {id:'won', label:'Deal Won'}, {id:'lost', label:'Deal Lost'}];
-function KeyIndicators({data, range, rangeKey, deals, violations, onOpenUser, onOpenDeal, onOpenViolation}){
+/* Key Indicator User — the sales professionals' own indicators only (the ranking tabs): Revenue,
+   Volume, Compliance, Speed. Business-level figures are widgets of their own. */
+const KI_TABS = FAME_TABS.map(t => ({id:t.id, label:t.label}));
+function KeyIndicators({data, range, rangeKey, violations, onOpenUser, onOpenDeal, onOpenViolation}){
   // Revenue (cash) needs View Payment Terms; without it Volume leads.
   const [tabId, setTabId] = React.useState(() => accountingViewAny() ? 'revenue' : 'volume');
   const [query, setQuery] = React.useState('');
   const [sorts, setSorts] = React.useState({});
   const [orders, setOrders] = React.useState({});
   const [page, setPage] = React.useState(1);
-  const tab = FAME_TABS.find(t => t.id === tabId) || null;   // a ranking tab, or null (Velocity / Won / Lost)
-  const sort = tab ? sorts[tabId] || fameDefaultSort(tab) : {key:'', dir:''};
-  const order = tab ? orders[tabId] || fameColumns(tab).map(c => c.key) : [];
+  const tab = FAME_TABS.find(t => t.id === tabId) || FAME_TABS[0];
+  const sort = sorts[tabId] || fameDefaultSort(tab);
+  const order = orders[tabId] || fameColumns(tab).map(c => c.key);
   // Search narrows the list; each person keeps their rank.
   const q = query.trim().toLowerCase();
-  const rows = tab ? fameRows(data, range, sort, violations).filter(r => !q || r.name.toLowerCase().includes(q)) : [];
+  const rows = fameRows(data, range, sort, violations).filter(r => !q || r.name.toLowerCase().includes(q));
   const pages = Math.max(1, Math.ceil(rows.length / FAME_PAGE));
   const at = Math.min(page, pages);
   React.useEffect(() => { setPage(1); }, [tabId, rangeKey, sort.key, sort.dir, q]);
   const move = (key, d) => setOrders(o => { const cur = o[tabId] || fameColumns(tab).map(c => c.key); const i = cur.indexOf(key);
     return i + d < 0 || i + d >= cur.length ? o : {...o, [tabId]:moveItem(cur, i, i + d)}; });
-  const now = new Date(data.now);
   return (
     <section style={{...dashCard, borderRadius:22, display:'flex', flexDirection:'column', minWidth:0}}>
       <div style={{padding:'20px 24px 0', display:'flex', flexDirection:'column', gap:12}}>
         <div style={{display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', minHeight:32}}>
-          <span style={{...dashTitle, fontSize:15, flex:1}}>Key Indicators</span>
-          {tab && <div style={{position:'relative', width:'min(240px, 100%)'}}>
+          <span style={{...dashTitle, fontSize:15, flex:1}}>Key Indicator User</span>
+          <div style={{position:'relative', width:'min(240px, 100%)'}}>
             <div style={{position:'absolute', left:9, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', display:'flex'}}><Icon name="search" size={13} color={T.gray400}/></div>
             <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search" aria-label="Search sales professionals"
               style={{width:'100%', height:32, padding:'0 10px 0 28px', fontSize:12.5, fontFamily:'inherit', color:T.attioText, border:`1px solid ${T.borderStrong}`, borderRadius:8, background:'#fff', outline:'none'}}/>
-          </div>}
+          </div>
         </div>
         <div style={{display:'flex', alignItems:'flex-end', gap:4, flexWrap:'wrap', borderBottom:`1px solid ${T.attioLine}`}}>
           {KI_TABS.filter(t => t.id !== 'revenue' || accountingViewAny()).map(t => <UtTab key={t.id} label={t.label} active={t.id === tabId} onClick={()=>setTabId(t.id)}/>)}
         </div>
-        {tab && <FameTable tab={tab} rows={rows.slice((at - 1) * FAME_PAGE, at * FAME_PAGE)} order={order} sort={sort}
-          onSort={(s)=>setSorts(x => ({...x, [tabId]:s}))} onMove={move} onOpenUser={onOpenUser} onOpenDeal={onOpenDeal} onOpenViolation={onOpenViolation}/>}
-        {tab && q && !rows.length && <div style={{fontSize:13, color:T.attioMuted, padding:'0 4px 12px'}}>No sales professional matches “{query.trim()}”.</div>}
-        {tabId === 'velocity' && <VelocityList velocity={companyVelocity(data, range)}/>}
-        {tabId === 'won' && <DealOutcomeList deals={deals} stage="deal-won" tone={T.good} range={range} now={now} onOpen={onOpenDeal}/>}
-        {tabId === 'lost' && <DealOutcomeList deals={deals} stage="deal-lost" tone={T.red} range={range} now={now} onOpen={onOpenDeal}/>}
+        <FameTable tab={tab} rows={rows.slice((at - 1) * FAME_PAGE, at * FAME_PAGE)} order={order} sort={sort}
+          onSort={(s)=>setSorts(x => ({...x, [tabId]:s}))} onMove={move} onOpenUser={onOpenUser} onOpenDeal={onOpenDeal} onOpenViolation={onOpenViolation}/>
+        {q && !rows.length && <div style={{fontSize:13, color:T.attioMuted, padding:'0 4px 12px'}}>No sales professional matches “{query.trim()}”.</div>}
       </div>
-      {tab ? <Pagination page={at} totalPages={pages} onChange={setPage} totalRows={rows.length} noun="sales professional"/> : <div style={{height:16}}/>}
+      <Pagination page={at} totalPages={pages} onChange={setPage} totalRows={rows.length} noun="sales professional"/>
+    </section>
+  );
+}
+
+// A one-title widget card: the title (and count / controls on its right), then its content.
+function DashWidgetCard({title, right, children}){
+  return (
+    <section style={{...dashCard, borderRadius:22, padding:'20px 22px 22px', display:'flex', flexDirection:'column', gap:14, minWidth:0}}>
+      <div style={{display:'flex', alignItems:'center', gap:8, minHeight:32, flexWrap:'wrap'}}>
+        <span style={{...dashTitle, fontSize:15, flex:1}}>{title}</span>
+        {right}
+      </div>
+      {children}
     </section>
   );
 }
@@ -626,12 +768,13 @@ function KeyIndicators({data, range, rangeKey, deals, violations, onOpenUser, on
 function VelocityList({velocity}){
   const rows = [
     {key:'contactToDeal', label:'Contact to Deal', icon:'contacts', hint:'Average time from first contact to deal creation'},
-    {key:'qualifiedToWon', label:'Qualified Client to Deal Won', icon:'deals', hint:'Average time from Qualified Client to the deal won'},
+    {key:'dealToCustomer', label:'Deal to Customer', icon:'customers', hint:'Average time from deal creation to its customer being created'},
     {key:'response', label:'Client Response Time', icon:'envelope', hint:'Average time for a client to reply to a call or email'},
-    {key:'invoiceToCash', label:'Invoice to Cash', icon:'coins', hint:'Average time from an installment sent to it paid'},
+    // Invoice to Cash is an accounting figure: it needs View Payment Terms.
+    ...(accountingViewAny() ? [{key:'invoiceToCash', label:'Invoice to Cash', icon:'coins', hint:'Average time from an installment invoiced to it paid'}] : []),
   ];
   return (
-    <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(min(220px, 100%), 1fr))', gap:12, padding:'4px 0 8px'}}>
+    <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(min(200px, 100%), 1fr))', gap:12}}>
       {rows.map(r => (
         <div key={r.key} title={r.hint} style={{border:`1px solid ${T.attioLine}`, borderRadius:12, padding:'16px 18px', display:'flex', flexDirection:'column', gap:14}}>
           <span style={{display:'flex', alignItems:'center', gap:10, fontSize:13, color:T.attioMuted}}>
@@ -648,8 +791,8 @@ function VelocityList({velocity}){
 
 /* Deal Won / Deal Lost: the deals that reached that outcome in the range (Actual Close Date) — the
    count, then each deal by name; picking one opens it. */
-function DealOutcomeList({deals, stage, tone, range, now, onOpen}){
-  const list = deals.filter(d => d.stage === stage).map(d => ({...d, at:dashTime(d.actualCloseDate) || d.stageEnteredAt})).filter(d => d.at != null && dashIn(d.at, range))
+function DealOutcomeList({deals, type, tone, range, now, onOpen}){
+  const list = deals.filter(d => recordStageType('deals', d) === type).map(d => ({...d, at:dashTime(d.actualCloseDate) || d.stageEnteredAt})).filter(d => d.at != null && dashIn(d.at, range))
     .sort((a, b) => b.at - a.at);
   return (
     <div style={{display:'flex', flexDirection:'column', paddingBottom:4}}>
@@ -668,27 +811,35 @@ function DealOutcomeList({deals, stage, tone, range, now, onOpen}){
   );
 }
 
-/* Today's Tasks: tasks assigned to the signed-in person, due today (any status); each opens the task
-   (the Tasks page's task panel). */
-function TodaysTasks({hub}){
+/* Total Tasks: the signed-in person's tasks with a due date, narrowed by a quick filter — Due today
+   (the default; any status), Overdue (open and past due) or This week (due Monday to Sunday). Each
+   opens the task (the Tasks page's task panel). */
+const DASH_TASK_FILTERS = [{id:'today', label:'Due today'}, {id:'overdue', label:'Overdue'}, {id:'week', label:'This week'}];
+function DueTasksWidget({hub}){
   const [open, setOpen] = React.useState(null);   // {object, recordId, actId}
+  const [quick, setQuick] = React.useState('today');
   const me = CURRENT_USER.name;
-  const [a, b] = dashPeriodRange('today', new Date());
-  const tasks = hubActivities(hub, 'task').filter(e => e.act.assignee === me && e.act.due && dashIn(new Date(e.act.due).getTime(), [a, b]))
+  const now = new Date();
+  const inQuick = (a) => quick === 'overdue' ? taskState(a) === 'overdue' : dashIn(new Date(a.due).getTime(), dashPeriodRange(quick === 'week' ? 'week' : 'today', now));
+  const tasks = hubActivities(hub, 'task').filter(e => e.act.assignee === me && e.act.due && inQuick(e.act))
     .sort((x, y) => new Date(x.act.due) - new Date(y.act.due));
   const entry = open ? hubActivities(hub, 'task').find(e => e.act.id === open.actId) || null : null;
   const team = (hub.data.users || []).filter(u => u.status === 'Activated').map(u => u.name);
+  const empty = {today:'No tasks due today.', overdue:'No overdue tasks.', week:'No tasks due this week.'}[quick];
   return (
-    <section style={{...dashCard, borderRadius:22, padding:'20px 22px 22px', display:'flex', flexDirection:'column', gap:14, minWidth:0}}>
-      <div style={{display:'flex', alignItems:'baseline', gap:8, minHeight:32}}>
-        <span style={{...dashTitle, fontSize:15}}>Today's Tasks</span>
-        <span style={{fontSize:12.5, color:T.attioMuted, fontVariantNumeric:'tabular-nums'}}>{tasks.length}</span>
+    <DashWidgetCard title={<span>Total Tasks <span style={{fontSize:12.5, fontWeight:400, color:T.attioMuted, fontVariantNumeric:'tabular-nums', marginLeft:4}}>{tasks.length}</span></span>}>
+      <div role="radiogroup" aria-label="Quick filter" style={{display:'flex', gap:6, flexWrap:'wrap'}}>
+        {DASH_TASK_FILTERS.map(f => {
+          const on = f.id === quick;
+          return <button key={f.id} type="button" role="radio" aria-checked={on} onClick={()=>setQuick(f.id)}
+            style={{height:28, padding:'0 10px', borderRadius:9999, border:`1px solid ${on ? T.black : T.borderStrong}`, background: on ? T.black : '#fff', color: on ? '#fff' : T.gray800, fontSize:12, fontFamily:'inherit', cursor:'pointer'}}>{f.label}</button>;
+        })}
       </div>
       {tasks.length ? (
         <div style={{display:'flex', flexDirection:'column', gap:10}}>
           {tasks.map(e => <TaskCard key={e.act.id} e={e} onDragStart={(ev)=>ev.preventDefault()} onOpen={()=>setOpen({object:e.object, recordId:e.recordId, actId:e.act.id})}/>)}
         </div>
-      ) : <div style={{fontSize:13, color:T.attioMuted}}>No tasks due today.</div>}
+      ) : <div style={{fontSize:13, color:T.attioMuted}}>{empty}</div>}
       {open && (
         <PageSidePanel width={560} title={(entry && entry.act.title) || 'Task'} subtitle={entry ? `${HUB_NOUN[entry.object]} · ${entry.record.name}` : ''}
           onClose={()=>setOpen(null)} menuItems={entry ? [{label:`Open ${HUB_NOUN[entry.object].toLowerCase()}`, onClick:()=>hub.openRecord(entry.object, entry.recordId, 'panel')}] : undefined}>
@@ -702,7 +853,195 @@ function TodaysTasks({hub}){
           </div>
         </PageSidePanel>
       )}
-    </section>
+    </DashWidgetCard>
+  );
+}
+
+/* ── Widgets ── a catalogue of widget definitions (DASH_WIDGET_DEFS): {id, label, width (columns
+   it spans: 1, 2 or 3), render(ctx), can?() (who may see it)}. The dashboard shows the
+   configuration's widgets in its order. `ctx`: the page's data, range and handlers. */
+const DASH_WIDGET_DEFS = [
+  {id:'keyIndicatorUser', label:'Key Indicator User', width:2,
+    render:(c) => <KeyIndicators data={c.data} range={c.range} rangeKey={c.rangeKey} violations={c.violations} onOpenUser={c.onOpenUser} onOpenDeal={c.onOpenDeal} onOpenViolation={c.onOpenViolation}/>},
+  {id:'tasks', label:'Total Tasks', width:1, render:(c) => <DueTasksWidget hub={c.hub}/>},
+  {id:'businessVelocity', label:'Business Velocity', width:1,
+    render:(c) => <DashWidgetCard title="Business Velocity"><VelocityList velocity={companyVelocity(c.data, c.range)}/></DashWidgetCard>},
+  {id:'dealWon', label:'Deal Won', width:1,
+    render:(c) => <DashWidgetCard title="Deal Won"><DealOutcomeList deals={c.deals} type="won" tone={T.good} range={c.range} now={new Date(c.data.now)} onOpen={c.onOpenDeal}/></DashWidgetCard>},
+  {id:'dealLost', label:'Deal Lost', width:1,
+    render:(c) => <DashWidgetCard title="Deal Lost"><DealOutcomeList deals={c.deals} type="lost" tone={T.red} range={c.range} now={new Date(c.data.now)} onOpen={c.onOpenDeal}/></DashWidgetCard>},
+];
+const dashWidgetDef = (id) => DASH_WIDGET_DEFS.find(w => w.id === id) || null;
+const dashWidgetVisible = (w) => !!w && (!w.can || w.can());
+const dashColumns = (n) => `${n} column${n === 1 ? '' : 's'}`;
+
+/* ── Configuration ── what the dashboard shows and in what order: {prominent, kpis (the others, in
+   order), widgets:[{id, hidden}] (in order)}. One workspace dashboard for now, set by the Super
+   Admin (hub.overviewSettings.dashboard) and seen by everyone; kept by id, so a role's or a
+   person's dashboard can be one more configuration later. Unknown ids are dropped; widgets added
+   to the catalogue later join at the end, shown. */
+const DASH_DEFAULT_CONFIG = {prominent:'invoiced', kpis:['received', 'forecast', 'closed:deals', 'winRate:deals'],
+  widgets:['keyIndicatorUser', 'tasks', 'businessVelocity', 'dealWon', 'dealLost'].map(id => ({id, hidden:false}))};
+function normalizeDashConfig(raw){
+  const c = raw || DASH_DEFAULT_CONFIG;
+  const prominent = dashKpiDef(c.prominent) ? c.prominent : DASH_DEFAULT_CONFIG.prominent;
+  const kpis = [...new Set((c.kpis || []).filter(id => dashKpiDef(id) && id !== prominent))].slice(0, DASH_KPI_MAX_OTHERS);
+  const saved = (c.widgets || []).filter(w => dashWidgetDef(w.id));
+  const widgets = [...saved.map(w => ({id:w.id, hidden:!!w.hidden})), ...DASH_WIDGET_DEFS.filter(d => !saved.some(w => w.id === d.id)).map(d => ({id:d.id, hidden:false}))];
+  return {prominent, kpis, widgets};
+}
+const dashConfigOf = (hub) => normalizeDashConfig((((hub && hub.overviewSettings) || {}).dashboard) || null);
+// Dashboard View Settings and Rearrange: the Super Admin's (with no signed-in user, the prototype's).
+const dashCanConfigure = () => { const u = accessUser(); return !u || u.preset === SUPER_ADMIN; };
+
+/* The widget grid: three columns at every width (navigation open or collapsed, ~1,000–1,500px),
+   each widget spanning its definition's width. Placement is CSS grid's dense flow on fine rows
+   (4px): each widget spans as many rows as it is tall (measured, and re-measured when it grows or
+   shrinks) and takes the first place, top to bottom and left to right, where it fits. So three
+   one-column widgets sit side by side, a fourth starts below, a two-column widget leaves its third
+   column to the next one — and the space under a widget shorter than its neighbour is taken by
+   the next widget that fits there, not left empty. While rearranging (`arrange`), widgets drag
+   to reorder, live (useLiveReorder): the others move aside as the dragged one passes over them. */
+const DASH_GRID_ROW = 4, DASH_GRID_GAP = 20;
+function DashWidgetGrid({items, ctx, arrange}){
+  const ids = items.map(w => w.id);
+  const live = useLiveReorder(ids, (next) => arrange && arrange.onReorder(next));
+  const byId = Object.fromEntries(items.map(w => [w.id, w]));
+  // Each widget's height, so it spans its rows.
+  const inner = React.useRef({});
+  const [heights, setHeights] = React.useState({});
+  const measure = React.useCallback(() => setHeights(h => {
+    let n = h;
+    Object.entries(inner.current).forEach(([id, el]) => { if(!el) return; const v = el.offsetHeight; if(h[id] !== v){ if(n === h) n = {...h}; n[id] = v; } });
+    return n;
+  }), []);
+  React.useLayoutEffect(measure);
+  React.useEffect(() => {
+    if(typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure);
+    Object.values(inner.current).forEach(el => el && ro.observe(el));
+    return () => ro.disconnect();
+  }, [ids.join('|'), measure]);
+  return (
+    <div ref={live.box} {...(arrange ? live.containerProps : {})} style={{position:'relative', display:'grid', gridTemplateColumns:'repeat(3, minmax(0, 1fr))',
+      gridAutoFlow:'row dense', gridAutoRows:DASH_GRID_ROW, columnGap:DASH_GRID_GAP, rowGap:0}}>
+      {live.order.map(id => byId[id]).filter(Boolean).map(w => {
+        const h = heights[w.id], dragged = live.dragging === w.id;
+        return (
+          <div key={w.id} ref={live.register(w.id)} {...(arrange ? live.itemProps(w.id) : {})}
+            style={{gridColumn:`span ${Math.min(3, Math.max(1, w.width || 1))}`, gridRowEnd:`span ${h != null ? Math.max(1, Math.ceil((h + DASH_GRID_GAP) / DASH_GRID_ROW)) : 1}`,
+              alignSelf:'start', minWidth:0, position:'relative', cursor: arrange ? 'grab' : undefined}}>
+            <div ref={el => { inner.current[w.id] = el; }} style={{position:'relative', borderRadius:24, opacity: dragged ? .4 : 1, transition:'opacity 120ms',
+              ...(arrange ? {outline:`2px dashed ${dragged ? T.attioBlue : T.borderStrong}`, outlineOffset:4} : {})}}>
+              {arrange && (
+                <div style={{position:'absolute', inset:0, zIndex:2, borderRadius:22, background:'rgba(250,251,252,.55)', display:'flex', alignItems:'flex-start', justifyContent:'flex-end', padding:12}}>
+                  <span style={{display:'inline-flex', alignItems:'center', gap:6, background:'#fff', border:`1px solid ${T.borderStrong}`, borderRadius:8, padding:'5px 10px', fontSize:12, color:T.attioText}}>
+                    <Icon name="dragHandle" size={13} color={T.gray600}/>{w.label} · {dashColumns(w.width)}
+                  </span>
+                </div>
+              )}
+              <div style={arrange ? {pointerEvents:'none'} : undefined}>{w.render(ctx)}</div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* All KPIs — a side panel listing every KPI in the catalogue the viewer may see (cash KPIs need View
+   Payment Terms), grouped as in the catalogue: the KPI on the left, its value on the right. Its own
+   date filter (starting from the dashboard's) sets the period. Read-only; for everyone. Opened by
+   its own button, beside View Settings. */
+const fmtKpiValue = (k, v) => v == null ? '—' : k.kind === 'money' ? `AED ${formatAmount(Math.round(v))}`
+  : k.kind === 'percent' ? `${v}%` : k.kind === 'hours' ? fmtHours(v) : formatAmount(v);
+function AllKpisButton({onClick}){
+  return (
+    <button onClick={onClick} style={{display:'flex', alignItems:'center', gap:6, border:`1px solid ${T.borderStrong}`, background:'#fff', borderRadius:8, padding:'7px 12px', fontSize:13, color:T.gray800, cursor:'pointer', flexShrink:0, fontFamily:'inherit'}}>
+      <Icon name="listBullets" size={13} color={T.gray600}/> All KPIs
+    </button>
+  );
+}
+function AllKpisPanel({ctx, filter: initial, onClose}){
+  const [filter, setFilter] = React.useState(initial);
+  const at = {...ctx, range:dashRangeOf(filter, new Date(ctx.data.now))};
+  const cell = {padding:'10px 20px', fontSize:13, borderTop:`1px solid ${T.attioLine}`};
+  return (
+    <PageSidePanel width={460} title="All KPIs" onClose={onClose}>
+      <div style={{flexShrink:0, padding:'12px 20px'}}><DateFilter value={filter} onChange={setFilter}/></div>
+      <div style={{flex:1, minHeight:0, overflowY:'auto', paddingBottom:16}}>
+        <table style={{width:'100%', borderCollapse:'collapse'}}>
+          <thead>
+            <tr style={{background:T.headerBg}}>
+              <th style={{textAlign:'left', fontWeight:500, color:T.attioMuted, fontSize:12.5, padding:'8px 20px'}}>KPI</th>
+              <th style={{textAlign:'right', fontWeight:500, color:T.attioMuted, fontSize:12.5, padding:'8px 20px'}}>Value</th>
+            </tr>
+          </thead>
+          {DASH_KPI_GROUPS.map(g => {
+            const list = DASH_KPI_DEFS.filter(k => k.group === g && dashKpiVisible(k));
+            if(!list.length) return null;
+            return (
+              <tbody key={g}>
+                <tr><td colSpan={2} style={{...settingsSectionLabel, padding:'16px 20px 6px'}}>{g}</td></tr>
+                {list.map(k => (
+                  <tr key={k.id} title={k.hint}>
+                    <td style={{...cell, color:T.attioText}}>{k.label}</td>
+                    <td style={{...cell, color:T.attioText, fontWeight:500, textAlign:'right', whiteSpace:'nowrap', fontVariantNumeric:'tabular-nums'}}>{fmtKpiValue(k, k.read(at))}</td>
+                  </tr>
+                ))}
+              </tbody>
+            );
+          })}
+        </table>
+      </div>
+    </PageSidePanel>
+  );
+}
+
+/* Dashboard View Settings (SettingsModalShell): KPIs — pick the KPI pinned first and up to four more,
+   from the catalogue by group; Widgets — show or hide each (its width shown). Rearrange (both
+   sections' toolbar) applies the choices and turns the dashboard into its rearranging state. */
+function DashViewSettingsModal({config, onApply, onRearrange, onClose}){
+  const [section, setSection] = React.useState('kpis');
+  const [draft, setDraft] = React.useState(config);
+  const others = draft.kpis;
+  const toggleKpi = (id) => setDraft(d => id === d.prominent ? d
+    : d.kpis.includes(id) ? {...d, kpis:d.kpis.filter(x => x !== id)} : d.kpis.length >= DASH_KPI_MAX_OTHERS ? d : {...d, kpis:[...d.kpis, id]});
+  // The KPI pinned first is one of the selection; the one it replaces joins the others, if there's room.
+  const makeProminent = (id) => setDraft(d => id === d.prominent ? d : ({...d, prominent:id, kpis:[d.prominent, ...d.kpis.filter(x => x !== id)].slice(0, DASH_KPI_MAX_OTHERS)}));
+  const toggleWidget = (id) => setDraft(d => ({...d, widgets:d.widgets.map(w => w.id === id ? {...w, hidden:!w.hidden} : w)}));
+  const radio = (on, onPick, label) => (
+    <label style={{display:'flex', alignItems:'center', gap:6, fontSize:12.5, color: on ? T.attioText : T.attioMuted, cursor:'pointer', flexShrink:0}}>
+      <input type="radio" checked={on} onChange={onPick} aria-label={label} style={{margin:0, width:14, height:14, accentColor:T.black, cursor:'pointer'}}/>Pin as first
+    </label>
+  );
+  const toolbar = (
+    <div style={{padding:'0 20px 10px', display:'flex', alignItems:'center', gap:10}}>
+      <span style={{flex:1, fontSize:12.5, color:T.attioMuted}}>
+        {section === 'kpis' ? `One KPI pinned first and up to ${DASH_KPI_MAX_OTHERS} more · ${others.length} of ${DASH_KPI_MAX_OTHERS} selected` : 'Widgets arrange themselves in three columns by their width.'}
+      </span>
+      <StSecondary label={<span style={{display:'inline-flex', alignItems:'center', gap:6}}><Icon name="dragHandle" size={12} color={T.gray800}/>Rearrange</span>} onClick={()=>onRearrange(draft)}/>
+    </div>
+  );
+  return (
+    <SettingsModalShell title="Dashboard View Settings" sections={{kpis:'KPIs', widgets:'Widgets'}} order={[]} onReorder={()=>{}} fixed={['kpis', 'widgets']}
+      section={section} onSection={setSection} onClose={onClose} onApply={()=>onApply(draft)} toolbar={toolbar}
+      footerNote={`Pinned first: ${(dashKpiDef(draft.prominent) || {}).label || '—'}`}>
+      {section === 'kpis' ? DASH_KPI_GROUPS.map(g => (
+        <div key={g} style={{display:'flex', flexDirection:'column', gap:2, marginTop:6}}>
+          <div style={{...settingsSectionLabel, padding:'8px 6px 4px'}}>{g}</div>
+          {DASH_KPI_DEFS.filter(k => k.group === g).map(k => {
+            const prom = k.id === draft.prominent, on = prom || others.includes(k.id);
+            return <SettingsCheckRow key={k.id} label={k.label} checked={on} onToggle={()=>toggleKpi(k.id)}
+              right={radio(prom, ()=>makeProminent(k.id), `Pin ${k.label} as first`)}/>;
+          })}
+        </div>
+      )) : draft.widgets.map(w => {
+        const d = dashWidgetDef(w.id);
+        return <SettingsCheckRow key={w.id} label={d.label} checked={!w.hidden} onToggle={()=>toggleWidget(w.id)}
+          right={<span style={{fontSize:12, color:T.attioMuted, flexShrink:0}}>{dashColumns(d.width)}</span>}/>;
+      })}
+    </SettingsModalShell>
   );
 }
 
@@ -844,6 +1183,9 @@ function DashboardPage(){
   const [filter, setFilter] = React.useState(() => ({id:'month', from:ymd(new Date(today.getFullYear(), today.getMonth(), 1)), to:ymd(today)}));
   const [view, setView] = React.useState('kpis');   // 'kpis' | 'graph'
   const [stub, setStub] = React.useState(null);
+  const [settingsOpen, setSettingsOpen] = React.useState(false);
+  const [allKpisOpen, setAllKpisOpen] = React.useState(false);
+  const [arranging, setArranging] = React.useState(null);   // the configuration being rearranged, or null
   const [user, setUser] = React.useState(null);     // the sales professional whose profile is open
   const hub = useRecordHub();
   const deals = (hub && hub.records && hub.records.deals) || [];
@@ -858,6 +1200,24 @@ function DashboardPage(){
   const openViolation = (v) => hub && hub.openViolation(v.object, v.id);
   const range = dashRangeOf(filter, new Date(data.now));
   const firstName = String(CURRENT_USER.name || '').split(/\s+/)[0];
+  // The dashboard's configuration (KPIs and widgets) — while rearranging, the draft being arranged.
+  const saved = dashConfigOf(hub), config = arranging || saved;
+  const saveConfig = (c) => hub && hub.setOverviewSettings(s => ({...(s || {}), dashboard:c}));
+  const kpiIds = [config.prominent, ...config.kpis];
+  const kpiCtx = {data, range, records:(hub && hub.records) || {}};
+  const shownWidgets = config.widgets.filter(w => !w.hidden).map(w => dashWidgetDef(w.id)).filter(dashWidgetVisible);
+  const widgetCtx = {hub, data, range, rangeKey:range.join('-'), deals, violations, onOpenUser:setUser, onOpenDeal:openDeal, onOpenViolation:openViolation};
+  // Rearranging: the four KPIs after the pinned one, and the shown widgets, move by drag; any of
+  // the four can be pinned as first (the pinned one takes its place).
+  const arrangeKpis = arranging && {
+    onReorder:(ids) => setArranging(c => ({...c, kpis:[...ids, ...c.kpis.filter(x => !ids.includes(x))]})),
+    onPin:(id) => setArranging(c => ({...c, prominent:id, kpis:c.kpis.map(x => x === id ? c.prominent : x)})),
+  };
+  // The shown widgets take the new order; hidden ones keep their places.
+  const arrangeWidgets = arranging && {onReorder:(ids) => setArranging(c => {
+    const moved = new Set(ids); let k = 0;
+    return {...c, widgets:c.widgets.map(w => { if(!moved.has(w.id)) return w; const id = ids[k++]; return c.widgets.find(x => x.id === id); })};
+  })};
   return (
     <div style={{flex:1, minHeight:0, overflowY:'auto', ...WORKFLOW_CANVAS}}>
       <div style={{maxWidth:1280, margin:'0 auto', padding:'36px 56px 56px', display:'flex', flexDirection:'column', gap:28}}>
@@ -874,22 +1234,32 @@ function DashboardPage(){
           <div style={{display:'flex', alignItems:'center', gap:10, flexWrap:'wrap'}}>
             <DateFilter value={filter} onChange={setFilter}/>
             <div style={{flex:1}}/>
-            {/* Dashboard view settings — what they manage isn't defined yet. */}
-            <ViewSettingsButton onClick={()=>setStub('View Settings')}/>
-            {accountingViewAny() && <DashViewSwitch value={view} onChange={setView}/>}
+            {/* Dashboard View Settings — the Super Admin's: KPIs, widgets and Rearrange. */}
+            {/* All KPIs — every KPI and its value, for everyone. */}
+            {!arranging && <AllKpisButton onClick={()=>setAllKpisOpen(true)}/>}
+            {dashCanConfigure() && !arranging && <ViewSettingsButton onClick={()=>setSettingsOpen(true)}/>}
+            {accountingViewAny() && !arranging && <DashViewSwitch value={view} onChange={setView}/>}
           </div>
-          {view === 'graph' && accountingViewAny() ? <TrendChart data={data} range={range}/> : <FinancialKpis kpis={companyKpis(data, range)} replay={range.join('-')}/>}
+          {/* Rearranging: a bar to finish (Done saves; Cancel leaves it as it was). */}
+          {arranging && (
+            <div style={{display:'flex', alignItems:'center', gap:10, padding:'10px 14px', borderRadius:12, background:'#fff', border:`1px solid ${T.borderStrong}`}}>
+              <Icon name="dragHandle" size={14} color={T.gray600}/>
+              <span style={{flex:1, fontSize:13, color:T.attioText}}>Rearranging — drag the KPIs and widgets to reorder them; Pin as first changes the first KPI.</span>
+              <StSecondary label="Cancel" onClick={()=>setArranging(null)}/>
+              <StCta label="Done" onClick={()=>{ saveConfig(normalizeDashConfig(arranging)); setArranging(null); }}/>
+            </div>
+          )}
+          {view === 'graph' && accountingViewAny() && !arranging ? <TrendChart data={data} range={range}/>
+            : <DashKpiRow ids={kpiIds} ctx={kpiCtx} replay={range.join('-')} arrange={arrangeKpis}/>}
         </div>
         </div>
-        {/* Key Indicators (wider) beside Today's Tasks; stacked when narrow. */}
-        <div style={{display:'flex', flexWrap:'wrap', gap:20, alignItems:'flex-start'}}>
-          <div style={{flex:'2 1 620px', minWidth:0}}>
-            <KeyIndicators data={data} range={range} rangeKey={range.join('-')} deals={deals} violations={violations}
-              onOpenUser={setUser} onOpenDeal={openDeal} onOpenViolation={openViolation}/>
-          </div>
-          <div style={{flex:'1 1 300px', minWidth:0}}><TodaysTasks hub={hub}/></div>
-        </div>
+        {/* The widgets, in the three-column grid. */}
+        <DashWidgetGrid items={shownWidgets} ctx={widgetCtx} arrange={arrangeWidgets}/>
       </div>
+      {allKpisOpen && <AllKpisPanel ctx={kpiCtx} filter={filter} onClose={()=>setAllKpisOpen(false)}/>}
+      {settingsOpen && <DashViewSettingsModal config={saved} onClose={()=>setSettingsOpen(false)}
+        onApply={(c)=>{ saveConfig(normalizeDashConfig(c)); setSettingsOpen(false); }}
+        onRearrange={(c)=>{ setSettingsOpen(false); setView('kpis'); setArranging(normalizeDashConfig(c)); }}/>}
       {user && <OwnerProfilePanel key={user} name={user} fixed onClose={()=>setUser(null)}/>}
       {stub && <StubPanel title={stub} onClose={()=>setStub(null)}/>}
     </div>

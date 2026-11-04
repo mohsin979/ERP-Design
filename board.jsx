@@ -49,6 +49,47 @@ let CONTACT_PIPELINES = PIPELINES;
 const setContactPipelines = (list) => { CONTACT_PIPELINES = list && list.length ? list : PIPELINES; };
 const pipelineById = (id) => CONTACT_PIPELINES.find(p => p.id === id) || CONTACT_PIPELINES[0];
 
+/* Stage Type — every pipeline stage has one: Open (an active stage), or one of the closed types
+   Won, Lost and Undecided (closed with no final decision). Open stages hold the active records;
+   the three closed types together are Closed, each kept apart for reporting. It replaces the
+   former "Outcome stage" checkbox: a stage saved with it takes its type from its name (Deal Won →
+   Won, Deal Lost / Visa Denied → Lost, Visa Granted → Won, anything else → Undecided). */
+const STAGE_TYPES = [
+  {id:'open', label:'Open'}, {id:'won', label:'Won'}, {id:'lost', label:'Lost'}, {id:'undecided', label:'Undecided'},
+];
+const CLOSED_STAGE_TYPES = ['won', 'lost', 'undecided'];
+const legacyOutcomeType = (label) => /\b(won|granted)\b/i.test(label || '') ? 'won' : /\b(lost|denied)\b/i.test(label || '') ? 'lost' : 'undecided';
+const stageTypeOf = (stage) => !stage ? 'open' : STAGE_TYPES.some(t => t.id === stage.type) ? stage.type : stage.outcome ? legacyOutcomeType(stage.label) : 'open';
+const isClosedStage = (stage) => CLOSED_STAGE_TYPES.includes(stageTypeOf(stage));
+const stageTypeLabel = (type) => (STAGE_TYPES.find(t => t.id === type) || STAGE_TYPES[0]).label;
+// A stage saved in the new shape: its type set, the old checkbox gone.
+const withStageType = (stage) => { const {outcome, ...rest} = stage; return {...rest, type:stageTypeOf(stage)}; };
+/* Every pipeline (Settings → Pipelines; app.jsx sets them) — what a record's stage type is read
+   from: a deal's or customer's own pipeline and stage; a contact's, in the Contacts pipeline given
+   (its first by default), from its property value. */
+let STAGE_PIPELINES = [];
+const setStagePipelines = (list) => { STAGE_PIPELINES = list || []; };
+function recordStageType(object, record, pipelineId){
+  if(!record) return null;
+  if(object === 'contacts'){
+    const pls = STAGE_PIPELINES.filter(p => p.objectId === 'contacts');
+    const pl = pls.find(p => p.id === pipelineId) || pls[0];
+    if(!pl) return null;
+    const st = pl.stages.find(s => s.id === stageIdOf(pl, record));
+    return st ? stageTypeOf(st) : null;
+  }
+  const pl = STAGE_PIPELINES.find(p => p.id === record.pipeline);
+  const st = pl && pl.stages.find(s => s.id === record.stage);
+  return st ? stageTypeOf(st) : null;
+}
+// The board column's and stage lists' tag for a closed stage (Won / Lost / Undecided).
+const STAGE_TYPE_TONE = {won:{fg:'#1E7A46', bg:'#E7F5EC'}, lost:{fg:'#B42318', bg:'#FDECEA'}, undecided:{fg:'#5B5F6B', bg:'#EEEFF2'}};
+function StageTypeTag({stage, type}){
+  const t = type || stageTypeOf(stage), tone = STAGE_TYPE_TONE[t];
+  if(!tone) return null;
+  return <span style={{fontSize:11, fontWeight:500, color:tone.fg, background:tone.bg, borderRadius:9999, padding:'1px 7px', flexShrink:0, whiteSpace:'nowrap'}}>{stageTypeLabel(t)}</span>;
+}
+
 function stageIdOf(pipeline, record){
   if(pipeline.source === 'property'){
     const v = record[pipeline.propertyKey];
@@ -357,6 +398,7 @@ function BoardColumn({stage, contacts, activities, isDropTarget, columnRef, onSt
         )}
         {/* One line always: a long stage name truncates rather than wrapping the header. */}
         <span title={stage.label} style={{fontSize:13, fontWeight:600, color:T.attioText, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', minWidth:0}}>{stage.label}</span>
+        <StageTypeTag stage={stage}/>
         <span style={{
           fontSize:11.5, color:T.attioMuted, background:'#fff', borderRadius:9999,
           padding:'1px 7px', minWidth:22, textAlign:'center', flexShrink:0,
@@ -584,5 +626,6 @@ function PipelineSelector({pipelineId, onChange, pipelines = CONTACT_PIPELINES})
 
 Object.assign(window, {REMOVED_CONTACT_STAGES, withoutRemovedStage, 
   CONTACT_TYPE_STAGES, PIPELINES, pipelineById, setContactPipelines, stageIdOf, withStage,
+  STAGE_TYPES, CLOSED_STAGE_TYPES, stageTypeOf, isClosedStage, stageTypeLabel, withStageType, setStagePipelines, recordStageType, StageTypeTag,
   ContactBoard, PipelineSelector, toolbarDropdownBtn, ContactName, ContactCard, COLUMN_BG,
 });

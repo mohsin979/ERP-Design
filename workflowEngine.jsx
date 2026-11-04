@@ -15,8 +15,8 @@
                   workflow (chain depth ≤ 5, a workflow never runs twice for the same deal in one
                   chain — "Loop prevented").
 
-   Deal pipelines only. Forward / Backward compare the pipeline's ordered stages; outcome stages
-   (Edit Pipeline → "Outcome stage") are outside that order. Every deal keeps when it entered its
+   Deal pipelines only. Forward / Backward compare the pipeline's ordered stages; closed stages
+   (Stage Type Won, Lost or Undecided — board.jsx) are outside that order. Every deal keeps when it entered its
    stage (stageEnteredAt), whether or not any workflow uses it.
 
    Runs are execution instances, separate from the workflow they came from (which can change):
@@ -41,12 +41,12 @@ const WF_PROPERTY_EVENTS = ['propertyCreated', 'propertyUpdated', 'propertyClear
 
 /* ── Pipelines: ordered stages and moves ── */
 const pipelineById2 = (data, id) => (data.pipelines || []).find(p => p.id === id);
-const orderedStages = (pipeline) => ((pipeline && pipeline.stages) || []).filter(s => !s.outcome);
+const orderedStages = (pipeline) => ((pipeline && pipeline.stages) || []).filter(s => !isClosedStage(s));
 const stageLabelOf = (data, pipelineId, stageId) => (((pipelineById2(data, pipelineId) || {}).stages || []).find(s => s.id === stageId) || {}).label || '';
-// 'forward' | 'backward' | null (same stage, or either end outside the ordered stages). Entering an
-// outcome stage (Deal Won, Postponed, Deal Lost) from any other stage moves forward.
+// 'forward' | 'backward' | null (same stage, or either end outside the ordered stages). Entering a
+// closed stage (Won, Lost, Undecided — e.g. Deal Won, Deal Lost, Postponed) from any other stage moves forward.
 const stageMoveDirection = (pipeline, from, to) => {
-  if(from && to && from !== to && ((pipeline && pipeline.stages) || []).some(s => s.id === to && s.outcome)) return 'forward';
+  if(from && to && from !== to && ((pipeline && pipeline.stages) || []).some(s => s.id === to && isClosedStage(s))) return 'forward';
   const ids = orderedStages(pipeline).map(s => s.id);
   const a = ids.indexOf(from), b = ids.indexOf(to);
   if(a < 0 || b < 0 || a === b) return null;
@@ -596,17 +596,17 @@ const withSeeded = (saved, defaults, seeded) => !saved ? defaults
   : [...saved, ...defaults.filter(x => !(seeded || []).includes(x.id) && !saved.some(s => s.id === x.id))];
 // Deals start out "entered" their stage when they were created.
 /* System-generated values, set on the one path records change (setDealsTracked): a deal's Actual
-   Close Date — when it reaches a Won / Lost outcome stage (Deal Won, Deal Lost), cleared if it
-   moves back out — and its Deal Source; a customer's Customer Source and Customer Since. */
-const isWonLostStage = (data, pipelineId, stageId) => {
+   Close Date — when it reaches a closed stage (Stage Type Won, Lost or Undecided), cleared if it
+   moves back to an Open one — and its Deal Source; a customer's Customer Source and Customer Since. */
+const isClosedStageIn = (data, pipelineId, stageId) => {
   const pl = (data.pipelines || []).find(x => x.id === pipelineId), st = pl && pl.stages.find(s => s.id === stageId);
-  return !!(st && st.outcome && /\b(won|lost)\b/i.test(st.label));
+  return !!(st && isClosedStage(st));
 };
 function recordSystemValues(data, p, d, now){
   const obj = recordObjectOf(d.id);
   if(obj === 'deals'){
     let n = !p && d.source == null ? {...d, source:'Manual'} : d;
-    const closed = isWonLostStage(data, n.pipeline, n.stage);
+    const closed = isClosedStageIn(data, n.pipeline, n.stage);
     if(closed && (!n.actualCloseDate || (p && (p.stage !== n.stage || p.pipeline !== n.pipeline)))) n = {...n, actualCloseDate:dealStamp(new Date(now))};
     else if(!closed && n.actualCloseDate) n = {...n, actualCloseDate:''};
     return n;
@@ -1219,7 +1219,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
       return {stage:target};
     }
     const dir = action.type === 'moveStageForward' ? 'forward' : 'backward';
-    if((pipeline.stages || []).find(s => s.id === deal.stage && s.outcome)) return {error:'The deal is in an outcome stage'};
+    if((pipeline.stages || []).find(s => s.id === deal.stage && isClosedStage(s))) return {error:'The deal is in a closed stage'};
     const next = adjacentStage(pipeline, deal.stage, dir);
     return next ? {stage:next} : {error: dir === 'forward' ? 'Already at the last stage' : 'Already at the first stage'};
   }
@@ -1323,12 +1323,12 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
      Automatically, named after it with its owner): linked to it, and to its contact. */
   // The customer a deal has (Deals → Customers), if any.
   /* The stage a record came from into `stage`: its last recorded entry (the engine's events), else
-     the nearest earlier stage of the pipeline that isn't an outcome (Won / Lost…). */
+     the nearest earlier stage of the pipeline that isn't closed (Won / Lost / Undecided). */
   const previousStageOf = (rec, pipelineId, stage) => {
     const ev = esRef.current.events.find(e => e.type === 'stageEntry' && e.recordId === rec.id && e.attrs && e.attrs.toStage === stage && e.attrs.fromStage);
     if(ev) return ev.attrs.fromStage;
     const pl = pipelineById2(dataRef.current, pipelineId), stages = (pl && pl.stages) || [], i = stages.findIndex(st => st.id === stage);
-    for(let j = i - 1; j >= 0; j--) if(!stages[j].outcome) return stages[j].id;
+    for(let j = i - 1; j >= 0; j--) if(!isClosedStage(stages[j])) return stages[j].id;
     return null;
   };
   const dealCustomer = (dealId) => dealsRef.current.find(r => recordObjectOf(r.id) === 'customers' && (r.dealIds || []).includes(dealId)) || null;
@@ -1345,7 +1345,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
     }
     if(!['customers', 'deals'].includes(object) || from === object) return `${objectName(data, object)}: not defined yet`;
     const pipes = recordPipelines(data, object), pl = pipes.find(x => x.id === values.pipeline) || pipes[0];
-    const stage = values.stage || (pl ? ((pl.stages.find(st => !st.outcome) || pl.stages[0] || {}).id || '') : '');
+    const stage = values.stage || (pl ? ((pl.stages.find(st => !isClosedStage(st)) || pl.stages[0] || {}).id || '') : '');
     const contactId = from === 'contacts' ? Number(rec.id) : rec.contactId ?? null;
     const created = storePropertyValue('Date & time', new Date());
     if(object === 'customers'){
@@ -1355,7 +1355,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
       /* Linked to the deal it came from (Deals ↔ Customers) and to the contact (Contacts → Customers),
          in the service pipeline for the deal's pipeline (CUSTOMER_PIPELINE_FOR_DEAL), with its details. */
       const forDeal = from === 'deals' && !values.pipeline ? pipes.find(x => x.id === CUSTOMER_PIPELINE_FOR_DEAL[rec.pipeline]) : null;
-      const cpl = forDeal || pl, cstage = forDeal ? ((forDeal.stages.find(st => !st.outcome) || forDeal.stages[0] || {}).id || '') : stage;
+      const cpl = forDeal || pl, cstage = forDeal ? ((forDeal.stages.find(st => !isClosedStage(st)) || forDeal.stages[0] || {}).id || '') : stage;
       const fill = from === 'deals' ? {email:rec.email || '', phone:rec.phone || '', status:'Active'} : {};
       const cust = {id:newRecordId('customers'), ...fill, ...values, pipeline:values.pipeline || (cpl || {}).id || '', ...(cstage ? {stage:cstage} : {}), contactId, dealIds: from === 'deals' ? [rec.id] : [], created};
       editActivities(m => ({...m, [cust.id]:[]}));
@@ -1557,7 +1557,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
         if(recordObjectOf(deal.id) === 'contacts') return {status:'skipped', result:'A contact moves by its Types of Contact'};
         const pl = pipelineById2(data, c.pipeline);
         if(!pl) return {status:'skipped', result:'No pipeline chosen'};
-        const stage = c.stage && pl.stages.some(st => st.id === c.stage) ? c.stage : ((pl.stages.find(st => !st.outcome) || pl.stages[0] || {}).id);
+        const stage = c.stage && pl.stages.some(st => st.id === c.stage) ? c.stage : ((pl.stages.find(st => !isClosedStage(st)) || pl.stages[0] || {}).id);
         if(!stage) return {status:'skipped', result:`${pl.label} has no stages`};
         if(deal.pipeline === pl.id && deal.stage === stage) return {status:'skipped', result:`Already in ${pl.label}`};
         const label = `${pl.label} · ${stageLabelOf(data, pl.id, stage)}`;
