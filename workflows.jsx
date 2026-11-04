@@ -49,11 +49,12 @@
    not built yet; DEFAULT_EMAIL_SEQUENCES until then): a named, ordered list of emails, each a
    template and a delay, with no recipients.
 
-   Workflow Control (the last step, a node on the right): the Trigger Scope, and the workflow's
-   permissions (edit, stop, revert — users and teams). No workflow can be overridden.
+   Workflow Control (the last step, a node on the right): the Trigger Scope and Applies To. Who may
+   view, create, edit and delete workflows is the Workflows permissions (Edit Permissions). No
+   workflow can be overridden.
 
    A workflow is {id, type:'enforce'|'track', context:{object, pipeline, stage}, triggers:[{id, trigger, triggerConfig}],
-   triggerMatch, triggerScope:'new'|'all', scopeSince, actions:[{id, type, config:{…, behavior?}, wait}], permissions:{edit, stop, revert: ['user:<id>'|'team:<id>']},
+   triggerMatch, triggerScope:'new'|'all', scopeSince, actions:[{id, type, config:{…, behavior?}, wait}], createdBy,
    active, version, origin}, saved to
    settingsData.workflows. Email templates are settingsData.emailTemplates. */
 
@@ -330,14 +331,15 @@ const nextWorkflowVersion = (prev, w) => {
 const saveWorkflowIn = (setData, w, newTemplates = []) => setData(d => {
   const list = d.workflows || [];
   const prev = list.find(x => x.id === w.id);
-  const next = nextWorkflowVersion(prev, {...w, restoredFrom:null});
+  // A new workflow is its creator's (Workflows permissions go by who created it).
+  const next = nextWorkflowVersion(prev, {...w, restoredFrom:null, createdBy:(prev && prev.createdBy) || w.createdBy || CURRENT_USER.name});
   return {...d, workflows: prev ? list.map(x => x.id === w.id ? next : x) : [...list, next],
     ...(newTemplates.length ? {emailTemplates:[...emailTemplatesOf(d), ...newTemplates]} : {})};
 });
 /* Revert: an earlier version's configuration becomes the next version (the current one joins the
    history). The name, permissions and on / off stay as they are now — they aren't the version's
    configuration. */
-const WORKFLOW_KEPT_ON_RESTORE = ['id', 'name', 'permissions', 'active'];
+const WORKFLOW_KEPT_ON_RESTORE = ['id', 'name', 'createdBy', 'active', 'excludedUsers'];
 const restoreWorkflowVersionIn = (setData, id, version) => setData(d => ({...d, workflows:(d.workflows || []).map(w => {
   const snap = w.id === id && (w.history || []).find(h => h.version === version);
   if(!snap) return w;
@@ -368,29 +370,62 @@ const actionFitsType = (typeKey, a) => { const t = workflowTypeOf(typeKey), opts
 // Each action takes its workflow type's behavior (where it can run that way).
 const withTypeBehavior = (actions, typeKey) => { const t = workflowTypeOf(typeKey); return !t ? actions
   : (actions || []).map(a => behaviorOptions(a.type, a.config) && actionFitsType(typeKey, a) ? {...a, config:{...(a.config || {}), behavior:t.behavior}} : a); };
-/* Workflow permissions (Workflow Control): who may edit, stop and revert the workflow. Each is a
-   list of 'user:<id>' / 'team:<id>'.
-     Edit    — change its configuration, rename it, delete it (without it the builder is view-only).
-     Stop    — turn it on and off.
-     Revert  — restore an earlier saved version.
-   Super Admin and Admin always may; anyone else when listed — themselves or their team. Nobody
-   listed: admins only. Creating a workflow isn't restricted by these. */
-const WORKFLOW_PERMISSIONS = [
-  {key:'edit',     label:'Edit workflow'},
-  {key:'stop',     label:'Stop workflow'},
-  {key:'revert',   label:'Revert workflow'},
-];
-const WORKFLOW_ADMIN_PRESETS = [SUPER_ADMIN, 'Admin'];
-// The signed-in person among the workspace's users (by email).
-const workflowSessionUser = (data) => { const email = String(CURRENT_USER.email || '').toLowerCase();
-  return (data.users || []).find(u => String(u.email || '').toLowerCase() === email) || null; };
-const canWorkflow = (data, w, key) => {
-  const u = workflowSessionUser(data);
-  if(WORKFLOW_ADMIN_PRESETS.includes(u ? u.preset : CURRENT_USER.role)) return true;
-  if(!u) return false;
-  const list = (((w && w.permissions) || {})[key]) || [];
-  return list.includes(`user:${u.id}`) || (!!u.teamId && list.includes(`team:${u.teamId}`));
+/* Workflow permissions — the signed-in user's Workflows permissions (Edit Permissions → Workflows,
+   workflowCan): View, Create, Edit, Delete, by who created the workflow. Edit covers changing its
+   configuration, renaming it, turning it on and off and restoring a version; without it the builder
+   is view-only. (The per-workflow Edit / Stop / Revert lists were replaced by these.) */
+const canWorkflow = (data, w, key) => workflowCan(key === 'stop' ? 'edit' : key);
+/* ── Identical workflows targeting the same people ── two workflows are identical when everything
+   but their name, Applies To and saved details matches: type, context, triggers (and how they
+   relate), Trigger Scope and actions. Saving one whose people overlap an identical saved one asks
+   who each overlapping person follows; the other workflow excludes them from then on (a new
+   version; its past runs stay in the history, and its steps still scheduled for them are cancelled). */
+const stableJson = (v) => Array.isArray(v) ? `[${v.map(stableJson).join(',')}]`
+  : v && typeof v === 'object' ? `{${Object.keys(v).sort().map(k => `${JSON.stringify(k)}:${stableJson(v[k])}`).join(',')}}` : JSON.stringify(v);
+const workflowSignature = (w) => { const n = normalizeWorkflow(w);
+  return stableJson({type:n.type, context:n.context, triggerMatch:n.triggerMatch, triggerScope:n.triggerScope,
+    triggers:(n.triggers || []).map(t => ({trigger:t.trigger, config:t.triggerConfig || {}})), actions:(n.actions || []).map(({id, ...a}) => a)}); };
+// The people a workflow applies to (activated users).
+const workflowTargets = (data, w) => (data.users || []).filter(u => u.status === 'Activated' && appliesToOwner(w, u.id)).map(u => u.id);
+const workflowOverlaps = (data, w) => {
+  const mine = new Set(workflowTargets(data, w)), sig = workflowSignature(w);
+  return (data.workflows || []).filter(o => o.id !== w.id && workflowSignature(o) === sig)
+    .map(o => ({workflow:o, users:workflowTargets(data, o).filter(id => mine.has(id))})).filter(x => x.users.length);
 };
+/* Who follows which workflow, for each overlapping person; Continue once every one is chosen.
+   Choosing this workflow changes the other one — that needs Workflows → Edit. */
+function WorkflowOverlapModal({data, name, overlaps, onCancel, onResolve}){
+  const [pick, setPick] = React.useState({});   // '<workflowId>:<userId>' → 'this' | 'other'
+  const keyOf = (o, uid) => `${o.workflow.id}:${uid}`;
+  const all = overlaps.flatMap(o => o.users.map(uid => keyOf(o, uid)));
+  const mayChangeOther = workflowCan('edit');
+  const radio = (k, v, label, disabled) => (
+    <label style={{display:'flex', alignItems:'center', gap:6, fontSize:13, color: disabled ? T.gray400 : T.attioText, cursor: disabled ? 'default' : 'pointer'}}>
+      <input type="radio" name={k} checked={pick[k] === v} disabled={disabled} onChange={()=>setPick(p => ({...p, [k]:v}))} style={{margin:0, accentColor:T.black}}/>{label}
+    </label>
+  );
+  return (
+    <StModal title="People in two identical workflows" primary="Continue" width={560} canSubmit={all.every(k => pick[k])} onCancel={onCancel} onSubmit={()=>onResolve(pick)}>
+      <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>
+        This workflow matches another one, and some people are in both. Choose which workflow applies to each of them. The other one stops applying to them from now on; its run history is kept.
+      </div>
+      {overlaps.map(o => (
+        <div key={o.workflow.id} style={{display:'flex', flexDirection:'column', gap:8}}>
+          <span style={{fontSize:12.5, fontWeight:600, color:T.gray600}}>{o.workflow.name || workflowTitle(data, o.workflow) || 'Workflow'}</span>
+          {o.users.map(uid => { const k = keyOf(o, uid);
+            return (
+              <div key={uid} style={{display:'grid', gridTemplateColumns:'1fr auto auto', alignItems:'center', gap:16, padding:'6px 0', borderTop:`1px solid ${T.attioLine}`}}>
+                <span style={{fontSize:13, color:T.attioText}}>{userName(data, uid)}</span>
+                {radio(k, 'this', name || 'This workflow', !mayChangeOther)}
+                {radio(k, 'other', o.workflow.name || 'The other workflow')}
+              </div>
+            ); })}
+        </div>
+      ))}
+      {!mayChangeOther && <div style={stTextB}>Keeping someone in this workflow changes the other one, which needs Workflows → Edit.</div>}
+    </StModal>
+  );
+}
 // Renaming changes the name only — not the configuration, and not the version.
 const renameWorkflowIn = (setData, id, name) => setData(d => ({...d, workflows:(d.workflows || []).map(w => w.id === id ? {...w, name} : w)}));
 /* One trigger (`trigger`, `triggerConfig`) became a list (`triggers`); the old one is its first. */
@@ -422,9 +457,8 @@ const normalizeWorkflow = (w) => {
     const was = opts && !(a.config || {}).behavior && legacy(a);
     return was ? {...a, config:{...(a.config || {}), behavior: opts.includes(was) ? was : opts[0]}} : a;
   });
-  // Permissions: separate lists per capability (users / teams). Override no longer exists — dropped.
-  const {overrides:oldOverrides, permissions:perms, ...rest2} = kept;
-  const permissions = Object.fromEntries(WORKFLOW_PERMISSIONS.map(k => [k.key, ((perms || {})[k.key]) || []]));
+  // Per-workflow permission lists and Override no longer exist — dropped (Workflows permissions apply).
+  const {overrides:oldOverrides, permissions:oldPermissions, ...rest2} = kept;
   /* Trigger Scope: a new workflow starts on New Records; one saved before the setting existed
      keeps applying to all records, as it did. */
   const triggerScope = TRIGGER_SCOPES.some(s => s.key === w.triggerScope) ? w.triggerScope : w.version ? 'all' : 'new';
@@ -435,7 +469,7 @@ const normalizeWorkflow = (w) => {
     : (w.version || actions.length) ? (actions.some(a => a.type === 'blockEntry') || (actions.length && actions.every(a => actionBehavior(a) === 'automatic')) ? 'enforce' : 'track')
     : null;
   const name = w.name;
-  return {...rest2, ...(name !== undefined ? {name} : {}), type, context:w.context || {}, triggers, triggerMatch: w.triggerMatch || 'all', triggerScope, actions:withTypeBehavior(actions, type), permissions,
+  return {...rest2, ...(name !== undefined ? {name} : {}), type, context:w.context || {}, triggers, triggerMatch: w.triggerMatch || 'all', triggerScope, actions:withTypeBehavior(actions, type),
     appliesTo:Array.isArray(w.appliesTo) ? w.appliesTo : []};
 };
 /* Trigger Scope options (what a "new" record is in each context: see the header). */
@@ -1600,7 +1634,7 @@ function AddCallLogConfig({config, setConfig}){
   return cfgPad(<>
     {cfgField('Call type', <FormSelect value={c.callType} placeholder="Select call type" options={CALL_TYPES} onChange={(v)=>set({callType:v || 'Outbound'})}/>)}
     {cfgField('Call outcome', <FormSelect value={c.outcome} placeholder="Select outcome" options={LOG_CALL_OUTCOMES} onChange={(v)=>set({outcome:v})}/>)}
-    {cfgField('Comment', <textarea rows={3} value={c.comment} onChange={e=>set({comment:e.target.value})} style={{...fieldInput, resize:'vertical', lineHeight:1.5}}/>)}
+    {cfgField('Note', <textarea rows={3} value={c.comment} onChange={e=>set({comment:e.target.value})} style={{...fieldInput, resize:'vertical', lineHeight:1.5}}/>)}
     {behaviorField('addCallLog', c, setConfig)}
   </>);
 }
@@ -1927,7 +1961,7 @@ function TriggerSettings({data, trig, context, config, onChange}){
 }
 
 /* The workflow builder, for any side panel: header; the canvas (CONTEXT → TRIGGER → ACTION, then
-   Workflow control — its type, Trigger Scope, Applies To and permissions) with the configuration
+   Workflow control — its type, Trigger Scope and Applies To) with the configuration
    area on its right; Cancel / Save at the bottom. A new workflow opens on its Context; a saved one,
    on its first trigger. `onSave(workflow, newTemplates)`. */
 /* Rename workflow — the Rename template modal: the name only (triggers, conditions, actions and
@@ -2085,8 +2119,6 @@ function WorkflowEditor({data, initial, onCancel, onSave, onDelete, onRename, on
     if(onControlStep){
       const teams = data.teams || [], users = (data.users || []).filter(u => u.status === 'Activated');
       const who = (v) => { const [kind, id] = v.split(':'); const x = (kind === 'team' ? teams : data.users || []).find(y => y.id === id); return {kind, name:x ? x.name : id}; };
-      const perms = draft.permissions || {};
-      const setPerm = (key, list) => set({permissions:{...perms, [key]:list}});
       // One people / teams list each (Applies To, every permission) — the same picker for each.
       const picker = (chosen, onPick, emptyLabel) => (
         <div style={{display:'flex', flexDirection:'column', gap:8}}>
@@ -2127,12 +2159,12 @@ function WorkflowEditor({data, initial, onCancel, onSave, onDelete, onRename, on
             </div>
           ))}
           {/* Applies To — the records of these owners (people, or members of teams); none: everyone's. */}
-          {cfgPart('Applies To', picker(draft.appliesTo || [], (list)=>set({appliesTo:list}), 'All people and teams'))}
-          {cfgPart('Permissions', (
-            <div style={{display:'flex', flexDirection:'column', gap:16}}>
-              {WORKFLOW_PERMISSIONS.map(k => <React.Fragment key={k.key}>{cfgField(k.label, picker(perms[k.key] || [], (list)=>setPerm(k.key, list)))}</React.Fragment>)}
-            </div>
-          ))}
+          {cfgPart('Applies To', <>
+            {picker(draft.appliesTo || [], (list)=>set({appliesTo:list}), 'All people and teams')}
+            {/* People an identical workflow applies to instead (settled when they overlapped). */}
+            {(draft.excludedUsers || []).length > 0 && <div style={{...stTextB, fontSize:12.5, marginTop:8}}>
+              Not applied to {(draft.excludedUsers || []).map(id => userName(data, id)).join(', ')} — an identical workflow applies to them.</div>}
+          </>)}
         </div>
       );
     }
@@ -2180,9 +2212,9 @@ function WorkflowEditor({data, initial, onCancel, onSave, onDelete, onRename, on
           beside it, Close at the top right. */}
       <div style={{display:'flex', alignItems:'center', gap:8, height:56, padding:'0 14px 0 20px', borderBottom:`1px solid ${T.border}`, flexShrink:0}}>
         <span style={{fontSize:15, fontWeight:600, color:T.attioText}}>{draft.name || 'Workflow'}</span>
-        {onDelete && canEdit && <RowActionsMenu title="Workflow actions" width={MENU_W} items={[
-          ...(onRename ? [{label:'Rename workflow', onClick:()=>setRenaming(true)}] : []),
-          {label:'Delete workflow', danger:true, onClick:onDelete}]}/>}
+        {((onRename && canEdit) || onDelete) && <RowActionsMenu title="Workflow actions" width={MENU_W} items={[
+          ...(onRename && canEdit ? [{label:'Rename workflow', onClick:()=>setRenaming(true)}] : []),
+          ...(onDelete ? [{label:'Delete workflow', danger:true, onClick:onDelete}] : [])]}/>}
         {/* A saved workflow is renamed at once (the draft keeps the new name for its next save). */}
         {renaming && <RenameWorkflowModal name={draft.name || ''} onCancel={()=>setRenaming(false)}
           onSave={(name)=>{ set({name}); onRename(name); setRenaming(false); }}/>}
@@ -2357,14 +2389,33 @@ const workflowOriginLabel = (data, origin) => {
 // version opens as the builder's new starting point (keyed by version).
 function WorkflowEditorHost({data, setData, workflow, onClose, onStub}){
   const live = (data.workflows || []).find(w => w.id === workflow.id);
-  const isSaved = !!live, may = (key) => !isSaved || canWorkflow(data, live, key);
-  return <WorkflowEditor key={`${workflow.id}:${isSaved ? live.version : 'new'}`} data={data} initial={live || workflow} onStub={onStub}
-    canEdit={may('edit')} canStop={may('stop')} canRevert={may('revert')}
-    onCancel={onClose} onSave={(w, newTemplates)=>{ saveWorkflowIn(setData, w, newTemplates); onClose(); }}
-    onSetActive={isSaved ? (v) => setWorkflowActiveIn(setData, workflow.id, v) : null}
-    onDelete={isSaved ? () => { deleteWorkflowIn(setData, workflow.id); onClose(); } : null}
-    onRename={isSaved ? (name) => renameWorkflowIn(setData, workflow.id, name) : null}
-    onRestore={isSaved ? (version) => restoreWorkflowVersionIn(setData, workflow.id, version) : null}/>;
+  const [overlap, setOverlap] = React.useState(null);   // {w, newTemplates, overlaps}
+  const finish = (w, newTemplates) => { saveWorkflowIn(setData, w, newTemplates); onClose(); };
+  // Saving: people shared with an identical workflow are settled first.
+  const save = (w, newTemplates) => { const overlaps = workflowOverlaps(data, w); if(overlaps.length) setOverlap({w, newTemplates, overlaps}); else finish(w, newTemplates); };
+  const resolve = (pick) => {
+    const {w, newTemplates, overlaps} = overlap;
+    const mine = new Set((w.excludedUsers || []));
+    overlaps.forEach(o => {
+      const keepHere = o.users.filter(uid => pick[`${o.workflow.id}:${uid}`] === 'this');
+      o.users.filter(uid => pick[`${o.workflow.id}:${uid}`] === 'other').forEach(uid => mine.add(uid));
+      // The other workflow excludes the people kept here — a new version of it.
+      if(keepHere.length) saveWorkflowIn(setData, {...o.workflow, excludedUsers:[...new Set([...(o.workflow.excludedUsers || []), ...keepHere])]});
+    });
+    setOverlap(null);
+    finish({...w, excludedUsers:[...mine]}, newTemplates);
+  };
+  const isSaved = !!live, may = (key) => isSaved ? canWorkflow(data, live, key) : workflowCan('create');
+  return <>
+    <WorkflowEditor key={`${workflow.id}:${isSaved ? live.version : 'new'}`} data={data} initial={live || workflow} onStub={onStub}
+      canEdit={may('edit')} canStop={may('stop')} canRevert={may('revert')}
+      onCancel={onClose} onSave={save}
+      onSetActive={isSaved ? (v) => setWorkflowActiveIn(setData, workflow.id, v) : null}
+      onDelete={isSaved && may('delete') ? () => { deleteWorkflowIn(setData, workflow.id); onClose(); } : null}
+      onRename={isSaved ? (name) => renameWorkflowIn(setData, workflow.id, name) : null}
+      onRestore={isSaved ? (version) => restoreWorkflowVersionIn(setData, workflow.id, version) : null}/>
+    {overlap && <WorkflowOverlapModal data={data} name={overlap.w.name} overlaps={overlap.overlaps} onCancel={()=>setOverlap(null)} onResolve={resolve}/>}
+  </>;
 }
 /* Versions — every saved version, newest first: when and by whom it was saved (and the version it
    restored). Revert: an earlier one's Restore makes its configuration the next version. */
@@ -2397,5 +2448,5 @@ const WorkflowEditorOverlay = (props) => (
   <div style={{position:'absolute', inset:0, zIndex:70, background:'#fff', display:'flex', flexDirection:'column'}}><WorkflowEditorHost {...props}/></div>
 );
 
-Object.assign(window, {WORKFLOWS_CLEARED, canWorkflow, restoreWorkflowVersionIn, WorkflowVersions, renameWorkflowIn, RenameWorkflowModal, newWorkflowDraft, workflowOriginLabel, WorkflowEditorHost, WorkflowEditorOverlay, WORKFLOW_TYPES, workflowTypeOf, actionFitsType, WORKFLOW_OBJECTS, workflowsAvailableFor, saveWorkflowIn, setWorkflowActiveIn, deleteWorkflowIn, WORKFLOW_PERMISSIONS, behaviorOptions, actionsReady, ACTION_BEHAVIORS, BEHAVIOR_OPTIONS, actionBehavior, triggersReady, triggerIssue, actionIssue, WORKFLOW_CONTEXT_LEVELS, workflowTriggerViews, triggersMatchAll, triggerReady, LEGACY_TRIGGER_ID, normalizeTriggerEntry, triggerSummary, activityTriggerProperty, COUNT_OPERATORS, triggerGroupAvailable, DEFAULT_EMAIL_SEQUENCES, emailSequencesOf, workflowContextLabel, ACTIVITY_TRIGGER_TYPES, workflowPipeline, workflowStage, normalizeWorkflow, triggerProperties, contextPathOf, triggerDetail, triggerSettingFields, WORKFLOW_TRIGGER_GROUPS, WORKFLOW_CONTEXT_FIELDS, WORKFLOW_ACTIONS, WORKFLOW_ACTION_CONFIGS, DEFAULT_EMAIL_TEMPLATES,
+Object.assign(window, {WORKFLOWS_CLEARED, canWorkflow, restoreWorkflowVersionIn, WorkflowVersions, renameWorkflowIn, RenameWorkflowModal, newWorkflowDraft, workflowOriginLabel, WorkflowEditorHost, WorkflowEditorOverlay, WORKFLOW_TYPES, workflowTypeOf, actionFitsType, WORKFLOW_OBJECTS, workflowsAvailableFor, saveWorkflowIn, setWorkflowActiveIn, deleteWorkflowIn, behaviorOptions, actionsReady, ACTION_BEHAVIORS, BEHAVIOR_OPTIONS, actionBehavior, triggersReady, triggerIssue, actionIssue, WORKFLOW_CONTEXT_LEVELS, workflowTriggerViews, triggersMatchAll, triggerReady, LEGACY_TRIGGER_ID, normalizeTriggerEntry, triggerSummary, activityTriggerProperty, COUNT_OPERATORS, triggerGroupAvailable, DEFAULT_EMAIL_SEQUENCES, emailSequencesOf, workflowContextLabel, ACTIVITY_TRIGGER_TYPES, workflowPipeline, workflowStage, normalizeWorkflow, triggerProperties, contextPathOf, triggerDetail, triggerSettingFields, WORKFLOW_TRIGGER_GROUPS, WORKFLOW_CONTEXT_FIELDS, WORKFLOW_ACTIONS, WORKFLOW_ACTION_CONFIGS, DEFAULT_EMAIL_TEMPLATES,
   workflowTrigger, workflowAction, actionSummary, workflowReady, emailTemplatesOf, SidePanelHeader, WorkflowCard, WorkflowEditor, ScheduleEmailConfig});

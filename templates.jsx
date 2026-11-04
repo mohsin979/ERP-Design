@@ -1,4 +1,6 @@
-/* HOF Pulse ERP — Settings → Templates: Email Templates, Email Sequences and Quote Templates.
+/* HOF Pulse ERP — Settings → Templates: Email Templates, Email Sequences, Quote Templates,
+   Playbooks (playbooks.jsx) and Services (services.jsx — the service catalog, moved here from the
+   CRM navigation).
 
    Foundational for now (to be refined later):
      Email Templates — reusable emails: a name, a subject and a message ({{first_name}} is filled
@@ -11,7 +13,12 @@
    Email templates and sequences are created, viewed, edited and deleted here; a template or sequence a workflow (or a
    sequence) uses can't be deleted until it's no longer used, so nothing that runs loses its email. */
 
-const TEMPLATE_TABS = [{id:'templates', label:'Email Templates', icon:'envelope'}, {id:'sequences', label:'Email Sequences', icon:'listBullets'}, {id:'quoteTemplates', label:'Quote Templates', icon:'quote'}, {id:'playbooks', label:'Playbooks', icon:'playbook'}];
+/* Each tab is a kind of template with its own permissions (Edit Permissions → Templates): a tab
+   shows to those who may view some of its items, and each item's actions follow View / Create /
+   Edit / Delete by who created it (items made before creators were recorded are no one's). */
+const TEMPLATE_TABS = [{id:'templates', label:'Email Templates', icon:'envelope', kind:'emailTemplates'}, {id:'sequences', label:'Email Sequences', icon:'listBullets', kind:'emailSequences'},
+  {id:'quoteTemplates', label:'Quote Templates', icon:'quote', kind:'quoteTemplates'}, {id:'playbooks', label:'Playbooks', icon:'playbook', kind:'playbooks'},
+  {id:'services', label:'Services', icon:'services', kind:'services'}];
 const SEQUENCE_UNITS = ['Hours', 'Days', 'Weeks'];
 const escHtml = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 /* A template's message as its email: the workspace's mark, then the paragraphs. */
@@ -93,7 +100,8 @@ function SequenceFormModal({initial, templates, onCancel, onSave}){
 
 /* Quote Templates: code, name, what it holds; View (the template's contents), Rename, Delete. */
 function QuoteTemplatesTab({data, setData, say}){
-  const list = quoteTemplatesOf(data);
+  const can = (action, t) => templateCan('quoteTemplates', action, t);
+  const list = quoteTemplatesOf(data).filter(t => can('view', t));
   const setList = (fn) => setData(d => ({...d, quoteTemplates:fn(quoteTemplatesOf(d))}));
   const [openId, setOpenId] = React.useState(null);
   const [renaming, setRenaming] = React.useState(null);   // {id, name}
@@ -102,9 +110,9 @@ function QuoteTemplatesTab({data, setData, say}){
   const cols = [{key:'code', label:'Code', width:110}, {key:'name', label:'Template Name', width:240}, {key:'services', label:'Services', width:280},
     {key:'installments', label:'Installments', width:120}, {key:'createdBy', label:'Created By', width:160}, {key:'created', label:'Created', width:150}];
   const rows = list.map(t => ({id:t.id, code:t.code, name:t.name, services:(t.items || []).map(it => it.name).join(', '), installments:(t.installments || []).length,
-    createdBy:t.createdBy, created:fmtQuoteDate(t.createdAt)}));
-  const actions = (t) => [{label:'View template', onClick:()=>setOpenId(t.id)}, {label:'Rename template', onClick:()=>setRenaming({id:t.id, name:t.name})},
-    {label:'Delete template', danger:true, onClick:()=>setDeleting(t)}];
+    createdBy:creatorOf(t), created:fmtQuoteDate(t.createdAt)}));
+  const actions = (t) => [{label:'View template', onClick:()=>setOpenId(t.id)}, ...(can('edit', t) ? [{label:'Rename template', onClick:()=>setRenaming({id:t.id, name:t.name})}] : []),
+    ...(can('delete', t) ? [{label:'Delete template', danger:true, onClick:()=>setDeleting(t)}] : [])];
   const schema = {
     properties:cols, noun:'template', searchKeys:['code', 'name', 'services'], canCreateProperty:false, boards:false, selectable:false,
     filterProps:[{key:'name', label:'Name', type:'text'}, {key:'createdBy', label:'Created By', type:'select'}], selectValues:{createdBy:[...new Set(list.map(t => t.createdBy).filter(Boolean))]},
@@ -163,7 +171,11 @@ function QuoteTemplatesTab({data, setData, say}){
 }
 
 function TemplatesSettings({data, setData}){
-  const [tab, setTab] = React.useState('templates');
+  const tabs = TEMPLATE_TABS.filter(t => templateCan(t.kind, 'view'));
+  const [tabPicked, setTab] = React.useState('templates');
+  const tab = tabs.some(t => t.id === tabPicked) ? tabPicked : (tabs[0] || {}).id;
+  const kind = (TEMPLATE_TABS.find(t => t.id === tab) || {}).kind;
+  const can = (action, item) => templateCan(kind, action, item);
   const [form, setForm] = React.useState(null);        // {kind, initial?}
   const [openId, setOpenId] = React.useState(null);
   const [deleting, setDeleting] = React.useState(null);  // {kind, item}
@@ -179,23 +191,24 @@ function TemplatesSettings({data, setData}){
     return [...ws.map(w => `${w.name || 'Workflow'} (workflow)`), ...seqs.map(s => `${s.name} (sequence)`)];
   };
   const isT = tab === 'templates';
-  const list = isT ? templates : sequences;
+  const list = (isT ? templates : sequences).filter(x => can('view', x));
   const open = list.find(x => x.id === openId) || null;
-  const cols = isT ? [{key:'name', label:'Template Name', width:240}, {key:'subject', label:'Subject', width:320}, {key:'usedBy', label:'Used By', width:120}]
-    : [{key:'name', label:'Sequence Name', width:240}, {key:'steps', label:'Emails', width:110}, {key:'span', label:'Templates', width:380}, {key:'usedBy', label:'Used By', width:120}];
-  const rows = list.map(x => isT ? {id:x.id, name:x.name, subject:x.subject, usedBy:usage('templates', x.id).length}
-    : {id:x.id, name:x.name, steps:x.emails.length, span:x.emails.map(e => templateName(e.templateId)).join(' → '), usedBy:usage('sequences', x.id).length});
+  const cols = isT ? [{key:'name', label:'Template Name', width:240}, {key:'subject', label:'Subject', width:320}, {key:'usedBy', label:'Used By', width:120}, {key:'createdBy', label:'Created By', width:170}]
+    : [{key:'name', label:'Sequence Name', width:240}, {key:'steps', label:'Emails', width:110}, {key:'span', label:'Templates', width:380}, {key:'usedBy', label:'Used By', width:120}, {key:'createdBy', label:'Created By', width:170}];
+  const rows = list.map(x => isT ? {id:x.id, name:x.name, subject:x.subject, usedBy:usage('templates', x.id).length, createdBy:creatorOf(x)}
+    : {id:x.id, name:x.name, steps:x.emails.length, span:x.emails.map(e => templateName(e.templateId)).join(' → '), usedBy:usage('sequences', x.id).length, createdBy:creatorOf(x)});
   const noun = isT ? 'template' : 'sequence';
   // Bulk Actions: Delete — one in use (by a sequence or a workflow) is skipped, as its Delete refuses.
-  const listBulk = useTableBulkDelete({rows:list, noun, canDelete:(x) => !usage(tab, x.id).length, skipNote:'in use',
+  const listBulk = useTableBulkDelete({rows:list, noun, canDelete:(x) => can('delete', x) && !usage(tab, x.id).length, skipNote:'in use or not yours to delete',
     remove:(ids) => { (isT ? setTemplates : setSequences)(xs => xs.filter(x => !ids.includes(x.id))); if(ids.includes(openId)) setOpenId(null); }, onDone:(n) => say(`${bulkPlural(n, noun)} deleted`)});
   const schema = {
     properties:cols, noun, searchKeys:['name', 'subject'], fillWidth:true, canCreateProperty:false, boards:false, bulkActions:listBulk.bulkActions,
     filterProps:[{key:'name', label:'Name', type:'text'}, {key:'usedBy', label:'Used By', type:'number'}], selectValues:{},
     renderCell:(key, r) => key === 'name' ? <ContactName name={r.name} onOpen={()=>setOpenId(r.id)} style={{fontSize:'inherit', fontWeight:500}}/> : undefined,
-    renderActions:(r) => <RowActionsMenu title="Actions" width={MENU_W} items={[{label:`View ${noun}`, onClick:()=>setOpenId(r.id)},
-      {label:`Edit ${noun}`, onClick:()=>setForm({kind:tab, initial:list.find(x => x.id === r.id)})},
-      {label:`Delete ${noun}`, danger:true, onClick:()=>setDeleting({kind:tab, item:list.find(x => x.id === r.id)})}]}/>,
+    renderActions:(r) => { const x = list.find(y => y.id === r.id);
+      return <RowActionsMenu title="Actions" width={MENU_W} items={[{label:`View ${noun}`, onClick:()=>setOpenId(r.id)},
+        ...(can('edit', x) ? [{label:`Edit ${noun}`, onClick:()=>setForm({kind:tab, initial:x})}] : []),
+        ...(can('delete', x) ? [{label:`Delete ${noun}`, danger:true, onClick:()=>setDeleting({kind:tab, item:x})}] : [])]}/>; },
   };
   const save = (vals) => {
     const editing = form.initial;
@@ -203,10 +216,10 @@ function TemplatesSettings({data, setData}){
       const unchanged = editing && templateBodyOf(editing) === vals.body;
       const t = {...vals, html: unchanged ? editing.html : templateHtmlOf(vals.body)};
       if(editing) setTemplates(ts => ts.map(x => x.id === editing.id ? {...x, ...t} : x));
-      else setTemplates(ts => [...ts, {id:`et-${Date.now().toString(36)}`, ...t}]);
+      else setTemplates(ts => [...ts, {id:`et-${Date.now().toString(36)}`, createdBy:CURRENT_USER.name, ...t}]);
     } else {
       if(editing) setSequences(ss => ss.map(x => x.id === editing.id ? {...x, ...vals} : x));
-      else setSequences(ss => [...ss, {id:`es-${Date.now().toString(36)}`, ...vals}]);
+      else setSequences(ss => [...ss, {id:`es-${Date.now().toString(36)}`, createdBy:CURRENT_USER.name, ...vals}]);
     }
     say(editing ? 'Saved' : `${form.kind === 'templates' ? 'Template' : 'Sequence'} created`);
     setForm(null);
@@ -216,16 +229,18 @@ function TemplatesSettings({data, setData}){
     <div style={{position:'relative', flex:1, minHeight:0, display:'flex', flexDirection:'column', overflow:'hidden'}}>
       <SettingsPage fill>
         <div style={{display:'flex', alignItems:'center', gap:4, marginBottom:8}}>
-          {TEMPLATE_TABS.map(t => <UtTab key={t.id} icon={t.icon} label={t.label} active={tab === t.id} onClick={()=>{ setTab(t.id); setOpenId(null); }}/>)}
+          {tabs.map(t => <UtTab key={t.id} icon={t.icon} label={t.label} active={tab === t.id} onClick={()=>{ setTab(t.id); setOpenId(null); }}/>)}
         </div>
-        {tab === 'quoteTemplates' ? <QuoteTemplatesTab data={data} setData={setData} say={say}/> :
+        {!tab ? <div style={{...stTextB, padding:'24px 0'}}>You don't have access to any templates.</div> :
+        tab === 'quoteTemplates' ? <QuoteTemplatesTab data={data} setData={setData} say={say}/> :
         tab === 'playbooks' ? <PlaybooksTab data={data} setData={setData} say={say}/> :
+        tab === 'services' ? <ServicesPage/> :
         <div style={{display:'flex', flexDirection:'column', flex:1, minHeight:0}}>
           <RecordViewsModule key={tab} schema={schema} rows={rows} columns={cols.map(c => c.key)} storeKey={`views:templates-${tab}`}
             defaultViews={[{id:`tv-${tab}`, name: isT ? 'All Templates' : 'All Sequences', sort:{key:'name', dir:'asc'}}]}
-            actions={() => <StCta icon="plus" label={isT ? 'New template' : 'New sequence'} onClick={()=>setForm({kind:tab})}/>}
+            actions={() => can('create') && <StCta icon="plus" label={isT ? 'New template' : 'New sequence'} onClick={()=>setForm({kind:tab})}/>}
             overlay={open && <PageSidePanel width={isT ? 620 : 480} title={open.name} subtitle={isT ? open.subject : plural(open.emails.length, 'email')} onClose={()=>setOpenId(null)}
-              menuItems={[{label:`Edit ${noun}`, onClick:()=>setForm({kind:tab, initial:open})}, {label:`Delete ${noun}`, danger:true, onClick:()=>setDeleting({kind:tab, item:open})}]}>
+              menuItems={[...(can('edit', open) ? [{label:`Edit ${noun}`, onClick:()=>setForm({kind:tab, initial:open})}] : []), ...(can('delete', open) ? [{label:`Delete ${noun}`, danger:true, onClick:()=>setDeleting({kind:tab, item:open})}] : [])]}>
               <div style={{flex:1, overflowY:'auto', padding:'4px 20px 24px'}}>
                 {isT ? <div style={{border:`1px solid ${T.border}`, borderRadius:10, overflow:'hidden'}} dangerouslySetInnerHTML={{__html:open.html || ''}}/>
                   : <ol style={{margin:0, padding:0, listStyle:'none', display:'flex', flexDirection:'column', gap:10}}>

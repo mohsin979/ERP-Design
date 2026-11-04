@@ -55,7 +55,7 @@ function BulkEditPanel({data, object, records, onSave, onClose}){
   // A property-driven pipeline's property (a contact's Contact Type) is its stage: one record at a time too.
   const stageKeys = objectPipelines(data, object).filter(pl => pl.source === 'property').map(pl => pl.propertyKey);
   const props = objectFormProperties(data, object).filter(p => !p.auto && !p.derived && !p.archived && !BULK_EXCLUDED_KEYS.includes(p.key) && !stageKeys.includes(p.key)
-    && !['Pipeline', 'Pipeline stage'].includes(p.type));
+    && !['Pipeline', 'Pipeline stage'].includes(p.type) && propKeyCan(object, p.key));
   // A property's shared value (stored), or `mixed`.
   const shared = (p) => { const vs = records.map(r => r[p.key] ?? ''); return vs.every(v => samePropertyValue(v, vs[0])) ? {value:vs[0]} : {mixed:true}; };
   const [edits, setEdits] = React.useState({});   // key → the value entered (input shape)

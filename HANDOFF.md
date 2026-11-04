@@ -36,7 +36,8 @@ A static React prototype of the HOF Pulse ERP (CRM module first): Contacts, Deal
 
 ## 4. Hosting
 
-- Hosted artifact: https://claude.ai/artifact/Hfb7wMGwpvtAsNp8uAAyQP — **Version 19** is current. **Keep updating this same link** (Mohsin's decision). It's owned by the old account and shared with the new one for editing, so:
+- **Current hosted artifact (2026-11-03, new account): https://claude.ai/artifact/HhVCibY8UgrbSHmBJjWErC** — Mohsin asked for a fresh link; update this one from now on (publish with `url` set to it). The old link below is retired.
+- Old hosted artifact: https://claude.ai/artifact/Hfb7wMGwpvtAsNp8uAAyQP — Version 19, old account. It's owned by the old account and shared with the new one for editing, so:
   1. Before the first publish in a session, read it: Artifact `action:"read"` with that `url` (a publish to an artifact the session hasn't read is refused). The read must say you're a "writer" — if it doesn't, the share hasn't been done yet: ask Mohsin to give the new account edit access from the artifact's Share menu; don't publish a separate artifact.
   2. Publish updates with `url` set to that link (never without `url` — that would create a new artifact). Send only the changed files in `files`; the rest are kept.
 - Build folder: copy all `*.jsx` + `assets/` into a scratch folder; regenerate `index.html` from the source `index.html`: strip doctype/`<head>` wrappers and `<meta>` tags, title `HOF Pulse ERP`, add `background:#FAFBFC; color:#15141B` to `body` and `:root { color-scheme: light; }`. Publish with a `files` map listing every script (contentType `text/javascript`) and assets; on updates only changed files need sending.

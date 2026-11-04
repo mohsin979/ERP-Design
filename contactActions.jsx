@@ -403,8 +403,10 @@ function RecordLinkField({link, value, onChange}){
    only): Create through associated object; onSave(values, [association]). `links` (Add and Edit):
    associated records picked from existing ones, starting at `initialLinks` ({key: id | ids});
    onSave(values, association, links). `zIndex`: over a modal it's opened from. */
-function ContactFormModal({mode, initial, properties, owners, stages, onCancel, onSave, noun = 'contact', optionsFor: optionsForProp, adjust, association, links, initialLinks, subtitle, zIndex}){
-  const fields = (properties || []).filter(p => mode === 'edit' ? !p.auto : p.onCreate)
+/* `canEditField(p)`: editing, the fields the signed-in user may change (Records → Edit — its stage
+   moves and property values); the others aren't offered, and keep their values. */
+function ContactFormModal({mode, initial, properties, owners, stages, onCancel, onSave, noun = 'contact', optionsFor: optionsForProp, adjust, association, links, initialLinks, subtitle, zIndex, canEditField}){
+  const fields = (properties || []).filter(p => mode === 'edit' ? !p.auto && (!canEditField || canEditField(p)) : p.onCreate)
     .map(p => mode === 'edit' ? {...p, required:!!p.mandatory} : p);
   const [v, setV] = React.useState(() => emptyValues(fields, initial));
   // Choices come from the property (Settings); owners (users, by ID) and the pipeline's stages from the caller.

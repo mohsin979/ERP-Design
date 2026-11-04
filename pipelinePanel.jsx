@@ -60,11 +60,14 @@ function PipelinePanel({data, setData, pipelineId, deals = [], onClose, onStub, 
   if(!pipeline) return null;
 
   const objName = objectName(data, pipeline.objectId);
-  const editable = pipeline.source === 'record';
+  // Stages are added, reordered and deleted with Pipelines → Edit for the pipeline's record type.
+  const editable = pipeline.source === 'record' && pipelineAdminCan(pipeline.objectId, 'edit', pipeline);
   // Stages count the records in them (a deal's, a customer's pipeline).
   const countsDeals = ['deals', 'customers'].includes(pipeline.objectId);
   const recNoun = objName.replace(/s$/, '').toLowerCase();
-  const canWorkflow = workflowsAvailableFor(pipeline.objectId);
+  // Workflows here: where the Object supports them; adding one needs Workflows → Create, seeing one → View.
+  const canWorkflow = workflowsAvailableFor(pipeline.objectId) && workflowCan('create');
+  const showsWorkflows = workflowsAvailableFor(pipeline.objectId) && workflowCan('view');
   const dealsIn = (stageId) => deals.filter(d => d.pipeline === pipeline.id && d.stage === stageId).length;
   // The stage a workflow belongs to here: its context stage, else its first stage trigger's stage
   // (a pipeline-level workflow), else the stage it was opened from.
@@ -72,7 +75,7 @@ function PipelinePanel({data, setData, pipelineId, deals = [], onClose, onStub, 
   const stageOfWorkflow = (w) => w.context && w.context.pipeline === pipeline.id && w.context.stage ? w.context.stage
     : w.context && w.context.pipeline === pipeline.id && triggerStage(w) ? triggerStage(w)
     : w.origin && w.origin.type === 'pipelineStage' && w.origin.pipelineId === pipeline.id ? w.origin.stageId : null;
-  const workflows = (data.workflows || []).filter(w => stageOfWorkflow(w));
+  const workflows = (data.workflows || []).filter(w => stageOfWorkflow(w) && workflowCan('view', w));
   const setStages = (fn) => setData(d => ({...d, pipelines:d.pipelines.map(p => p.id === pipeline.id ? {...p, stages:fn(p.stages)} : p)}));
   // Object + Pipeline + Stage (editable in the builder).
   const newWorkflow = (stage) => newWorkflowDraft({object:pipeline.objectId, pipeline:pipeline.id, stage:stage.id}, {type:'pipelineStage', pipelineId:pipeline.id, stageId:stage.id});
@@ -83,7 +86,7 @@ function PipelinePanel({data, setData, pipelineId, deals = [], onClose, onStub, 
     {key:'name', label:'Stage Name', width:150},
     ...(countsDeals ? [{key:'records', label:objName, width:64}] : []),
     // Workflows only where the pipeline's Object supports them (Deals); Contacts' pipelines have none.
-    ...(canWorkflow ? [{key:'workflows', label:'Workflows', width:140}] : []),
+    ...(showsWorkflows ? [{key:'workflows', label:'Workflows', width:140}] : []),
   ];
   const rows = pipeline.stages.map(st => ({id:st.id, name:st.label, records: countsDeals ? String(dealsIn(st.id)) : '', stage:st,
     stageWorkflows: workflows.filter(w => stageOfWorkflow(w) === st.id)}));
@@ -206,9 +209,10 @@ const pipelineDealCount = (pipeline, deals) => (deals || []).filter(d => d.pipel
 const pipelineMenuItems = (pipeline, deals, onEdit, noun = 'deal') => {
   const n = pipelineDealCount(pipeline, deals);
   const own = pipeline.source === 'record';
+  // Settings & Administration → Pipelines: Edit and Delete, for the pipeline's record type.
   return [
-    {label:'Edit', disabled:!own, onClick:onEdit},
-    {label: n ? `Delete · ${n} ${noun}${n === 1 ? '' : 's'}` : 'Delete', danger: own && !n, disabled:true, onClick:()=>{}},
+    ...(pipelineAdminCan(pipeline.objectId, 'edit', pipeline) ? [{label:'Edit', disabled:!own, onClick:onEdit}] : []),
+    ...(pipelineAdminCan(pipeline.objectId, 'delete', pipeline) ? [{label: n ? `Delete · ${n} ${noun}${n === 1 ? '' : 's'}` : 'Delete', danger: own && !n, disabled:true, onClick:()=>{}}] : []),
   ];
 };
 

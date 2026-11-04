@@ -204,18 +204,22 @@ const formRecordValue = (key, rec) => {
 const userPropertyFields = (data) => [
   ...(((data && data.properties) || WF_LIVE.properties || []).filter(p => p.objectId === 'users' && !p.archived).map(p => ({key:p.key, label:p.label, kind:conditionKind(p.type), prop:p}))),
   ...USER_METRIC_FIELDS];
+/* The statistics — the user's profile panel's (USER_STATS, dashboard.jsx), all-time, from the
+   CRM's records. Averages in days or hours, as labelled. */
 const USER_METRIC_FIELDS = [
-  {key:'sales', label:'Total Number of Sales', kind:'number'}, {key:'invoiceCash', label:'Total Invoice Cash', kind:'number'},
-  {key:'currentExpectedCash', label:'Current and Expected Cash', kind:'number'}, {key:'totalCash', label:'Total Cash', kind:'number'},
-  {key:'serviceCash', label:'Total Service Cash', kind:'number'}, {key:'callTime', label:'Total Call Time (minutes)', kind:'number'},
-  {key:'completedTasks', label:'Total Completed Tasks', kind:'number'}, {key:'dealsCreated', label:'Total Deals Created', kind:'number'},
-  {key:'velocity', label:'Total Velocity (days)', kind:'number'}, {key:'contactToDeal', label:'Contact-to-Deal Velocity (days)', kind:'number'},
-  {key:'contactToCustomer', label:'Contact-to-Customer Velocity (days)', kind:'number'}, {key:'assignments', label:'Total Assignments', kind:'number'},
-  {key:'breakTime', label:'Total Break Time (minutes)', kind:'number'}, {key:'dials', label:'Total Dials', kind:'number'},
-];
+  {key:'invoiceCash', label:'Total Invoice Cash'}, {key:'cashReceived', label:'Total Cash Received'}, {key:'cashForecasted', label:'Total Cash Forecasted'},
+  {key:'dealsCreated', label:'Total Deals Created'}, {key:'dealsClosed', label:'Deals Closed'}, {key:'dealsWon', label:'Deal Won'}, {key:'dealsLost', label:'Deal Lost'},
+  {key:'contactToClosed', label:'Contact to Deal Closed (days)'}, {key:'contactToDeal', label:'Contact to Deal (days)'},
+  {key:'contactToCustomer', label:'Contact to Customer (days)'}, {key:'qualifiedToWon', label:'Qualified Client to Deal Won (days)'},
+  {key:'responseTime', label:'Client Response Time (hours)'}, {key:'invoiceToCash', label:'Invoice to Cash (hours)'},
+].map(f => ({...f, kind:'number'}));
 const USER_PROPERTY_FIELDS = USER_METRIC_FIELDS;   // the metrics (properties: userPropertyFields)
-// A user's User Properties (by id or name): the generated values, with what's set on the user (`profile`).
-const userPropertiesOf = (data, who) => { const u = (data.users || []).find(x => x.id === who || x.name === who); return u ? {...(u.profile || {}), ...ownerProfileMock(u.name, u).raw} : null; };
+/* A user's User Properties (by id or name): what's set on the user (`profile`, else the value fixed
+   per user), and their statistics — empty where there's nothing to average. */
+const userPropertiesOf = (data, who) => { const u = (data.users || []).find(x => x.id === who || x.name === who);
+  if(!u) return null;
+  const stats = Object.fromEntries(Object.entries(userStatsAllTime(u.id)).map(([k, v]) => [k, v == null ? '' : Math.round(v * 100) / 100]));
+  return {...(u.profile || {}), ...ownerProfileMock(u.name, u).raw, ...stats}; };
 // The person whose Customer Profile a record has: a contact itself; a deal's or customer's contact.
 const profileContactId = (rec) => !rec ? null : recordObjectOf(rec.id) === 'contacts' ? Number(rec.id) : (rec.contactId ?? null);
 const PROFILE_TRIGGER_FIELDS = () => [
@@ -448,8 +452,10 @@ const scopeEnteredAt = (w, deal, ev) => {
   return createdTime(deal);
 };
 /* Applies To: the records of these owners — people, or members of teams (`appliesTo`: 'user:<id>' /
-   'team:<id>'); none chosen: everyone's. */
+   'team:<id>'); none chosen: everyone's. `excludedUsers`: people another identical workflow applies
+   to instead (chosen when the two overlapped) — never this one's. */
 const appliesToOwner = (w, ownerId) => {
+  if(ownerId && ((w && w.excludedUsers) || []).includes(ownerId)) return false;
   const list = (w && w.appliesTo) || [];
   if(!list.length) return true;
   if(!ownerId) return false;
@@ -1139,6 +1145,8 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
     if(!action) return patchStep(runId, stepId, {status:'skipped', result:'Removed from the workflow'});
     const deal = getDeal(run.dealId);
     if(!deal) return patchStep(runId, stepId, {status:'failed', result:'The deal no longer exists'});
+    // An identical workflow applies to the record's owner now (they were excluded from this one): what's left is cancelled.
+    if(((w.excludedUsers) || []).includes(deal.owner)) return patchStep(runId, stepId, {status:'cancelled', result:`Another workflow applies to ${userName(dataRef.current, deal.owner) || 'the owner'}`});
     if(delayed){
       if(['stageEntryForward', 'stageEntryBackward', 'stayAtStage'].includes(run.trigger) && (deal.pipeline !== run.pipeline || deal.stage !== run.stage)) return patchStep(runId, stepId, {status:'skipped', result:'The deal left the stage'});
       // Other triggers stay within the workflow's context (a stage context: the deal is still in it).
@@ -3731,7 +3739,7 @@ function WorkflowPromptModal({promptId, onClose, hidden, direct}){
     primary = 'Log Call'; can = !!callOutcome;
     content = (<>
       <div><label style={fieldLabel}>Call outcome</label><FormSelect value={callOutcome} placeholder="Select outcome" options={LOG_CALL_OUTCOMES} onChange={setCallOutcome}/></div>
-      <div><label style={fieldLabel}>Comment</label><textarea rows={3} value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Optional — saved as a note linked to this call" style={{...fieldInput, resize:'vertical', lineHeight:1.5}}/></div>
+      <div><label style={fieldLabel}>Note</label><textarea rows={3} value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Optional — saved as a note linked to this call" style={{...fieldInput, resize:'vertical', lineHeight:1.5}}/></div>
     </>);
   } else if(p.kind === 'deleteRecord' && !deletable){
     can = false;

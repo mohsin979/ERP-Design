@@ -8,11 +8,10 @@
 
    Every detail has the same minimal header (DetailFrame): the activity's first line on the left
    ("Meeting by [Person]", …), Edit and ⋯ on the right; Edit → Cancel / Save in the same place.
-     Call   — "Call by [Person]" (made through the system: only comments editable) or "Call log
-              by [Person]" (entered by hand: call type, point of contact, outcome and comments
-              editable). Details: call type (Inbound / Outbound), point of contact (the internal
-              representative), outcome, comment. A new comment is saved as a Note linked to the
-              call (callId).
+     Call   — "Call by [Person]" (made through the system: nothing to edit) or "Call log by
+              [Person]" (entered by hand: call type, point of contact and outcome editable).
+              Details: call type (Inbound / Outbound), point of contact (the internal
+              representative), outcome; then its Notes (ActivityNotes: Notes linked to the call).
      Email  — subject and content; the header has Reply, ⋯ has Forward (UI only; not defined yet).
      Task   — name, description, status (radios), task type, assigned to, assigned by.
      Note   — readable text; Edit makes it a field.
@@ -20,8 +19,9 @@
               update, so it records its own Owner change).
 
      Meeting — "Meeting" (start / schedule — not defined yet) or "Meeting log" (an online
-              meeting logged by hand: organiser, platform, title, comments). Read-only: title,
-              platform, transcript (Read / Add transcript), comment, time stamp (the organiser is in the header).
+              meeting logged by hand: organiser, platform, title, link). Read-only: title,
+              platform, transcript (Read / Add transcript), time stamp, link (the organiser is in
+              the header); then its Notes (ActivityNotes: Notes linked to the meeting).
    Every ⋯ menu follows one arrangement (detailMenu). Edits and new items go through onUpdate / onAdd
    (ContactsModule) — the one activity store the Overview, cards and side panel also read. */
 
@@ -254,7 +254,7 @@ function ActivityEditBar({a, onEdit, menu}){
   const canEdit = !ra || activityCan(ra.object, ra.record, a, 'edit'), canDelete = !ra || activityCan(ra.object, ra.record, a, 'delete');
   const items = (menu || []).filter(it => canDelete || !/^Delete/.test(it.label));
   return (<>
-    {canEdit && headerBtn('Edit', onEdit)}
+    {canEdit && onEdit && headerBtn('Edit', onEdit)}
     {items.length > 0 && <DetailMoreMenu items={items}/>}
   </>);
 }
@@ -315,13 +315,91 @@ function NoteDetail({a, contact, calls, onUpdate, onStub, across}){
   );
 }
 
+/* A call's or meeting's Notes (Notes (n) under its details): every note linked to it
+   (callId / meetingId), oldest first, each with its author, time and its own ⋯ (Edit Note,
+   Delete Note). + opens a box to add one. They're ordinary Notes, so the Notes tab shows them
+   too; logging a call or meeting doesn't ask for one. Adding, editing and deleting follow the
+   record's Notes permissions. `own`: an older call's own notes (its `body`), shown first and
+   following the call's permissions. */
+const fmtNoteStamp = (at) => { const d = new Date(at), p = (n) => String(n).padStart(2, '0');
+  return `${fmtActTime(d).replace(/\s+/g, '')} | ${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()}`; };
+function ActivityNoteItem({n, contact, canEdit, canDelete, onSave, onDelete}){
+  const [editing, setEditing] = React.useState(false);
+  const [text, setText] = React.useState('');
+  const [confirm, setConfirm] = React.useState(false);
+  const person = activityActor(n, contact);
+  const plain = (body) => String(body || '').replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>\s*<p[^>]*>/gi, '\n').replace(/<[^>]+>/g, '');
+  const menu = [
+    ...(canEdit ? [{label:'Edit Note', icon:'edit', onClick:()=>{ setText(plain(n.body)); setEditing(true); }}] : []),
+    ...(canDelete ? [{label:'Delete Note', icon:'trash', danger:true, onClick:()=>setConfirm(true)}] : []),
+  ];
+  return (
+    <div style={{display:'flex', flexDirection:'column', gap:6}}>
+      {confirm && <StModal title="Delete Note" primary="Delete Note" danger onCancel={()=>setConfirm(false)}
+        onSubmit={()=>{ setConfirm(false); onDelete(); }}>
+        <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>This removes it from the record. It can't be undone.</div>
+      </StModal>}
+      <div style={{display:'flex', alignItems:'center', gap:8, minHeight:30}}>
+        <div style={{flex:1, minWidth:0, display:'flex', alignItems:'center', gap:6, fontSize:13, color:T.attioMuted}}>
+          {person && <PersonAvatar kind={person.kind} name={person.name}/>}
+          {person && <PersonName kind={person.kind} name={person.name}/>}
+          <span style={{fontSize:11.5, whiteSpace:'nowrap'}}>{fmtNoteStamp(n.at)}</span>
+        </div>
+        {!editing && menu.length > 0 && <DetailMoreMenu items={menu}/>}
+      </div>
+      {editing
+        ? <div style={{display:'flex', flexDirection:'column', gap:8}}>
+            <textarea autoFocus value={text} onChange={e=>setText(e.target.value)} rows={3} aria-label="Note" style={{...fieldText, resize:'vertical', lineHeight:1.5}}/>
+            <div style={{display:'flex', justifyContent:'flex-end', gap:8}}>
+              {saveBar(()=>setEditing(false), ()=>{ onSave(text.trim()); setEditing(false); }, !!text.trim() && text.trim() !== plain(n.body).trim())}
+            </div>
+          </div>
+        : <RichTextView html={n.body} style={{fontSize:13, lineHeight:1.55, color:T.attioText}}/>}
+    </div>
+  );
+}
+function ActivityNotes({a, contact, notes, link, onUpdate, onAdd, own}){
+  const ra = useRecordAccess(), del = useActivityDelete();
+  const [adding, setAdding] = React.useState(false);
+  const [text, setText] = React.useState('');
+  const can = (x, action) => !ra || activityCan(ra.object, ra.record, x, action);
+  const canAddNote = !ra || canAdd(ra.object, ra.record, 'Note');
+  const list = [...(own ? [own] : []), ...[...notes].sort((x, y) => new Date(x.at) - new Date(y.at))];
+  const add = () => { onAdd({id:newId('note'), type:'note', source:'you', by:null, body:text.trim(), [link]:a.id}); setText(''); setAdding(false); };
+  return (
+    <div style={{marginTop:20, paddingTop:20, borderTop:`1px solid ${T.border}`, display:'flex', flexDirection:'column', gap:14}}>
+      <div style={{display:'flex', alignItems:'center', gap:8}}>
+        <span style={{fontSize:14, fontWeight:600, color:T.attioText}}>Notes ({list.length})</span>
+        {canAddNote && <button title="Add note" aria-label="Add note" onClick={()=>setAdding(true)} style={{...btnSecondarySm, padding:'5px 7px'}}>
+          <Icon name="plus" size={13} color={T.attioText}/>
+        </button>}
+      </div>
+      {adding && <div style={{display:'flex', flexDirection:'column', gap:8}}>
+        <textarea autoFocus value={text} onChange={e=>setText(e.target.value)} rows={3} placeholder="Add a note" aria-label="Note" style={{...fieldText, resize:'vertical', lineHeight:1.5}}/>
+        <div style={{display:'flex', justifyContent:'flex-end', gap:8}}>
+          <button onClick={()=>{ setText(''); setAdding(false); }} style={btnSecondarySm}>Cancel</button>
+          <button onClick={add} disabled={!text.trim()} style={btnPrimarySm(!!text.trim())}>Add Note</button>
+        </div>
+      </div>}
+      {list.map(n => n === own
+        ? <ActivityNoteItem key="own" n={{...a, body:a.body}} contact={contact} canEdit={can(a, 'edit')} canDelete={can(a, 'delete')}
+            onSave={body=>onUpdate(a.id, {body})} onDelete={()=>onUpdate(a.id, {body:''})}/>
+        : <ActivityNoteItem key={n.id} n={n} contact={contact} canEdit={can(n, 'edit')} canDelete={can(n, 'delete')}
+            onSave={body=>onUpdate(n.id, {body})} onDelete={()=>del && del(n)}/>)}
+      {!list.length && !adding && <div style={{fontSize:13, color:T.attioMuted}}>No notes yet.</div>}
+    </div>
+  );
+}
+// A meeting's link, opened in a new tab.
+const meetingHref = (url) => /^https?:\/\//i.test(url) ? url : `https://${url}`;
+
 /* A call: "Call" (made through the system — its person and outcome are the real record and
-   stay fixed; comments can still be added and edited) or "Call log" (entered by hand — person,
-   outcome and comments all editable). Comments are Notes linked to the call. */
+   stay fixed) or "Call log" (entered by hand — person and outcome editable). Its Notes follow
+   the details (ActivityNotes). */
 /* `across`: {object, record} when calls from different records are shown together (Tools →
    Calls) — the record leads: "Call to [Record]", and the details add its name and type. */
 function CallDetail({a, contact, team, comments, onUpdate, onAdd, onStub, across}){
-  const blank = () => ({type:callTypeOf(a), poc:callPocValue(a, contact), outcome:a.outcome, own:a.body || '', edits:{}, added:''});
+  const blank = () => ({type:callTypeOf(a), poc:callPocValue(a, contact), outcome:a.outcome});
   const [editing, setEditing] = React.useState(false);
   const [d, setD] = React.useState(blank);
   const set = (p) => setD(x => ({...x, ...p}));
@@ -334,31 +412,21 @@ function CallDetail({a, contact, team, comments, onUpdate, onAdd, onStub, across
       if(d.poc && placed(d)) Object.assign(patch, callPatch(d.type, d.poc));
       if(d.outcome !== a.outcome) patch.outcome = d.outcome;
     }
-    if(ownNotes && d.own.trim() !== (a.body || '').trim()) patch.body = d.own.trim();
     if(Object.keys(patch).length) onUpdate(a.id, patch);
-    Object.entries(d.edits).forEach(([id, body]) => {
-      const n = comments.find(c => c.id === id);
-      if(n && body.trim() && body.trim() !== n.body) onUpdate(id, {body:body.trim()});
-    });
-    if(d.added.trim()) onAdd({id:newId('note'), type:'note', source:'you', by:null, body:d.added.trim(), callId:a.id});
     setEditing(false);
   };
   // Save only once something has actually changed — the same rule for every detail.
-  const dirty = (a.logged && ((d.poc && placed(d)) || d.outcome !== a.outcome))
-    || (ownNotes && d.own.trim() !== (a.body || '').trim())
-    || Object.entries(d.edits).some(([id, body]) => { const n = comments.find(c => c.id === id); return n && body.trim() && body.trim() !== n.body; })
-    || !!d.added.trim();
-  const area = (value, onChange, placeholder, rows = 2) =>
-    <textarea value={value} onChange={e=>onChange(e.target.value)} rows={rows} placeholder={placeholder} style={{...fieldText, resize:'vertical', lineHeight:1.5}}/>;
+  const dirty = a.logged && ((d.poc && placed(d)) || d.outcome !== a.outcome);
   const record = across && across.record;
   const head = detailHead(a, contact, across);
   return (
+    // A call made through the system has nothing to edit (its notes have their own ⋯).
     <DetailFrame head={head} actions={editing ? saveBar(cancel, save, dirty)
-      : activityEditBar(a, ()=>{ setD(blank()); setEditing(true); }, detailMenu({a, onUpdate, onStub, deleteLabel: a.logged ? 'Delete Call Log' : 'Delete Call'}))}>
+      : activityEditBar(a, a.logged ? ()=>{ setD(blank()); setEditing(true); } : null, detailMenu({a, onUpdate, onStub, deleteLabel: a.logged ? 'Delete Call Log' : 'Delete Call'}))}>
       {stack(<>
         {!editing && recordFirst(across)}
         {/* Edit mode shows only what can be edited: call type, point of contact and outcome on
-            a call log, and the comments on any call. */}
+            a call log. */}
         {editing ? (a.logged && <Field label="Call type"><Select value={d.type} options={CALL_TYPES} onChange={v=>v && set({type:v})}/></Field>)
                  : <Field label="Call type"><ReadValue>{callTypeOf(a)}</ReadValue></Field>}
         {/* Tools → Calls is the current user's view: no point of contact there. */}
@@ -370,22 +438,10 @@ function CallDetail({a, contact, team, comments, onUpdate, onAdd, onStub, across
         </>}
         {editing ? (a.logged && <Field label="Call outcome"><Select value={d.outcome} options={LOG_CALL_OUTCOMES} placeholder="Select outcome" onChange={v=>set({outcome:v})}/></Field>)
                  : <Field label="Call outcome"><ReadValue>{a.outcome}</ReadValue></Field>}
-        <Field label="Comment">
-          <div style={{display:'flex', flexDirection:'column', gap:10, paddingTop: editing ? 0 : 7}}>
-            {ownNotes && (editing ? (a.body ? area(d.own, v=>set({own:v})) : null)
-                                  : a.body && <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>{a.body}</div>)}
-            {comments.map(n => editing
-              ? <div key={n.id}>{area(d.edits[n.id] ?? n.body, v=>set({edits:{...d.edits, [n.id]:v}}))}</div>
-              : <div key={n.id} style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>
-                  {n.body}
-                  <div style={{fontSize:11.5, color:T.attioMuted, marginTop:2}}>Saved as a note · {fmtActStamp(n.at)}</div>
-                </div>)}
-            {editing && area(d.added, v=>set({added:v}), 'Add a comment — saved as a note linked to this call')}
-            {!editing && !(ownNotes && a.body) && !comments.length && <div style={{fontSize:13, color:T.attioMuted}}>No comments yet.</div>}
-          </div>
-        </Field>
         {!editing && across && timeStampField(a.at)}
       </>)}
+      {!editing && <ActivityNotes a={a} contact={contact} notes={comments} link="callId" onUpdate={onUpdate} onAdd={onAdd}
+        own={ownNotes && String(a.body || '').trim() ? a : null}/>}
     </DetailFrame>
   );
 }
@@ -500,45 +556,38 @@ function MeetingTranscript({a, onUpdate}){
   </>);
 }
 
-/* A meeting: "Meeting" (started / scheduled through the system — not defined yet; only comments
+/* A meeting: "Meeting" (started / scheduled through the system — not defined yet; only its link
    editable) or "Meeting log" (an online meeting — Google Meet, Zoom, … — logged by hand:
-   organiser, platform, title and comments editable). Always organised by an internal team
-   member. Comments are Notes linked to the meeting (meetingId). */
+   organiser, platform, title and link editable). Always organised by an internal team member.
+   Its Notes (linked by meetingId) follow the details (ActivityNotes). */
 function MeetingDetail({a, contact, team, comments, onUpdate, onAdd, onStub, across}){
-  const blank = () => ({organiser:a.by || null, platform:a.platform || null, title:a.title || '', edits:{}, added:''});
+  const blank = () => ({organiser:a.by || null, platform:a.platform || null, title:a.title || '', link:a.link || ''});
   const [editing, setEditing] = React.useState(false);
   const [d, setD] = React.useState(blank);
   const set = (p) => setD(x => ({...x, ...p}));
   const orig = blank();
   const dirty = (a.logged && (d.organiser !== orig.organiser || d.platform !== orig.platform || d.title.trim() !== orig.title))
-    || Object.entries(d.edits).some(([id, body]) => { const n = comments.find(c => c.id === id); return n && body.trim() && body.trim() !== n.body; })
-    || !!d.added.trim();
+    || d.link.trim() !== orig.link;
   const cancel = () => { setD(blank()); setEditing(false); };
   const save = () => {
+    const patch = {};
     if(a.logged){
-      const patch = {};
       if(d.organiser && d.organiser !== a.by) Object.assign(patch, {source:'team', by:d.organiser});
       if(d.platform !== a.platform) patch.platform = d.platform;
       if(d.title.trim() && d.title.trim() !== a.title) patch.title = d.title.trim();
-      if(Object.keys(patch).length) onUpdate(a.id, patch);
     }
-    Object.entries(d.edits).forEach(([id, body]) => {
-      const n = comments.find(c => c.id === id);
-      if(n && body.trim() && body.trim() !== n.body) onUpdate(id, {body:body.trim()});
-    });
-    if(d.added.trim()) onAdd({id:newId('note'), type:'note', source:'you', by:null, body:d.added.trim(), meetingId:a.id});
+    if(d.link.trim() !== (a.link || '')) patch.link = d.link.trim();
+    if(Object.keys(patch).length) onUpdate(a.id, patch);
     setEditing(false);
   };
-  const area = (value, onChange, placeholder, rows = 2) =>
-    <textarea value={value} onChange={e=>onChange(e.target.value)} rows={rows} placeholder={placeholder} style={{...fieldText, resize:'vertical', lineHeight:1.5}}/>;
   const teamOptions = team.map(n => ({value:n, label: n === contact.owner ? `${n} (Owner)` : n}));
   return (
     <DetailFrame head={detailHead(a, contact, across)} actions={editing ? saveBar(cancel, save, dirty)
       : activityEditBar(a, ()=>{ setD(blank()); setEditing(true); }, detailMenu({a, onUpdate, onStub, deleteLabel: a.logged ? 'Delete Meeting Log' : 'Delete Meeting'}))}>
       {stack(<>
         {!editing && recordFirst(across)}
-        {/* Read-only: Title, Platform, Transcript, Comment, Time Stamp — the organiser is in
-            the header. Edit: organiser, platform, title (logs only) and comments. */}
+        {/* Read-only: Title, Platform, Transcript, Time Stamp, Link — the organiser is in the
+            header; Notes follow. Edit: organiser, platform, title (logs only) and link. */}
         {!editing && <Field label="Title"><ReadValue>{a.title}</ReadValue></Field>}
         {!editing && (a.attendees || []).length > 0 && <Field label="Attendees"><ReadValue>{attendeesText(a.attendees)}</ReadValue></Field>}
         {editing && a.logged && <Field label="Organiser"><Select value={d.organiser} options={teamOptions} onChange={v=>v && set({organiser:v})}/></Field>}
@@ -546,21 +595,15 @@ function MeetingDetail({a, contact, team, comments, onUpdate, onAdd, onStub, acr
                  : <Field label="Platform"><ReadValue>{a.platform}</ReadValue></Field>}
         {!editing && <Field label="Transcript"><MeetingTranscript a={a} onUpdate={onUpdate}/></Field>}
         {editing && a.logged && <Field label="Title"><input value={d.title} onChange={e=>set({title:e.target.value})} style={fieldText}/></Field>}
-        <Field label="Comment">
-          <div style={{display:'flex', flexDirection:'column', gap:10, paddingTop: editing ? 0 : 7}}>
-            {comments.map(n => editing
-              ? <div key={n.id}>{area(d.edits[n.id] ?? n.body, v=>set({edits:{...d.edits, [n.id]:v}}))}</div>
-              : <div key={n.id} style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>
-                  {n.body}
-                  <div style={{fontSize:11.5, color:T.attioMuted, marginTop:2}}>Saved as a note · {fmtActStamp(n.at)}</div>
-                </div>)}
-            {editing && area(d.added, v=>set({added:v}), 'Add a comment — saved as a note linked to this meeting')}
-            {!editing && !comments.length && <div style={{fontSize:13, color:T.attioMuted}}>No comments yet.</div>}
-          </div>
-        </Field>
+        {editing && <Field label="Link"><input value={d.link} onChange={e=>set({link:e.target.value})} placeholder="Meeting link" style={fieldText}/></Field>}
         {!editing && personLed(across) && recordFields(across)}
         {!editing && <Field label="Time Stamp"><ReadValue>{fmtActStamp(a.at)}</ReadValue></Field>}
+        {!editing && <Field label="Link">{a.link
+          ? <div style={{paddingTop:7, fontSize:13, minWidth:0, overflowWrap:'anywhere'}}><a href={meetingHref(a.link)} target="_blank" rel="noopener noreferrer"
+              style={{color:T.blue, textDecorationLine:'underline', textUnderlineOffset:2}}>{a.link}</a></div>
+          : <ReadValue/>}</Field>}
       </>)}
+      {!editing && <ActivityNotes a={a} contact={contact} notes={comments} link="meetingId" onUpdate={onUpdate} onAdd={onAdd}/>}
     </DetailFrame>
   );
 }
@@ -699,12 +742,10 @@ function NewLogCall({contact, team, onAdd, onDone, fixedPoc}){
   // The point of contact (the call's responsible person): the record owner unless another is picked.
   const [poc, setPoc] = useOwnerDefault(contact, team, fixedPoc);
   const [outcome, setOutcome] = React.useState(null);
-  const [comment, setComment] = React.useState('');
   const ok = !!type && !!poc && !!outcome;
   const save = () => {
     const id = newId('call');
     onAdd({id, type:'call', logged:true, outcome, durationMin:0, body:'', ...callPatch(type, poc)});
-    if(comment.trim()) onAdd({id:newId('note'), type:'note', source:'you', by:null, body:comment.trim(), callId:id});
     onDone(id);
   };
   return (
@@ -712,23 +753,18 @@ function NewLogCall({contact, team, onAdd, onDone, fixedPoc}){
       <Field label="Call type"><Select value={type} options={CALL_TYPES} placeholder="Select call type" onChange={setType}/></Field>
       {!fixedPoc && <Field label="Point of contact"><PersonPicker value={poc} team={team} contact={contact} onChange={setPoc}/></Field>}
       <Field label="Call outcome"><Select value={outcome} options={LOG_CALL_OUTCOMES} placeholder="Select outcome" onChange={setOutcome}/></Field>
-      <Field label="Comment">
-        <textarea value={comment} onChange={e=>setComment(e.target.value)} rows={3} placeholder="Optional — saved as a note linked to this call"
-          style={{...fieldText, resize:'vertical', lineHeight:1.5}}/>
-      </Field>
     </NewItemPanel>
   );
 }
 
 function NewLogMeeting({contact, team, onAdd, onDone}){
-  const [m, setM] = React.useState({platform:null, title:'', comment:'', attendees:[]});
+  const [m, setM] = React.useState({platform:null, title:'', link:'', attendees:[]});
   const [organiser, setOrganiser] = useOwnerDefault(contact, team);
   const set = (p) => setM(x => ({...x, ...p}));
   const ok = !!organiser && !!m.platform && !!m.title.trim();
   const save = () => {
     const id = newId('meeting');
-    onAdd({id, type:'meeting', logged:true, source:'team', by:organiser, platform:m.platform, title:m.title.trim(), attendees:m.attendees});
-    if(m.comment.trim()) onAdd({id:newId('note'), type:'note', source:'you', by:null, body:m.comment.trim(), meetingId:id});
+    onAdd({id, type:'meeting', logged:true, source:'team', by:organiser, platform:m.platform, title:m.title.trim(), attendees:m.attendees, ...(m.link.trim() ? {link:m.link.trim()} : {})});
     onDone(id);
   };
   return (
@@ -737,10 +773,7 @@ function NewLogMeeting({contact, team, onAdd, onDone}){
       <Field label="Attendees"><AttendeesField value={m.attendees} team={team} contact={contact} onChange={v=>set({attendees:v})}/></Field>
       <Field label="Platform"><Select value={m.platform} options={MEETING_PLATFORMS} placeholder="Select platform" onChange={v=>set({platform:v})}/></Field>
       <Field label="Title"><input value={m.title} onChange={e=>set({title:e.target.value})} placeholder="Meeting title" style={fieldText}/></Field>
-      <Field label="Comment">
-        <textarea value={m.comment} onChange={e=>set({comment:e.target.value})} rows={3} placeholder="Optional — saved as a note linked to this meeting"
-          style={{...fieldText, resize:'vertical', lineHeight:1.5}}/>
-      </Field>
+      <Field label="Link"><input value={m.link} onChange={e=>set({link:e.target.value})} placeholder="Meeting link (optional)" style={fieldText}/></Field>
     </NewItemPanel>
   );
 }

@@ -523,7 +523,7 @@ function ConsequencesModal({title = 'Review changes', lines, blockers, confirmLa
 
 const OBJECT_COLS = [
   {key:'name', label:'Record Name', width:240}, {key:'records', label:'Total Entries', width:120}, {key:'assoc', label:'Associated Records', width:180},
-  {key:'props', label:'Properties', width:160}, {key:'group', label:'Group', width:160},
+  {key:'props', label:'Properties', width:160}, {key:'group', label:'Group', width:160}, {key:'createdBy', label:'Created By', width:170},
 ];
 /* `records`: each Object's records ({contacts, deals, customers}); an Object without a records
    store has none. The Records count is information only (not a link). */
@@ -537,9 +537,10 @@ function ObjectsSettings({data, setData, navigate, records = {}, updateRecords, 
   // Quick Search: open the record type's details.
   React.useEffect(() => { if(!target) return; if(target.kind === 'record') setDetails(target.id); onTargetDone && onTargetDone(); }, [target && target.nonce]);
   const recordCount = (id) => (records[id] || []).length;
-  const rows = React.useMemo(()=>data.objects.map(o => {
+  // Settings & Administration → Records: each record type shows to those who may view it.
+  const rows = React.useMemo(()=>data.objects.filter(o => adminRecordsCan('view', o)).map(o => {
     const a = objectAssociations(data, o.id).length, p = objectProperties(data, o.id).length;
-    return {...o, assocCount:a, propCount:p, assoc:String(a), props:String(p), records:String(recordCount(o.id))};
+    return {...o, assocCount:a, propCount:p, assoc:String(a), props:String(p), records:String(recordCount(o.id)), createdBy:creatorOf(o)};
   }), [data.objects, data.associations, data.properties, records]);
   const schema = {
     properties:OBJECT_COLS, filterProps:[{key:'name', label:'Record Name', type:'text'}, {key:'group', label:'Group', type:'select'}],
@@ -553,11 +554,12 @@ function ObjectsSettings({data, setData, navigate, records = {}, updateRecords, 
       : key === 'name' ? <ContactName name={r.name} onOpen={()=>setDetails(r.id)} style={{fontSize:'inherit', fontWeight:500}}/>
       : undefined,
     // Actions: the workflow quick action (record types workflows run on), then ⋯.
-    renderActions: (r) => actionsWithWorkflow(workflowsAvailableFor(r.id), ()=>setWorkflow(newWorkflowDraft({object:r.id}, {type:'record', objectId:r.id})),
-      <RowActionsMenu title="Record actions" items={[
-        {label:'Edit Record', onClick:()=>setStub(`Edit ${r.name}`)},
-        {label:'Delete Record', danger:true, onClick:()=>setDeleting(data.objects.find(o => o.id === r.id))},
-      ]}/>),
+    renderActions: (r) => { const o = data.objects.find(x => x.id === r.id); const items = [
+        ...(adminRecordsCan('edit', o) ? [{label:'Edit Record', onClick:()=>setStub(`Edit ${r.name}`)}] : []),
+        ...(adminRecordsCan('delete', o) ? [{label:'Delete Record', danger:true, onClick:()=>setDeleting(data.objects.find(o => o.id === r.id))}] : []),
+      ];
+      return actionsWithWorkflow(workflowsAvailableFor(r.id) && workflowCan('create'), ()=>setWorkflow(newWorkflowDraft({object:r.id}, {type:'record', objectId:r.id})),
+        items.length ? <RowActionsMenu title="Record actions" items={items}/> : null); },
   };
   return (
     <div style={{position:'relative', flex:1, minHeight:0, display:'flex', flexDirection:'column', overflow:'hidden'}}>
@@ -565,11 +567,13 @@ function ObjectsSettings({data, setData, navigate, records = {}, updateRecords, 
       <div style={{display:'flex', flexDirection:'column', flex:1, minHeight:0}}>
         {/* Its own store: views saved before the rename were called All Objects, without Total Entries. */}
         <RecordViewsModule flushTop storeKey="views:ov-all-v2" schema={schema} rows={rows} columns={OBJECT_COLS.map(c => c.key)} defaultViews={[{id:'ov-all', name:'All Records'}]}
-          actions={() => <button onClick={()=>setCreating(true)} title="Create Record" style={iconBtn}><Icon name="plus" size={14} color={T.gray800}/></button>}/>
+          actions={() => adminRecordsCan('create') && <button onClick={()=>setCreating(true)} title="Create Record" style={iconBtn}><Icon name="plus" size={14} color={T.gray800}/></button>}/>
       </div>
       {creating && <CreateObjectPanel data={data} onClose={()=>setCreating(false)}
         onCreate={(obj, assocs, props) => {
-          setData(d => ({...d, objects:[...d.objects, obj], associations:[...d.associations, ...assocs], properties:[...d.properties, ...props]}));
+          // A new record type and its properties are their creator's.
+          const by = CURRENT_USER.name;
+          setData(d => ({...d, objects:[...d.objects, {...obj, createdBy:by}], associations:[...d.associations, ...assocs], properties:[...d.properties, ...props.map(p => ({...p, createdBy:by}))]}));
           setCreating(false);
         }}/>}
       {deleting && <DeleteObjectModal data={data} object={deleting} recordCount={recordCount(deleting.id)} onClose={()=>setDeleting(null)}
@@ -816,7 +820,7 @@ const CreateObjectPanel = ({data, onClose, onCreate}) => <RecordTypePanel data={
 /* ── Settings → Properties ── every property; each belongs to one Object. ─────────────────── */
 
 const PROPERTY_COLS = [
-  {key:'label', label:'Property Label', width:260}, {key:'type', label:'Property Type', width:200}, {key:'objectName', label:'Record', width:180},
+  {key:'label', label:'Property Label', width:260}, {key:'type', label:'Property Type', width:200}, {key:'objectName', label:'Record', width:180}, {key:'createdBy', label:'Created By', width:170},
 ];
 function PropertiesSettings({data, setData, records = {}, updateRecords, onWorkflowOpen, target, onTargetDone}){
   const [editing, setEditing] = React.useState(null);   // 'new' | property
@@ -845,21 +849,28 @@ function PropertiesSettings({data, setData, records = {}, updateRecords, onWorkf
   const [stub, setStub] = React.useState(null);
   const [fromObject] = React.useState(data.propertiesObjectId);
   React.useEffect(()=>{ if(data.propertiesObjectId) setData(d => ({...d, propertiesObjectId:null})); }, []);
-  const rows = data.properties.map(p => ({...p, id:`${p.objectId}:${p.key}`, objectName:objectName(data, p.objectId), type:propertyTypeId(p.type)}));
+  const rows = data.properties.map(p => ({...p, id:`${p.objectId}:${p.key}`, objectName:objectName(data, p.objectId), type:propertyTypeId(p.type), createdBy:creatorOf(p)}));
+  // Users' properties have no Properties permissions; the record types' follow Settings & Administration → Properties (by who created each).
+  const propCan = (objectId, action, prop) => !ADMIN_RECORD_OBJECTS.includes(objectId) || adminPropertyCan(objectId, action, prop);
+  const addableHolders = PROPERTY_HOLDERS(data).filter(o => propCan(o.id, 'add'));
   const archivedTag = <span style={{marginLeft:8, fontSize:11.5, fontWeight:500, color:T.gray600, background:T.headerBg, borderRadius:9999, padding:'1px 8px'}}>Archived</span>;
   const schema = {
     properties:PROPERTY_COLS, noun:'property', nounPlural:'properties', searchKeys:['label', 'type', 'objectName'], fillWidth:true,
     filterProps:[{key:'label', label:'Property Label', type:'text'}, {key:'type', label:'Property Type', type:'select'}, {key:'objectName', label:'Record', type:'select'}],
     selectValues:{type:[...PROPERTY_TYPES, ...SYSTEM_PROPERTY_TYPES], objectName:PROPERTY_HOLDERS(data).map(o => o.name)},
     // Actions: the workflow quick action (a property workflows can watch — its Record and Property as the context), then ⋯.
-    renderActions: (r) => actionsWithWorkflow(workflowsAvailableFor(r.objectId) && triggerProperties(data, r.objectId).some(p => p.key === r.key),
-      ()=>setWorkflow(newWorkflowDraft({object:r.objectId, property:r.key}, {type:'property', objectId:r.objectId, propertyKey:r.key})),
-      <RowActionsMenu title="Property actions" items={[
-        {label:'Edit property', onClick:()=>setEditing(findProp(r))},
+    /* Settings & Administration → Properties (per record type): Edit (archiving and restoring
+       included) and Delete, property by property. User Properties aren't covered by them. */
+    renderActions: (r) => { const canEdit = propCan(r.objectId, 'edit', findProp(r)), canDelete = propCan(r.objectId, 'delete', findProp(r));
+      const items = [
+        ...(canEdit ? [{label:'Edit property', onClick:()=>setEditing(findProp(r))}] : []),
         // The record's name, owner, pipeline and stage stay (the record relies on them).
-        ...(r.locked ? [] : [r.archived ? {label:'Restore property', onClick:()=>setArchived(findProp(r), false)} : {label:'Archive property', onClick:()=>archive(findProp(r))},
-          {label:'Delete property', danger:true, onClick:()=>remove(findProp(r))}]),
-      ]}/>),
+        ...(r.locked ? [] : [...(canEdit ? [r.archived ? {label:'Restore property', onClick:()=>setArchived(findProp(r), false)} : {label:'Archive property', onClick:()=>archive(findProp(r))}] : []),
+          ...(canDelete ? [{label:'Delete property', danger:true, onClick:()=>remove(findProp(r))}] : [])]),
+      ];
+      return actionsWithWorkflow(workflowsAvailableFor(r.objectId) && workflowCan('create') && triggerProperties(data, r.objectId).some(p => p.key === r.key),
+        ()=>setWorkflow(newWorkflowDraft({object:r.objectId, property:r.key}, {type:'property', objectId:r.objectId, propertyKey:r.key})),
+        items.length ? <RowActionsMenu title="Property actions" items={items}/> : null); },
     renderCell: (key, r) => key === 'label' && r.archived ? <span style={{color:T.gray600}}>{r.label}{archivedTag}</span> : undefined,
   };
   /* Views: All Properties, Contact / Deal / Customer Properties (by default). From a record type's
@@ -877,14 +888,16 @@ function PropertiesSettings({data, setData, records = {}, updateRecords, onWorkf
           defaultViews={[{id:'prv-all', name:'All Properties'}, {id:'prv-contacts', name:'Contact Properties', filters:objectFilter(objectName(data, 'contacts'))},
             {id:'prv-deals', name:'Deal Properties', filters:objectFilter(objectName(data, 'deals'))}, {id:'prv-customers', name:'Customer Properties', filters:objectFilter(objectName(data, 'customers'))},
             {id:'prv-users', name:'User Properties', filters:objectFilter('Users')}]} focus={focus}
-          actions={() => <button onClick={()=>setEditing('new')} title="Add Property" style={iconBtn}><Icon name="plus" size={14} color={T.gray800}/></button>}/>
+          actions={() => addableHolders.length > 0 && <button onClick={()=>setEditing('new')} title="Add Property" style={iconBtn}><Icon name="plus" size={14} color={T.gray800}/></button>}/>
       </div>
-      {editing && <PropertyModal data={data} property={editing === 'new' ? null : editing} defaultObjectId={fromObject} onClose={()=>setEditing(null)}
+      {editing && <PropertyModal data={data} property={editing === 'new' ? null : editing} holders={editing === 'new' ? addableHolders : null}
+        defaultObjectId={editing === 'new' && !addableHolders.some(o => o.id === fromObject) ? (addableHolders[0] || {}).id : fromObject} onClose={()=>setEditing(null)}
         onSave={(p) => {
           const before = editing === 'new' ? null : editing;
           const apply = () => {
             if(before) applyEffects([{kind:'edit', before, after:p}]);
-            setData(d => ({...d, properties: !before ? [...d.properties, p] : d.properties.map(x => same(x, before) ? p : x)}));
+            // A new property is its creator's.
+            setData(d => ({...d, properties: !before ? [...d.properties, {...p, createdBy:CURRENT_USER.name}] : d.properties.map(x => same(x, before) ? p : x)}));
             setEditing(null);
           };
           if(before) reviewThen({kind:'edit', before, after:p}, `Change ${before.label}`, 'Save changes', false, apply); else apply();
@@ -902,7 +915,8 @@ function PropertiesSettings({data, setData, records = {}, updateRecords, onWorkf
    belongs to, and that Object's settings — Available During Creation and Mandatory (only when
    available). An existing contact field keeps its label, type and Object; Name and Contact Owner
    stay locked on. */
-function PropertyModal({data, property, defaultObjectId, onClose, onSave}){
+// `holders`: the record types a new property can be added to (the signed-in user's Add permission).
+function PropertyModal({data, property, defaultObjectId, onClose, onSave, holders}){
   const editing = !!property;
   const system = editing && property.system;
   const [label, setLabel] = React.useState(property ? property.label : '');
@@ -950,7 +964,7 @@ function PropertyModal({data, property, defaultObjectId, onClose, onSave}){
             {/* An existing property stays on its record (its values are there). */}
             {editing
               ? <div style={{...fieldInput, background:T.pageBg, color:T.gray600}}>{objectName(data, objectId)}</div>
-              : <SearchableSelect value={objectId} options={PROPERTY_HOLDERS(data).map(o => ({value:o.id, label:o.name}))} onChange={setObjectId}
+              : <SearchableSelect value={objectId} options={(holders || PROPERTY_HOLDERS(data)).map(o => ({value:o.id, label:o.name}))} onChange={setObjectId}
                   placeholder="Select record" searchPlaceholder="Search records"/>}
           </div>
           {/* Users have no creation form here (they come from HRMS). */}
@@ -967,7 +981,7 @@ function PropertyModal({data, property, defaultObjectId, onClose, onSave}){
    pipelines is not defined yet. */
 const PIPELINE_COLS = [
   {key:'label', label:'Pipeline Name', width:260}, {key:'objectName', label:'Record', width:200}, {key:'entryCount', label:'Total Entries', width:140},
-  {key:'stageCount', label:'Stages', width:140}, {key:'workflowCount', label:'Workflows', width:140},
+  {key:'stageCount', label:'Stages', width:140}, {key:'workflowCount', label:'Workflows', width:140}, {key:'createdBy', label:'Created By', width:170},
 ];
 
 /* ── New Pipeline (Settings → Pipelines → +) ── the creation side panel, as for Calls, Notes and
@@ -1030,7 +1044,7 @@ function NewPipelinePanel({data, records = {}, onCancel, onSave}){
           {taken && <div style={{fontSize:12, color:T.red, marginTop:4}}>This record already has a pipeline with this name.</div>}
         </Field>
         <Field label="Record">
-          <Select value={objectId} placeholder="Select record" options={RECORD_OBJECTS.map(id => ({value:id, label:objectName(data, id)}))}
+          <Select value={objectId} placeholder="Select record" options={RECORD_OBJECTS.filter(id => pipelineAdminCan(id, 'create')).map(id => ({value:id, label:objectName(data, id)}))}
             onChange={v=>{ setObjectId(v || ''); setPropertyKey(''); if(v === 'contacts') setKind('property'); }}/>
         </Field>
         <Field label="Type">
@@ -1118,7 +1132,8 @@ function PipelinesSettings({data, setData, records = {}, onWorkflowOpen, target,
   const workflowsOf = (id) => (data.workflows || []).filter(w => (w.context && w.context.pipeline === id) || (w.origin && w.origin.pipelineId === id)).length;
   // Total Entries: the pipeline's record type's records that are in it (a stage of it — by their pipeline, or by the property it follows).
   const entriesOf = (p) => (records[p.objectId] || []).filter(r => stageIdOf(p, r)).length;
-  const rows = (data.pipelines || []).map(p => ({...p, objectName:objectName(data, p.objectId), entryCount:String(entriesOf(p)), stageCount:p.stages.length, workflowCount:workflowsOf(p.id)}));
+  // Settings & Administration → Pipelines (per record type): View shows its pipelines; Create, Edit, Delete.
+  const rows = (data.pipelines || []).filter(p => pipelineAdminCan(p.objectId, 'view', p)).map(p => ({...p, createdBy:creatorOf(p), objectName:objectName(data, p.objectId), entryCount:String(entriesOf(p)), stageCount:p.stages.length, workflowCount:workflowsOf(p.id)}));
   const schema = {
     properties:PIPELINE_COLS, noun:'pipeline', searchKeys:['label', 'objectName'], fillWidth:true, canCreateProperty:false,
     filterProps:[{key:'label', label:'Pipeline Name', type:'text'}, {key:'objectName', label:'Record', type:'select'}],
@@ -1129,8 +1144,8 @@ function PipelinesSettings({data, setData, records = {}, onWorkflowOpen, target,
       : key === 'label' ? <ContactName name={r.label} onOpen={()=>setOpenId(r.id)} style={{fontSize:'inherit', fontWeight:500}}/>
       : undefined,
     // The workflow quick action, then ⋯ Add Workflow (a new workflow for this pipeline), Edit, Delete.
-    renderActions: (r) => actionsWithWorkflow(workflowsAvailableFor(r.objectId), ()=>setOpen({id:r.id, workflow:true}), <RowActionsMenu title="Pipeline actions" width={MENU_W}
-      items={[...(workflowsAvailableFor(r.objectId) ? [{label:'Add Workflow', onClick:()=>setOpen({id:r.id, workflow:true})}] : []), ...pipelineMenuItems(r, records[r.objectId], ()=>setEditingId(r.id), r.objectName.replace(/s$/, '').toLowerCase())]}/>),
+    renderActions: (r) => actionsWithWorkflow(workflowsAvailableFor(r.objectId) && workflowCan('create'), ()=>setOpen({id:r.id, workflow:true}), <RowActionsMenu title="Pipeline actions" width={MENU_W}
+      items={[...(workflowsAvailableFor(r.objectId) && workflowCan('create') ? [{label:'Add Workflow', onClick:()=>setOpen({id:r.id, workflow:true})}] : []), ...pipelineMenuItems(r, records[r.objectId], ()=>setEditingId(r.id), r.objectName.replace(/s$/, '').toLowerCase())]}/>),
   };
   return (
     <div style={{position:'relative', flex:1, minHeight:0, display:'flex', flexDirection:'column', overflow:'hidden'}}>
@@ -1138,13 +1153,13 @@ function PipelinesSettings({data, setData, records = {}, onWorkflowOpen, target,
       <div style={{display:'flex', flexDirection:'column', flex:1, minHeight:0}}>
         {/* New pipeline: the "+" beside View Settings (no Save View here), as Create Record on Records. */}
         <RecordViewsModule flushTop storeKey="views:plv-all-v2" schema={schema} rows={rows} columns={PIPELINE_COLS.map(c => c.key)} defaultViews={[{id:'plv-all', name:'All Pipelines'}]} saveView={false}
-          actions={() => <button onClick={()=>setCreating(true)} title="New pipeline" aria-label="New pipeline" style={iconBtn}><Icon name="plus" size={14} color={T.gray800}/></button>}/>
+          actions={() => RECORD_OBJECTS.some(o => pipelineAdminCan(o, 'create')) && <button onClick={()=>setCreating(true)} title="New pipeline" aria-label="New pipeline" style={iconBtn}><Icon name="plus" size={14} color={T.gray800}/></button>}/>
       </div>
     </SettingsPage>
     {open && <PipelinePanel key={`${open.id}-${open.workflow ? 'wf' : 'stages'}`} data={data} setData={setData} pipelineId={open.id} deals={records[((data.pipelines || []).find(p => p.id === open.id) || {}).objectId] || []}
       startWorkflow={!!open.workflow} onClose={()=>setOpen(null)} onStub={setStub} onWorkflowOpen={onWorkflowOpen}/>}
     {creating && <NewPipelinePanel data={data} records={records} onCancel={()=>setCreating(false)}
-      onSave={(p)=>{ setData(d => ({...d, pipelines:[...(d.pipelines || []), p]})); setCreating(false); }}/>}
+      onSave={(p)=>{ setData(d => ({...d, pipelines:[...(d.pipelines || []), {...p, createdBy:CURRENT_USER.name}]})); setCreating(false); }}/>}
     {editingId && <EditPipelineModal pipeline={data.pipelines.find(p => p.id === editingId)} setData={setData} onClose={()=>setEditingId(null)}/>}
     {stub && <StubPanel title={stub} onClose={()=>setStub(null)} zIndex={110}/>}
     </div>

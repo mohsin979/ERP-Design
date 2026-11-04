@@ -1,4 +1,6 @@
-/* HOF Pulse ERP — Services (CRM → Tools → Services).
+/* HOF Pulse ERP — Services (Settings → Templates → Services; a kind of template).
+   Settings & Administration permissions (Templates → Services) decide who sees, creates, edits and
+   deletes each service (by who created it — the sample services are no one's).
 
    The workspace's service catalog — what quotations are built from (quotes.jsx). A service has
    a name, a description (rich text, richText.jsx) and its milestones: the stages the service is
@@ -52,7 +54,7 @@ const withMilestonePrices = (s) => (s.milestones || []).some(m => m.price != nul
   : {...s, milestones:s.milestones.map((m, i) => ({...m, price: i === 0 ? Number(s.price) || 0 : 0}))};
 const servicePrice = (s) => (s.milestones || []).length ? s.milestones.reduce((sum, m) => sum + (Number(m.price) || 0), 0) : Number(s.price) || 0;
 const richPlain = (html) => { const d = document.createElement('div'); d.innerHTML = richHtmlOf(html); return d.textContent.replace(/\s+/g, ' ').trim(); };
-const serviceRow = (s) => ({...s, price:servicePrice(s), priceText:fmtMoney(servicePrice(s), s.currency), milestoneCount:(s.milestones || []).length, description:richPlain(s.description)});
+const serviceRow = (s) => ({...s, createdBy:creatorOf(s), price:servicePrice(s), priceText:fmtMoney(servicePrice(s), s.currency), milestoneCount:(s.milestones || []).length, description:richPlain(s.description)});
 
 /* A side panel over the page (a service, a quotation, an activity on the Tools pages): the
    Contact side panel's header, its content scrolling below. */
@@ -162,7 +164,7 @@ function ServiceDetail({service: raw}){
 
 const SERVICE_COLUMNS = [
   {key:'name', label:'Service Name', width:240}, {key:'priceText', label:'Price', width:150}, {key:'milestoneCount', label:'Milestones', width:120},
-  {key:'description', label:'Description', width:360}, {key:'created', label:'Created', width:140},
+  {key:'description', label:'Description', width:360}, {key:'created', label:'Created', width:140}, {key:'createdBy', label:'Created By', width:170},
 ];
 function ServicesPage(){
   const hub = useRecordHub();
@@ -170,34 +172,37 @@ function ServicesPage(){
   const [form, setForm] = React.useState(null);        // {initial?}
   const [openId, setOpenId] = React.useState(null);
   const [deleting, setDeleting] = React.useState(null);
-  const open = services.find(s => s.id === openId) || null;
+  const can = (action, s) => templateCan('services', action, s);
+  const shown = services.filter(s => can('view', s));
+  const open = shown.find(s => s.id === openId) || null;
   const quotedIn = (id) => hub.quotes.filter(q => (q.items || []).some(it => it.serviceId === id)).length;
   // Bulk Actions: Delete (as a service's Delete).
-  const serviceBulk = useTableBulkDelete({rows:services, noun:'service',
+  const serviceBulk = useTableBulkDelete({rows:shown, noun:'service', canDelete:(s) => can('delete', s), skipNote:'not yours to delete',
     remove:(ids) => { setServices(ss => ss.filter(s => !ids.includes(s.id))); if(ids.includes(openId)) setOpenId(null); }, onDone:(n) => hub.toast(`${bulkPlural(n, 'service')} deleted`)});
   const schema = {
     properties:SERVICE_COLUMNS, noun:'service', searchKeys:['name', 'description'], canCreateProperty:false, bulkActions:serviceBulk.bulkActions,
     filterProps:[{key:'name', label:'Service Name', type:'text'}, {key:'price', label:'Price', type:'number'}, {key:'milestoneCount', label:'Milestones', type:'number'}],
     selectValues:{},
     renderCell:(key, r) => key === 'name' ? <ContactName name={r.name} onOpen={()=>setOpenId(r.id)} style={{fontSize:'inherit', fontWeight:500}}/> : undefined,
-    renderActions:(r) => <RowActionsMenu title="Service actions" width={MENU_W} items={[
-      {label:'View service', onClick:()=>setOpenId(r.id)}, {label:'Edit service', onClick:()=>setForm({initial:services.find(s => s.id === r.id)})},
-      {label:'Delete service', danger:true, onClick:()=>setDeleting(services.find(s => s.id === r.id))}]}/>,
+    renderActions:(r) => { const s = services.find(x => x.id === r.id);
+      return <RowActionsMenu title="Service actions" width={MENU_W} items={[
+        {label:'View service', onClick:()=>setOpenId(r.id)}, ...(can('edit', s) ? [{label:'Edit service', onClick:()=>setForm({initial:s})}] : []),
+        ...(can('delete', s) ? [{label:'Delete service', danger:true, onClick:()=>setDeleting(s)}] : [])]}/>; },
   };
   const save = (vals) => {
     if(form.initial) setServices(ss => ss.map(s => s.id === form.initial.id ? {...s, ...vals} : s));
-    else { const id = `svc-${Date.now().toString(36)}`; setServices(ss => [...ss, {id, created:todayLabel(), ...vals}]); setOpenId(id); }
+    else { const id = `svc-${Date.now().toString(36)}`; setServices(ss => [...ss, {id, created:todayLabel(), createdBy:CURRENT_USER.name, ...vals}]); setOpenId(id); }
     setForm(null);
     hub.toast(form.initial ? 'Service saved' : 'Service created');
   };
   return (
     <div style={{flex:1, minWidth:0, minHeight:0, display:'flex', flexDirection:'column', position:'relative', overflow:'hidden'}}>
-      <RecordViewsModule inset="page" schema={schema} rows={services.map(serviceRow)} columns={SERVICE_COLUMNS.map(c => c.key)}
+      <RecordViewsModule schema={schema} rows={shown.map(serviceRow)} columns={SERVICE_COLUMNS.map(c => c.key)}
         defaultViews={[{id:'svcv-all', name:'All Services', sort:{key:'name', dir:'asc'}}]}
-        actions={(btn) => <button onClick={()=>{ setOpenId(null); setForm({}); }} title="New service" style={toolbarIconButton}><Icon name="plus" size={14} color={T.gray800}/></button>}
+        actions={() => can('create') && <StCta icon="plus" label="New service" onClick={()=>{ setOpenId(null); setForm({}); }}/>}
         overlay={form ? <ServiceFormPanel key={form.initial ? form.initial.id : 'new'} initial={form.initial} onCancel={()=>setForm(null)} onSave={save}/>
           : open && <PageSidePanel title={open.name} subtitle={fmtMoney(open.price, open.currency)} onClose={()=>setOpenId(null)}
-          menuItems={[{label:'Edit service', onClick:()=>setForm({initial:open})}, {label:'Delete service', danger:true, onClick:()=>setDeleting(open)}]}>
+          menuItems={[...(can('edit', open) ? [{label:'Edit service', onClick:()=>setForm({initial:open})}] : []), ...(can('delete', open) ? [{label:'Delete service', danger:true, onClick:()=>setDeleting(open)}] : [])]}>
           <ServiceDetail service={open}/>
         </PageSidePanel>}/>
       {serviceBulk.bulkModal}

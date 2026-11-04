@@ -391,6 +391,8 @@ function PfFieldInput({field, value, onChange, invalid, extra}){
    has a different answer, the found one is offered beside it. Saving keeps each answer's source. */
 /* `title` / `primary`: Create customer profile · Create, or Edit customer profile · Save changes.
    `search`: a field search at the top (as Edit contact has). */
+/* Only the properties the signed-in user may edit are offered (Customer Profile Properties); the
+   others keep their answers. */
 function ProfileFormFillPanel({contact, form, current, found = {}, sourcesRead, onBack, onCancel, onSave, top: topExtra, title, primary = 'Save', search}){
   const cur = (current && current.values) || {}, curMeta = (current && current.meta) || {};
   const blank = (x) => x == null || x === '';
@@ -409,7 +411,8 @@ function ProfileFormFillPanel({contact, form, current, found = {}, sourcesRead, 
   const [query, setQuery] = React.useState('');
   const visible = pfVisibleFields(form, values);
   const q = query.trim().toLowerCase();
-  const listed = q ? visible.filter(f => String(f.label).toLowerCase().includes(q)) : visible;
+  const editable = visible.filter(f => profilePropCan(form.id, f.id));
+  const listed = q ? editable.filter(f => String(f.label).toLowerCase().includes(q)) : editable;
   const errorOf = (f) => propertyValueError(pfProp(f), values[f.id], false);
   const problems = visible.filter(f => errorOf(f));
   const foundCount = Object.keys(found).length;
@@ -709,6 +712,7 @@ function ProfileByHand({contact, startForm, onCancel, onSave, editing}){
 
 /* ── Customer Profile tab ──────────────────────────────────────────────────────────────────── */
 // One profile's answers: property on the left, value with its edit icon at the far right.
+// Answers are edited in place where the property may be edited (Customer Profile Properties).
 function PfRows({contact, form, current}){
   const store = useProfileForms();
   const values = (current && current.values) || {};
@@ -716,13 +720,14 @@ function PfRows({contact, form, current}){
   return (
     <div>
       {visible.map(f => {
-        const p = pfProp(f), v = values[f.id];
+        const p = pfProp(f), v = values[f.id], canEdit = profilePropCan(form.id, f.id);
         return (
           <div key={f.id} style={{display:'grid', gridTemplateColumns:'minmax(0, 1fr) minmax(0, 1fr)', alignItems:'baseline', gap:16, padding:'9px 0', borderTop:`1px solid ${T.attioLine}`}}>
             <span style={{fontSize:12.5, color:T.attioMuted, lineHeight:1.4}}>{f.label}</span>
+            {!canEdit ? <span style={{fontSize:13, color: pfBlank(v) ? T.attioFaint : T.attioText, textAlign:'right', overflowWrap:'anywhere'}}>{pfBlank(v) ? '—' : pfFormat(f, v)}</span> :
             <OwnerEditableValue prop={p} value={pfBlank(v) ? '' : storePropertyValueOf(p, v)} display={pfBlank(v) ? '' : pfFormat(f, v)} pencil="always" align="right"
               onSave={(stored)=>{ const v = pfBlank(stored) ? '' : loadPropertyValueOf(p, stored);
-                store.saveField(contact.id, form.id, f.id, formFieldType(f.type) === 'Number' && !pfBlank(v) ? Number(v) : v); }}/>
+                store.saveField(contact.id, form.id, f.id, formFieldType(f.type) === 'Number' && !pfBlank(v) ? Number(v) : v); }}/>}
           </div>
         );
       })}
@@ -739,14 +744,17 @@ function CustomerProfileTab({contact}){
   // A customer profile exists once any of its templates has been filled in.
   const exists = store.forms.some(f => mine[f.id]);
   const current = form && mine[form.id];
+  /* Customer Profile Properties (on every record): filling in or editing needs at least one
+     editable property; Run Customer Profile fills in any of them, so it needs All Properties. */
+  const can = (action) => action === 'run' ? profilePropsAll() : profileEditAny();
   const panel = mode === 'run' ? <ProfileRunWizard contact={contact} form={form} onCancel={()=>setMode(null)} onSave={()=>setMode(null)}/>
     : mode === 'hand' || mode === 'edit' ? <ProfileByHand contact={contact} startForm={form} editing={mode === 'edit'} onCancel={()=>setMode(null)} onSave={()=>setMode(null)}/> : null;
   if(!exists || !form) return (
     <div style={{padding:'20px 24px 32px'}}>
-      <EmptyState illustration="profile" title="No customer profile yet" action={form && (
+      <EmptyState illustration="profile" title="No customer profile yet" action={form && can('create') && (
         <div style={{display:'flex', alignItems:'center', gap:8}}>
           <StSecondary label="Create by Hand" onClick={()=>setMode('hand')}/>
-          <StCta label="Run Customer Profile" onClick={()=>setMode('run')}/>
+          {can('run') && <StCta label="Run Customer Profile" onClick={()=>setMode('run')}/>}
         </div>
       )}/>
       {panel}
@@ -756,10 +764,11 @@ function CustomerProfileTab({contact}){
     <div style={{padding:'20px 24px 32px', display:'flex', flexDirection:'column', gap:12}}>
       <div style={{display:'flex', alignItems:'center', gap:12, flexWrap:'wrap'}}>
         {/* Customer Profile Type: which template this person's profile uses. */}
-        <div style={{width:240}}><Select value={form.id} options={profiles.map(f => ({value:f.id, label:f.name}))} onChange={(v)=>v && store.setType(contact.id, v)}/></div>
+        <div style={{width:240}}>{can('edit') ? <Select value={form.id} options={profiles.map(f => ({value:f.id, label:f.name}))} onChange={(v)=>v && store.setType(contact.id, v)}/>
+          : <span style={{fontSize:13, color:T.attioText}}>{form.name}</span>}</div>
         <span style={{flex:1}}/>
-        <button onClick={()=>setMode('edit')} title="Edit customer profile" aria-label="Edit customer profile" style={toolbarIconButton}><Icon name="edit" size={14} color={T.gray800}/></button>
-        <StCta label="Run Customer Profile" onClick={()=>setMode('run')}/>
+        {can('edit') && <button onClick={()=>setMode('edit')} title="Edit customer profile" aria-label="Edit customer profile" style={toolbarIconButton}><Icon name="edit" size={14} color={T.gray800}/></button>}
+        {can('run') && <StCta label="Run Customer Profile" onClick={()=>setMode('run')}/>}
       </div>
       <div>
         <PfRows contact={contact} form={form} current={current}/>
@@ -776,6 +785,7 @@ function ProfileTypeValue({contactId}){
   const store = useProfileForms();
   if(!store || contactId == null) return <span style={{fontSize:13, color:T.attioFaint}}>—</span>;
   const list = store.forms, id = store.typeOf(contactId), cur = list.find(f => f.id === id);
+  if(!profileEditAny()) return <span style={{fontSize:13, color: cur ? T.attioText : T.attioFaint}}>{cur ? cur.name : '—'}</span>;
   return <OwnerEditableValue prop={{key:'profileType', label:'Customer Profile Type', type:'Single Selection', options:list.map(f => f.id)}} value={id || ''}
     options={list.map(f => ({value:f.id, label:f.name}))} display={cur ? cur.name : ''} pencil="always" onSave={(v)=>v && store.setType(contactId, v)}/>;
 }
@@ -826,21 +836,24 @@ function ProfileFormsSettings({data, setData}){
   const [deleting, setDeleting] = React.useState(null);
   const usedBy = (id) => Object.values((store && store.data) || {}).filter(m => m && m[id]).length;
   const byId = (id) => forms.find(f => f.id === id);
-  const rows = forms.map(f => ({...f, fieldCount:f.fields.length, customerCount:usedBy(f.id),
+  // Templates → Customer Profile: Create, Edit form fields, Delete, by who created each form; everyone sees them.
+  const can = (action, f) => profileFormCan(action, f);
+  const shownForms = forms.filter(f => can('view', f));
+  const rows = shownForms.map(f => ({...f, createdBy:creatorOf(f), fieldCount:f.fields.length, customerCount:usedBy(f.id),
     createdText: f.createdAt ? fmtActStamp(new Date(f.createdAt)) : ''}));
   const actionsFor = (f) => [
-    {label:'Edit form', onClick:()=>setEditor({id:f.id})},
+    ...(can('edit', f) ? [{label:'Edit form', onClick:()=>setEditor({id:f.id})}] : []),
     {label:'Preview form', onClick:()=>setPreviewId(f.id)},
-    {label:'Delete form', danger:true, onClick:()=>setDeleting(f.id)},
+    ...(can('delete', f) ? [{label:'Delete form', danger:true, onClick:()=>setDeleting(f.id)}] : []),
   ];
   // Bulk Actions: Delete — a form with customers' information is skipped, as its Delete refuses.
-  const pfBulk = useTableBulkDelete({rows:forms, noun:'form', canDelete:(f) => !usedBy(f.id), skipNote:'with customers’ information',
+  const pfBulk = useTableBulkDelete({rows:shownForms, noun:'form', canDelete:(f) => can('delete', f) && !usedBy(f.id), skipNote:'with customers’ information or not yours to delete',
     remove:(ids) => setForms(fs => fs.filter(f => !ids.includes(f.id)))});
   const schema = {
     properties:PF_COLUMNS, noun:'form', searchKeys:['name', 'description', 'createdBy'], canCreateProperty:false, fillWidth:true, bulkActions:pfBulk.bulkActions,
     filterProps:[{key:'createdBy', label:'Created By', type:'select'}, {key:'customerCount', label:'Customers', type:'number'}],
     selectValues:{createdBy:[...new Set(forms.map(f => f.createdBy).filter(Boolean))]},
-    renderCell:(key, r) => key === 'name' ? <ContactName name={r.name} onOpen={()=>setEditor({id:r.id})} style={{fontSize:'inherit', fontWeight:500}}/>
+    renderCell:(key, r) => key === 'name' ? <ContactName name={r.name} onOpen={()=>can('edit', r) ? setEditor({id:r.id}) : setPreviewId(r.id)} style={{fontSize:'inherit', fontWeight:500}}/>
       : key === 'fieldCount' || key === 'customerCount' ? <span style={{fontVariantNumeric:'tabular-nums'}}>{r[key]}</span> : undefined,
     renderActions:(r) => <RowActionsMenu title="Form actions" width={MENU_W} items={actionsFor(byId(r.id))}/>,
   };
@@ -856,7 +869,7 @@ function ProfileFormsSettings({data, setData}){
         <div style={{display:'flex', flexDirection:'column', flex:1, minHeight:0}}>
           <RecordViewsModule flushTop storeKey="views:profile-forms-v1" schema={schema} rows={rows} columns={PF_COLUMNS.map(c => c.key)} saveView={false}
             defaultViews={[{id:'pfv-all', name:'All Forms', sort:{key:'name', dir:'asc'}}]}
-            actions={() => <button onClick={()=>setEditor({})} title="New form" aria-label="New form" style={iconBtn}><Icon name="plus" size={14} color={T.gray800}/></button>}/>
+            actions={() => can('create') && <button onClick={()=>setEditor({})} title="New form" aria-label="New form" style={iconBtn}><Icon name="plus" size={14} color={T.gray800}/></button>}/>
         </div>
       </SettingsPage>
       {editor && <ProfileFormEditor key={editor.id || 'new'} form={editor.id ? byId(editor.id) : null} taken={forms.filter(f => f.id !== editor.id).map(f => f.name.trim().toLowerCase())}

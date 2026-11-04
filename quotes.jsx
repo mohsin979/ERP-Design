@@ -313,7 +313,7 @@ function QuoteBuilder({mode, id, object, onClose, placement = 'fixed'}){
         {step > 0 && <StSecondary label="Back" onClick={()=>setStep(s => s - 1)}/>}
         <StSecondary label="Cancel" onClick={()=>onClose()}/>
         {step < last ? <StCta label="Next" disabled={!stepOk[step]} onClick={()=>setStep(s => s + 1)}/>
-          : <><StSecondary label="Save as template" onClick={()=>setTemplating(q.title.trim() || (q.items[0] && q.items[0].name) || '')}/>
+          : <>{templateCan('quoteTemplates', 'create') && <StSecondary label="Save as template" onClick={()=>setTemplating(q.title.trim() || (q.items[0] && q.items[0].name) || '')}/>}
               <StSecondary label={existing ? 'Save changes' : 'Save as draft'} onClick={()=>save(false)}/><StCta label="Send quote" onClick={()=>save(true)}/></>}
       </>}>
       {/* The steps, in their own column on the left. */}

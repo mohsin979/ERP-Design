@@ -10,6 +10,8 @@
      Today's Tasks       — the signed-in person's tasks due today; each opens the task.
    One date filter (Today / This Week / This Month / Custom range) drives the KPIs, trends and Key
    Indicators.
+   The same records give each user's statistics (USER_STATS): their profile panel's figures and
+   trends, and workflows' User Properties (all-time).
 
    Data: the CRM's own records (dashBusinessData) — deals, their contacts and customers, their
    activity, Accounting and the workflow violations; each attributed to the deal's owner.
@@ -103,6 +105,49 @@ function personMetrics(p, range){
     contactToCustomer: dashAvg(closed, x => x.contactToCustomer), qualifiedToWon: dashAvg(closed, x => x.qualifiedToWon),
   };
 }
+/* ── A user's statistics ── the same records and rules as the dashboard, for one person (the
+   owner of the deals, customers and contacts), over any range. One source for the user profile
+   panel (its figures and trends) and for workflows' User Properties (all-time). `kind`: 'money'
+   (sums, AED), 'count', 'days' / 'hours' (averages — empty when there's nothing to average). */
+const USER_STATS = [
+  {key:'invoiceCash',      label:'Total Invoice Cash',           kind:'money', accounting:true, read:(p, r) => dashSum(p.ev.invoices.filter(x => dashIn(x.at, r)), x => x.amount)},
+  {key:'cashReceived',     label:'Total Cash Received',          kind:'money', accounting:true, read:(p, r) => dashSum(p.ev.payments.filter(x => dashIn(x.at, r)), x => x.amount)},
+  {key:'cashForecasted',   label:'Total Cash Forecasted',        kind:'money', accounting:true, read:(p, r) => dashSum(p.ev.installments.filter(x => dashIn(x.due, r)), x => x.amount)},
+  {key:'dealsCreated',     label:'Total Deals Created',          kind:'count', read:(p, r) => p.ev.created.filter(x => dashIn(x.at, r)).length},
+  {key:'dealsClosed',      label:'Deals Closed',                 kind:'count', read:(p, r) => p.ev.closed.filter(x => dashIn(x.at, r)).length},
+  {key:'dealsWon',         label:'Deal Won',                     kind:'count', read:(p, r) => p.ev.closed.filter(x => x.outcome === 'won' && dashIn(x.at, r)).length},
+  {key:'dealsLost',        label:'Deal Lost',                    kind:'count', read:(p, r) => p.ev.closed.filter(x => x.outcome === 'lost' && dashIn(x.at, r)).length},
+  {key:'contactToClosed',  label:'Contact to Deal Closed',       kind:'days',  read:(p, r) => dashAvg(p.ev.closed.filter(x => dashIn(x.at, r)), x => x.contactToClosed)},
+  {key:'contactToDeal',    label:'Contact to Deal',              kind:'days',  read:(p, r) => dashAvg(p.ev.closed.filter(x => dashIn(x.at, r)), x => x.contactToDeal)},
+  {key:'contactToCustomer',label:'Contact to Customer',          kind:'days',  read:(p, r) => dashAvg(p.ev.closed.filter(x => dashIn(x.at, r)), x => x.contactToCustomer)},
+  {key:'qualifiedToWon',   label:'Qualified Client to Deal Won', kind:'days',  read:(p, r) => dashAvg(p.ev.closed.filter(x => dashIn(x.at, r)), x => x.qualifiedToWon)},
+  {key:'responseTime',     label:'Client Response Time',         kind:'hours', read:(p, r) => dashAvg(p.ev.responses.filter(x => dashIn(x.at, r)), x => x.hours)},
+  {key:'invoiceToCash',    label:'Invoice to Cash',              kind:'hours', accounting:true, read:(p, r) => dashAvg(p.ev.payments.filter(x => x.sent != null && dashIn(x.at, r)), x => Math.max(0, x.at - x.sent) / 36e5)},
+];
+const userStat = (key) => USER_STATS.find(s => s.key === key) || null;
+const USER_STAT_ALL_TIME = [-Infinity, Infinity];
+const NO_PERSON = {ev:{invoices:[], installments:[], payments:[], closed:[], created:[], responses:[]}};
+// The person's events (dashBusinessData) — someone who owns nothing has none.
+const userStatPerson = (data, userId) => (data.people || []).find(p => p.id === String(userId)) || NO_PERSON;
+const userStatValue = (person, key, range) => { const s = userStat(key); return s ? s.read(person, range) : null; };
+const fmtUserStat = (key, v) => { const s = userStat(key); if(!s || v == null) return '—';
+  return s.kind === 'money' ? fmtMoney(v) : s.kind === 'count' ? Number(v).toLocaleString('en-US') : s.kind === 'days' ? fmtDays(v) : fmtHours(v); };
+/* The dashboard's records from the workflow engine's live view (WF_LIVE), cached while those
+   records, payments and activities stay the same — workflows read User Properties often. */
+let USER_STATS_CACHE = null;
+function liveUserStatsData(){
+  const recs = WF_LIVE.records || [], accounting = WF_LIVE.accounting || [], acts = WF_LIVE.acts || {};
+  const c = USER_STATS_CACHE;
+  if(c && c.recs === recs && c.accounting === accounting && c.acts === acts) return c.data;
+  const of = (o) => recs.filter(r => recordObjectOf(r.id) === o);
+  const data = dashBusinessData({deals:of('deals'), customers:of('customers'), contacts:of('contacts'), accounting, activities:{deals:acts}, users:WF_LIVE.users || []});
+  USER_STATS_CACHE = {recs, accounting, acts, data};
+  return data;
+}
+// A user's statistics, all-time, as numbers (workflows' User Properties).
+const userStatsAllTime = (userId) => { const p = userStatPerson(liveUserStatsData(), userId);
+  return Object.fromEntries(USER_STATS.map(s => [s.key, s.read(p, USER_STAT_ALL_TIME)])); };
+
 function companyKpis(data, range){
   const all = (k) => data.people.flatMap(p => p.ev[k]);
   return {
@@ -224,10 +269,12 @@ const DASH_SILVER = {
 // figures and units on the same lines across them (one vertical padding).
 function FinancialKpis({kpis, replay}){
   const all = {...kpis, winRate:dashWinRate(kpis)};
+  // The cash cards need View Payment Terms; without it only the deal cards show.
+  const cards = accountingViewAny() ? DASH_CARDS : DASH_CARDS.filter(c => !DASH_KPIS.includes(c));
   return (
     <div style={{display:'flex', alignItems:'stretch', gap:14}}>
-      {DASH_CARDS.map((t, i) => {
-        const hero = i === 0, ink = hero ? '#fff' : '#111113';
+      {cards.map((t, i) => {
+        const hero = i === 0 && accountingViewAny(), ink = hero ? '#fff' : '#111113';
         return (
           <div key={t.key} title={t.hint} style={{flex: hero ? '2 1 0' : '1 1 0', minWidth:0, minHeight:240, borderRadius:22,
             background: hero ? DASH_HERO_BG : '#F2F2F3', border:`1px solid ${hero ? DASH_BLUE : '#E4E4E7'}`, padding: hero ? '20px 24px 22px' : '20px 18px 22px',
@@ -316,11 +363,16 @@ function DashViewSwitch({value, onChange}){
 
 /* View Trends: the three KPIs over the selected range as lines — by hour for a single day, by
    day up to two months, else by week. Hover reads a point's three values. */
-function dashTrendSeries(data, range){
+// The range in steps — hours for a day, days up to two months, else weeks: [{at, end}], and the step.
+function dashBuckets(range){
   const [a, b] = range, span = b - a;
   const step = span <= DASH_DAY ? 36e5 : span <= 62 * DASH_DAY ? DASH_DAY : 7 * DASH_DAY;
   const n = Math.max(1, Math.ceil(span / step));
-  const buckets = Array.from({length:n}, (_, i) => ({at:a + i * step, received:0, invoiced:0, forecast:0}));
+  return {step, buckets:Array.from({length:n}, (_, i) => ({at:a + i * step, end:Math.min(b, a + (i + 1) * step)}))};
+}
+function dashTrendSeries(data, range){
+  const [a, b] = range, {step, buckets:steps} = dashBuckets(range), n = steps.length;
+  const buckets = steps.map(x => ({at:x.at, received:0, invoiced:0, forecast:0}));
   const put = (t, key, amount) => { if(t >= a && t < b) buckets[Math.min(n - 1, Math.floor((t - a) / step))][key] += amount; };
   data.people.forEach(p => {
     p.ev.invoices.forEach(x => put(x.at, 'invoiced', x.amount));
@@ -329,20 +381,10 @@ function dashTrendSeries(data, range){
   });
   return {buckets, step};
 }
-const dashNiceMax = (v) => { if(v <= 0) return 1000; const p = Math.pow(10, Math.floor(Math.log10(v))); return [1, 2, 2.5, 5, 10].map(m => m * p).find(m => m >= v); };
+const dashNiceMax = (v, empty = 1000) => { if(v <= 0) return empty; const p = Math.pow(10, Math.floor(Math.log10(v))); return [1, 2, 2.5, 5, 10].map(m => m * p).find(m => m >= v); };
 const dashShort = (n) => n >= 1e6 ? `${(n / 1e6).toFixed(1).replace(/\.0$/, '')}M` : n >= 1e3 ? `${Math.round(n / 1e3)}K` : String(Math.round(n));
 function TrendChart({data, range}){
-  const ref = React.useRef(null);
-  const [w, setW] = React.useState(800);
-  const [hover, setHover] = React.useState(null);
-  React.useEffect(() => { const el = ref.current; if(!el) return; const ro = new ResizeObserver(() => setW(el.clientWidth)); ro.observe(el); setW(el.clientWidth); return () => ro.disconnect(); }, []);
   const {buckets, step} = dashTrendSeries(data, range);
-  const H = 260, L = 48, R = 12, Tp = 12, B = 28, iw = Math.max(10, w - L - R), ih = H - Tp - B;
-  const max = dashNiceMax(Math.max(...buckets.flatMap(x => DASH_KPIS.map(k => x[k.key]))));
-  const x = (i) => L + (buckets.length === 1 ? iw / 2 : i * iw / (buckets.length - 1)), y = (v) => Tp + ih - v / max * ih;
-  const label = (t) => { const d = new Date(t); return step < DASH_DAY ? `${d.getHours()}:00` : `${DATE_MONTHS[d.getMonth()]} ${d.getDate()}`; };
-  const every = Math.max(1, Math.ceil(buckets.length / 8));
-  const onMove = (e) => { const r = e.currentTarget.getBoundingClientRect(); const i = Math.round((e.clientX - r.left - L) / (iw / Math.max(1, buckets.length - 1))); setHover(Math.max(0, Math.min(buckets.length - 1, i))); };
   return (
     <div style={{...dashCard, borderRadius:22, padding:'20px 24px 16px'}}>
       <div style={{display:'flex', alignItems:'center', gap:18, flexWrap:'wrap', marginBottom:12}}>
@@ -352,36 +394,55 @@ function TrendChart({data, range}){
           </span>
         ))}
       </div>
+      <LineTrend buckets={buckets} step={step} lines={DASH_KPIS} fmt={formatAmount} ariaLabel="Cash trends"/>
+    </div>
+  );
+}
+/* The line graph itself (the dashboard's Graph view, and a user's statistic over time): `lines`
+   [{key, label, accent}] read from each bucket; `fmt` formats a value in the tooltip; `axis` the
+   axis labels (short amounts by default). An empty value (nothing to average) breaks the line. */
+function LineTrend({buckets, step, lines, fmt, axis = dashShort, empty = 1000, height = 260, ariaLabel}){
+  const ref = React.useRef(null);
+  const [w, setW] = React.useState(800);
+  const [hover, setHover] = React.useState(null);
+  React.useEffect(() => { const el = ref.current; if(!el) return; const ro = new ResizeObserver(() => setW(el.clientWidth)); ro.observe(el); setW(el.clientWidth); return () => ro.disconnect(); }, []);
+  const H = height, L = 48, R = 12, Tp = 12, B = 28, iw = Math.max(10, w - L - R), ih = H - Tp - B;
+  const max = dashNiceMax(Math.max(0, ...buckets.flatMap(x => lines.map(k => x[k.key] || 0))), empty);
+  const x = (i) => L + (buckets.length === 1 ? iw / 2 : i * iw / (buckets.length - 1)), y = (v) => Tp + ih - v / max * ih;
+  const label = (t) => { const d = new Date(t); return step < DASH_DAY ? `${d.getHours()}:00` : `${DATE_MONTHS[d.getMonth()]} ${d.getDate()}`; };
+  const every = Math.max(1, Math.ceil(buckets.length / 8));
+  const onMove = (e) => { const r = e.currentTarget.getBoundingClientRect(); const i = Math.round((e.clientX - r.left - L) / (iw / Math.max(1, buckets.length - 1))); setHover(Math.max(0, Math.min(buckets.length - 1, i))); };
+  // Each line in runs of the buckets that have a value.
+  const runs = (k) => buckets.reduce((acc, bk, i) => { if(bk[k.key] == null){ acc.push([]); return acc; } acc[acc.length - 1].push(`${x(i)},${y(bk[k.key])}`); return acc; }, [[]]).filter(r => r.length);
+  return (
       <div ref={ref} style={{position:'relative'}}>
-        <svg width={w} height={H} onMouseMove={onMove} onMouseLeave={()=>setHover(null)} style={{display:'block'}} role="img" aria-label="Cash trends">
+        <svg width={w} height={H} onMouseMove={onMove} onMouseLeave={()=>setHover(null)} style={{display:'block'}} role="img" aria-label={ariaLabel}>
           {[0, .25, .5, .75, 1].map(f => (
             <g key={f}>
               <line x1={L} x2={L + iw} y1={y(max * f)} y2={y(max * f)} stroke={T.attioLine}/>
-              <text x={L - 8} y={y(max * f) + 4} textAnchor="end" fontSize="11" fill={T.attioMuted}>{dashShort(max * f)}</text>
+              <text x={L - 8} y={y(max * f) + 4} textAnchor="end" fontSize="11" fill={T.attioMuted}>{axis(max * f)}</text>
             </g>
           ))}
           {buckets.map((bk, i) => i % every === 0 && <text key={i} x={x(i)} y={H - 8} textAnchor="middle" fontSize="11" fill={T.attioMuted}>{label(bk.at)}</text>)}
-          {DASH_KPIS.map(k => (
-            <polyline key={k.key} fill="none" stroke={k.accent} strokeWidth="2.25" strokeLinejoin="round" strokeLinecap="round"
-              points={buckets.map((bk, i) => `${x(i)},${y(bk[k.key])}`).join(' ')}/>
-          ))}
+          {lines.map(k => runs(k).map((pts, j) => pts.length === 1
+            ? <circle key={`${k.key}-${j}`} cx={pts[0].split(',')[0]} cy={pts[0].split(',')[1]} r="2.5" fill={k.accent}/>
+            : <polyline key={`${k.key}-${j}`} fill="none" stroke={k.accent} strokeWidth="2.25" strokeLinejoin="round" strokeLinecap="round" points={pts.join(' ')}/>))}
           {hover != null && <line x1={x(hover)} x2={x(hover)} y1={Tp} y2={Tp + ih} stroke={T.borderStrong} strokeDasharray="3 3"/>}
-          {hover != null && DASH_KPIS.map(k => <circle key={k.key} cx={x(hover)} cy={y(buckets[hover][k.key])} r="3.5" fill="#fff" stroke={k.accent} strokeWidth="2"/>)}
+          {hover != null && lines.filter(k => buckets[hover][k.key] != null).map(k => <circle key={k.key} cx={x(hover)} cy={y(buckets[hover][k.key])} r="3.5" fill="#fff" stroke={k.accent} strokeWidth="2"/>)}
         </svg>
         {hover != null && (
-          <div style={{position:'absolute', top:4, left:Math.min(x(hover) + 12, w - 220), width:208, background:'#fff', border:`1px solid ${T.border}`, borderRadius:10,
+          <div style={{position:'absolute', top:4, left:Math.max(0, Math.min(x(hover) + 12, w - 220)), width:208, background:'#fff', border:`1px solid ${T.border}`, borderRadius:10,
             boxShadow:'0 4px 16px rgba(16,24,40,.12)', padding:'10px 12px', pointerEvents:'none', display:'flex', flexDirection:'column', gap:6}}>
             <span style={{fontSize:12, fontWeight:600, color:T.attioText}}>{label(buckets[hover].at)}{step === 7 * DASH_DAY ? ' (week)' : ''}</span>
-            {DASH_KPIS.map(k => (
+            {lines.map(k => (
               <span key={k.key} style={{display:'flex', alignItems:'center', gap:8, fontSize:12}}>
                 <span style={{width:8, height:8, borderRadius:2, background:k.accent}}/><span style={{flex:1, color:T.attioMuted}}>{k.label}</span>
-                <span style={{color:T.attioText, fontVariantNumeric:'tabular-nums'}}>{formatAmount(buckets[hover][k.key])}</span>
+                <span style={{color:T.attioText, fontVariantNumeric:'tabular-nums'}}>{buckets[hover][k.key] == null ? '—' : fmt(buckets[hover][k.key])}</span>
               </span>
             ))}
           </div>
         )}
       </div>
-    </div>
   );
 }
 
@@ -517,7 +578,8 @@ function FameTable({tab, rows, order, sort, onSort, onMove, onOpenUser, onOpenDe
    the selected range. */
 const KI_TABS = [...FAME_TABS.map(t => ({id:t.id, label:t.label})), {id:'velocity', label:'Business Velocity'}, {id:'won', label:'Deal Won'}, {id:'lost', label:'Deal Lost'}];
 function KeyIndicators({data, range, rangeKey, deals, violations, onOpenUser, onOpenDeal, onOpenViolation}){
-  const [tabId, setTabId] = React.useState('revenue');
+  // Revenue (cash) needs View Payment Terms; without it Volume leads.
+  const [tabId, setTabId] = React.useState(() => accountingViewAny() ? 'revenue' : 'volume');
   const [query, setQuery] = React.useState('');
   const [sorts, setSorts] = React.useState({});
   const [orders, setOrders] = React.useState({});
@@ -546,7 +608,7 @@ function KeyIndicators({data, range, rangeKey, deals, violations, onOpenUser, on
           </div>}
         </div>
         <div style={{display:'flex', alignItems:'flex-end', gap:4, flexWrap:'wrap', borderBottom:`1px solid ${T.attioLine}`}}>
-          {KI_TABS.map(t => <UtTab key={t.id} label={t.label} active={t.id === tabId} onClick={()=>setTabId(t.id)}/>)}
+          {KI_TABS.filter(t => t.id !== 'revenue' || accountingViewAny()).map(t => <UtTab key={t.id} label={t.label} active={t.id === tabId} onClick={()=>setTabId(t.id)}/>)}
         </div>
         {tab && <FameTable tab={tab} rows={rows.slice((at - 1) * FAME_PAGE, at * FAME_PAGE)} order={order} sort={sort}
           onSort={(s)=>setSorts(x => ({...x, [tabId]:s}))} onMove={move} onOpenUser={onOpenUser} onOpenDeal={onOpenDeal} onOpenViolation={onOpenViolation}/>}
@@ -648,6 +710,135 @@ function TodaysTasks({hub}){
    switcher top right), the date filter, the KPI cards or the Graph, then Key Indicators beside
    Today's Tasks; generous side margins. */
 const dashGreeting = (d = new Date()) => d.getHours() < 12 ? 'Good Morning' : d.getHours() < 17 ? 'Good Afternoon' : 'Good Evening';
+// The dashboard's records from the record hub (the dashboard, and a user's profile panel).
+function useDashBusinessData(hub){
+  const deals = (hub && hub.records && hub.records.deals) || [];
+  const records = (hub && hub.records) || {};
+  // Only the payment terms the signed-in user may view (Payment Terms → View) count.
+  return React.useMemo(() => { const byId = Object.fromEntries(['contacts', 'deals', 'customers'].map(o => [o, new Map((records[o] || []).map(r => [String(r.id), r]))]));
+    const accounting = ((hub && hub.accounting) || []).filter(s => { const r = (byId[s.object] || new Map()).get(String(s.recordId)); return !r || paymentTermsCan('view', s.object, r); });
+    return dashBusinessData({deals, customers:records.customers || [], contacts:records.contacts || [], accounting,
+    activities:(hub && hub.activities) || {}, users:(hub && hub.data.users) || []}); }, [deals, records.customers, records.contacts, hub && hub.accounting, hub && hub.activities]);
+}
+
+/* ── A user's statistics in their profile panel ──────────────────────────────────────────
+   The dashboard's date filter drives every figure. The pinned item (Total Invoice Cash by
+   default) leads, larger; its ⋯ pins another User Property or statistic in its place — one
+   setting for the workspace (hub.overviewSettings.users, as Highlights are per record type).
+   Every statistic has a trend (chart icon): the panel's secondary section, the statistic over
+   the filter's range. */
+const USER_PIN_DEFAULT = 'stat:invoiceCash';
+const userPinnedOf = (hub) => ((((hub && hub.overviewSettings) || {}).users || {}).pinned || [])[0] || USER_PIN_DEFAULT;
+// The pool: the User Properties, then the statistics. Ids 'prop:<key>' / 'stat:<key>'.
+const userPinPool = (properties) => [
+  {id:'props', label:'User Properties', items:properties.map(p => ({id:`prop:${p.key}`, label:p.label}))},
+  {id:'stats', label:'Statistics', items:USER_STATS.filter(st => !st.accounting || accountingViewAny()).map(st => ({id:`stat:${st.key}`, label:st.label}))},
+];
+const userPinLabel = (pool, id) => { for(const g of pool){ const it = g.items.find(x => x.id === id); if(it) return it.label; } return 'Property removed'; };
+const userStatAxis = (kind) => kind === 'money' ? dashShort : (n) => String(Math.round(n * 10) / 10);
+const userTrendBtn = {width:26, height:26, borderRadius:6, border:'none', background:'transparent', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0};
+function UserTrendButton({label, onClick}){
+  return <button onClick={onClick} title={`${label} trend`} aria-label={`${label} trend`} style={userTrendBtn}><Icon name="analytical" size={14} color={T.gray600}/></button>;
+}
+
+/* `values`: the user's property values as shown ({key: text}); `onTrend(key)` opens a statistic's trend. */
+function UserStatistics({person, filter, setFilter, properties, values, onTrend}){
+  const hub = useRecordHub();
+  const [pinning, setPinning] = React.useState(false);
+  const range = dashRangeOf(filter, new Date());
+  const pool = userPinPool(properties);
+  // Accounting statistics (cash, Invoice to Cash) only with View Payment Terms somewhere.
+  const stats = USER_STATS.filter(st => !st.accounting || accountingViewAny());
+  const pinnedRaw = userPinnedOf(hub), pinned = pinnedRaw.startsWith('stat:') && !stats.some(st => `stat:${st.key}` === pinnedRaw) ? `stat:${stats[0].key}` : pinnedRaw;
+  const [kind, key] = pinned.split(':');
+  const stat = kind === 'stat' ? userStat(key) : null;
+  const lead = kind === 'stat' ? (stat ? fmtUserStat(key, userStatValue(person, key, range)) : '—') : (values[key] || '—');
+  return (
+    <section style={{marginTop:24, display:'flex', flexDirection:'column', gap:12}}>
+      <SectionHeader title="Statistics"/>
+      <DateFilter value={filter} onChange={setFilter}/>
+      {/* The pinned item, slightly more prominent. */}
+      <div style={{...dashCard, padding:'12px 14px 14px', display:'flex', flexDirection:'column', gap:6}}>
+        <div style={{display:'flex', alignItems:'center', gap:4}}>
+          <span style={{flex:1, minWidth:0, fontSize:12.5, color:T.attioMuted}}>{userPinLabel(pool, pinned)}</span>
+          {stat && <UserTrendButton label={stat.label} onClick={()=>onTrend(key)}/>}
+          <ActionsMenu title="Pinned item" width={250} height={50}>
+            {(close) => <MenuItem label="Pin another property or statistic" onClick={()=>{ close(); setPinning(true); }}/>}
+          </ActionsMenu>
+        </div>
+        <div style={{fontFamily:DASH_FIGURE_FONT, fontSize:30, fontWeight:700, color:T.attioText, lineHeight:1.1, fontVariantNumeric:'tabular-nums', overflowWrap:'anywhere'}}>{lead}</div>
+      </div>
+      <div>
+        {stats.filter(st => `stat:${st.key}` !== pinned).map(st => (
+          <div key={st.key} style={{display:'flex', alignItems:'center', gap:12, padding:'4px 0', borderBottom:`1px solid ${T.attioLine}`, minHeight:34}}>
+            <span style={{flex:1, minWidth:0, fontSize:12.5, color:T.attioMuted}}>{st.label}</span>
+            <span style={{fontSize:13, color:T.attioText, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap'}}>{fmtUserStat(st.key, userStatValue(person, st.key, range))}</span>
+            <UserTrendButton label={st.label} onClick={()=>onTrend(st.key)}/>
+          </div>
+        ))}
+      </div>
+      {pinning && <UserPinModal pool={pool} pinned={pinned} onClose={()=>setPinning(false)}
+        onApply={(id)=>{ hub.setOverviewSettings(s => ({...(s || {}), users:{pinned:[id]}})); setPinning(false); }}/>}
+    </section>
+  );
+}
+
+// A statistic over time: back to the statistics, the date filter, the figure for the range, the line graph.
+function UserStatTrend({person, statKey, filter, setFilter, onBack}){
+  const st = userStat(statKey);
+  if(!st) return null;
+  const range = dashRangeOf(filter, new Date());
+  const {buckets, step} = dashBuckets(range);
+  const series = buckets.map(b => ({at:b.at, v:st.read(person, [b.at, b.end])}));
+  return (
+    <section style={{display:'flex', flexDirection:'column', gap:12}}>
+      <div style={{display:'flex', alignItems:'center', gap:6}}>
+        <button onClick={onBack} title="Back to statistics" aria-label="Back to statistics" style={userTrendBtn}><Icon name="arrowLeft" size={14} color={T.gray600}/></button>
+        <span style={sectionTitle}>{st.label}</span>
+      </div>
+      <DateFilter value={filter} onChange={setFilter}/>
+      <div style={{fontFamily:DASH_FIGURE_FONT, fontSize:30, fontWeight:700, color:T.attioText, lineHeight:1.1, fontVariantNumeric:'tabular-nums'}}>{fmtUserStat(statKey, st.read(person, range))}</div>
+      <div style={{...dashCard, padding:'12px 8px 8px 0'}}>
+        <LineTrend buckets={series} step={step} lines={[{key:'v', label:st.label, accent:DASH_BLUE}]} fmt={(v)=>fmtUserStat(statKey, v)}
+          axis={userStatAxis(st.kind)} empty={st.kind === 'money' ? 1000 : 1} height={220} ariaLabel={`${st.label} trend`}/>
+      </div>
+    </section>
+  );
+}
+
+/* Pin another User Property or statistic in the pinned item's place — the Highlights pinning
+   modal (View settings), with one place to fill. */
+function UserPinModal({pool, pinned, onApply, onClose}){
+  const [query, setQuery] = React.useState('');
+  const [draft, setDraft] = React.useState(pinned);
+  const q = query.trim().toLowerCase();
+  const shown = pool.map(g => ({...g, items:g.items.filter(it => !q || it.label.toLowerCase().includes(q) || g.label.toLowerCase().includes(q))})).filter(g => g.items.length);
+  return (
+    <SettingsModalShell title="View settings" sections={{pinned:'Pinned Item'}} order={[]} onReorder={()=>{}} fixed={['pinned']}
+      section="pinned" onSection={()=>{}} onClose={onClose} onApply={()=>onApply(draft)}
+      footerNote={`Pinned: ${userPinLabel(pool, draft)}`}
+      toolbar={(
+        <div style={{padding:'0 20px 8px'}}>
+          <div style={{position:'relative'}}>
+            <div style={{position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', display:'flex'}}>
+              <Icon name="search" size={13} color={T.gray400}/>
+            </div>
+            <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search properties and statistics…"
+              style={{width:'100%', padding:'8px 10px 8px 30px', fontSize:13, fontFamily:'inherit', border:`1px solid ${T.borderStrong}`, borderRadius:8}}/>
+          </div>
+        </div>
+      )}>
+      {shown.map(g => (
+        <div key={g.id}>
+          <div style={poolGroupLabel}>{g.label}</div>
+          {g.items.map(it => <SettingsCheckRow key={it.id} label={it.label} checked={draft === it.id} onToggle={()=>setDraft(it.id)}/>)}
+        </div>
+      ))}
+      {!shown.length && <div style={{fontSize:12.5, color:T.gray400, padding:'8px 6px'}}>Nothing matches “{query}”.</div>}
+    </SettingsModalShell>
+  );
+}
+
 function DashboardPage(){
   const today = new Date();
   const [filter, setFilter] = React.useState(() => ({id:'month', from:ymd(new Date(today.getFullYear(), today.getMonth(), 1)), to:ymd(today)}));
@@ -656,9 +847,7 @@ function DashboardPage(){
   const [user, setUser] = React.useState(null);     // the sales professional whose profile is open
   const hub = useRecordHub();
   const deals = (hub && hub.records && hub.records.deals) || [];
-  const records = (hub && hub.records) || {};
-  const data = React.useMemo(() => dashBusinessData({deals, customers:records.customers || [], contacts:records.contacts || [], accounting:(hub && hub.accounting) || [],
-    activities:(hub && hub.activities) || {}, users:(hub && hub.data.users) || []}), [deals, records.customers, records.contacts, hub && hub.accounting, hub && hub.activities]);
+  const data = useDashBusinessData(hub);
   const openDeal = (d) => hub && hub.openRecord('deals', d.id, 'panel');
   // The CRM's open workflow violations, each with its record's owner (Compliance).
   const wf = useWorkflowEngineCtx();
@@ -687,9 +876,9 @@ function DashboardPage(){
             <div style={{flex:1}}/>
             {/* Dashboard view settings — what they manage isn't defined yet. */}
             <ViewSettingsButton onClick={()=>setStub('View Settings')}/>
-            <DashViewSwitch value={view} onChange={setView}/>
+            {accountingViewAny() && <DashViewSwitch value={view} onChange={setView}/>}
           </div>
-          {view === 'graph' ? <TrendChart data={data} range={range}/> : <FinancialKpis kpis={companyKpis(data, range)} replay={range.join('-')}/>}
+          {view === 'graph' && accountingViewAny() ? <TrendChart data={data} range={range}/> : <FinancialKpis kpis={companyKpis(data, range)} replay={range.join('-')}/>}
         </div>
         </div>
         {/* Key Indicators (wider) beside Today's Tasks; stacked when narrow. */}
@@ -707,4 +896,4 @@ function DashboardPage(){
   );
 }
 
-Object.assign(window, {DashboardPage, dashBusinessData, dashPeriodRange});
+Object.assign(window, {DashboardPage, dashBusinessData, dashPeriodRange, USER_STATS, userStat, userStatsAllTime, userStatPerson, useDashBusinessData, UserStatistics, UserStatTrend, DASH_FILTERS});

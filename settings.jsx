@@ -219,6 +219,8 @@ function ConnectMenuButton({label, providers, onPick}){
 /* Row actions from a list of items {label, onClick, danger, disabled, external} — the shared ⋯
    ActionsMenu (Settings tables keep their 180px panel; record pages pass the Contacts width). */
 function RowActionsMenu({items, title = 'Actions', width = 180}){
+  // Nothing the signed-in user may do here (permissions): the menu's space stays, so rows line up.
+  if(!items.length) return <span aria-hidden="true" style={{width:28, height:28, flexShrink:0}}/>;
   return (
     <ActionsMenu title={title} width={width} height={items.length * 34 + 14}>
       {(close) => items.map(it => <MenuItem key={it.label} danger={it.danger} disabled={it.disabled} onClick={()=>{ close(); it.onClick(); }}
@@ -370,7 +372,10 @@ const providerOf = (list, key) => list.find(p => p.key === key) || list[0];
    One page shape: provider buttons top-right, each opening that provider's connection flow;
    connected accounts in the Contacts grid; Disconnect from the row's ⋯ menu. */
 
+// Which Tools Settings permission each page's connections need (Settings & Administration → Tools Settings).
+const TOOL_SETTING_OF = {emails:'email', meetings:'meetings', calendars:'calendar'};
 function ConnectedAccountsPage({title, description, providers, connectLabel, listKey, noun, emptyTitle, emptyText, data, setData}){
+  const can = toolSettingCan(TOOL_SETTING_OF[listKey]);
   const [connecting, setConnecting] = React.useState(null);
   const [removing, setRemoving] = React.useState(null);
   const rows = data[listKey];
@@ -381,11 +386,11 @@ function ConnectedAccountsPage({title, description, providers, connectLabel, lis
       {key:'status', label:'Status', width:150}, {key:'connected', label:'Connected on', width:170},
     ],
     renderCell: providerCell(providers),
-    renderActions: (r) => <RowActionsMenu items={[{label:'Disconnect', danger:true, onClick:()=>setRemoving(r)}]}/>,
+    renderActions: (r) => <RowActionsMenu items={can ? [{label:'Disconnect', danger:true, onClick:()=>setRemoving(r)}] : []}/>,
   };
   return (
     <SettingsPage title={title} description={description}
-      actions={connectLabel
+      actions={!can ? null : connectLabel
         ? <ConnectMenuButton label={connectLabel} providers={providers} onPick={setConnecting}/>
         : providers.map(p => <ProviderButton key={p.key} p={p} onClick={()=>setConnecting(p)}/>)}>
       {rows.length ? <RecordGrid schema={schema} rows={rows}/> : <StEmpty title={emptyTitle} description={emptyText}/>}
@@ -429,6 +434,7 @@ function ConnectNumberModal({onCancel, onAdd}){
 }
 
 function CallsSettings({data, setData}){
+  const can = toolSettingCan('calls');
   const [adding, setAdding] = React.useState(false);
   const [removing, setRemoving] = React.useState(null);
   const rows = data.phones;
@@ -438,11 +444,11 @@ function CallsSettings({data, setData}){
       {key:'number', label:'Number', width:220}, {key:'label', label:'Label', width:200},
       {key:'status', label:'Status', width:150}, {key:'added', label:'Connected on', width:170},
     ],
-    renderActions: (r) => <RowActionsMenu items={[{label:'Disconnect', danger:true, onClick:()=>setRemoving(r)}]}/>,
+    renderActions: (r) => <RowActionsMenu items={can ? [{label:'Disconnect', danger:true, onClick:()=>setRemoving(r)}] : []}/>,
   };
   return (
     <SettingsPage description="Connect the phone number you call from in the CRM."
-      actions={<ProviderButton icon="call" label="Connect Phone Number" onClick={()=>setAdding(true)}/>}>
+      actions={can && <ProviderButton icon="call" label="Connect Phone Number" onClick={()=>setAdding(true)}/>}>
       {rows.length ? <RecordGrid schema={schema} rows={rows}/> : <StEmpty title="No phone number connected" description="Connect your number to make and log calls from the CRM."/>}
       {adding && <ConnectNumberModal onCancel={()=>setAdding(false)}
         onAdd={({number, label}) => { setData(d => ({...d, phones:[...d.phones, {id:stId('phone'), number, label, status:'Connected', added:stToday()}]})); setAdding(false); }}/>}
@@ -547,10 +553,16 @@ function TaskPipelinesSection({data, setData}){
   );
 }
 
+/* Without the page's permission (Tools Settings → Tasks; Company Defaults) the settings show but
+   can't be changed: the fields are disabled and there's nothing to save. */
+const ReadOnlySettings = ({on, children}) => on ? children
+  : <fieldset disabled style={{border:'none', padding:0, margin:0, minWidth:0}}>{children}</fieldset>;
 function TasksSettings({data, setData}){
+  const can = toolSettingCan('tasks');
   const {draft:d, set, actions} = useSettingsForm(data.tasks, v => setData(x => ({...x, tasks:v})));
   return (
-    <SettingsPage description="Your defaults for new tasks." actions={actions}>
+    <SettingsPage description="Your defaults for new tasks." actions={can && actions}>
+      <ReadOnlySettings on={can}>
       <div style={{display:'flex', flexDirection:'column', gap:20}}>
         <StField label="Default due date"><StSelect value={d.dueDate} options={TASK_DUE_DATES} onChange={v=>set({dueDate:v})}/></StField>
         <StField label="Default due time">
@@ -568,19 +580,23 @@ function TasksSettings({data, setData}){
         )}
       </div>
       <TaskPipelinesSection data={data} setData={setData}/>
+      </ReadOnlySettings>
     </SettingsPage>
   );
 }
 
 function DefaultsSettings({data, setData}){
+  const can = defaultsCan();
   const {draft:d, set, actions} = useSettingsForm(data.defaults, v => setData(x => ({...x, defaults:v})));
   return (
-    <SettingsPage description="Company-wide preferences for everyone in the CRM." actions={actions}>
+    <SettingsPage description="Company-wide preferences for everyone in the CRM." actions={can && actions}>
+      <ReadOnlySettings on={can}>
       <div style={{display:'flex', flexDirection:'column', gap:20}}>
         <StField label="Time Zone"><StSelect value={d.timeZone} options={TIME_ZONES} onChange={v=>set({timeZone:v})}/></StField>
         <StField label="Language"><StSelect value={d.language} options={LANGUAGES} onChange={v=>set({language:v})}/></StField>
         <StField label="Currency"><StSelect value={d.currency} options={CURRENCIES} onChange={v=>set({currency:v})}/></StField>
       </div>
+      </ReadOnlySettings>
     </SettingsPage>
   );
 }

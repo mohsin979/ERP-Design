@@ -493,7 +493,11 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
             // The board shows the selected pipeline's deals; the filters and search still apply.
             const onBoard = filtered.map(r => byId.get(r.id)).filter(d => d && recordInPipeline(pipeline, d));
             return <ContactBoard rows={onBoard} search={search} pipeline={pipeline} searchKeys={['name']} noun="deal" bulkActions={false}
-              onChangeStage={(id, stageId)=>setDeals(ds => ds.map(d => d.id === id ? withStage(pipeline, d, stageId) : d))}
+              onChangeStage={(id, stageId)=>{
+                const d0 = deals.find(d => d.id === id);
+                if(d0 && !stageMoveCan('deals', d0)) return hub && hub.toast("You can't move this deal between stages");
+                setDeals(ds => ds.map(d => d.id === id ? withStage(pipeline, d, stageId) : d));
+              }}
               onAddToStage={(pl, stageId)=>setForm({mode:'add', initial:withStage(pl, {}, stageId)})}
               renderCard={(d, ui) => card(d, cardSettings, ui)}/>;
           }}}
@@ -504,6 +508,7 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
         filterControls={(v) => <ViolationsButton object="deals" pipelines={viewPipelines(v)} active={violationMode} onClick={()=>setViolationMode(!violationMode)}/>}
         overlay={(v) => violationMode && <ViolationPanel object="deals" pipelines={viewPipelines(v)} onClose={()=>setViolationMode(false)}/>}/>
       {form && <ContactFormModal mode={form.mode} initial={form.initial} properties={props} noun="deal"
+        canEditField={form.mode === 'edit' ? (p)=>fieldEditCan('deals', form.initial, p) : undefined}
         optionsFor={formOptions} adjust={adjust} association={association} onCancel={()=>setForm(null)} onSave={save}/>}
       {changingOwner && <ChangeOwnerModal record={changingOwner} noun="Deal" users={owners} ownerName={ownerName} onClose={()=>setChangingOwner(null)}
         onSave={(owner) => { changeOwner(changingOwner.id, owner); setChangingOwner(null); }}/>}

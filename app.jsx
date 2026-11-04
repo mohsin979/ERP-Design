@@ -313,8 +313,9 @@ function HeaderSearch(){
 }
 
 /* Profile ▾ — shortened name in the header, full details inside. Three clear sections: the
-   profile (name, email, Organization / Role), then the menu. Entries are not defined yet and
-   open the standard placeholder. (The Time Clock lives in the header.) */
+   profile (name, email, Organization / Role), then the menu. ⋯ → Go to Profile leads to the
+   person's ERP / HRMS profile (the header is ERP-scoped; not defined yet). The entries are not
+   defined yet and open the standard placeholder. (The Time Clock lives in the header.) */
 function ProfileMenu({onStub}){
   const [open, setOpen] = React.useState(false);
   const [moreOpen, setMoreOpen] = React.useState(false);
@@ -357,7 +358,7 @@ function ProfileMenu({onStub}){
                 <Icon name="moreDots" size={15} color={T.attioMuted}/>
               </button>
               <MenuShell open={moreOpen} onClose={()=>setMoreOpen(false)} anchorRight width={180}>
-                {['Edit Profile', 'Edit Role', 'Edit Permissions'].map(l => <MenuItem key={l} label={l} onClick={()=>go(l)}/>)}
+                <MenuItem label="Go to Profile" onClick={()=>go('Go to Profile')}/>
               </MenuShell>
             </div>
           </div>
@@ -576,12 +577,13 @@ function App(){
     // Sample pipelines and deals are added once; deleted ones stay deleted.
     // Contacts → Deals is One-to-many (decided); settings saved before say Many-to-many.
     const associations = ((v2 && v2.associations) || d.associations).map(a => a.id === 'as-contacts-deals' && a.type === 'Many-to-many' ? {...a, type:'One-to-many'} : a);
-    // Permissions saved in the earlier shape (Contacts only) become per-Object permissions.
-    const people = v2 ? {users:(v2.users || d.users).map(u => ({...u, permissions:normalizePermissions(u.permissions)})),
-      presets:(v2.presets || d.presets).map(x => ({...x, permissions:normalizePermissions(x.permissions)}))} : {};
     // A new empty workspace: no people, workflows or email templates yet.
     const empty = !SEED && !v2 ? {...EMPTY_PEOPLE_DATA(), emailTemplates:[], emailSequences:[]} : {};
-    const base = {...d, ...empty, ...(v2 || {}), ...people};
+    const loaded = {...d, ...empty, ...(v2 || {})};
+    /* Permissions saved in an earlier shape (Contacts only; Records only) are completed: per-Object
+       permissions, then the other categories by the holder's preset (levelOfPreset). */
+    const base = {...loaded, users:(loaded.users || []).map(u => ({...u, permissions:normalizePermissions(u.permissions, levelOfPreset(u.preset))})),
+      presets:(loaded.presets || []).map(x => ({...x, permissions:normalizePermissions(x.permissions, levelOfPreset(x.name))}))};
     // The signed-in person is one of the workspace's users (added when they aren't yet).
     const withMember = withSessionMember({users:base.users, seats:base.seats, presets:base.presets, people:base.people}, SESSION);
     return migrateDataModel({...base, ...withMember, associations,
@@ -690,7 +692,7 @@ function App(){
   // Task pipelines (Settings → Tasks), for every task's stage (activities.jsx).
   setTaskPipelines(taskPipelinesOf(settingsData));
   setContactPipelines(objectPipelines(settingsData, 'contacts'));
-  setAccessContext({user:signedInUser, users:settingsData.users,
+  setAccessContext({user:signedInUser, users:settingsData.users, data:settingsData,
     history:(object, id) => object === 'contacts' ? contactActivities[id] : object === 'deals' ? dealActivities[id] : object === 'customers' ? customerActivities[id] : []});
   /* The workflow engine: every deal and customer change goes through engine.setDeals /
      engine.setCustomers, which record stage entry times and owner history and emit the events
@@ -932,7 +934,8 @@ function App(){
               updateRecords={(object, fn) => object === 'contacts' ? setContacts(fn) : object === 'deals' ? setDealsRaw(fn) : object === 'customers' ? setCustomersRaw(fn) : null} setNav={setCrmNav}
               onWorkflowOpen={(open)=>setSettingsNavOpen(!open)} target={settingsTarget} onTargetDone={()=>setSettingsTarget(null)}/>
           // Automation → Workflows: every configured workflow (workflowsPage.jsx).
-          : crmActive === 'workflows' ? <WorkflowsPage data={settingsData} setData={setSettingsData}/>
+          : crmActive === 'workflows' ? (workflowCan('view') ? <WorkflowsPage data={settingsData} setData={setSettingsData}/>
+            : <div style={{flex:1, display:'flex', alignItems:'center', justifyContent:'center', fontSize:13, color:T.gray400}}>You don't have access to Workflows.</div>)
           // Marketing → Brand: the workspace logo and brand colours (workspaces.jsx).
           : crmActive === 'brand' ? <BrandPage/>
           // Marketing → Forms: lead forms, their builder and connections (forms.jsx).

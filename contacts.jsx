@@ -2132,8 +2132,12 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
            grouping and the presentation differ. Dragging a card writes the stage back through
            the pipeline model, which for a property-based pipeline means updating the property. */
         <ContactBoard rows={filteredContacts} search={search} pipelineId={pipelineId}
-          onChangeStage={(contactId, stageId)=>setContacts(cs => cs.map(c =>
-            c.id===contactId ? withStage(pipelineById(pipelineId), c, stageId) : c))}
+          onChangeStage={(contactId, stageId)=>{
+            // Records → Edit → Move between pipeline stages.
+            const c0 = contacts.find(c => c.id === contactId);
+            if(c0 && !stageMoveCan('contacts', c0)) return hub && hub.toast("You can't move this contact between stages");
+            setContacts(cs => cs.map(c => c.id===contactId ? withStage(pipelineById(pipelineId), c, stageId) : c));
+          }}
           actions={tableRowActions} activities={shownActivities} onOpenContact={openContact}
           cardSettings={cardSettings} cardProperties={cardProperties}
           /* A column's + seeds the form with that stage via the pipeline model, so a manual
@@ -2199,6 +2203,7 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
 
       {contactForm && (
         <ContactFormModal mode={contactForm.mode} initial={contactForm.initial} properties={contactProperties}
+          canEditField={contactForm.mode === 'edit' ? (p)=>fieldEditCan('contacts', contactForm.initial, p) : undefined}
           owners={ownerChoices} stages={CONTACT_TYPE_STAGES.map(st=>st.value)} association={association}
           onCancel={()=>setContactForm(null)} onSave={saveContact}/>
       )}

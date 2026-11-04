@@ -86,6 +86,8 @@ function HighlightCard({id, item, object, ctx}){
     const v = cid != null ? ((((store.data || {})[cid] || {})[a] || {}).values || {})[b] : undefined;
     if(cid == null) return <KpiCard label={label} value={notSet()}/>;
     const p = pfProp(field);
+    // Edited in place where the property may be edited (Customer Profile Properties).
+    if(!profilePropCan(a, b)) return <KpiCard label={label} value={kpiText(pfBlank(v) ? '' : pfFormat(field, v))}/>;
     return <KpiCard label={label} value={
       <OwnerEditableValue prop={p} value={pfBlank(v) ? '' : storePropertyValueOf(p, v)} display={pfBlank(v) ? '' : pfFormat(field, v)} pencil="always" valueStyle={KPI_EDIT_STYLE}
         onSave={(stored)=>{ const nv = pfBlank(stored) ? '' : loadPropertyValueOf(p, stored);

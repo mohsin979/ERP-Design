@@ -15,11 +15,13 @@
    The Users tab is built on the Contacts design system (UsersModule): the four statuses are
    default views in the Contacts view system, with its View Settings, Save View, Filters, Table
    Settings and grid. Edit Permissions (row ⋯) writes the seat, preset and permissions back to
-   the user. Not defined yet (placeholder): Add user, the user link, Edit, Export, and the Seats,
-   Teams and Permission Presets tabs.
+   the user. Edit User (row ⋯) opens the Edit User panel, as Edit contact: the User Properties,
+   saved with Save changes, and Edit User in HRMS (placeholder until HRMS exists). A
+   user's name opens their profile panel: the same properties, then their statistics. Not
+   defined yet (placeholder): Export, and the Seats, Teams and Permission Presets tabs.
    Edit Permissions follows the seat model (SEAT_TYPES): seat first (with remaining seats), then
-   the seat's access options, then — for manual access — the preset and the permission editor.
-   Only Objects → Contacts is specified; the other categories and tabs say so. */
+   the seat's access options, then — for manual access — the preset and the permission editor
+   (PERMISSION_CATEGORIES). */
 
 /* User status (a select property) and the default views built on it — the Contacts view
    system: each view is a saved filter on Status, managed like any Contacts view. */
@@ -39,11 +41,11 @@ const SEAT_TYPES = [
   {key:'Full Seat', total:64, description:'Full access, shaped by the Permission Preset.',
    manualTitle:'Manually assign permission', manualDescription:'Customise access based on current permissions',
    allTitle:'Make super Admin', allDescription:'Super admin has all permissions', allPreset:SUPER_ADMIN,
-   contactStandard:['create', 'view', 'edit', 'delete', 'merge'], contactAdmin:['assign', 'createAssociated']},   // what the seat can grant, on every Object
+   contactStandard:['create', 'view', 'edit', 'delete', 'merge'], contactAdmin:['assign', 'createAssociated'], extended:'all'},   // what the seat can grant, on every Object
   {key:'View Seat', total:Infinity, description:'Restricted, view-only access.',
    manualTitle:'Manually assign view permissions', manualDescription:'Choose view access on records and tools below',
    allTitle:'Grant all view permissions', allDescription:'View access to every record and tool', allPreset:'Viewer',
-   contactStandard:['view'], contactAdmin:[]},
+   contactStandard:['view'], contactAdmin:[], extended:'view'},
 ];
 const USER_SEATS = SEAT_TYPES.map(st => st.key);
 const seatDef = (key) => SEAT_TYPES.find(st => st.key === key) || SEAT_TYPES[0];
@@ -76,16 +78,37 @@ const assignSeat = (seats, uid, type, seatId) => {
 const availableLabel = (n) => n === Infinity ? 'Unlimited' : `${Math.max(0, n)} available`;
 const PERMISSION_PRESETS = [SUPER_ADMIN, 'Admin', 'Team Lead', 'Sales Professional', 'Case Manager', 'Petition Writer', 'Compliance', 'Viewer'];
 
-/* Permission categories (left list). Objects and Tools have horizontal tabs; Objects → Contacts
-   and Deals have their permissions specified (Customers follows the same pattern later).
-   Administration (user-level administrative settings, e.g. access to Users & Teams) is not
-   defined yet. */
-const PERMISSION_CATEGORIES = ['Records', 'Tools', 'Automation', 'Reports', 'Data Management', 'Administration'];
+/* Permission categories (left list), each with its horizontal tabs:
+     Records                     — Contacts / Deals / Customers: what's done on records (their
+                                   tools — Calls, Call Logs, Meetings, Notes, Tasks, Files, Quotes —
+                                   and Accounting: Payment Terms, by the record's owner), and under
+                                   Edit: moving between stages, which property values may be edited.
+     Customer Profile Properties — which Customer Profile answers may be edited, on every record.
+     Templates                   — Email Templates, Email Sequences, Quote Templates, Playbooks,
+                                   Services, Customer Profile templates (by who created each).
+     Workflows                   — View, Create, Edit, Delete, Revert — on / off, every workflow.
+     Settings & Administration   — Settings → Records, Properties and Pipelines (by creator),
+                                   Tools Settings, Company Defaults, Users & Teams and Permission
+                                   Management (Their Team / All users). */
+const PERMISSION_CATEGORIES = ['Records', 'Customer Profile Properties', 'Templates', 'Workflows', 'Settings & Administration'];
+const PERMISSION_TEMPLATES = [
+  {key:'emailTemplates', tab:'Email Templates', noun:'Email Template', plural:'Email Templates'},
+  {key:'emailSequences', tab:'Email Sequences', noun:'Email Sequence', plural:'Email Sequences'},
+  {key:'quoteTemplates', tab:'Quote Templates', noun:'Quote Template', plural:'Quote Templates'},
+  {key:'playbooks',      tab:'Playbooks',       noun:'Playbook',       plural:'Playbooks'},
+  {key:'services',       tab:'Services',        noun:'Service',        plural:'Services'},
+  // Customer Profile templates (Settings → Customer Profile forms): Create, Edit form fields, Delete.
+  {key:'profileForms',   tab:'Customer Profile', noun:'Customer Profile Template', plural:'Customer Profile Templates', rows:['create', 'edit', 'delete']},
+];
+const ADMIN_TABS = ['Records', 'Properties', 'Pipelines', 'Tools Settings', 'Company Defaults', 'Users & Teams', 'Permission Management'];
 const PERMISSION_TABS = {
-  Records: ['Contacts', 'Deals', 'Customers'],   // each has its permissions, Tools included
-  // Calls, Call Logs, Meetings, Notes, Tasks, Files and Quotes are set per Object (its Tools section).
-  Tools:   ['Forms', 'Ads', 'Socials', 'Email'],
+  Records: ['Contacts', 'Deals', 'Customers'],
+  Templates: PERMISSION_TEMPLATES.map(t => t.tab),
+  'Settings & Administration': ADMIN_TABS,
 };
+// Tools Settings (Settings → Tools): connecting each tool.
+const ADMIN_TOOL_SETTINGS = [{key:'email', label:'Email'}, {key:'calls', label:'Calls'}, {key:'meetings', label:'Meetings'}, {key:'calendar', label:'Calendar'}, {key:'tasks', label:'Tasks'}];
+const ADMIN_RECORD_OBJECTS = ['contacts', 'deals', 'customers'];
 /* ── Object permissions ── per Object (Contacts, Deals; Customers later), one shape:
      {enabled, create:{on}, view|edit|delete|merge|assign|createAssociated:{on, scope, life}}
    Standard permissions: Create (on / off), then View, Edit, Delete and Merge. Administrative
@@ -145,8 +168,10 @@ const objectPermissions = ({create = false, view = null, edit = null, del = null
   assign:scopedPermission(!!assign, assign || 'own', life), createAssociated:scopedPermission(!!createAssociated, createAssociated || 'own', life),
 });
 // The permissions for every defined Object; Deals start as a copy of Contacts (a decision: mirror).
-const permissionMatrix = (contacts) => normalizePermissions({contacts});   // Deals and Customers mirror Contacts
-const DEFAULT_CONTACT_PERMISSIONS = () => permissionMatrix(objectPermissions({create:true, view:'own', edit:'own', del:'own', merge:'own', assign:'all', createAssociated:'all'}));
+// Records only — the rest is filled in by the holder's level when loaded (normalizePermissions).
+const recordsOnly = (m) => ({contacts:m.contacts, deals:m.deals, customers:m.customers});
+const permissionMatrix = (contacts, level = 'view') => normalizePermissions({contacts}, level);   // Deals and Customers mirror Contacts
+const DEFAULT_CONTACT_PERMISSIONS = () => recordsOnly(permissionMatrix(objectPermissions({create:true, view:'own', edit:'own', del:'own', merge:'own', assign:'all', createAssociated:'all'})));
 /* Permissions saved before (Contacts only, flat): scope names → Type, "also for contacts assigned
    to someone else in the future" → Until the <record> Is Removed, None → off; the on / off admin
    actions become All <records> (they had no scope). Deals mirror Contacts when missing. */
@@ -158,7 +183,16 @@ function normalizeObjectPermissions(o){
     : v ? scopedPermission(v.on, v.scope || 'own', v.life) : scopedPermission(false);
   const std = {enabled:o.enabled !== false, create:{on: typeof o.create === 'boolean' ? o.create : !!(o.create && o.create.on)},
     ...Object.fromEntries(SCOPED_PERMISSION_KEYS.map(k => [k, fromOld(o[k])]))};
-  return {...std, tools:normalizeToolPermissions(o.tools, std)};
+  return {...std, tools:normalizeToolPermissions(o.tools, std), accounting:normalizeAccountingPermissions(o.accounting, std)};
+}
+/* Payment Terms (the record's Accounting tab), per Object: Create, View, Edit, Delete — by the
+   record's owner, as the Object's own. None saved yet → mirroring the Object's (as Payment Terms
+   followed the record's Edit before). Without View the record's payment terms and every
+   accounting figure from them (Accounting properties, cash KPIs and statistics) don't show. */
+function normalizeAccountingPermissions(a, std){
+  const scoped = (v, fallback) => v ? scopedPermission(v.on, v.scope || 'own', v.life) : scopedPermission(fallback.on, fallback.scope, fallback.life);
+  const cur = a || {};
+  return {create:{on: cur.create ? !!cur.create.on : std.edit.on}, view:scoped(cur.view, std.view), edit:scoped(cur.edit, std.edit), delete:scoped(cur.delete, std.edit)};
 }
 /* An Object's Tools: saved ones as they are; none yet → mirroring the Object's own Create / View /
    Edit / Delete (Tools on). Calls: Create only. */
@@ -171,12 +205,73 @@ function normalizeToolPermissions(t, std){
       return [tool.key, tool.createOnly ? {create} : {create, view:scoped(cur.view, std.view), edit:scoped(cur.edit, std.edit), delete:scoped(cur.delete, std.delete)}];
     }))};
 }
-function normalizePermissions(p){
-  if(!p) return DEFAULT_CONTACT_PERMISSIONS();
-  const contacts = normalizeObjectPermissions(p.contacts || p);
+/* ── Beyond Records ── one shape for everything with Create / View / Edit / Delete: Create on /
+   off; the others with a Type (by owner — the record's for Customer Profile, the creator's for
+   Templates, Workflows, Settings → Records, Properties and Pipelines (these two per record type)
+   and Customer Profile forms). Tools Settings and Company Defaults are on / off. Users & Teams and Permission
+   Management go by the user's team: Their Team Users or All Users. `level`: what a matrix saved
+   before these existed starts with — 'all' (Super Admin, Admin), else 'view' (View on Customer
+   Profile, Templates and Workflows; nothing in Settings & Administration). */
+const flag = (on) => ({on:!!on});
+const crud = (on, viewOn = on) => ({create:flag(on), view:scopedPermission(viewOn, 'all'), edit:scopedPermission(on, 'all'), delete:scopedPermission(on, 'all')});
+function extendedPermissions(level){
+  const all = level === 'all', view = all || level === 'view';
+  const perObject = (f) => Object.fromEntries(ADMIN_RECORD_OBJECTS.map(o => [o, f(o)]));
+  return {
+    // Customer Profile Properties: which answers may be edited, on every record — 'all' or ['<form>:<field>'].
+    profileProps: 'all',
+    templates: Object.fromEntries(PERMISSION_TEMPLATES.map(t => [t.key, crud(all, view)])),
+    // Workflows: on / off for every workflow (not by who created it); Revert restores an earlier version.
+    workflows: {view:flag(view), create:flag(all), edit:flag(all), delete:flag(all), revert:flag(all)},
+    admin: {
+      records: crud(all),
+      properties: perObject(() => ({add:flag(all), edit:scopedPermission(all, 'all'), delete:scopedPermission(all, 'all')})),
+      pipelines: perObject(() => crud(all)),
+      tools: Object.fromEntries(ADMIN_TOOL_SETTINGS.map(t => [t.key, flag(all)])),
+      defaults: {edit:flag(all)},
+      users: {add:flag(all), edit:scopedPermission(all, 'all'), deactivate:scopedPermission(all, 'all'), delete:scopedPermission(all, 'all')},
+      permissions: {edit:scopedPermission(all, 'all'), assign:scopedPermission(all, 'all')},
+    },
+  };
+}
+const ADMIN_LEVEL_PRESETS = [SUPER_ADMIN, 'Admin'];
+const levelOfPreset = (name) => ADMIN_LEVEL_PRESETS.includes(name) ? 'all' : 'view';
+// Saved sections kept as they are; a missing one (or part) from `base` — the level's defaults.
+const fillFrom = (base, saved) => {
+  if(saved == null) return base;
+  if(Array.isArray(base) || typeof base !== 'object' || base === null || typeof saved !== 'object' || Array.isArray(saved)) return saved;
+  return Object.fromEntries([...new Set([...Object.keys(base), ...Object.keys(saved)])].map(k => [k, fillFrom(base[k], saved[k])]));
+};
+/* Records → Edit: moving between pipeline stages (on unless switched off), and which property
+   values may be edited — 'all' or a list of property keys. */
+const withEditOptions = (o) => o && ({...o, editStages: o.editStages !== false, editProps: Array.isArray(o.editProps) ? o.editProps : 'all'});
+/* Settings & Administration saved in the earlier shape — Records per record type, a property list,
+   Pipelines on / off — take the Type shape: on wherever it was on anywhere, for All. */
+const scopedFromOld = (v) => v && typeof v === 'object' && 'scope' in v ? v : scopedPermission(v === 'all' || (Array.isArray(v) && v.length > 0) || !!(v && v.on), 'all');
+function migrateAdmin(a){
+  if(!a) return a;
+  const out = {...a};
+  if(a.records && !a.records.view){
+    const objs = ADMIN_RECORD_OBJECTS.map(o => a.records[o] || {});
+    const any = (k) => objs.some(o => o[k] && o[k].on);
+    out.records = {create:a.records.create || flag(false), view:scopedPermission(any('view'), 'all'), edit:scopedPermission(any('edit'), 'all'), delete:scopedPermission(any('delete'), 'all')};
+  }
+  if(a.properties) out.properties = Object.fromEntries(Object.entries(a.properties).map(([o, v]) => [o, {add:v.add || flag(false), edit:scopedFromOld(v.edit), delete:scopedFromOld(v.delete)}]));
+  if(a.pipelines) out.pipelines = Object.fromEntries(Object.entries(a.pipelines).map(([o, v]) => [o, {create:v.create || flag(false), view:scopedFromOld(v.view), edit:scopedFromOld(v.edit), delete:scopedFromOld(v.delete)}]));
+  return out;
+}
+function normalizePermissions(p, level = 'view'){
+  const base = extendedPermissions(level);
+  if(!p) return {...DEFAULT_CONTACT_PERMISSIONS(), ...base};
+  const contacts = withEditOptions(normalizeObjectPermissions(p.contacts || p));
   // Deals and Customers mirror Contacts until they're set.
   const copy = () => JSON.parse(JSON.stringify(contacts));
-  return {contacts, deals: p.deals ? normalizeObjectPermissions(p.deals) : copy(), customers: p.customers ? normalizeObjectPermissions(p.customers) : copy()};
+  return {contacts, deals: p.deals ? withEditOptions(normalizeObjectPermissions(p.deals)) : copy(), customers: p.customers ? withEditOptions(normalizeObjectPermissions(p.customers)) : copy(),
+    profileProps: Array.isArray(p.profileProps) ? p.profileProps : 'all',
+    // Customer Profile forms moved from Settings & Administration to Templates.
+    templates:fillFrom(base.templates, {...(p.admin && p.admin.profileForms && !(p.templates || {}).profileForms ? {profileForms:p.admin.profileForms} : {}), ...(p.templates || {})}),
+    workflows:fillFrom(base.workflows, p.workflows && !('revert' in p.workflows) ? {...p.workflows, revert:{on:!!(p.workflows.edit || {}).on}} : p.workflows),
+    admin:(({profileForms, ...rest}) => rest)(fillFrom(base.admin, migrateAdmin(p.admin)))};
 }
 
 // The record a page is showing, for its permission checks: {object, record} (ContactDetail, DealDetail).
@@ -191,7 +286,7 @@ const useRecordAccess = () => React.useContext(RecordAccessCtx);
    the current owner only; Until the <record> Is Removed also counts its earlier owners. No acting
    user (nothing registered): everything is allowed. */
 let ACCESS = {user:null, perms:null, users:[], history:() => []};
-const setAccessContext = ({user, users, history}) => { ACCESS = {user, users:users || [], history:history || (() => []), perms:user ? normalizePermissions(user.permissions) : null}; };
+const setAccessContext = ({user, users, history, data}) => { ACCESS = {user, data, users:users || [], history:history || (() => []), perms:user ? normalizePermissions(user.permissions, levelOfPreset(user.preset)) : null}; };
 const accessUser = () => ACCESS.user;
 function recordOwners(object, record, withHistory){
   const owner = userIdOf(record.ownerId || record.owner, ACCESS.users);
@@ -216,6 +311,78 @@ function toolCan(object, record, tool, action){
   if(!p) return false;
   return action === 'create' ? !!p.on : permissionCovers(p, object, record);
 }
+/* ── Access beyond tools ── each check: no acting user (nothing registered) → allowed. Create needs
+   only to be on; a check without the item ("may they view any?") needs only the permission on;
+   with the item, its Type is checked against its owner — the record's owner, or the item's
+   creator (`createdBy`, a user's name or ID; "System" and nobody count as no one's, so only All
+   covers them). Creator-owned items aren't reassigned, so their Permission Life doesn't apply. */
+const ACCESS_ON = () => !!(ACCESS.user && ACCESS.perms);
+/* Who created an item — a user's name. Items from before creators were recorded (and the shipped
+   ones, "System") are the workspace creator's: who created the workspace, else its first Super Admin. */
+function workspaceCreatorName(){
+  const users = ACCESS.users && ACCESS.users.length ? ACCESS.users : USER_DIRECTORY;
+  const ws = typeof workspaceBrand === 'function' ? workspaceBrand() : {};
+  const byEmail = ws.createdBy && users.find(u => String(u.email || '').toLowerCase() === String(ws.createdBy).toLowerCase());
+  return (byEmail || users.find(u => u.preset === SUPER_ADMIN) || {}).name || '';
+}
+const creatorOf = (item) => item && item.createdBy && item.createdBy !== 'System' ? (userLabel(item.createdBy) || item.createdBy) : workspaceCreatorName();
+const ownedCan = (p, object, owner, action, life) => {
+  if(!p) return false;
+  if(action === 'create' || owner === undefined) return !!p.on;
+  return permissionCovers(life ? p : {...p, life:'reassigned'}, object, {owner:owner || ''});
+};
+// Records → Edit: moving between stages, and editing a property's value.
+const stageMoveCan = (object, record) => !ACCESS_ON() || (recordEditable(object, record) && (ACCESS.perms[object] || {}).editStages !== false);
+const propValueCan = (object, record, key) => {
+  if(!ACCESS_ON()) return true;
+  if(!recordEditable(object, record)) return false;
+  const list = (ACCESS.perms[object] || {}).editProps;
+  return !Array.isArray(list) || list.includes(key);
+};
+// A property's value as a stage: a pipeline / stage property, or the property a pipeline follows (a contact's Types of Contact).
+const isStageProperty = (object, p) => !!p && (['Pipeline', 'Pipeline stage'].includes(propertyTypeId(p.type))
+  || objectPipelines((ACCESS.data || {}), object).some(pl => pl.source === 'property' && pl.propertyKey === p.key));
+// The field may be edited on this record (its edit form, its side panel): a stage, or a property's value.
+const fieldEditCan = (object, record, p) => !ACCESS_ON() || !record ? true : isStageProperty(object, p) ? stageMoveCan(object, record) : propValueCan(object, record, p.key);
+// The property is among those whose values may be edited (bulk edit: whatever the record).
+const propKeyCan = (object, key) => { if(!ACCESS_ON()) return true; const list = (ACCESS.perms[object] || {}).editProps; return !Array.isArray(list) || list.includes(key); };
+// Payment Terms on a record (Records → <Object> → Payment Terms), by the record's owner.
+const paymentTermsCan = (action, object, record) => {
+  if(!ACCESS_ON()) return true;
+  const o = ACCESS.perms[object];
+  const p = o && o.enabled && o.accounting && o.accounting[action];
+  if(!p) return false;
+  return action === 'create' || !record ? !!p.on : permissionCovers(p, object, record);
+};
+// May see accounting figures at all (any record): cash KPIs and statistics show only then.
+const accountingViewAny = () => !ACCESS_ON() || ADMIN_RECORD_OBJECTS.some(o => paymentTermsCan('view', o));
+/* Customer Profile Properties — universal, on every record: an answer may be edited (given,
+   changed or cleared) when its property is allowed ('all', or '<form>:<field>' in the list). */
+const profilePropCan = (formId, fieldId) => { if(!ACCESS_ON()) return true; const l = ACCESS.perms.profileProps; return !Array.isArray(l) || l.includes(`${formId}:${fieldId}`); };
+const profilePropsAll = () => !ACCESS_ON() || !Array.isArray(ACCESS.perms.profileProps);
+const profileEditAny = () => { if(!ACCESS_ON()) return true; const l = ACCESS.perms.profileProps; return !Array.isArray(l) || l.length > 0; };
+// Templates (`kind`: emailTemplates, emailSequences, quoteTemplates, playbooks, services) and Workflows, by creator.
+const templateCan = (kind, action, item) => !ACCESS_ON() || ownedCan(((ACCESS.perms.templates || {})[kind] || {})[action], kind, item ? creatorOf(item) : undefined, action);
+const workflowCan = (action) => !ACCESS_ON() || !!((ACCESS.perms.workflows || {})[action] || {}).on;
+// Settings & Administration.
+const adminOf = () => ACCESS.perms.admin || {};
+// Settings → Records (`obj`: a record type), Properties and Pipelines (per record type), by who created each item.
+const adminRecordsCan = (action, obj) => !ACCESS_ON() || ownedCan((adminOf().records || {})[action], 'recordTypes', obj ? creatorOf(obj) : undefined, action);
+const adminPropertyCan = (object, action, prop) => !ACCESS_ON() || ownedCan(((adminOf().properties || {})[object] || {})[action === 'add' ? 'add' : action], 'properties', prop ? creatorOf(prop) : undefined, action === 'add' ? 'create' : action);
+const pipelineAdminCan = (object, action, pipeline) => !ACCESS_ON() || ownedCan(((adminOf().pipelines || {})[object] || {})[action], 'pipelines', pipeline ? creatorOf(pipeline) : undefined, action);
+// Customer Profile templates (Templates → Customer Profile): Create, Edit form fields, Delete — by creator; anyone may view them.
+const profileFormCan = (action, form) => action === 'view' || templateCan('profileForms', action, form);
+const toolSettingCan = (tool) => !ACCESS_ON() || !!((adminOf().tools || {})[tool] || {}).on;
+const defaultsCan = () => !ACCESS_ON() || !!((adminOf().defaults || {}).edit || {}).on;
+// Users & Teams, Permission Management: Their Team Users (the user is in the actor's team) or All Users.
+const userAdminCan = (section, action, target) => {
+  if(!ACCESS_ON()) return true;
+  const p = ((adminOf()[section] || {})[action]);
+  if(!p || !p.on) return false;
+  if(!target || action === 'add' || p.scope === 'all') return true;
+  return !!ACCESS.user.teamId && target.teamId === ACCESS.user.teamId;
+};
+
 // Which tool an activity belongs to (emails, owner changes and workflow entries aren't tools).
 const ACTIVITY_TOOL = {call:'callLogs', meeting:'meetings', note:'notes', task:'tasks', file:'files', fileChange:'files', quote:'quotes'};
 const activityVisible = (object, record, a) => { const t = ACTIVITY_TOOL[a.type]; return !t || toolCan(object, record, t, 'view'); };
@@ -270,11 +437,11 @@ const SAMPLE_TEAMS = [
    Petition permissions (Case Manager, Petition Writer, Compliance) are not defined yet. */
 const ALL_CONTACTS = 'all', TEAM_CONTACTS = 'team';
 // A preset's matrix: Contacts as given; Deals mirror them. `future` → Until the <record> Is Removed.
-const presetMatrix = ({create, view, edit = null, del = null, merge = null, future = false, assign = false, createAssociated = false}) =>
-  permissionMatrix(objectPermissions({create, view, edit, del, merge, assign: assign ? 'all' : null, createAssociated: createAssociated ? 'all' : null, life: future ? 'removed' : 'reassigned'}));
+const presetMatrix = ({create, view, edit = null, del = null, merge = null, future = false, assign = false, createAssociated = false, level = 'view'}) =>
+  permissionMatrix(objectPermissions({create, view, edit, del, merge, assign: assign ? 'all' : null, createAssociated: createAssociated ? 'all' : null, life: future ? 'removed' : 'reassigned'}), level);
 const DEFAULT_PRESETS = () => [
-  {id:'pp-super-admin',  name:SUPER_ADMIN,          seat:'Full Seat', permissions:presetMatrix({create:true, view:ALL_CONTACTS, edit:ALL_CONTACTS, del:ALL_CONTACTS, merge:ALL_CONTACTS, future:true, assign:true, createAssociated:true})},
-  {id:'pp-admin',        name:'Admin',              seat:'Full Seat', permissions:presetMatrix({create:true, view:ALL_CONTACTS, edit:ALL_CONTACTS, del:ALL_CONTACTS, merge:ALL_CONTACTS, future:true, createAssociated:true})},
+  {id:'pp-super-admin',  name:SUPER_ADMIN,          seat:'Full Seat', permissions:presetMatrix({create:true, view:ALL_CONTACTS, edit:ALL_CONTACTS, del:ALL_CONTACTS, merge:ALL_CONTACTS, future:true, assign:true, createAssociated:true, level:'all'})},
+  {id:'pp-admin',        name:'Admin',              seat:'Full Seat', permissions:presetMatrix({create:true, view:ALL_CONTACTS, edit:ALL_CONTACTS, del:ALL_CONTACTS, merge:ALL_CONTACTS, future:true, createAssociated:true, level:'all'})},
   {id:'pp-team-lead',    name:'Team Lead',          seat:'Full Seat', permissions:presetMatrix({create:true, view:TEAM_CONTACTS, edit:TEAM_CONTACTS, merge:TEAM_CONTACTS})},
   {id:'pp-sales-pro',    name:'Sales Professional', seat:'Full Seat', permissions:presetMatrix({create:true, view:TEAM_CONTACTS, edit:TEAM_CONTACTS, del:TEAM_CONTACTS})},
   {id:'pp-case-manager', name:'Case Manager',       seat:'Full Seat', permissions:presetMatrix({create:true, view:TEAM_CONTACTS, edit:TEAM_CONTACTS, del:TEAM_CONTACTS})},
@@ -569,15 +736,75 @@ const personName = (users, uid) => (users.find(u => u.id === uid) || {}).name ||
 const teamName = (teams, tid) => (teams.find(t => t.id === tid) || {}).name || '';
 
 /* ── Users ── the four status views; seat type and team are read from the seat and team records. */
+/* ── Edit User ── Users & Teams → a user's ⋯ → Edit User: the Edit contact panel (CreatePanelFrame +
+   RecordFields) with the User Properties (Country, Language, Designation and any added). Footer:
+   Cancel, Edit User in HRMS (placeholder until HRMS exists), Save changes. */
+const saveUserProfileIn = (setData, id, patch) => setData(d => ({...d, users:d.users.map(u => u.id === id ? {...u, profile:{...(u.profile || {}), ...patch}} : u)}));
+function UserEditPanel({data, setData, user, onClose, onStub}){
+  const fields = (data.properties || []).filter(p => p.objectId === 'users' && !p.archived).map(p => ({...p, required:!!p.mandatory}));
+  const current = ownerProfileMock(user.name, user).raw;
+  const initial = Object.fromEntries(fields.map(p => [p.key, p.key in current ? current[p.key] : (user.profile || {})[p.key]]));
+  const [v, setV] = React.useState(() => emptyValues(fields, initial));
+  const [tried, setTried] = React.useState(false);
+  const set = (patch) => setV(x => ({...x, ...patch}));
+  const submit = () => {
+    setTried(true);
+    if(Object.keys(formErrors(fields, v)).length) return;
+    saveUserProfileIn(setData, user.id, storedValues(fields, v));
+    onClose();
+  };
+  return (
+    <CreatePanelFrame title="Edit user" onClose={onClose} more={false} zIndex={130} actions={<>
+      <StSecondary label="Cancel" onClick={onClose}/>
+      <StSecondary label={<span style={{display:'inline-flex', alignItems:'center', gap:6}}>Edit User in HRMS <Icon name="externalLink" size={13} color={T.gray600}/></span>}
+        onClick={()=>onStub(`Edit User in HRMS · ${user.name}`)}/>
+      <StCta label="Save changes" onClick={submit}/>
+    </>}>
+      <div style={{display:'grid', gridTemplateColumns:'minmax(0, 1fr)', gap:16}}>
+        <RecordFields fields={fields} values={v} set={set} optionsFor={(p)=>p.options || []} tried={tried}/>
+      </div>
+    </CreatePanelFrame>
+  );
+}
+
+/* Deactivate user: they lose access and their seat is freed; the records they own keep them as owner. */
+function DeactivateUserModal({user, onCancel, onConfirm}){
+  return (
+    <StModal title="Deactivate user" primary="Deactivate user" danger onCancel={onCancel} onSubmit={onConfirm}>
+      <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>{user.name} will lose access to the CRM and their seat will be freed. The records they own stay theirs.</div>
+    </StModal>
+  );
+}
+/* Delete user: someone takes over the records they own first (each a recorded owner change); their
+   past activity keeps their name. The user and their seat go. */
+function DeleteUserModal({user, owned, users, onCancel, onConfirm}){
+  const [to, setTo] = React.useState('');
+  const n = owned.length, needs = n > 0;
+  return (
+    <StModal title="Delete user" primary="Delete user" danger canSubmit={!needs || !!to} onCancel={onCancel} onSubmit={()=>onConfirm(to || null)}>
+      <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>
+        {needs ? `${user.name} owns ${n} record${n === 1 ? '' : 's'}. Choose who takes them over, then delete ${user.name}.` : `${user.name} will be deleted.`} Their past activity keeps their name.
+      </div>
+      {needs && <StField label="Reassign their records to">
+        <PersonSelect value={to} people={users.filter(u => u.id !== user.id && u.status === 'Activated')} labelOf={(u)=>u.name} onChange={setTo} placeholder="Select user"/>
+      </StField>}
+    </StModal>
+  );
+}
+
 function UsersModule({data, setData, onStub, focus}){
+  const hub = useRecordHub();
   const [editing, setEditing] = React.useState(null);
+  const [deactivating, setDeactivating] = React.useState(null);
+  const [deleting, setDeleting] = React.useState(null);
+  const [editingUser, setEditingUser] = React.useState(null);   // the user open in Edit User (id)
   const [addingUser, setAddingUser] = React.useState(false);
   const [changingSeat, setChangingSeat] = React.useState(null);
   const [changingTeam, setChangingTeam] = React.useState(null);
   const [viewingId, setViewingId] = React.useState(null);   // an active user whose details are open
   const viewing = viewingId && data.users.find(u => u.id === viewingId);
   // A user's Country / Language / Designation — read wherever user properties are (owner panel, workflows).
-  const saveProfile = (id, patch) => setData(d => ({...d, users:d.users.map(u => u.id === id ? {...u, profile:{...(u.profile || {}), ...patch}} : u)}));
+  const saveProfile = (id, patch) => saveUserProfileIn(setData, id, patch);
   const rows = React.useMemo(()=>data.users.map(u => ({...u, seat:(seatOfUser(data.seats, u.id) || {}).type || '', team:teamName(data.teams, u.teamId)})),
     [data.users, data.seats, data.teams]);
   const schema = {
@@ -587,23 +814,29 @@ function UsersModule({data, setData, onStub, focus}){
       // An active user opens their details (the Record Owner profile, editable here).
       ? <ContactName name={u.name} onOpen={()=>u.status === 'Activated' ? setViewingId(u.id) : onStub(u.name)} style={{fontSize:'inherit', fontWeight:500}}/>
       : undefined,
-    // Edit Employee opens the employee record in HRMS, outside CRM Settings (not defined yet).
-    renderActions: (u) => <RowActionsMenu title="User actions" items={[
-      {label:'Edit Permissions', onClick:()=>setEditing(u)},
-      {label:'Edit Employee', external:true, onClick:()=>onStub(`Edit Employee · ${u.name} (HRMS)`)},
-      {label:'Change Seat', onClick:()=>setChangingSeat(u)},
-      {label:'Change Team', onClick:()=>setChangingTeam(u)},
-    ]}/>,
+    /* Settings & Administration: Edit Permissions with Permission Management (Assign or Edit);
+       Edit User, Change Seat and Change Team with Users & Teams → Edit; Deactivate and Delete with
+       their own — each for Their Team users or All users. */
+    renderActions: (u) => { const can = (action) => userAdminCan('users', action, u);
+      return <RowActionsMenu title="User actions" items={[
+        ...(userAdminCan('permissions', 'assign', u) || userAdminCan('permissions', 'edit', u) ? [{label:'Edit Permissions', onClick:()=>setEditing(u)}] : []),
+        ...(can('edit') ? [{label:'Edit User', onClick:()=>setEditingUser(u.id)}, {label:'Change Seat', onClick:()=>setChangingSeat(u)}, {label:'Change Team', onClick:()=>setChangingTeam(u)}] : []),
+        ...(can('deactivate') && u.status === 'Activated' ? [{label:'Deactivate user', onClick:()=>setDeactivating(u)}] : []),
+        ...(can('delete') ? [{label:'Delete user', danger:true, onClick:()=>setDeleting(u)}] : []),
+      ]}/>; },
   };
+  const ownedBy = (uid) => ['contacts', 'deals', 'customers'].flatMap(o => (((hub && hub.records) || {})[o] || []).filter(r => r.owner === uid).map(r => ({object:o, id:r.id})));
   return (
     <RecordViewsModule schema={schema} rows={rows} columns={USER_COLUMNS} focus={focus}
       defaultViews={USER_DEFAULT_VIEWS.map(v => ({id:v.id, name:v.name, filters:isFilter('status', v.status), sort:{key:'name', dir:'asc'}}))}
       actions={(btn) => <>
         <button onClick={()=>onStub('Export')} style={btn}><Icon name="export" size={13} color={T.gray600}/> Export</button>
-        {/* Add user — the Contacts toolbar's icon-only + after Export. */}
-        <button onClick={()=>setAddingUser(true)} title="Add user" style={iconBtn}><Icon name="plus" size={14} color={T.gray800}/></button>
+        {/* Add user — the Contacts toolbar's icon-only + after Export (Users & Teams → Add users). */}
+        {userAdminCan('users', 'add') && <button onClick={()=>setAddingUser(true)} title="Add user" style={iconBtn}><Icon name="plus" size={14} color={T.gray800}/></button>}
       </>}>
       {viewing && <OwnerProfilePanel key={viewing.id} name={viewing.id} user={viewing} editable fixed properties={data.properties.filter(p => p.objectId === 'users' && !p.archived)} onClose={()=>setViewingId(null)} onSaveProfile={(patch)=>saveProfile(viewing.id, patch)}/>}
+      {editingUser && data.users.some(u => u.id === editingUser) && <UserEditPanel data={data} setData={setData} user={data.users.find(u => u.id === editingUser)}
+        onStub={onStub} onClose={()=>setEditingUser(null)}/>}
       {changingSeat && <ChangeSeatModal data={data} user={changingSeat} onClose={()=>setChangingSeat(null)}
         onSave={(type) => { setData(d => ({...d, seats:assignSeat(d.seats, changingSeat.id, type)})); setChangingSeat(null); }}/>}
       {changingTeam && <ChangeTeamModal data={data} user={changingTeam} onClose={()=>setChangingTeam(null)}
@@ -615,6 +848,15 @@ function UsersModule({data, setData, onStub, focus}){
           // Save and Set Permission: straight into Edit Permissions for the new user.
           if(setPermissions) setEditing({...u, seat:'', team:teamName(data.teams, u.teamId)});
         }}/>}
+      {deactivating && <DeactivateUserModal user={deactivating} onCancel={()=>setDeactivating(null)}
+        onConfirm={() => { const id = deactivating.id;
+          setData(d => ({...d, users:d.users.map(u => u.id === id ? {...u, status:'Deactivated'} : u), seats:d.seats.map(st => st.assigneeId === id ? {...st, assigneeId:null} : st)}));
+          setDeactivating(null); }}/>}
+      {deleting && <DeleteUserModal user={deleting} owned={ownedBy(deleting.id)} users={data.users} onCancel={()=>setDeleting(null)}
+        onConfirm={(to) => { const id = deleting.id;
+          if(to) ownedBy(id).forEach(r => hub.updateRecord(r.object, r.id, {owner:to}));
+          setData(d => ({...d, users:d.users.filter(u => u.id !== id), seats:d.seats.map(st => st.assigneeId === id ? {...st, assigneeId:null} : st)}));
+          setDeleting(null); }}/>}
       {editing && <EditPermissionsDrawer user={editing} seats={data.seats} presets={data.presets} onStub={onStub} onClose={()=>setEditing(null)}
         onCreatePreset={(p) => setData(d => ({...d, presets:[...d.presets, p]}))}
         onSave={({seat, ...patch}) => {
@@ -915,11 +1157,12 @@ function PresetsModule({data, setData, onStub, openUsers}){
     properties:PRESET_PROPERTIES, filterProps:PRESET_FILTER_PROPS, selectValues:{seat:USER_SEATS}, noun:'preset', searchKeys:['name', 'seat'], fillWidth:true,
     // The assigned-user count opens Users filtered to this preset.
     renderCell: (key, r) => key === 'assigned' ? countLink(r.count, ()=>openUsers({prop:'preset', op:'is', value:r.name})) : undefined,
-    renderActions: (r) => <RowActionsMenu title="Preset actions" items={[{label:'Edit preset', onClick:()=>setEditingPreset(data.presets.find(p => p.id === r.id))}]}/>,
+    // Presets are changed with Permission Management → Edit.
+    renderActions: (r) => <RowActionsMenu title="Preset actions" items={userAdminCan('permissions', 'edit') ? [{label:'Edit preset', onClick:()=>setEditingPreset(data.presets.find(p => p.id === r.id))}] : []}/>,
   };
   return <RecordViewsModule schema={schema} rows={rows} columns={PRESET_PROPERTIES.map(p => p.key)}
     defaultViews={[{id:'pv-all', name:'All Presets'}]}
-    actions={() => <button onClick={()=>onStub('Add Permission Preset')} title="Add Permission Preset" style={iconBtn}><Icon name="plus" size={14} color={T.gray800}/></button>}>
+    actions={() => userAdminCan('permissions', 'edit') && <button onClick={()=>onStub('Add Permission Preset')} title="Add Permission Preset" style={iconBtn}><Icon name="plus" size={14} color={T.gray800}/></button>}>
     {editingPreset && <EditPresetDrawer preset={editingPreset} onClose={()=>setEditingPreset(null)}
       onSave={(permissions) => { setData(d => ({...d, presets:d.presets.map(p => p.id === editingPreset.id ? {...p, permissions} : p)})); setEditingPreset(null); }}/>}
   </RecordViewsModule>;
@@ -957,10 +1200,11 @@ function PermissionsDrawerFrame({title, subtitle, onClose, onSave, children}){
    on (Create needs nothing else); View / Edit / Delete / Merge and the admin permissions then
    take a Type, and Their / Their Team records a Permission Life. Options that don't apply are
    shown disabled; a permission the seat can't grant is disabled. Every change applies at once. */
-function ObjectPermissionsEditor({obj, seat, value, onChange}){
-  const v = value || normalizeObjectPermissions({});
+function ObjectPermissionsEditor({obj, seat, value, onChange, properties = []}){
+  const v = withEditOptions(value || normalizeObjectPermissions({}));
   const set = (key, patch) => onChange(o => ({...o, [key]:applyPermission(o[key], key, patch)}));
   const tools = v.tools || normalizeToolPermissions(null, v);
+  const accounting = v.accounting || normalizeAccountingPermissions(null, v);
   const setTool = (tool, key, patch) => onChange(o => ({...o, tools:{...o.tools, [tool]:{...o.tools[tool], [key]:applyPermission(o.tools[tool][key], key, patch)}}}));
   const standard = STANDARD_PERMISSIONS.map(a => ({...a, allowed:seat.contactStandard.includes(a.key)}));
   const admin = ADMIN_PERMISSIONS.filter(a => seat.contactAdmin.includes(a.key)).map(a => ({...a, allowed:true}));
@@ -973,6 +1217,10 @@ function ObjectPermissionsEditor({obj, seat, value, onChange}){
       </div>
       {v.enabled && (<>
         <PermissionTable title="Standard permissions" obj={obj} rows={standard} value={v} set={set}/>
+        {/* Under Edit: moving between stages, and which property values may be edited. */}
+        {v.edit.on && seat.contactStandard.includes('edit') && (
+          <EditOptions obj={obj} value={v} properties={properties} onChange={(patch)=>onChange(o => ({...o, ...patch}))}/>
+        )}
         {/* Administrative permissions: Full Seats only. */}
         {admin.length > 0 && <PermissionTable title="Administrative permissions" obj={obj} rows={admin} value={v} set={set}/>}
         {/* Tools: one switch for all of them; on, a table per tool (the seat's limits apply). */}
@@ -986,10 +1234,90 @@ function ObjectPermissionsEditor({obj, seat, value, onChange}){
             rows={toolActionsOf(tool).map(a => ({...a, allowed:seat.contactStandard.includes(a.key)}))}
             value={tools[tool.key]} set={(key, patch)=>setTool(tool.key, key, patch)}/>
         ))}
+        {/* Accounting: the record's Payment Terms (its Accounting tab), by the record's owner. */}
+        <div style={{height:1, background:T.borderStrong}}/>
+        <span style={{fontSize:14, fontWeight:500, color:T.black}}>Accounting</span>
+        <PermissionTable title="Payment Terms" obj={obj} idKey={`${obj.key}-accounting`}
+          rows={[{key:'create', label:() => 'Create Payment Terms', unscoped:true}, {key:'view', label:() => 'View Payment Terms'},
+            {key:'edit', label:() => 'Edit Payment Terms'}, {key:'delete', label:() => 'Delete Payment Terms'}].map(a => ({...a, allowed:seat.contactStandard.includes(a.key)}))}
+          value={accounting} set={(key, patch)=>onChange(o => ({...o, accounting:{...(o.accounting || accounting), [key]:applyPermission((o.accounting || accounting)[key], key, patch)}}))}/>
+        <div style={stTextB}>Without View Payment Terms, the record's payment terms and the accounting figures from them (Accounting properties, cash KPIs and statistics) don't show.</div>
       </>)}
     </div>
   );
 }
+/* Records → Edit options: Move between pipeline stages (on / off), and Edit property values — All
+   properties, or Specific properties (ticked from the Object's properties). */
+function EditOptions({obj, value, properties, onChange}){
+  const specific = Array.isArray(value.editProps);
+  const list = specific ? value.editProps : [];
+  const radio = (checked, label, onPick) => (
+    <label style={{display:'flex', alignItems:'center', gap:8, fontSize:13, color:T.attioText, cursor:'pointer', minHeight:22}}>
+      <input type="radio" name={`${obj.key}-edit-props`} checked={checked} onChange={onPick} style={{margin:0, width:15, height:15, accentColor:T.black, cursor:'pointer'}}/>{label}
+    </label>
+  );
+  return (
+    <div style={{display:'flex', flexDirection:'column', gap:8}}>
+      <span style={{fontSize:13, fontWeight:500, color:T.gray600}}>Edit options</span>
+      <div style={{border:`1px solid ${T.attioLine}`, borderRadius:8, padding:'10px 12px', display:'flex', flexDirection:'column', gap:12}}>
+        <label onClick={()=>onChange({editStages:!value.editStages})} style={{display:'flex', alignItems:'center', gap:10, fontSize:13.5, fontWeight:500, color:T.black, cursor:'pointer'}}>
+          <RowCheckbox checked={value.editStages} onChange={()=>onChange({editStages:!value.editStages})}/>Move between pipeline stages
+        </label>
+        <div style={{display:'flex', flexDirection:'column', gap:6}}>
+          <span style={{fontSize:13.5, fontWeight:500, color:T.black}}>Edit property values</span>
+          {radio(!specific, 'All properties', ()=>onChange({editProps:'all'}))}
+          {radio(specific, 'Specific properties', ()=>onChange({editProps:list.length ? list : []}))}
+          {specific && (
+            <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(200px, 1fr))', gap:4, paddingLeft:23}}>
+              {properties.map(p => {
+                const on = list.includes(p.key), toggle = () => onChange({editProps: on ? list.filter(k => k !== p.key) : [...list, p.key]});
+                return <label key={p.key} onClick={toggle} style={{display:'flex', alignItems:'center', gap:8, fontSize:13, color:T.attioText, cursor:'pointer', minHeight:24}}>
+                  <RowCheckbox checked={on} onChange={toggle}/>{p.label}</label>;
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* Customer Profile Properties: All Properties (the default), or Specific Properties — every
+   profile template's fields, one per row, ticked on the left. */
+function ProfilePropsEditor({value, forms, disabled, onChange}){
+  const specific = Array.isArray(value), list = specific ? value : [];
+  const radio = (checked, label, onPick) => (
+    <label style={{display:'flex', alignItems:'center', gap:8, fontSize:13, color:T.attioText, cursor: disabled ? 'default' : 'pointer', minHeight:22}}>
+      <input type="radio" name="profile-props" checked={checked} disabled={disabled} onChange={onPick} style={{margin:0, width:15, height:15, accentColor:T.black}}/>{label}
+    </label>
+  );
+  return (
+    <div style={{display:'flex', flexDirection:'column', gap:10, opacity: disabled ? .5 : 1}}>
+      <div style={{display:'flex', gap:20}}>
+        {radio(!specific, 'All Properties', ()=>onChange('all'))}
+        {radio(specific, 'Specific Properties', ()=>onChange(list))}
+      </div>
+      {specific && (
+        <div style={{border:`1px solid ${T.attioLine}`, borderRadius:8, overflow:'hidden'}}>
+          {forms.map(f => (
+            <div key={f.id}>
+              <div style={{padding:'8px 12px', background:T.headerBg, fontSize:12.5, fontWeight:500, color:T.gray600, borderTop:`1px solid ${T.attioLine}`}}>{f.name}</div>
+              {(f.fields || []).map(fd => {
+                const id = `${f.id}:${fd.id}`, on = list.includes(id), toggle = () => !disabled && onChange(on ? list.filter(x => x !== id) : [...list, id]);
+                return (
+                  <label key={id} onClick={toggle} style={{display:'flex', alignItems:'center', gap:10, padding:'8px 12px', borderTop:`1px solid ${T.attioLine}`, fontSize:13, color:T.attioText, cursor: disabled ? 'default' : 'pointer'}}>
+                    <RowCheckbox checked={on} onChange={toggle}/>{fd.label}
+                  </label>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const PERMISSION_TABLE_COLS = '200px 1fr 1fr';
 // One permission changed: Create is on / off; the others stay complete (a Type, and a Permission Life for Their / Their Team).
 const applyPermission = (cur, key, patch) => {
@@ -997,8 +1325,10 @@ const applyPermission = (cur, key, patch) => {
   const next = {...cur, ...patch};
   return scopedPermission(next.on, next.scope || 'own', next.scope === 'all' ? null : (next.life || 'reassigned'));
 };
-// `idKey`: keeps each table's radio groups apart (a tool's table repeats the same permissions).
-function PermissionTable({title, obj, rows, value, set, idKey}){
+/* `idKey`: keeps each table's radio groups apart (a tool's table repeats the same permissions).
+   A row's `scopes` replaces the Types offered (Their Team / All users); `noLife`: no Permission Life
+   (items never reassigned — a creator's). `flat`: on / off permissions only — no Type or Life columns. */
+function PermissionTable({title, obj, rows, value, set, idKey, flat}){
   const cell = {padding:'10px 12px', minWidth:0};
   const header = {...cell, padding:'8px 12px', fontSize:12.5, fontWeight:500, color:T.gray600};
   const empty = <span style={{fontSize:13, color:T.gray400}}>—</span>;
@@ -1009,32 +1339,34 @@ function PermissionTable({title, obj, rows, value, set, idKey}){
       {label}
     </label>
   );
+  const cols = flat ? '1fr' : PERMISSION_TABLE_COLS;
   return (
     <div style={{display:'flex', flexDirection:'column', gap:8}}>
-      <span style={{fontSize:13, fontWeight:500, color:T.gray600}}>{title}</span>
-      <div role="table" aria-label={`${obj.plural} ${title}`} style={{border:`1px solid ${T.attioLine}`, borderRadius:8, overflow:'hidden'}}>
-        <div role="row" style={{display:'grid', gridTemplateColumns:PERMISSION_TABLE_COLS, background:T.headerBg, borderBottom:`1px solid ${T.attioLine}`}}>
+      {title && <span style={{fontSize:13, fontWeight:500, color:T.gray600}}>{title}</span>}
+      <div role="table" aria-label={`${obj.plural} ${title || ''}`} style={{border:`1px solid ${T.attioLine}`, borderRadius:8, overflow:'hidden'}}>
+        <div role="row" style={{display:'grid', gridTemplateColumns:cols, background:T.headerBg, borderBottom:`1px solid ${T.attioLine}`}}>
           <div role="columnheader" style={header}>Permission</div>
-          <div role="columnheader" style={{...header, borderLeft:`1px solid ${T.attioLine}`}}>Type</div>
-          <div role="columnheader" style={{...header, borderLeft:`1px solid ${T.attioLine}`}}>Permission Life</div>
+          {!flat && <div role="columnheader" style={{...header, borderLeft:`1px solid ${T.attioLine}`}}>Type</div>}
+          {!flat && <div role="columnheader" style={{...header, borderLeft:`1px solid ${T.attioLine}`}}>Permission Life</div>}
         </div>
         {rows.map((a, i) => {
           const p = value[a.key] || {}, on = !!p.on, name = `${idKey || obj.key}-${a.key}`;
           const scoped = !a.unscoped, typeOff = !a.allowed || !on, lifeOff = typeOff || p.scope === 'all';
+          const scopes = a.scopes || PERMISSION_SCOPES;
           return (
-            <div key={a.key} role="row" style={{display:'grid', gridTemplateColumns:PERMISSION_TABLE_COLS, borderTop: i ? `1px solid ${T.attioLine}` : 'none', opacity: a.allowed ? 1 : .5}}>
+            <div key={a.key} role="row" style={{display:'grid', gridTemplateColumns:cols, borderTop: i ? `1px solid ${T.attioLine}` : 'none', opacity: a.allowed ? 1 : .5}}>
               <div role="cell" style={{...cell, display:'flex', alignItems:'flex-start'}}>
                 <label onClick={()=>a.allowed && set(a.key, {on:!on})} style={{display:'flex', alignItems:'center', gap:10, fontSize:13.5, fontWeight:500, color:T.black, cursor: a.allowed ? 'pointer' : 'default', minHeight:22}}>
                   <RowCheckbox checked={on} onChange={()=>a.allowed && set(a.key, {on:!on})}/>{a.label(obj)}
                 </label>
               </div>
-              <div role="cell" style={{...cell, borderLeft:`1px solid ${T.attioLine}`, display:'flex', flexDirection:'column', gap:6}}>
-                {scoped ? PERMISSION_SCOPES.map(sc => radio(on && p.scope === sc, typeOff, scopeLabel(obj, sc), ()=>set(a.key, {scope:sc}), `${name}-type`)) : empty}
-              </div>
-              <div role="cell" style={{...cell, borderLeft:`1px solid ${T.attioLine}`, display:'flex', flexDirection:'column', gap:6}}>
+              {!flat && <div role="cell" style={{...cell, borderLeft:`1px solid ${T.attioLine}`, display:'flex', flexDirection:'column', gap:6}}>
+                {scoped ? scopes.map(sc => radio(on && p.scope === sc, typeOff, scopeLabel(obj, sc), ()=>set(a.key, {scope:sc}), `${name}-type`)) : empty}
+              </div>}
+              {!flat && <div role="cell" style={{...cell, borderLeft:`1px solid ${T.attioLine}`, display:'flex', flexDirection:'column', gap:6}}>
                 {/* All <records> needs no Permission Life: shown disabled, nothing picked. */}
-                {scoped ? PERMISSION_LIVES.map(l => radio(on && p.scope !== 'all' && p.life === l, lifeOff, lifeLabel(obj, l), ()=>set(a.key, {life:l}), `${name}-life`)) : empty}
-              </div>
+                {scoped && !a.noLife ? PERMISSION_LIVES.map(l => radio(on && p.scope !== 'all' && p.life === l, lifeOff, lifeLabel(obj, l), ()=>set(a.key, {life:l}), `${name}-life`)) : empty}
+              </div>}
             </div>
           );
         })}
@@ -1044,21 +1376,90 @@ function PermissionTable({title, obj, rows, value, set, idKey}){
 }
 
 /* The two-pane permission matrix for one seat type: categories on the left swap the right-hand
-   content; Objects and Tools have horizontal tabs. Only Objects → Contacts is defined. */
-function PermissionMatrixEditor({seat, perms, setPerms}){
+   content, each with its horizontal tabs. The search finds categories by their name or a tab's.
+   A View Seat grants View only (the rest shown disabled), and nothing in Settings & Administration. */
+const CRUD_ROWS = [
+  {key:'create', label:() => 'Create', unscoped:true},
+  {key:'view',   label:() => 'View'},
+  {key:'edit',   label:() => 'Edit'},
+  {key:'delete', label:() => 'Delete'},
+];
+const USERS_SCOPES = ['team', 'all'];
+// `readOnly`: the categories can be browsed, nothing changes (Permission Management → Edit).
+function PermissionMatrixEditor({seat, perms, setPerms, readOnly}){
+  const hub = useRecordHub();
   const [category, setCategory] = React.useState('Records');
-  const [tabs, setTabs] = React.useState({Records:'Contacts', Tools:'Quotes'});
+  const [tabs, setTabs] = React.useState({Records:'Contacts', Templates:PERMISSION_TEMPLATES[0].tab, 'Settings & Administration':ADMIN_TABS[0]});
   const [find, setFind] = React.useState('');
   const def = seatDef(seat);
+  const viewOnly = def.extended === 'view';
   const f = find.trim().toLowerCase();
-  const categories = PERMISSION_CATEGORIES.filter(c => !f || c.toLowerCase().includes(f));
-  const notDefined = (name) => (
-    <div style={{padding:'48px 0', textAlign:'center'}}>
-      <div style={{fontSize:15, fontWeight:600, color:T.gray800}}>{name}</div>
-      <div style={{fontSize:13, color:T.gray400, marginTop:6}}>Permissions for this area haven't been defined yet.</div>
-    </div>
-  );
+  const categories = PERMISSION_CATEGORIES.filter(c => !f || c.toLowerCase().includes(f) || (PERMISSION_TABS[c] || []).some(t => t.toLowerCase().includes(f)));
   const tab = tabs[category];
+  const objectProps = (o) => hub && hub.data ? objectProperties(hub.data, o) : [];
+  const profileForms = (hub && hub.data && hub.data.profileForms) || [];
+  const nounOf = (o) => (PERMISSION_OBJECTS.find(x => x.key === o) || {}).noun || o;
+  // Writing one part of the matrix: `path` into perms, a permission's key, its patch.
+  const setAt = (path, key, patch) => setPerms(p => {
+    const next = copyMatrix(p); let at = next;
+    path.forEach(k => { at[k] = at[k] || {}; at = at[k]; });
+    at[key] = patch === null || typeof patch !== 'object' || Array.isArray(patch) ? patch : applyPermission(at[key] || {}, key, patch);
+    return next;
+  });
+  const getAt = (path) => path.reduce((at, k) => (at || {})[k], perms) || {};
+  const rowsFor = (rows, extra = {}) => rows.map(a => ({...a, ...extra, allowed: viewOnly ? a.key === 'view' && !extra.adminOnly : true}));
+  const crudTable = (path, obj, extra) => (
+    <PermissionTable key={path.join('-')} obj={obj} idKey={path.join('-')} rows={rowsFor(CRUD_ROWS, extra)} value={getAt(path)} set={(key, patch)=>setAt(path, key, patch)}/>
+  );
+  const flatTable = (path, obj, rows, title) => (
+    <PermissionTable key={path.join('-')} flat title={title} obj={obj} idKey={path.join('-')} rows={rows.map(a => ({...a, unscoped:true, allowed:!viewOnly || !!a.viewRow}))}
+      value={getAt(path)} set={(key, patch)=>setAt(path, key, patch)}/>
+  );
+  const section = (title, body) => <div key={title} style={{display:'flex', flexDirection:'column', gap:10}}><span style={{fontSize:14, fontWeight:500, color:T.black}}>{title}</span>{body}</div>;
+  const row = (key, label) => ({key, label:() => label});
+
+  const body = () => {
+    if(category === 'Records' && permissionObjectOf(tab)) return (
+      <ObjectPermissionsEditor key={tab} obj={permissionObjectOf(tab)} seat={def} value={perms[permissionObjectOf(tab).key]} properties={objectProps(permissionObjectOf(tab).key)}
+        onChange={(fn)=>setPerms(p => { const k = permissionObjectOf(tab).key; return {...p, [k]:fn(p[k])}; })}/>
+    );
+    // Which Customer Profile answers may be edited — on every record.
+    if(category === 'Customer Profile Properties') return section('Edit Customer Profile properties',
+      <ProfilePropsEditor value={perms.profileProps} forms={profileForms} disabled={viewOnly} onChange={(v)=>setPerms(p => ({...p, profileProps:v}))}/>);
+    if(category === 'Templates'){ const t = PERMISSION_TEMPLATES.find(x => x.tab === tab); if(!t) return null;
+      if(t.key === 'profileForms') return section(t.plural, <PermissionTable obj={t} idKey="templates-profileForms" value={getAt(['templates', 'profileForms'])}
+        set={(key, patch)=>setAt(['templates', 'profileForms'], key, patch)}
+        rows={[{key:'create', label:() => 'Create Customer Profile Templates', unscoped:true}, {key:'edit', label:() => 'Edit Form Fields'}, {key:'delete', label:() => 'Delete Customer Profiles'}]
+          .map(a => ({...a, noLife:true, allowed:!viewOnly}))}/>);
+      return section(t.plural, crudTable(['templates', t.key], t, {noLife:true})); }
+    // Workflows: on / off for every workflow.
+    if(category === 'Workflows') return flatTable(['workflows'], {key:'workflows', plural:'Workflows'},
+      [row('view', 'View'), row('create', 'Create'), row('edit', 'Edit'), row('delete', 'Delete'), row('revert', 'Revert')].map(r => ({...r, viewRow:r.key === 'view'})), 'Workflows');
+    if(category !== 'Settings & Administration') return null;
+    const admin = ['admin'];
+    // Records, Properties, Pipelines: by who created each (the shipped ones are the workspace creator's).
+    if(tab === 'Records') return section('Settings → Records', crudTable([...admin, 'records'], {key:'recordTypes', noun:'Record', plural:'Records'}, {noLife:true, adminOnly:true}));
+    if(tab === 'Properties') return ADMIN_RECORD_OBJECTS.map(o => section(`${nounOf(o)} Properties`,
+      <PermissionTable obj={{key:`${o}-properties`, noun:`${nounOf(o)} Property`, plural:`${nounOf(o)} Properties`}} idKey={`admin-properties-${o}`}
+        value={getAt([...admin, 'properties', o])} set={(key, patch)=>setAt([...admin, 'properties', o], key, patch)}
+        rows={[{key:'add', label:() => 'Add new properties', unscoped:true}, {key:'edit', label:() => 'Edit'}, {key:'delete', label:() => 'Delete'}].map(a => ({...a, noLife:true, allowed:!viewOnly}))}/>));
+    if(tab === 'Pipelines') return ADMIN_RECORD_OBJECTS.map(o => section(`${nounOf(o)} Pipelines`,
+      crudTable([...admin, 'pipelines', o], {key:`${o}-pipelines`, noun:`${nounOf(o)} Pipeline`, plural:`${nounOf(o)} Pipelines`}, {noLife:true, adminOnly:true})));
+    if(tab === 'Tools Settings') return flatTable([...admin, 'tools'], {key:'tools', plural:'Tools'}, ADMIN_TOOL_SETTINGS.map(t => row(t.key, `Connect ${t.label}`)), 'Settings → Tools');
+    if(tab === 'Company Defaults') return flatTable([...admin, 'defaults'], {key:'defaults', plural:'Defaults'}, [row('edit', 'Edit company defaults')], 'Settings → Defaults');
+    if(tab === 'Users & Teams') return (
+      <PermissionTable title="Users" obj={{key:'users', noun:'User', plural:'Users'}} idKey="admin-users" value={getAt([...admin, 'users'])}
+        set={(key, patch)=>setAt([...admin, 'users'], key, patch)}
+        rows={[{key:'add', label:() => 'Add users', unscoped:true}, {key:'edit', label:() => 'Edit users'}, {key:'deactivate', label:() => 'Deactivate users'}, {key:'delete', label:() => 'Delete users'}]
+          .map(a => ({...a, scopes:USERS_SCOPES, noLife:true, allowed:!viewOnly}))}/>
+    );
+    if(tab === 'Permission Management') return (
+      <PermissionTable title="User permissions" obj={{key:'permissions', noun:'User', plural:'Users'}} idKey="admin-permissions" value={getAt([...admin, 'permissions'])}
+        set={(key, patch)=>setAt([...admin, 'permissions'], key, patch)}
+        rows={[{key:'assign', label:() => 'Assign permissions'}, {key:'edit', label:() => 'Edit permissions'}].map(a => ({...a, scopes:USERS_SCOPES, noLife:true, allowed:!viewOnly}))}/>
+    );
+    return null;
+  };
   return (
     <div style={{display:'flex', borderTop:`1px solid ${T.borderStrong}`, minHeight:480}}>
       {/* Left — categories; selecting one swaps the right-hand content. */}
@@ -1071,23 +1472,23 @@ function PermissionMatrixEditor({seat, perms, setPerms}){
         </div>
         <div style={{display:'flex', flexDirection:'column', gap:6}}>
           {categories.map(c => (
-            <div key={c} onClick={()=>setCategory(c)} style={{height:29, display:'flex', alignItems:'center', padding:'0 8px', borderRadius:6, cursor:'pointer',
+            <div key={c} onClick={()=>{ setCategory(c); const t = (PERMISSION_TABS[c] || []).find(x => f && x.toLowerCase().includes(f)); if(t) setTabs(x => ({...x, [c]:t})); }}
+              style={{minHeight:29, display:'flex', alignItems:'center', padding:'4px 8px', borderRadius:6, cursor:'pointer',
               fontSize:13, color: category === c ? '#fff' : T.black, background: category === c ? T.black : 'transparent'}}>{c}</div>
           ))}
         </div>
       </div>
 
-      {/* Right — the selected category: horizontal tabs for Objects and Tools. */}
+      {/* Right — the selected category, with its horizontal tabs. */}
       <div style={{flex:1, minWidth:0, padding:12, display:'flex', flexDirection:'column', gap:16}}>
         {PERMISSION_TABS[category] && (
           <div style={{display:'flex', gap:8, borderBottom:`1px solid ${T.borderStrong}`, overflowX:'auto', flexShrink:0}}>
             {PERMISSION_TABS[category].map(t => <UtTab key={t} label={t} active={tab === t} onClick={()=>setTabs(x => ({...x, [category]:t}))}/>)}
           </div>
         )}
-        {category === 'Records' && permissionObjectOf(tab) ? (
-          <ObjectPermissionsEditor key={tab} obj={permissionObjectOf(tab)} seat={def} value={perms[permissionObjectOf(tab).key]}
-            onChange={(fn)=>setPerms(p => { const k = permissionObjectOf(tab).key; return {...p, [k]:fn(p[k])}; })}/>
-        ) : notDefined(tab || category)}
+        {viewOnly && category === 'Settings & Administration' && <div style={stTextB}>A View Seat can't be given Settings & Administration permissions.</div>}
+        {readOnly && <div style={stTextB}>You can view these permissions but not change them.</div>}
+        {readOnly ? <div aria-disabled="true" style={{pointerEvents:'none', display:'flex', flexDirection:'column', gap:16}}>{body()}</div> : body()}
       </div>
     </div>
   );
@@ -1097,7 +1498,16 @@ const copyMatrix = (m) => JSON.parse(JSON.stringify(m));
 
 /* Edit Permissions for one user: Select Seat → Choose how to access → (manual) Permission
    Preset + matrix. The seat sets what can be granted; the preset sets what is granted. */
+/* Permission Management: Assign — the seat, how access is given and the preset; Edit — the
+   permission matrix (and saving it as a preset). What the signed-in user can't change shows locked. */
+const Locked = ({on, note, children}) => on ? children : (
+  <div style={{display:'flex', flexDirection:'column', gap:8}}>
+    <div style={stTextB}>{note}</div>
+    <div aria-disabled="true" style={{pointerEvents:'none', opacity:.6}}>{children}</div>
+  </div>
+);
 function EditPermissionsDrawer({user, seats, presets, onClose, onSave, onStub, onCreatePreset}){
+  const assignOk = userAdminCan('permissions', 'assign', user), editOk = userAdminCan('permissions', 'edit', user);
   const startSeat = user.seat || 'View Seat';
   const [seat, setSeat] = React.useState(startSeat);
   const [access, setAccess] = React.useState(user.access || 'manual');
@@ -1133,6 +1543,8 @@ function EditPermissionsDrawer({user, seats, presets, onClose, onSave, onStub, o
 
   return (<>
     <PermissionsDrawerFrame title="Edit Permissions" subtitle={user.name} onClose={onClose} onSave={save}>
+      <Locked on={assignOk} note="You can't assign this user's seat, access or preset.">
+      <div style={{display:'flex', flexDirection:'column', gap:24}}>
       {/* 1 — the seat type, with what's left of it; everything below follows from it. */}
       <div style={{display:'flex', flexDirection:'column', gap:12}}>
         <StField label="Select Seat">
@@ -1154,6 +1566,8 @@ function EditPermissionsDrawer({user, seats, presets, onClose, onSave, onStub, o
           <StRadioCard selected={access === 'all'} title={def.allTitle} description={def.allDescription} onSelect={()=>setAccess('all')}/>
         </div>
       </div>
+      </div>
+      </Locked>
 
       {/* Granting everything on the seat leaves nothing to choose, so the preset and the
           editor apply only to manually assigned access. */}
@@ -1161,14 +1575,14 @@ function EditPermissionsDrawer({user, seats, presets, onClose, onSave, onStub, o
         {/* The preset sits in its own bordered section, set apart from the permission matrix. */}
         <div style={{display:'flex', alignItems:'flex-end', gap:16, border:`1px solid ${T.borderStrong}`, borderRadius:12, padding:16}}>
           <div style={{display:'flex', flexDirection:'column', gap:8, minWidth:0}}>
-            <StField label="Choose a Permission Preset"><StSelect value={preset} options={presetsFor(seat)} onChange={choosePreset}/></StField>
+            <StField label="Choose a Permission Preset"><Locked on={assignOk} note=""><StSelect value={preset} options={presetsFor(seat)} onChange={choosePreset}/></Locked></StField>
             <div style={stTextB}>Apply a ready-made permission matrix to this user with a preset.</div>
           </div>
           <div style={{marginLeft:'auto', paddingBottom:24}}>
-            <StSecondary label="Save Permission Preset" disabled={!deviates} onClick={()=>setNamingPreset(true)}/>
+            <StSecondary label="Save Permission Preset" disabled={!deviates || !editOk} onClick={()=>setNamingPreset(true)}/>
           </div>
         </div>
-        <PermissionMatrixEditor seat={seat} perms={perms} setPerms={setPerms}/>
+        <PermissionMatrixEditor seat={seat} perms={perms} setPerms={setPerms} readOnly={!editOk}/>
       </>)}
     </PermissionsDrawerFrame>
     {namingPreset && <SavePresetModal seat={seat} presets={presets} onCancel={()=>setNamingPreset(false)}
@@ -1208,4 +1622,4 @@ function SavePresetModal({seat, presets, onCancel, onSave}){
   );
 }
 
-Object.assign(window, {nameFromEmail, memberFromSession, withSessionMember, EMPTY_PEOPLE_DATA, RecordAccessCtx, useRecordAccess, normalizePermissions, setAccessContext, accessUser, toolCan, visibleActivities, activityCan, canAdd, PERMISSION_TOOLS, EditPresetDrawer, PermissionMatrixEditor, UsersTeamsSettings, UsersModule, SeatsModule, TeamsModule, PresetsModule, RecordViewsModule, SAMPLE_USERS, SAMPLE_PEOPLE_DATA, EditPermissionsDrawer});
+Object.assign(window, {UserEditPanel, saveUserProfileIn, nameFromEmail, memberFromSession, withSessionMember, EMPTY_PEOPLE_DATA, RecordAccessCtx, useRecordAccess, normalizePermissions, setAccessContext, accessUser, toolCan, visibleActivities, activityCan, canAdd, PERMISSION_TOOLS, EditPresetDrawer, PermissionMatrixEditor, UsersTeamsSettings, UsersModule, SeatsModule, TeamsModule, PresetsModule, RecordViewsModule, SAMPLE_USERS, SAMPLE_PEOPLE_DATA, EditPermissionsDrawer});

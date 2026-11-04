@@ -225,6 +225,7 @@ function CustomerFormModal({data, mode = 'add', initial, links, contacts = [], d
     {key:'dealId', noun:'deal', options:deals.map(d => ({value:d.id, label:d.name}))},
   ];
   return <ContactFormModal mode={mode} initial={start} properties={objectFormProperties(data, 'customers')} noun="customer"
+    canEditField={mode === 'edit' ? (p)=>fieldEditCan('customers', initial, p) : undefined}
     optionsFor={pipelineFormOptions(data, 'customers')} adjust={pipelineFormAdjust(data, 'customers')}
     links={linkFields} initialLinks={{contactId:(links && links.contactId) ?? null, dealId:((links && links.dealIds) || [])[0] ?? null}}
     onCancel={onCancel} onSave={(vals, _assoc, l) => onSave(vals, {contactId:l.contactId ?? null, dealIds:l.dealId != null ? [l.dealId] : []})}/>;
@@ -472,7 +473,11 @@ function CustomersModule({data, customers, setCustomers, activities, setActiviti
             // The board shows the selected pipeline's customers; the filters and search still apply.
             const onBoard = filtered.map(r => byId.get(r.id)).filter(c => c && recordInPipeline(pipeline, c));
             return <ContactBoard rows={onBoard} search={search} pipeline={pipeline} searchKeys={['name', 'email']} noun="customer" bulkActions={false}
-              onChangeStage={(id, stageId)=>setCustomers(cs => cs.map(c => c.id === id ? withStage(pipeline, c, stageId) : c))}
+              onChangeStage={(id, stageId)=>{
+                const c0 = customers.find(c => c.id === id);
+                if(c0 && !stageMoveCan('customers', c0)) return hub && hub.toast("You can't move this customer between stages");
+                setCustomers(cs => cs.map(c => c.id === id ? withStage(pipeline, c, stageId) : c));
+              }}
               onAddToStage={(pl, stageId)=>setForm({mode:'add', initial:withStage(pl, {}, stageId)})}
               renderCard={(c, ui) => card(c, cardSettings, ui)}/>;
           }} : undefined}

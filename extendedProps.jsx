@@ -49,7 +49,8 @@ function extendedValue(key, record){
   const object = recordObjectOf(record.id);
   if(key.startsWith('acc:')){
     const f = ACCOUNTING_TRIGGER_FIELDS.find(a => a.key === key.slice(4));
-    if(!f) return '';
+    // Accounting figures show only with View Payment Terms on the record.
+    if(!f || !paymentTermsCan('view', object, object === 'contacts' ? {...record, id:Number(record.id)} : record)) return '';
     const terms = (WF_LIVE.accounting || []).filter(s => s.object === object && String(s.recordId) === String(record.id));
     const v = f.level === 'installments' ? f.readAll(terms) : f.readRecord(terms);
     return Array.isArray(v) ? [...new Set(v)].join(', ') : (v ?? '');

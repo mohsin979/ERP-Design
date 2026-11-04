@@ -36,9 +36,9 @@ const CRM_NAV_DEFAULT = () => ([
     {id:'meetings', label:'Meetings', icon:'videoCamera', hidden:false},
     {id:'notes',    label:'Notes',    icon:'notepad',     hidden:false},
     {id:'quotes',   label:'Quotes',   icon:'quote',       hidden:false},
-    {id:'services', label:'Services', icon:'services',    hidden:false},   // the service catalog quotations are built from (services.jsx)
   ]},
-  {id:'automation', label:'Automation', group:true, hidden:false, items:[
+  // Services moved to Settings → Templates (a kind of template).
+  {id:'automation', label:'Workflows', group:true, hidden:false, items:[
     {id:'reports',   label:'Reports',   icon:'analytical', hidden:false},
     {id:'workflows', label:'Workflows', icon:'workflows',  hidden:false},
   ]},
@@ -91,13 +91,14 @@ const OBJECT_NAV_ICONS = {contacts:'contacts', deals:'deals', customers:'custome
    leave the navigation; the other items are untouched. */
 const isObjectNavItem = (id) => !!OBJECT_NAV_ICONS[id] || String(id).startsWith('obj-');
 // Entries removed from the product (saved navigation may still list them): Lead Scoring.
-const REMOVED_NAV_IDS = ['leadScoring'];
+const REMOVED_NAV_IDS = ['leadScoring', 'services'];   // Services: now Settings → Templates → Services
 // Entries added to the product since a navigation was saved join their group, after `after`.
-const ADDED_NAV_ITEMS = [{group:'tools', after:'quotes', item:{id:'services', label:'Services', icon:'services', hidden:false}},
-  {group:'marketing', after:'ads', item:{id:'forms', label:'Forms', icon:'forms', hidden:false}}];
+const ADDED_NAV_ITEMS = [{group:'marketing', after:'ads', item:{id:'forms', label:'Forms', icon:'forms', hidden:false}}];
+// Groups renamed since a navigation was saved: the Automation group is Workflows.
+const RENAMED_NAV_GROUPS = {automation:'Workflows'};
 function navWithObjects(nav, objects){
   const ids = new Set((objects || []).map(o => o.id));
-  const next = nav.map(e => e.group ? {...e, items:e.items.filter(x => !REMOVED_NAV_IDS.includes(x.id) && (!isObjectNavItem(x.id) || ids.has(x.id)))} : e)
+  const next = nav.map(e => e.group ? {...e, label:RENAMED_NAV_GROUPS[e.id] || e.label, items:e.items.filter(x => !REMOVED_NAV_IDS.includes(x.id) && (!isObjectNavItem(x.id) || ids.has(x.id)))} : e)
     .filter(e => e.group || !isObjectNavItem(e.id) || ids.has(e.id));
   ADDED_NAV_ITEMS.forEach(({group, after, item}) => {
     const g = next.find(e => e.id === group);
@@ -168,7 +169,9 @@ function CrmNavGroup({group, active, collapsed, setActive, first}){
 function CrmSidebar({active, setActive, onBack, nav, setNav}){
   const [collapsed, setCollapsed] = React.useState(false);
   const [managing, setManaging] = React.useState(null);   // draft while Navigation Management is open
-  const entries = (nav || CRM_NAV_DEFAULT()).filter(e => !e.hidden);
+  // Workflows shows only to those with Workflows → View (Edit Permissions).
+  const entries = (nav || CRM_NAV_DEFAULT()).filter(e => !e.hidden)
+    .map(e => e.group ? {...e, items:e.items.filter(x => x.id !== 'workflows' || workflowCan('view'))} : e);
   const width = collapsed ? 56 : 200;
 
   return (

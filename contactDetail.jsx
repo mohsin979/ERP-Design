@@ -473,9 +473,10 @@ const DETAIL_EASE = 'cubic-bezier(.2,.8,.2,1)';
 const DETAIL_MS = 320;
 
 /* ── Record Owner profile ── opened from the Record Owner on a Contact, Deal or Customer; it
-   slides in over the record (the record stays open behind it). UI only for now: the values
-   will come from HRMS and related systems — until then each owner gets MOCK values, fixed per
-   owner (seeded from their name) so they read the same every time the panel opens. */
+   slides in over the record (the record stays open behind it). Country, Language and Designation
+   are the user's own (Settings → Users & Teams); a user who hasn't set one shows a value fixed per
+   user (seeded from their name) until HRMS provides it. The statistics are calculated from the
+   CRM's records (USER_STATS, dashboard.jsx). */
 const OWNER_DESIGNATIONS = {'Super Admin':'Head of Sales', 'Admin':'Sales Manager', 'Team Lead':'Sales Team Lead', 'Sales Professional':'Sales Consultant',
   'Case Manager':'Case Manager', 'Petition Writer':'Petition Writer', 'Compliance':'Compliance Officer', 'Viewer':'Sales Associate'};
 // One language each (a Language property's value), in the same five places so the draws don't move.
@@ -484,41 +485,16 @@ const OWNER_COUNTRIES = ['Pakistan', 'United Arab Emirates', 'Pakistan', 'Canada
 function ownerProfileMock(name, user){
   let seed = 0; for(const ch of String(name)) seed = (seed * 31 + ch.charCodeAt(0)) >>> 0;
   const rnd = (min, max) => { seed = (seed * 1103515245 + 12345) >>> 0; return min + (seed % (max - min + 1)); };
-  const n = (v) => v.toLocaleString('en-US');
-  const hm = (mins) => `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, '0')}m`;
-  const sales = rnd(8, 64), invoice = sales * rnd(18, 42) * 1000, service = Math.round(invoice * rnd(55, 80) / 100);
-  const received = Math.round(invoice * rnd(55, 85) / 100), expected = Math.round((invoice - received) * rnd(40, 90) / 100);
-  // The values as numbers (the same draws, in the same order), for workflow User Property triggers.
+  // Five draws come before the language, so each user keeps the values they always had.
+  for(let i = 0; i < 5; i++) rnd(0, 1);
   /* Country, Language and Designation are the user's (Settings → Users & Teams → a user):
      what they set replaces the generated value — the draws still happen, in the same order. */
   const own = (user && user.profile) || {}, mine = (k, v) => own[k] != null ? own[k] : v;
   const language = mine('language', OWNER_LANGUAGES[rnd(0, OWNER_LANGUAGES.length - 1)]);
   const designation = mine('designation', (user && OWNER_DESIGNATIONS[user.preset]) || 'Sales Consultant');
   const country = mine('country', OWNER_COUNTRIES[rnd(0, OWNER_COUNTRIES.length - 1)]);
-  const callTime = rnd(1800, 9000), completedTasks = rnd(40, 320), dealsCreated = sales + rnd(10, 60);
-  const velocity = rnd(14, 45), contactToDeal = rnd(3, 14), contactToCustomer = rnd(12, 40);
-  const assignments = rnd(60, 400), breakTime = rnd(600, 2400), dials = rnd(400, 3200);
-  return {
-    language, designation, country,
-    sales: n(sales), invoiceCash: fmtMoney(invoice), currentExpectedCash: `${fmtMoney(received)} / ${fmtMoney(expected)}`,
-    totalCash: fmtMoney(received + expected), serviceCash: fmtMoney(service), callTime: hm(callTime),
-    completedTasks: n(completedTasks), dealsCreated: n(dealsCreated),
-    velocity: `${velocity} days`, contactToDeal: `${contactToDeal} days`, contactToCustomer: `${contactToCustomer} days`,
-    assignments: n(assignments), breakTime: hm(breakTime), dials: n(dials),
-    raw:{language, designation, country, sales, invoiceCash:invoice, currentExpectedCash:received, totalCash:received + expected, serviceCash:service,
-      callTime, completedTasks, dealsCreated, velocity, contactToDeal, contactToCustomer, assignments, breakTime, dials},
-  };
+  return {language, designation, country, raw:{language, designation, country}};
 }
-const OWNER_PROFILE_PROPERTIES = [
-  {key:'designation', label:'Designation'}, {key:'country', label:'Country'},
-  {key:'sales', label:'Total Number of Sales'}, {key:'invoiceCash', label:'Total Invoice Cash'},
-  {key:'currentExpectedCash', label:'Current and Expected Cash'}, {key:'totalCash', label:'Total Cash'},
-  {key:'serviceCash', label:'Total Service Cash'}, {key:'callTime', label:'Total Call Time'},
-  {key:'completedTasks', label:'Total Completed Tasks'}, {key:'dealsCreated', label:'Total Deals Created'},
-  {key:'velocity', label:'Total Velocity'}, {key:'contactToDeal', label:'Contact-to-Deal Velocity'},
-  {key:'contactToCustomer', label:'Contact-to-Customer Velocity'}, {key:'assignments', label:'Total Assignments'},
-  {key:'breakTime', label:'Total Break Time'}, {key:'dials', label:'Total Dials'},
-];
 // The user-managed properties (editable in Settings → Users); the rest are system-generated, read-only.
 // The user-managed properties when none are passed (Settings → Properties → Users has them).
 const OWNER_EDITABLE_PROPERTIES = [{key:'country', label:'Country', type:'Country'}, {key:'language', label:'Language', type:'Language'}, {key:'designation', label:'Designation', type:'Single-Line Text'}];
@@ -595,13 +571,16 @@ function OwnerEditableValue({prop, value, onSave, options, display, pencil, alig
 }
 /* A record's property in its side panel: editable in place (hover → edit icon) when it's an
    editable property of the record type — not the name and owner (they have their own flows), not
-   one the system sets. Pipeline and Stage pick from the record's pipelines and that pipeline's
+   one the system sets, and only where the signed-in user may edit it (Records → Edit, its stage
+   moves and property values). Pipeline and Stage pick from the record's pipelines and that pipeline's
    stages (a new pipeline starts at its first stage). Saves through the record hub. → {prop,
    options, value, save} or null. */
 function panelEditSpec(hub, object, record, key){
   if(!hub || !hub.updateRecord || !record) return null;
   const prop = objectProperties(hub.data, object).find(p => p.key === key);
   if(!prop || prop.auto || prop.derived || ['name', 'owner'].includes(key)) return null;
+  // The signed-in user's Records → Edit: the record, its stages, this property's value.
+  if(!fieldEditCan(object, record, prop)) return null;
   const t = propertyTypeId(prop.type);
   const save = (patch) => hub.updateRecord(object, record.id, patch);
   if(t === 'Pipeline'){
@@ -621,22 +600,34 @@ function PanelEditableValue({spec, display}){
 }
 
 /* A user's profile: over a record (its Record Owner), or — `editable`, Settings → Users — with the
-   user-managed properties editable (`onSaveProfile(patch)`) and the metrics read-only. `user`:
-   the user record (else looked up by `name`); `fixed`: over the page rather than a record. */
+   User Properties (Country, Language, Designation and any added) edited in place, one field at a
+   time (`onSaveProfile(patch)`). Under them, the user's statistics; a statistic's trend opens in
+   the same panel. `user`: the user record (else looked up by `name`); `fixed`: over the page
+   rather than a record. */
 function OwnerProfilePanel({name, onClose, user: userProp, editable, onSaveProfile, fixed, properties}){
+  const hub = useRecordHub();
   const [entered, setEntered] = React.useState(false);
+  const [trend, setTrend] = React.useState(null);     // the statistic whose trend is open
+  const today = new Date();
+  const [filter, setFilter] = React.useState(() => ({id:'month', from:ymd(new Date(today.getFullYear(), today.getMonth(), 1)), to:ymd(today)}));
   React.useEffect(()=>{
     let r2; const r1 = requestAnimationFrame(()=>{ r2 = requestAnimationFrame(()=>setEntered(true)); });
     return () => { cancelAnimationFrame(r1); cancelAnimationFrame(r2); };
   }, []);
-  // Esc closes this panel first (the record behind it stays open).
+  // Esc closes the trend first, then this panel (the record behind it stays open).
   React.useEffect(()=>{
-    const onKey = (e) => { if(e.key === 'Escape' && !/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)){ e.stopPropagation(); onClose(); } };
+    const onKey = (e) => { if(e.key === 'Escape' && !/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)){ e.stopPropagation(); trend ? setTrend(null) : onClose(); } };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [onClose]);
-  const user = userProp || USER_DIRECTORY.find(u => u.name === name || u.id === name) || null;
+  }, [onClose, trend]);
+  const users = (hub && hub.data && hub.data.users) || USER_DIRECTORY;
+  const user = userProp || users.find(u => u.name === name || u.id === name) || USER_DIRECTORY.find(u => u.name === name || u.id === name) || null;
   const values = React.useMemo(() => ownerProfileMock(user ? user.name : name, user), [name, user]);
+  const props = properties || (hub && hub.data ? (hub.data.properties || []).filter(p => p.objectId === 'users' && !p.archived) : null) || OWNER_EDITABLE_PROPERTIES;
+  const valueOf = (p) => p.key in values.raw ? values.raw[p.key] : ((user && user.profile) || {})[p.key];
+  const shown = Object.fromEntries(props.map(p => [p.key, formatPropertyValueOf(p, valueOf(p)) || '']));
+  const data = useDashBusinessData(hub);
+  const person = userStatPerson(data, user ? user.id : name);
   return (
     <div role="dialog" aria-label={`${name} profile`} style={{
       position: fixed ? 'fixed' : 'absolute', top:0, right:0, bottom:0, zIndex: fixed ? 90 : 5, width:DETAIL_PANEL_W, maxWidth:'100%',
@@ -648,21 +639,20 @@ function OwnerProfilePanel({name, onClose, user: userProp, editable, onSaveProfi
           headerActions={<button title="Close" onClick={onClose} style={barIconBtn}><Icon name="close" size={13} color={T.gray600}/></button>}/>
       </div>
       <div style={{flex:1, minHeight:0, overflowY:'auto', padding:'0 20px 24px'}}>
-        {/* The user's properties (each by its type), then the system-generated metrics, read-only. */}
-        {editable && (properties || OWNER_EDITABLE_PROPERTIES).map(p => (
-          <div key={p.key} style={{display:'flex', alignItems:'baseline', gap:12, padding:'7px 0', borderBottom:`1px solid ${T.attioLine}`, minHeight:32}}>
-            <span style={{width:190, flexShrink:0, fontSize:12.5, color:T.attioMuted, whiteSpace:'nowrap'}}>{p.label}</span>
-            <OwnerEditableValue prop={p} value={p.key in values ? values[p.key] : ((user && user.profile) || {})[p.key]} onSave={(v)=>onSaveProfile && onSaveProfile({[p.key]:v})}/>
-          </div>
-        ))}
-        {OWNER_PROFILE_PROPERTIES.filter(p => !editable || !(properties || OWNER_EDITABLE_PROPERTIES).some(x => x.key === p.key)).map(p => (
-          <div key={p.key} style={{display:'flex', alignItems:'baseline', gap:12, padding:'7px 0', borderBottom:`1px solid ${T.attioLine}`, minHeight:32}}>
-            <span style={{width:190, flexShrink:0, fontSize:12.5, color:T.attioMuted, whiteSpace:'nowrap'}}>{p.label}</span>
-            {values[p.key]
-              ? <span style={{fontSize:13, color:T.attioText, minWidth:0, overflowWrap:'anywhere'}}>{values[p.key]}</span>
-              : <span style={{fontSize:13, color:T.attioFaint}}>—</span>}
-          </div>
-        ))}
+        {trend
+          ? <UserStatTrend person={person} statKey={trend} filter={filter} setFilter={setFilter} onBack={()=>setTrend(null)}/>
+          : <>
+            {/* The User Properties — each edited on its own (edit icon), by its type; read-only over a record. */}
+            {props.map(p => (
+              <div key={p.key} style={{display:'flex', alignItems:'baseline', gap:12, padding:'7px 0', borderBottom:`1px solid ${T.attioLine}`, minHeight:32}}>
+                <span style={{width:190, flexShrink:0, fontSize:12.5, color:T.attioMuted, whiteSpace:'nowrap'}}>{p.label}</span>
+                {editable
+                  ? <OwnerEditableValue prop={p} value={valueOf(p)} pencil="always" onSave={(v)=>onSaveProfile && onSaveProfile({[p.key]:v})}/>
+                  : <span style={{fontSize:13, color: shown[p.key] ? T.attioText : T.attioFaint, minWidth:0, overflowWrap:'anywhere'}}>{shown[p.key] || '—'}</span>}
+              </div>
+            ))}
+            <UserStatistics person={person} filter={filter} setFilter={setFilter} properties={props} values={shown} onTrend={setTrend}/>
+          </>}
       </div>
     </div>
   );

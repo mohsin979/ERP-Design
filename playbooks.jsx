@@ -114,11 +114,13 @@ function PlaybooksTab({data, setData, say}){
   const [openId, setOpenId] = React.useState(null);
   const [editing, setEditing] = React.useState(null);   // {playbook?}
   const [deleting, setDeleting] = React.useState(null);
-  const open = list.find(p => p.id === openId) || null;
-  const cols = [{key:'name', label:'Playbook Name', width:260}, {key:'sections', label:'Sections', width:420}, {key:'created', label:'Created', width:150}];
-  const rows = list.map(p => ({id:p.id, name:p.name, sections:p.sections.map(s => s.header).join(' · '), created:p.createdAt ? fmtQuoteDate(p.createdAt) : ''}));
-  const actions = (p) => [{label:'View playbook', onClick:()=>setOpenId(p.id)}, {label:'Edit playbook', onClick:()=>setEditing({playbook:p})},
-    {label:'Delete playbook', danger:true, onClick:()=>setDeleting(p)}];
+  const can = (action, p) => templateCan('playbooks', action, p);
+  const shown = list.filter(p => can('view', p));
+  const open = shown.find(p => p.id === openId) || null;
+  const cols = [{key:'name', label:'Playbook Name', width:260}, {key:'sections', label:'Sections', width:420}, {key:'created', label:'Created', width:150}, {key:'createdBy', label:'Created By', width:170}];
+  const rows = shown.map(p => ({id:p.id, createdBy:creatorOf(p), name:p.name, sections:p.sections.map(s => s.header).join(' · '), created:p.createdAt ? fmtQuoteDate(p.createdAt) : ''}));
+  const actions = (p) => [{label:'View playbook', onClick:()=>setOpenId(p.id)}, ...(can('edit', p) ? [{label:'Edit playbook', onClick:()=>setEditing({playbook:p})}] : []),
+    ...(can('delete', p) ? [{label:'Delete playbook', danger:true, onClick:()=>setDeleting(p)}] : [])];
   const schema = {
     properties:cols, noun:'playbook', searchKeys:['name', 'sections'], canCreateProperty:false, boards:false, selectable:false,
     filterProps:[{key:'name', label:'Name', type:'text'}], selectValues:{},
@@ -128,7 +130,7 @@ function PlaybooksTab({data, setData, say}){
   const save = (vals) => {
     const p = editing.playbook;
     if(p) setList(ps => ps.map(x => x.id === p.id ? {...x, ...vals} : x));
-    else setList(ps => [...ps, {id:playbookId('pb'), createdAt:new Date(), ...vals}]);
+    else setList(ps => [...ps, {id:playbookId('pb'), createdAt:new Date(), createdBy:CURRENT_USER.name, ...vals}]);
     say(p ? 'Saved' : 'Playbook created');
     setEditing(null);
   };
@@ -136,7 +138,7 @@ function PlaybooksTab({data, setData, say}){
     <div style={{display:'flex', flexDirection:'column', flex:1, minHeight:0}}>
       <RecordViewsModule schema={schema} rows={rows} columns={cols.map(c => c.key)} storeKey="views:templates-playbooks"
         defaultViews={[{id:'tv-playbooks', name:'All Playbooks', sort:{key:'name', dir:'asc'}}]}
-        actions={() => <StCta icon="plus" label="New playbook" onClick={()=>setEditing({})}/>}
+        actions={() => can('create') && <StCta icon="plus" label="New playbook" onClick={()=>setEditing({})}/>}
         overlay={open && <PageSidePanel width={520} title={open.name} subtitle={plural(open.sections.length, 'section')} onClose={()=>setOpenId(null)}
           menuItems={actions(open).filter(it => !/^View/.test(it.label))}>
           <div style={{flex:1, overflowY:'auto', padding:'4px 20px 24px'}}><PlaybookSections playbook={open}/></div>

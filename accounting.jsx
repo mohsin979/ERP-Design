@@ -258,7 +258,8 @@ function PaymentVerificationModal({inst, onClose}){
    the table scrolls sideways and Actions stays in view. */
 const SCHEDULE_COLS = 'minmax(220px, 2fr) minmax(96px, 1fr) minmax(112px, 1fr) minmax(124px, 1fr) minmax(140px, 1fr) minmax(120px, 1fr) 150px';
 const SCHEDULE_MIN_W = 962;
-function PaymentScheduleCard({schedule, canEdit, canPay, quote, onPay, onView, onEdit, onDelete, onOpenQuote}){
+// `canEdit`: edit the terms and record payments; `canDelete`: remove them (Payment Terms permissions).
+function PaymentScheduleCard({schedule, canEdit, canDelete = canEdit, canPay, quote, onPay, onView, onEdit, onDelete, onOpenQuote}){
   const t = scheduleTotals(schedule);
   // Every row (header included) one line, at the record tables' row height.
   const head = {fontSize:11.5, fontWeight:500, color:T.attioMuted, height:T.attioRowH, padding:'0 12px', display:'flex', alignItems:'center', whiteSpace:'nowrap'};
@@ -295,10 +296,10 @@ function PaymentScheduleCard({schedule, canEdit, canPay, quote, onPay, onView, o
             <span style={{fontSize:12, color:T.attioMuted}}>Created {fmtQuoteDate(schedule.createdAt)} by {schedule.createdBy}</span>
           </div>
           {/* Edit (manual terms) and Remove: until the first payment is recorded — payments are never removed. */}
-          {canEdit && (
+          {(canEdit || canDelete) && (
             <RowActionsMenu title="Payment terms actions" items={[
-              ...(schedule.source === 'manual' ? [{label:'Edit Payment', disabled:hasPayments(schedule), onClick:onEdit}] : []),
-              {label:'Remove Payment', danger:true, disabled:hasPayments(schedule), onClick:onDelete}]}/>
+              ...(canEdit && schedule.source === 'manual' ? [{label:'Edit Payment', disabled:hasPayments(schedule), onClick:onEdit}] : []),
+              ...(canDelete ? [{label:'Remove Payment', danger:true, disabled:hasPayments(schedule), onClick:onDelete}] : [])]}/>
           )}
         </div>
         <div style={{display:'flex', gap:8, flexWrap:'wrap'}}>
@@ -354,7 +355,9 @@ function AccountingTab({object, record}){
   const [editing, setEditing] = React.useState(null); // {id?}: the manual structure panel
   const [deleting, setDeleting] = React.useState(null);
   const [quoteOpen, setQuoteOpen] = React.useState(null); // the quotation opened from "Imported from Quotation"
-  const canEdit = recordEditable(object, record);
+  // Payment Terms permissions (Records → <Object> → Accounting), by the record's owner.
+  const can = (action) => paymentTermsCan(action, object, record);
+  const canEdit = can('edit'), canCreate = can('create'), canDelete = can('delete');
   const stored = (hub.accounting || []).filter(s => s.object === object && String(s.recordId) === String(record.id));
   const quotes = recordQuotes(hub, object, record);
   // Pulled quotes' structures, each with its quote (gone if it was deleted).
@@ -405,19 +408,20 @@ function AccountingTab({object, record}){
   const viewingInst = viewingSchedule && viewingSchedule.installments.find(x => x.id === viewing.instId);
   const openedQuote = quoteOpen && quotes.find(q => q.id === quoteOpen);
   const editingDef = editing && editing.id ? manual.find(s => s.id === editing.id) : null;
+  if(!can('view')) return <div style={{flex:1, padding:'48px 24px', textAlign:'center', fontSize:13, color:T.gray400}}>You don't have access to this record's payment terms.</div>;
   return (
     <div style={{flex:1, minHeight:0, minWidth:0, display:'flex', flexDirection:'column', position:'relative'}}>
       <div style={{display:'flex', alignItems:'center', gap:10, padding:'12px 20px', borderBottom:`1px solid ${T.border}`, flexShrink:0}}>
         <span style={{fontSize:13, fontWeight:600, color:T.attioText}}>Payment Terms</span>
         <span style={{fontSize:13, color:T.attioMuted, fontVariantNumeric:'tabular-nums'}}>{all.length}</span>
         <div style={{flex:1}}/>
-        {canEdit && <button onClick={()=>setEditing({})} style={{...btnPrimarySm(), display:'inline-flex', alignItems:'center', gap:6}}><Icon name="plus" size={13} color="#fff"/> New payment terms</button>}
+        {canCreate && <button onClick={()=>setEditing({})} style={{...btnPrimarySm(), display:'inline-flex', alignItems:'center', gap:6}}><Icon name="plus" size={13} color="#fff"/> New payment terms</button>}
       </div>
       <div style={{flex:1, minHeight:0, overflowY:'auto', paddingBottom:32, display:'flex', flexDirection:'column'}}>
-        {imported.map(({schedule, quote}) => <PaymentScheduleCard key={schedule.id} schedule={schedule} quote={quote} canEdit={canEdit}
+        {imported.map(({schedule, quote}) => <PaymentScheduleCard key={schedule.id} schedule={schedule} quote={quote} canEdit={canEdit} canDelete={canDelete}
           canPay={hasPayments(schedule) || (quote && quote.status === 'signed')} onPay={(inst)=>setPaying({scheduleId:schedule.id, instId:inst.id})}
           onView={(inst)=>setViewing({scheduleId:schedule.id, instId:inst.id})} onDelete={()=>setDeleting(schedule)} onOpenQuote={(q)=>setQuoteOpen(q.id)}/>)}
-        {manual.map(s => <PaymentScheduleCard key={s.id} schedule={s} canEdit={canEdit} canPay onPay={(inst)=>setPaying({scheduleId:s.id, instId:inst.id})}
+        {manual.map(s => <PaymentScheduleCard key={s.id} schedule={s} canEdit={canEdit} canDelete={canDelete} canPay onPay={(inst)=>setPaying({scheduleId:s.id, instId:inst.id})}
           onView={(inst)=>setViewing({scheduleId:s.id, instId:inst.id})}
           onEdit={()=>setEditing({id:s.id})} onDelete={()=>setDeleting(s)}/>)}
         {!all.length && <div style={{padding:'40px 0', textAlign:'center', fontSize:13, color:T.attioMuted}}>No payment terms yet.</div>}
