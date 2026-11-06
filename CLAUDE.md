@@ -451,13 +451,13 @@ Do not make product decisions that the product designer has not made. Technical 
 24.1 How it runs
 * Browser prototype: React 18 + Babel Standalone from unpkg, compiled in the browser. No build step, no package.json, no Git.
 * `index.html` loads every `.jsx` as a classic `<script type="text/babel">`. Load order matters: files share globals (no imports/exports), so a file can only use what earlier files defined at load time.
-* Run: `python3 serve.py 9420`, then open http://localhost:9420 (`.claude/launch.json` → `hof-erp`). `serve.py` disables caching so every reload runs current files.
+* Run: `python3 serve.py 9420`, then open http://localhost:9420 (`.claude/launch.json` → `hof-erp`). `serve.py` disables caching so every reload runs current files, and keeps the saved data in SQLite (`data/hof-erp.sqlite`, git-ignored) through `/api/kv`.
 * Sign-in is mocked: any HOF Migration / HOF Global email, no password (workspaces.jsx).
 * `_removed/` holds retired code (assessments, profile runner). It is not loaded; do not revive it unless asked.
 * Each file starts with a header comment describing its scope and decisions. Read it before editing the file and keep it current.
 
 24.2 State and data
-* store.jsx + app.jsx: one localStorage store per workspace (`hof-erp-store-v2[:workspaceId]`), saved as a single JSON. Owners keep slices via persistSlice / usePersistedState. Record IDs come from per-object counters that only increase.
+* store.jsx + app.jsx: one store per workspace (`hof-erp-store-v2[:workspaceId]`), saved as a single JSON through `DB` (store.jsx): SQLite via serve.py on localhost, localStorage elsewhere (the hosted copy). A module linked between organizations keeps its data in its group's space instead (moduleLinks.jsx). Owners keep slices via persistSlice / usePersistedState. Record IDs come from per-object counters that only increase.
 * Owners and other user references are stored as user IDs and resolved through the Users directory.
 * businessData.jsx seeds ~1,000 sample contacts → deals → customers once per workspace, following the data model.
 * recordHub.jsx (`hub`): the single read/write path for records and their activity across workspace-wide pages (Tools, emails, files, quotes). Deal/Customer activity goes through the workflow engine so workflows see it.

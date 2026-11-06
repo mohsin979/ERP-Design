@@ -4,19 +4,25 @@
    or HOF Global domains is accepted, with no real Google account behind it. Signing in opens
    the last workspace; inside it the person is the user with that email, or joins its Users.
 
-   Workspaces: the top-left switcher in the ERP header — the workspaces the signed-in person is a
-   member of. Each workspace is a separate account environment — its own records, CRM configuration
-   and CRM roles (its own saved store, store.jsx) — while people are shared: one identity each,
-   with each workspace's membership and module access set on its own (ERP Settings → Users). A
-   workspace can start from a template (WORKSPACE_TEMPLATES: the Accounting workspace's CRM).
-   Creating a workspace (name and optional logo; it starts empty, its creator Super Admin) is kept
-   but not offered for now (WORKSPACE_CREATION_ENABLED).
+   Workspaces: the organizations — HOF Global, HOF Migration (Pakistan), HOF Migration Dubai, HOF
+   Pack, HOF Partners (Pakistan) — in the top-left switcher of the ERP header, every one; those
+   the signed-in person has no access to are greyed out ("No access"). Each is a separate account environment — its own records, CRM and CRM roles
+   (its own saved store, store.jsx); only HOF Migration and HOF Partners are defined, the others
+   open empty. People are shared: one identity each, with each organization's access set on its
+   own. Each organization has the modules set in Module Settings; any module's data can be shared
+   between the organizations of one of its linkage groups (moduleLinks.jsx). A workspace can start from a template
+   (WORKSPACE_TEMPLATES: HOF Partners' CRM). Creating a workspace (name and optional logo; it
+   starts empty, its creator Super Admin) is kept but not offered for now (WORKSPACE_CREATION_ENABLED).
 
    ERP Settings (the ERP home's Setting tile; workspace Super Admin and Admin):
-     Workspace — the open workspace's name and logo (HOF Migration keeps its own mark until a logo
-                 is uploaded).
-     Users     — everyone in the directory, the modules each opens in each workspace; Add user /
-                 Edit access / Assign access (several people at once).
+     Workspace       — the open workspace's name and logo (HOF Migration keeps its own mark until a
+                       logo is uploaded).
+     Users           — search, Add user and everyone, one line each; ⋯ Access to Workspaces
+                       (which organizations they can open).
+     Module Settings — each module: its availability per organization (Enable), and its linkage
+                       groups (moduleLinks.jsx) — Link Modules, Add organizations, Unlink.
+   Design-system pattern (ERP Settings): a settings page carries no title or explanation that
+   repeats the menu it's opened from — only its controls (search, actions, the table).
 
    Brand (CRM → Marketing → Brand): workspace administrators set the workspace logo, brand
    colours (used on the workspace's mark and its quotations), the company email signature and
@@ -76,7 +82,8 @@ function WorkspaceLockup({ws}){
 /* ── Workspace switcher (ERP header, top left) ── */
 function WorkspaceSwitcher(){
   const {workspaces:allWorkspaces, active, update} = useWorkspaces();
-  const workspaces = switchableWorkspaces();
+  // Every organization; those the signed-in person has no access to are greyed out.
+  const workspaces = visibleWorkspaces(), open_ = new Set(switchableWorkspaces().map(w => w.id));
   const [open, setOpen] = React.useState(false);
   const [creating, setCreating] = React.useState(false);
   return (
@@ -86,16 +93,18 @@ function WorkspaceSwitcher(){
         <Icon name="chevDown" size={T.chevronSize} color={T.gray600} style={{transform: open ? 'rotate(180deg)' : 'none'}}/>
       </div>
       <MenuShell open={open} onClose={()=>setOpen(false)} width={260}>
-        <div style={{padding:'4px 10px 6px', fontSize:11.5, color:T.gray400}}>Workspaces</div>
-        {workspaces.map(w => (
-          <div key={w.id} onClick={()=>{ setOpen(false); if(w.id !== active.id) reloadInto({activeId:w.id}); }}
-            style={{display:'flex', alignItems:'center', gap:10, padding:'7px 10px', borderRadius:6, cursor:'pointer', background: w.id === active.id ? T.headerBg : 'transparent'}}
-            onMouseEnter={e=>e.currentTarget.style.background = T.headerBg} onMouseLeave={e=>e.currentTarget.style.background = w.id === active.id ? T.headerBg : 'transparent'}>
+        {workspaces.map(w => { const can = open_.has(w.id);
+          return (
+          <div key={w.id} aria-disabled={!can} onClick={()=>{ if(!can) return; setOpen(false); if(w.id !== active.id) reloadInto({activeId:w.id}); }}
+            style={{display:'flex', alignItems:'center', gap:10, padding:'7px 10px', borderRadius:6, cursor: can ? 'pointer' : 'default', opacity: can ? 1 : .5,
+              background: w.id === active.id ? T.headerBg : 'transparent'}}
+            onMouseEnter={e=>{ if(can) e.currentTarget.style.background = T.headerBg; }} onMouseLeave={e=>e.currentTarget.style.background = w.id === active.id ? T.headerBg : 'transparent'}>
             <WorkspaceTile ws={w} size={22}/>
             <span style={{flex:1, minWidth:0, fontSize:13, color:T.attioText, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{w.name}</span>
             {w.id === active.id && <Icon name="check" size={12} color={T.blue}/>}
+            {!can && <span style={{fontSize:11.5, color:T.attioMuted, whiteSpace:'nowrap'}}>No access</span>}
           </div>
-        ))}
+        ); })}
         {WORKSPACE_CREATION_ENABLED && <>
           <div style={{height:1, background:T.border, margin:'4px 2px'}}/>
           <MenuItem icon={<Icon name="plus" size={13} color={T.gray600}/>} label="Create workspace" onClick={()=>{ setOpen(false); setCreating(true); }}/>
@@ -162,83 +171,104 @@ function CreateWorkspaceModal({onClose, onCreate}){
   );
 }
 
-/* ── Shared people and module access ── one identity per person (the registry's `users`); each
-   workspace's members and the modules each may open there (`members`). The modules are the ERP's
-   tiles (MODULE_TILES, app.jsx): each can be assigned per workspace except Setting (administrators
-   only); People (HRMS) is one module shared by the workspaces that have it, CRM is each
-   workspace's own. A person's CRM role (seat, team, permissions) is set in that workspace's CRM
-   (Users & Teams). */
+/* ── Shared people, access and modules ── one identity per person (the registry's `users`); who
+   can access each organization (`members`); and which organizations have each module (`modules`,
+   Module Settings). Everyone with access to an organization opens the modules it has; Setting (ERP
+   Settings) is for its administrators. Each module has its own linkage groups (moduleLinks.jsx):
+   the organizations in one share that module's data, an unlinked one keeps its own; linking one
+   module never links another. A person's CRM role (seat, team, permissions) is set in that
+   organization's CRM (Users & Teams) — one for a CRM linkage group. */
 const WORKSPACE_CREATION_ENABLED = false;
 const visibleWorkspaces = () => WORKSPACE_REGISTRY.workspaces.filter(w => !w.hidden);
-const assignableModules = () => MODULE_TILES.filter(t => t.assignable !== false);
+// An organization's name in organization lists: with its region — "HOF Migration (Pakistan)".
+const orgLabel = (w) => w.region ? `${w.name} (${w.region})` : w.name;
+// The modules Module Settings sets per organization (the ERP tiles but Setting).
+const orgModules = () => MODULE_TILES.filter(t => t.assignable !== false);
 const moduleLabel = (id) => { const t = MODULE_TILES.find(x => x.id === id); return t ? t.label : id; };
+const moduleConfig = (id) => (WORKSPACE_REGISTRY.modules || {})[id] || {orgs:[], groups:[]};
+const moduleEnabled = (id, wsId = ACTIVE_WORKSPACE.id) => (moduleConfig(id).orgs || []).includes(wsId);
+// A shareable module's data is shared by the organization (it has the module and is linked).
+// Whether the organization is in one of the module's linkage groups (moduleLinks.jsx).
+const moduleLinked = (id, wsId = ACTIVE_WORKSPACE.id) => !!moduleGroupOf(id, wsId);
 const directoryUsers = () => WORKSPACE_REGISTRY.users || [];
 const sameEmail = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
 const directoryUserByEmail = (email) => directoryUsers().find(u => sameEmail(u.email, email)) || null;
 const workspaceMembers = (wsId) => (WORKSPACE_REGISTRY.members || {})[wsId] || null;   // null: not set up yet
 const membershipOf = (wsId, userId) => (workspaceMembers(wsId) || []).find(m => m.userId === userId) || null;
 const signedInUserId = () => { const u = SESSION && directoryUserByEmail(SESSION.email); return u ? u.id : null; };
-// The workspaces the switcher offers: those the signed-in person belongs to (any not set up yet, too).
-const switchableWorkspaces = () => { const me = signedInUserId(); return visibleWorkspaces().filter(w => !me || !workspaceMembers(w.id) || membershipOf(w.id, me)); };
-// The modules the signed-in person opens in the open workspace (every one until its members are set up).
+// A Super Admin of any organization (`superAdminIn`, kept by syncWorkspacePeople) can open every organization.
+const isSuperAdminUser = (userId) => { const u = directoryUsers().find(x => x.id === userId); return !!(u && (u.superAdminIn || []).length); };
+// Whether a person can open an organization: given access to it, a Super Admin, or it isn't set up yet.
+const canAccess = (wsId, userId) => !userId || !workspaceMembers(wsId) || !!membershipOf(wsId, userId) || isSuperAdminUser(userId);
+// The workspaces the signed-in person can open (the switcher greys the others out).
+const switchableWorkspaces = () => { const me = signedInUserId(); return visibleWorkspaces().filter(w => canAccess(w.id, me)); };
+// The modules the signed-in person opens here: the organization's — when they can access it.
 const myModules = () => {
-  const list = workspaceMembers(ACTIVE_WORKSPACE.id), me = signedInUserId();
-  if(!list || !me) return assignableModules().map(t => t.id);
-  const m = list.find(x => x.userId === me); return m ? m.modules : [];
+  const mods = orgModules().filter(t => moduleEnabled(t.id)).map(t => t.id);
+  return canAccess(ACTIVE_WORKSPACE.id, signedInUserId()) ? mods : [];
 };
 function setRegistry(patch){ saveWorkspaceRegistry(patch); window.dispatchEvent(new Event(WS_EVENT)); }
-// People's modules in workspaces, all at once: [{wsId, userId, modules}] — no modules, not a member.
+// Access to organizations, all at once: [{wsId, userId, member}].
 function setMemberships(changes, users = directoryUsers()){
   const members = {...WORKSPACE_REGISTRY.members};
-  changes.forEach(({wsId, userId, modules}) => {
+  changes.forEach(({wsId, userId, member}) => {
     const list = (members[wsId] || []).filter(m => m.userId !== userId);
-    members[wsId] = modules.length ? [...list, {userId, modules}] : list;
+    members[wsId] = member ? [...list, {userId}] : list;
   });
   setRegistry({users, members});
 }
-// A person into the directory (once) and into a workspace with these modules (added to theirs) — CRM's Add User.
-function joinWorkspaceDirectory(person, modules, wsId = ACTIVE_WORKSPACE.id){
+// A module available in an organization or not (its data and linkage groups are kept either way).
+function setModuleOrg(id, wsId, enabled){
+  const c = moduleConfig(id), orgs = c.orgs || [];
+  setRegistry({modules:{...WORKSPACE_REGISTRY.modules, [id]:{...c, orgs: enabled ? [...new Set([...orgs, wsId])] : orgs.filter(x => x !== wsId)}}});
+}
+// A person into the directory (once) with access to an organization — CRM's Add User.
+function joinWorkspaceDirectory(person, wsId = ACTIVE_WORKSPACE.id){
   const known = directoryUsers().find(u => u.id === person.id || sameEmail(u.email, person.email));
   const users = known ? directoryUsers() : [...directoryUsers(), {id:person.id, name:person.name, email:person.email}];
-  const id = known ? known.id : person.id, cur = membershipOf(wsId, id);
-  setMemberships([{wsId, userId:id, modules:[...new Set([...(cur ? cur.modules : []), ...modules])]}], users);
+  setMemberships([{wsId, userId: known ? known.id : person.id, member:true}], users);
 }
-/* Opening a workspace (app.jsx): its Users join the directory; a workspace with no members yet
-   takes its Users, each with every module; and the signed-in person, a member nowhere the switcher
-   offers, joins it as anyone signing in always has. */
+/* Opening a workspace (app.jsx): its Users join the directory; a workspace with no access list
+   yet takes its Users; and the signed-in person, with access nowhere the switcher offers, joins it
+   as anyone signing in always has. */
 function syncWorkspacePeople(users){
   const wsId = ACTIVE_WORKSPACE.id;
   let dir = directoryUsers(), changed = false;
   const members = {...WORKSPACE_REGISTRY.members};
   users.forEach(u => { if(!dir.some(d => d.id === u.id || sameEmail(d.email, u.email))){ dir = [...dir, {id:u.id, name:u.name, email:u.email}]; changed = true; } });
   const idOf = (u) => (dir.find(d => d.id === u.id || sameEmail(d.email, u.email)) || u).id;
-  const all = assignableModules().map(t => t.id);
-  if(!members[wsId]){ members[wsId] = users.map(u => ({userId:idOf(u), modules:all})); changed = true; }
+  if(!members[wsId]){ members[wsId] = users.map(u => ({userId:idOf(u)})); changed = true; }
   const me = SESSION && dir.find(d => sameEmail(d.email, SESSION.email));
   if(me && !members[wsId].some(m => m.userId === me.id) && !visibleWorkspaces().some(w => (members[w.id] || []).some(m => m.userId === me.id))){
-    members[wsId] = [...members[wsId], {userId:me.id, modules:all}]; changed = true;
+    members[wsId] = [...members[wsId], {userId:me.id}]; changed = true;
   }
+  // Who is a Super Admin here (their CRM preset), for opening every organization.
+  dir = dir.map(d => {
+    const u = users.find(x => x.id === d.id || sameEmail(x.email, d.email)), was = (d.superAdminIn || []).includes(wsId), is = !!u && u.preset === SUPER_ADMIN;
+    if(was === is) return d;
+    changed = true;
+    return {...d, superAdminIn: is ? [...(d.superAdminIn || []), wsId] : (d.superAdminIn || []).filter(x => x !== wsId)};
+  });
   if(changed) setRegistry({users:dir, members});
 }
-// The CRM users the open workspace still needs: members with CRM not in its Users yet — as CRM's Add User makes them (no seat, team or preset).
+// The CRM users the open organization still needs (it has CRM): those with access not in its Users yet — as CRM's Add User makes them (no seat, team or preset).
 function crmUsersToAdd(users){
+  if(!moduleEnabled('crm')) return [];
   const created = new Date().toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'});
-  return (workspaceMembers(ACTIVE_WORKSPACE.id) || []).filter(m => m.modules.includes('crm'))
-    .map(m => directoryUsers().find(d => d.id === m.userId)).filter(Boolean)
+  return (workspaceMembers(ACTIVE_WORKSPACE.id) || []).map(m => directoryUsers().find(d => d.id === m.userId)).filter(Boolean)
     .filter(d => !users.some(u => u.id === d.id || sameEmail(u.email, d.email)))
     .map(d => ({id:d.id, name:d.name, email:d.email, status:'Activated', teamId:null, preset:'', access:'manual', lastActive:null, created,
       permissions:normalizePermissions(DEFAULT_CONTACT_PERMISSIONS(), levelOfPreset(''))}));
 }
-// Where the signed-in person belongs instead of the open workspace (not a member of it), or null.
+// Where the signed-in person belongs instead of the open workspace (no access to it), or null.
 function workspaceRedirect(){
   const me = signedInUserId();
-  if(!me || !workspaceMembers(ACTIVE_WORKSPACE.id) || membershipOf(ACTIVE_WORKSPACE.id, me)) return null;
-  const other = switchableWorkspaces().find(w => w.id !== ACTIVE_WORKSPACE.id && membershipOf(w.id, me));
+  if(canAccess(ACTIVE_WORKSPACE.id, me)) return null;
+  const other = switchableWorkspaces().find(w => w.id !== ACTIVE_WORKSPACE.id);
   return other ? other.id : null;
 }
-
-/* ── Workspace templates ── a workspace's CRM setup when it starts (store.jsx `template`). The
-   Accounting workspace's: two record types — Leads (the Deals record type, named Leads) and
+/* ── Workspace templates ── a workspace's CRM setup when it starts (store.jsx `template`). HOF
+   Partners' (the template `accounting`, as it was first named): two record types — Leads (the Deals record type, named Leads) and
    Customers — linked Leads → Customers (one-to-many), their properties, the Lead Pipeline and the
    customers' Service pipeline, and the Customer Profile form. No sample records. */
 const typedStages = (list) => list.map(([label, type]) => ({id:label.toLowerCase().replace(/[^a-z0-9]+/g, '-'), label, type}));
@@ -289,7 +319,8 @@ const workspaceTemplate = () => (WORKSPACE_TEMPLATE && WORKSPACE_TEMPLATES[WORKS
    the CRM settings' look — a Settings menu on the left (back arrow to the ERP home), the page on
    the right. */
 const ERP_SETTINGS_NAV = {id:'erp.settings', label:'ERP Settings', group:true, items:[
-  {id:'erp.workspace', label:'Workspace', icon:'brand'}, {id:'erp.users', label:'Users', icon:'usersThree'}]};
+  {id:'erp.workspace', label:'Workspace', icon:'brand'}, {id:'erp.users', label:'Users', icon:'usersThree'},
+  {id:'erp.modules', label:'Module Settings', icon:'dashboard'}]};
 function ErpSettingsScreen({onBack, data, setData}){
   const [page, setPage] = React.useState('erp.workspace');
   return (
@@ -302,7 +333,7 @@ function ErpSettingsScreen({onBack, data, setData}){
         <CrmNavGroup group={ERP_SETTINGS_NAV} active={page} setActive={setPage} first/>
       </div>
       <div style={{flex:1, minWidth:0, minHeight:0, display:'flex', flexDirection:'column', position:'relative'}}>
-        {page === 'erp.workspace' ? <WorkspaceSettingsPage/> : <ErpUsersPage data={data} setData={setData}/>}
+        {page === 'erp.workspace' ? <WorkspaceSettingsPage/> : page === 'erp.users' ? <ErpUsersPage data={data} setData={setData}/> : <ModuleSettingsPage/>}
       </div>
     </div>
   );
@@ -320,7 +351,7 @@ function WorkspaceSettingsPage(){
   const save = () => { if(!ok) return; updateWorkspace(update, active.id, {name:name.trim(), logo}); setSaved(true); };
   React.useEffect(() => { if(dirty) setSaved(false); }, [dirty]);
   return (
-    <SettingsPage title="Workspace" description="The open workspace’s name and logo, as the workspace switcher and the header show them."
+    <SettingsPage title="Workspace"
       actions={dirty ? <><StSecondary label="Cancel" onClick={()=>{ setName(active.name); setLogo(active.logo || null); }}/><StCta label="Save changes" disabled={!ok} onClick={save}/></>
         : saved ? <span style={{fontSize:12.5, color:T.attioMuted}}>Saved</span> : null}>
       <div style={{maxWidth:560, display:'flex', flexDirection:'column', gap:20}}>
@@ -338,102 +369,75 @@ function WorkspaceSettingsPage(){
   );
 }
 
-/* Users: everyone in the directory with the modules they open in each workspace ("—": not a
-   member). Select people for Assign access, or a row's Edit access; Add user for someone new. A
-   person given CRM in the open workspace joins its CRM Users at once (other workspaces: when
+/* Users: everyone, one line each, in the record tables' grid (ContactsDataGrid) — Name and Email,
+   sortable and searchable; ⋯ Access to Workspaces. Add user for someone new. A person given access
+   to the open organization joins its CRM Users at once when it has CRM (other organizations: when
    they're next opened), with no seat, team or preset — set in that CRM's Users & Teams. */
+const ERP_USER_COLUMNS = [{key:'name', label:'Name', width:280}, {key:'email', label:'Email', width:320}];
 function ErpUsersPage({data, setData}){
-  useWorkspaces();   // follows directory and membership changes
+  useWorkspaces();   // follows directory and access changes
   const [query, setQuery] = React.useState('');
-  const [selected, setSelected] = React.useState([]);
-  const [panel, setPanel] = React.useState(null);   // {userIds} — [] adds someone new
-  const wss = visibleWorkspaces();
-  const q = query.trim().toLowerCase();
-  const users = directoryUsers().filter(u => !q || u.name.toLowerCase().includes(q) || String(u.email).toLowerCase().includes(q))
-    .slice().sort((a, b) => a.name.localeCompare(b.name));
-  const toggle = (id) => setSelected(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
-  const allOn = users.length > 0 && users.every(u => selected.includes(u.id));
-  const cols = `36px minmax(260px, 1.2fr) ${wss.map(() => 'minmax(240px, 1fr)').join(' ')} 120px`;
-  const head = {fontSize:12, fontWeight:500, color:T.attioMuted, padding:'0 12px', display:'flex', alignItems:'center', height:36, whiteSpace:'nowrap'};
-  const cell = {fontSize:13, color:T.attioText, padding:'0 12px', display:'flex', alignItems:'center', minHeight:48, minWidth:0};
-  const saved = (crmUsers) => { if(crmUsers.length) setData(d => ({...d, users:[...d.users, ...crmUsers.filter(u => !d.users.some(x => x.id === u.id))]})); setPanel(null); setSelected([]); };
+  const [sort, setSort] = React.useState({key:'name', dir:'asc'});
+  const [columnOrder, setColumnOrder] = React.useState(null);
+  const [panel, setPanel] = React.useState(null);   // {userId} — null id adds someone new
+  const rows = directoryUsers().map(u => ({id:u.id, name:u.name, email:u.email}));
+  const schema = {
+    properties:ERP_USER_COLUMNS, filterProps:[], selectValues:{}, noun:'user', searchKeys:['name', 'email'], selectable:false, boards:false,
+    fillWidth:true, canCreateProperty:false, pinGutter:false,
+    renderCell:(key, r) => key === 'name' ? <span style={{display:'flex', alignItems:'center', gap:8, minWidth:0}}>
+        <Avatar name={r.name} size={22}/><span style={{fontWeight:500, color:T.attioText, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{r.name}</span></span>
+      : undefined,
+    renderActions:(r) => <RowActionsMenu title="User actions" width={MENU_W} items={[{label:'Access to Workspaces', onClick:()=>setPanel({userId:r.id})}]}/>,
+  };
+  const saved = (crmUsers) => { if(crmUsers.length) setData(d => ({...d, users:[...d.users, ...crmUsers.filter(u => !d.users.some(x => x.id === u.id))]})); setPanel(null); };
   return (
-    <SettingsPage fill title="Users" description="People are shared across workspaces; choose which modules each can open in each workspace."
-      actions={<>
-        {selected.length > 0 && <StSecondary label={`Assign access (${selected.length})`} onClick={()=>setPanel({userIds:selected})}/>}
-        <StCta label="Add user" onClick={()=>setPanel({userIds:[]})}/>
-      </>}>
-      <div style={{position:'relative', width:280, marginBottom:12}}>
-        <div style={{position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', display:'flex'}}><Icon name="search" size={13} color={T.gray400}/></div>
-        <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search users" aria-label="Search users" style={{...fieldInput, paddingLeft:30}}/>
-      </div>
-      <div style={{flex:1, minHeight:0, overflow:'auto', border:`1px solid ${T.attioLine}`, borderRadius:8}}>
-        {/* Wide enough for every workspace column; module chips wrap inside theirs. */}
-        <div style={{minWidth:36 + 260 + wss.length * 240 + 120}}>
-          <div style={{display:'grid', gridTemplateColumns:cols, background:T.headerBg, borderBottom:`1px solid ${T.attioLine}`, position:'sticky', top:0, zIndex:1}}>
-            <span style={{...head, justifyContent:'center'}}><RowCheckbox checked={allOn} onChange={()=>setSelected(allOn ? [] : users.map(u => u.id))}/></span>
-            <span style={head}>User</span>
-            {wss.map(w => <span key={w.id} style={{...head, gap:8}}><WorkspaceTile ws={w} size={16}/>{w.name}</span>)}
-            <span style={head}/>
-          </div>
-          {users.map(u => (
-            <div key={u.id} style={{display:'grid', gridTemplateColumns:cols, borderBottom:`1px solid ${T.attioLine}`, background: selected.includes(u.id) ? T.blueLight : '#fff'}}>
-              <span style={{...cell, justifyContent:'center'}}><RowCheckbox checked={selected.includes(u.id)} onChange={()=>toggle(u.id)}/></span>
-              <span style={{...cell, gap:10}}>
-                <Avatar name={u.name} size={26}/>
-                <span style={{minWidth:0, display:'flex', flexDirection:'column'}}>
-                  <span style={{fontWeight:500, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{u.name}</span>
-                  <span style={{fontSize:12, color:T.attioMuted, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{u.email}</span>
-                </span>
-              </span>
-              {wss.map(w => { const m = membershipOf(w.id, u.id);
-                return <span key={w.id} style={{...cell, flexWrap:'wrap', gap:4, padding:'8px 12px'}}>
-                  {m ? m.modules.map(id => <span key={id} style={{fontSize:11.5, padding:'1px 8px', borderRadius:9999, background:T.headerBg, color:T.gray800, whiteSpace:'nowrap'}}>{moduleLabel(id)}</span>)
-                    : <span style={{color:T.attioFaint}}>—</span>}
-                </span>; })}
-              <span style={{...cell, justifyContent:'flex-end'}}><StTextAction label="Edit access" onClick={()=>setPanel({userIds:[u.id]})}/></span>
-            </div>
-          ))}
-          {!users.length && <div style={{padding:'24px 16px', fontSize:13, color:T.attioMuted}}>No users match “{query.trim()}”.</div>}
+    <SettingsPage fill>
+      <div style={{display:'flex', alignItems:'center', gap:12, marginBottom:12}}>
+        <div style={{position:'relative', width:280}}>
+          <div style={{position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', display:'flex'}}><Icon name="search" size={13} color={T.gray400}/></div>
+          <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search users" aria-label="Search users" style={{...fieldInput, paddingLeft:30}}/>
         </div>
+        <div style={{flex:1}}/>
+        <StCta label="Add user" onClick={()=>setPanel({userId:null})}/>
       </div>
-      {panel && <UserAccessPanel userIds={panel.userIds} onClose={()=>setPanel(null)} onSaved={saved} crmUsers={data.users}/>}
+      <div style={{flex:1, minHeight:0, display:'flex', flexDirection:'column', border:`1px solid ${T.attioLine}`, borderRadius:8, overflow:'hidden'}}>
+        <RecordSchema.Provider value={schema}>
+          <ContactsDataGrid rows={rows} columnOrder={columnOrder || ERP_USER_COLUMNS.map(c => c.key)} setColumnOrder={setColumnOrder} sort={sort} setSort={setSort}
+            search={query} frozenLeft={0} frozenRight={0} actionsFrozen={false} rowsPerPage={25} onOpenContact={()=>{}}/>
+        </RecordSchema.Provider>
+      </div>
+      {panel && <WorkspaceAccessPanel userId={panel.userId} onClose={()=>setPanel(null)} onSaved={saved} crmUsers={data.users}/>}
     </SettingsPage>
   );
 }
 
-/* Add user / Edit access / Assign access — the creation side panel: the people (someone new —
-   name and email on the sign-in domains — or those chosen), then per workspace the modules they
-   open there (none: not a member). For several people it starts from what they all have, and
-   saving gives each exactly what's ticked. */
-function UserAccessPanel({userIds, onClose, onSaved, crmUsers}){
-  const isNew = !userIds.length;
-  const wss = visibleWorkspaces(), mods = assignableModules();
+/* Access to Workspaces — the creation side panel: the organizations as a checkbox list, ticked
+   where the person can open them. Add user (no person yet) asks for their name and email (the
+   sign-in domains) first. Access only — which modules an organization has is Module Settings'. */
+function WorkspaceAccessPanel({userId, onClose, onSaved, crmUsers}){
+  const isNew = !userId;
+  const person = isNew ? null : directoryUsers().find(u => u.id === userId);
+  const wss = visibleWorkspaces();
   const [name, setName] = React.useState('');
   const [email, setEmail] = React.useState('');
-  const [access, setAccess] = React.useState(() => Object.fromEntries(wss.map(w => {
-    const sets = userIds.map(id => (membershipOf(w.id, id) || {modules:[]}).modules);
-    return [w.id, isNew ? [] : mods.map(t => t.id).filter(id => sets.every(s => s.includes(id)))];
-  })));
-  const people = userIds.map(id => directoryUsers().find(u => u.id === id)).filter(Boolean);
+  const [access, setAccess] = React.useState(() => wss.filter(w => !isNew && membershipOf(w.id, userId)).map(w => w.id));
+  const superAdmin = !isNew && isSuperAdminUser(userId);   // opens every organization
   const emailTaken = isNew && !!directoryUserByEmail(email);
-  const ok = isNew ? !!name.trim() && signInAllowed(email) && !emailTaken : people.length > 0;
-  const flip = (wsId, mod) => setAccess(a => ({...a, [wsId]:a[wsId].includes(mod) ? a[wsId].filter(x => x !== mod) : [...a[wsId], mod]}));
+  const ok = isNew ? !!name.trim() && signInAllowed(email) && !emailTaken : !!person;
   const save = () => {
     if(!ok) return;
-    let dir = directoryUsers(), targets = people;
+    let dir = directoryUsers(), target = person;
     if(isNew){
       const base = name.trim().toLowerCase().replace(/[^a-z]+/g, '-').replace(/^-|-$/g, '') || 'user';
-      const person = {id: dir.some(u => u.id === base) ? `${base}-${Date.now().toString(36)}` : base, name:name.trim(), email:email.trim().toLowerCase()};
-      dir = [...dir, person]; targets = [person];
+      target = {id: dir.some(u => u.id === base) ? `${base}-${Date.now().toString(36)}` : base, name:name.trim(), email:email.trim().toLowerCase()};
+      dir = [...dir, target];
     }
-    setMemberships(targets.flatMap(p => wss.map(w => ({wsId:w.id, userId:p.id, modules:mods.map(t => t.id).filter(id => access[w.id].includes(id))}))), dir);
-    // CRM in the open workspace: into its CRM Users now (no seat, team or preset).
-    onSaved(access[ACTIVE_WORKSPACE.id].includes('crm') ? crmUsersToAdd(crmUsers) : []);
+    setMemberships(wss.map(w => ({wsId:w.id, userId:target.id, member:access.includes(w.id)})), dir);
+    // Access to the open organization (with CRM): into its CRM Users now (no seat, team or preset).
+    onSaved(access.includes(ACTIVE_WORKSPACE.id) ? crmUsersToAdd(crmUsers) : []);
   };
-  const title = isNew ? 'Add user' : people.length === 1 ? 'Edit access' : `Assign access · ${people.length} users`;
   return (
-    <CreatePanelFrame title={title} onClose={onClose} more={false} placement="fixed" width={520} actions={<>
+    <CreatePanelFrame title={isNew ? 'Add user' : 'Access to Workspaces'} onClose={onClose} more={false} placement="fixed" width={480} actions={<>
       <StSecondary label="Cancel" onClick={onClose}/>
       <StCta label={isNew ? 'Add user' : 'Save changes'} disabled={!ok} onClick={save}/>
     </>}>
@@ -444,36 +448,166 @@ function UserAccessPanel({userIds, onClose, onSaved, crmUsers}){
             {emailTaken && <div style={{fontSize:12, color:T.red, marginTop:4}}>This person is already a user.</div>}
             {email.trim() && !emailTaken && !signInAllowed(email) && <div style={{fontSize:12, color:T.red, marginTop:4}}>Use a hofmigration.com or hof-global.com address.</div>}
           </Field>
-        </> : (
-          <Field label={people.length === 1 ? 'User' : 'Users'}>
-            <div style={{display:'flex', flexWrap:'wrap', gap:6, paddingTop:4}}>
-              {people.map(p => <span key={p.id} style={{display:'inline-flex', alignItems:'center', gap:6, fontSize:12.5, padding:'3px 10px 3px 4px', borderRadius:9999, background:T.headerBg, color:T.attioText}}>
-                <Avatar name={p.name} size={20}/>{p.name}</span>)}
-            </div>
-            {people.length > 1 && <div style={{fontSize:12, color:T.attioMuted, marginTop:6}}>Each of them gets exactly the modules ticked below.</div>}
-          </Field>
+        </> : person && (
+          <Field label="User"><div style={{display:'flex', alignItems:'center', gap:8, paddingTop:5, fontSize:13, color:T.attioText, minWidth:0}}>
+            <Avatar name={person.name} size={22}/><span style={{fontWeight:500, whiteSpace:'nowrap'}}>{person.name}</span>
+            <span style={{color:T.attioMuted, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{person.email}</span></div></Field>
         )}
-      </>)}
-      <div style={{borderTop:`1px solid ${T.border}`, margin:'18px -20px 14px'}}/>
-      <div style={{display:'flex', flexDirection:'column', gap:18}}>
-        {wss.map(w => (
-          <div key={w.id} style={{display:'flex', flexDirection:'column', gap:8}}>
-            <div style={{display:'flex', alignItems:'center', gap:8}}>
-              <WorkspaceTile ws={w} size={18}/>
-              <span style={{fontSize:13, fontWeight:600, color:T.attioText, flex:1}}>{w.name}</span>
-              <span style={{fontSize:12, color:T.attioMuted}}>{access[w.id].length ? 'Member' : 'Not a member'}</span>
-            </div>
-            <div style={{display:'grid', gridTemplateColumns:'repeat(2, minmax(0, 1fr))', gap:'4px 16px', paddingLeft:26}}>
-              {mods.map(t => (
-                <label key={t.id} style={{display:'flex', alignItems:'center', gap:8, fontSize:13, color:T.attioText, cursor:'pointer', padding:'4px 0'}}>
-                  <RowCheckbox checked={access[w.id].includes(t.id)} onChange={()=>flip(w.id, t.id)}/>
-                  {t.label}{t.shared && <span style={{fontSize:11.5, color:T.attioMuted}}>· {t.note || 'Shared'}</span>}
-                </label>
-              ))}
-            </div>
+        <Field label="Workspaces">
+          <div style={{display:'flex', flexDirection:'column', paddingTop:2}}>
+            {wss.map(w => (
+              <div key={w.id} style={superAdmin ? {pointerEvents:'none'} : undefined}>
+                <SettingsCheckRow checked={superAdmin || access.includes(w.id)} onToggle={()=>setAccess(a => a.includes(w.id) ? a.filter(x => x !== w.id) : [...a, w.id])}
+                  hint={superAdmin ? 'Super Admin' : undefined}
+                  label={<span style={{display:'inline-flex', alignItems:'center', gap:8}}><WorkspaceTile ws={w} size={18}/>{orgLabel(w)}</span>}/>
+              </div>
+            ))}
           </div>
-        ))}
+        </Field>
+      </>)}
+    </CreatePanelFrame>
+  );
+}
+
+/* Module Settings: the modules on the left (every one, whichever organizations have it); on the
+   right, no heading — the module in each organization with its Enable switch (availability), then
+   its linkage groups (moduleLinks.jsx): each group's organizations marked as one, ⋯ Unlink per
+   organization, and the group's ⋯ to add organizations or unlink it. Link Modules (top right)
+   opens the side panel for a new group. Moving data asks first. */
+const LINK_TONES = ['#3A5BF9', '#16A34A', '#D97706', '#DB2777', '#7C3AED', '#0D9488'];
+const mtHead = {fontSize:12, fontWeight:500, color:T.attioMuted, whiteSpace:'nowrap'};
+const mtRow = {display:'flex', alignItems:'center', gap:12, padding:'0 12px 0 16px', height:T.attioRowH, borderBottom:`1px solid ${T.attioLine}`, fontSize:13, color:T.attioText};
+const mtTable = {border:`1px solid ${T.attioLine}`, borderRadius:8, overflow:'hidden'};
+const mtHeadRow = {display:'flex', alignItems:'center', gap:12, padding:'0 12px 0 16px', height:36, background:T.headerBg, borderBottom:`1px solid ${T.attioLine}`};
+const orgCell = (mod, w) => (
+  <span style={{flex:1, minWidth:0, display:'flex', alignItems:'center', gap:8}}>
+    <WorkspaceTile ws={w} size={18}/>
+    <span style={{whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{mod.label} <span style={{color:T.attioMuted}}>in</span> {orgLabel(w)}</span>
+  </span>
+);
+function ModuleSettingsPage(){
+  useWorkspaces();   // follows module changes
+  const mods = orgModules();
+  const [modId, setModId] = React.useState(mods[0].id);
+  const [panel, setPanel] = React.useState(null);     // {groupId?}: Link Modules
+  const [confirm, setConfirm] = React.useState(null); // {title, primary, body, run, danger}
+  const [error, setError] = React.useState('');
+  const mod = mods.find(m => m.id === modId) || mods[0];
+  const wss = visibleWorkspaces(), byId = Object.fromEntries(wss.map(w => [w.id, w]));
+  const groups = moduleGroups(mod.id);
+  const hasData = !!MODULE_DATA[mod.id];
+  const names = (ids) => ids.map(id => byId[id] ? orgLabel(byId[id]) : id).join(', ');
+  // Linking or unlinking moves the module's data: it asks first.
+  const ask = (c) => hasData ? setConfirm(c) : c.run();
+  const link = (moduleId, orgIds, groupId) => {
+    const m = mods.find(x => x.id === moduleId);
+    const run = () => { const err = linkOrgs(moduleId, orgIds, groupId); setError(err || ''); setPanel(null); setConfirm(null); };
+    if(!MODULE_DATA[moduleId]) return run();
+    setConfirm({title:`Link ${m.label}`, primary:'Link', body:<>{names(orgIds)}</>, run});
+  };
+  return (
+    <div style={{flex:1, minHeight:0, display:'flex', background:'#fff'}}>
+      <div style={{width:200, flexShrink:0, borderRight:`1px solid ${T.border}`, padding:'14px 12px', overflowY:'auto'}}>
+        {mods.map(m => <CrmNavItem key={m.id} icon={null} label={m.label} active={m.id === mod.id} onClick={()=>{ setModId(m.id); setError(''); }}/>)}
       </div>
+      <div style={{flex:1, minWidth:0, minHeight:0, overflowY:'auto', padding:'12px 16px 24px', display:'flex', flexDirection:'column', gap:16}}>
+        <div style={{display:'flex', alignItems:'center', gap:12, minHeight:30}}>
+          {error && <span style={{fontSize:12.5, color:T.red}}>{error}</span>}
+          <div style={{flex:1}}/>
+          <StCta label="Link Modules" onClick={()=>setPanel({})}/>
+        </div>
+        <div style={{...mtTable, maxWidth:720}}>
+          <div style={mtHeadRow}><span style={{...mtHead, flex:1}}>Module</span><span style={{...mtHead, width:96}}>Status</span></div>
+          {wss.map(w => { const on = moduleEnabled(mod.id, w.id);
+            return (
+              <div key={w.id} style={mtRow}>
+                {orgCell(mod, w)}
+                <span style={{width:96, display:'flex', alignItems:'center', gap:8}}>
+                  <UtToggle on={on} onChange={(v)=>setModuleOrg(mod.id, w.id, v)}/>
+                  <span style={{fontSize:12.5, color: on ? T.attioText : T.attioMuted}}>{on ? 'Enabled' : 'Disabled'}</span>
+                </span>
+              </div>
+            ); })}
+        </div>
+        {groups.length > 0 && (
+          <div style={{...mtTable, maxWidth:720}}>
+            <div style={mtHeadRow}><span style={{...mtHead, flex:1}}>Linked</span><span style={{width:28}}/></div>
+            {groups.map((g, i) => { const tone = LINK_TONES[i % LINK_TONES.length];
+              return (
+                <div key={g.id} style={{position:'relative'}}>
+                  {/* One group: a coloured bar down its rows. */}
+                  <span aria-hidden="true" style={{position:'absolute', left:0, top:0, bottom:0, width:3, background:tone}}/>
+                  <div style={{...mtRow, background:T.pageBg}}>
+                    <span style={{flex:1, minWidth:0, display:'flex', alignItems:'center', gap:8, fontWeight:500}}>
+                      <span style={{width:8, height:8, borderRadius:9999, background:tone, flexShrink:0}}/>Linkage {i + 1}
+                      <span style={{fontWeight:400, color:T.attioMuted}}>· {g.orgs.length}</span>
+                    </span>
+                    <RowActionsMenu title="Linkage actions" width={MENU_W} items={[
+                      {label:'Add organizations', onClick:()=>setPanel({groupId:g.id})},
+                      {label:'Unlink all', danger:true, onClick:()=>ask({title:`Unlink ${mod.label}`, primary:'Unlink', danger:true, body:<>{names(g.orgs)}</>,
+                        run:()=>{ setConfirm(null); unlinkGroup(mod.id, g.id); }})}]}/>
+                  </div>
+                  {g.orgs.map(id => byId[id] && (
+                    <div key={id} style={{...mtRow, paddingLeft:32}}>
+                      {orgCell(mod, byId[id])}
+                      <RowActionsMenu title="Organization actions" width={MENU_W} items={[
+                        {label:'Unlink', danger:true, onClick:()=>ask({title:`Unlink ${mod.label} in ${orgLabel(byId[id])}`, primary:'Unlink', danger:true, body:null,
+                          run:()=>{ setConfirm(null); unlinkOrg(mod.id, g.id, id); }})}]}/>
+                    </div>
+                  ))}
+                </div>
+              ); })}
+          </div>
+        )}
+      </div>
+      {panel && <LinkModulesPanel moduleId={mod.id} groupId={panel.groupId} onClose={()=>setPanel(null)} onLink={link}/>}
+      {confirm && <StModal title={confirm.title} primary={confirm.primary} danger={confirm.danger} onCancel={()=>setConfirm(null)} onSubmit={confirm.run}>
+        {confirm.body && <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>{confirm.body}</div>}
+      </StModal>}
+    </div>
+  );
+}
+
+/* Link Modules — the side panel: the module being linked, a search, and the organizations as a
+   checkbox list (several at once; one already in another group of this module can't be picked).
+   From a group's ⋯ Add organizations: that group's organizations come ticked. */
+function LinkModulesPanel({moduleId, groupId, onClose, onLink}){
+  const mods = orgModules();
+  const [mid, setMid] = React.useState(moduleId);
+  const [q, setQ] = React.useState('');
+  const groups = moduleGroups(mid), g = groupId ? groups.find(x => x.id === groupId) : null;
+  const [picked, setPicked] = React.useState(() => g ? [...g.orgs] : []);
+  React.useEffect(() => { if(!g) setPicked([]); }, [mid]);
+  const linkedElsewhere = (id) => groups.some(x => x.id !== groupId && x.orgs.includes(id));
+  const qq = q.trim().toLowerCase();
+  const wss = visibleWorkspaces().filter(w => !qq || orgLabel(w).toLowerCase().includes(qq));
+  const ok = g ? picked.length > g.orgs.length : picked.length >= 2;
+  const toggle = (id) => setPicked(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
+  const modLabel = (mods.find(m => m.id === mid) || {}).label;
+  return (
+    <CreatePanelFrame title={g ? `Link ${modLabel}` : 'Link Modules'} onClose={onClose} more={false} placement="fixed" width={460} actions={<>
+      <StSecondary label="Cancel" onClick={onClose}/>
+      <StCta label="Link" disabled={!ok} onClick={()=>onLink(mid, g ? picked.filter(id => !g.orgs.includes(id)) : picked, groupId)}/>
+    </>}>
+      {stack(<>
+        <Field label="Module">{g ? <ReadValue>{modLabel}</ReadValue>
+          : <Select value={mid} options={mods.map(m => ({value:m.id, label:m.label}))} onChange={v=>v && setMid(v)}/>}</Field>
+        <Field label="Organizations">
+          <div style={{display:'flex', flexDirection:'column', gap:6}}>
+            <div style={{position:'relative'}}>
+              <div style={{position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', display:'flex'}}><Icon name="search" size={13} color={T.gray400}/></div>
+              <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search organizations" aria-label="Search organizations" style={{...fieldText, paddingLeft:30}}/>
+            </div>
+            {wss.map(w => { const fixed = (g && g.orgs.includes(w.id)) || linkedElsewhere(w.id);
+              return (
+                <div key={w.id} style={{opacity: linkedElsewhere(w.id) ? .5 : 1, pointerEvents: fixed ? 'none' : 'auto'}}>
+                  <SettingsCheckRow checked={picked.includes(w.id)} onToggle={()=>toggle(w.id)} hint={linkedElsewhere(w.id) ? 'Linked' : undefined}
+                    label={<span style={{display:'inline-flex', alignItems:'center', gap:8}}><WorkspaceTile ws={w} size={18}/>{orgLabel(w)}</span>}/>
+                </div>
+              ); })}
+          </div>
+        </Field>
+      </>)}
     </CreatePanelFrame>
   );
 }
@@ -776,7 +910,8 @@ function BrandPage(){
 // The open workspace's brand (quotations, documents).
 const workspaceBrand = () => { const w = WORKSPACE_REGISTRY.workspaces.find(x => x.id === WORKSPACE_REGISTRY.activeId) || ACTIVE_WORKSPACE; return {...w, colors:{...DEFAULT_BRAND(), ...(w.colors || {})}}; };
 
-Object.assign(window, {WORKSPACE_CREATION_ENABLED, visibleWorkspaces, assignableModules, directoryUsers, workspaceMembers, membershipOf, signedInUserId, switchableWorkspaces,
+Object.assign(window, {WORKSPACE_CREATION_ENABLED, visibleWorkspaces, directoryUsers, workspaceMembers, membershipOf, signedInUserId, switchableWorkspaces,
   myModules, setMemberships, joinWorkspaceDirectory, syncWorkspacePeople, crmUsersToAdd, workspaceRedirect, WORKSPACE_TEMPLATES, workspaceTemplate, LEAD_OUTCOMES,
-  ErpSettingsScreen, WorkspaceSettingsPage, ErpUsersPage, UserAccessPanel, ALLOWED_EMAIL_DOMAINS, signInAllowed, isWorkspaceAdmin, signOut, useWorkspaces, WorkspaceTile, WorkspaceLockup, WorkspaceSwitcher,
+  orgLabel, orgModules, moduleEnabled, moduleLinked, setModuleOrg, canAccess, isSuperAdminUser,
+  ErpSettingsScreen, WorkspaceSettingsPage, ErpUsersPage, WorkspaceAccessPanel, ModuleSettingsPage, LinkModulesPanel, ALLOWED_EMAIL_DOMAINS, signInAllowed, isWorkspaceAdmin, signOut, useWorkspaces, WorkspaceTile, WorkspaceLockup, WorkspaceSwitcher,
   CreateWorkspaceModal, LoginScreen, BrandPage, LogoField, readImageFile, workspaceBrand});

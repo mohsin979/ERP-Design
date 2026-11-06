@@ -583,19 +583,20 @@ function FormsPage(){
 }
 
 /* ── The public form (no sign-in) ── #f~<workspace>~<form>: the form alone, for anyone with its
-   link. A prototype has no server, so a response is left in that workspace's form inbox in this
-   browser (localStorage); the workspace's app takes it in — at once when it's open (the storage
-   event), else when it next opens — through the same submission path (submitFormValues). */
+   link. A prototype has no real backend, so a response is left in that workspace's form inbox where
+   the prototype saves its data (store.jsx DB: SQLite on localhost, else localStorage); the
+   workspace's app takes it in — while it's open (the storage event, or a check every few seconds
+   with SQLite), else when it next opens — through the same submission path (submitFormValues). */
 const FORM_INBOX_KEY = (wsId) => `hof-erp-form-inbox:${wsId}`;
 const formPublicRoute = (hash) => { const m = /^#f~([A-Za-z0-9._-]+)~([A-Za-z0-9._-]+)$/.exec(hash || ''); return m ? {wsId:m[1], formId:m[2]} : null; };
 const workspaceStoreKey = (wsId) => wsId === HOF_MIGRATION_WS ? 'hof-erp-store-v2' : `hof-erp-store-v2:${wsId}`;
-const readFormInbox = (wsId) => { try { return JSON.parse(window.localStorage.getItem(FORM_INBOX_KEY(wsId)) || '[]', (k, v) => typeof v === 'string' && ISO_DATE_RE.test(v) ? new Date(v) : v) || []; } catch(e){ return []; } };
-const writeFormInbox = (wsId, list) => { try { window.localStorage.setItem(FORM_INBOX_KEY(wsId), JSON.stringify(list)); return true; } catch(e){ return false; } };
+const readFormInbox = (wsId) => { try { return JSON.parse(DB.fresh(FORM_INBOX_KEY(wsId)) || '[]', (k, v) => typeof v === 'string' && ISO_DATE_RE.test(v) ? new Date(v) : v) || []; } catch(e){ return []; } };
+const writeFormInbox = (wsId, list) => { try { DB.setItem(FORM_INBOX_KEY(wsId), JSON.stringify(list)); DB.flush(); return true; } catch(e){ return false; } };
 // The workspace's forms as last saved (the sample workspace before it saved any: its sample forms).
 function publicWorkspaceForms(wsId){
   const ws = WORKSPACE_REGISTRY.workspaces.find(w => w.id === wsId);
   if(!ws) return null;
-  try { const raw = window.localStorage.getItem(workspaceStoreKey(wsId)), saved = raw ? JSON.parse(raw) : null;
+  try { const raw = DB.getItem(workspaceStoreKey(wsId)), saved = raw ? JSON.parse(raw) : null;
     if(saved && Array.isArray(saved.forms)) return {ws, forms:saved.forms}; } catch(e){}
   return {ws, forms: ws.sample ? SAMPLE_FORMS() : []};
 }
@@ -657,7 +658,9 @@ function PublicFormInbox(){
     take();
     const onStorage = (e) => { if(e.key === FORM_INBOX_KEY(wsId)) take(); };
     window.addEventListener('storage', onStorage);
-    return () => window.removeEventListener('storage', onStorage);
+    // Saved in SQLite (store.jsx DB) there's no storage event between tabs: the inbox is checked every few seconds.
+    const poll = DB.sqlite ? setInterval(take, 4000) : null;
+    return () => { window.removeEventListener('storage', onStorage); if(poll) clearInterval(poll); };
   }, []);
   return null;
 }

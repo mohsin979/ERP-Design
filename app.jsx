@@ -1,12 +1,13 @@
 /* HOF Pulse ERP — app shell only (Header + Main Screen). No module content yet —
    module requirements will be provided separately. */
 
-/* The ERP's modules. Each is given per workspace to each member (ERP Settings → Users, workspaces.jsx),
-   except Setting — the ERP Settings, for the workspace's Super Admin and Admin (`assignable:false`).
-   People (HRMS) is `shared`: one HRMS for every workspace that has it; CRM is each workspace's own. */
+/* The ERP's modules. Each organization has those set in ERP Settings → Module Settings
+   (workspaces.jsx), and everyone with access to it opens them — except Setting, the ERP Settings,
+   for its Super Admin and Admin (`assignable:false`). People's data can be shared between
+   organizations (`shareable`: linked ones share it); CRM is each organization's own. */
 const MODULE_TILES = [
   {id:'crm', label:'CRM', icon:'crm', color:'#1869EC'},
-  {id:'people', label:'People', icon:'people', color:'#7C3AED', shared:true, note:'Shared HRMS'},
+  {id:'people', label:'People', icon:'people', color:'#7C3AED', shareable:true},
   {id:'marketing', label:'Marketing', icon:'marketing', color:'#EC4899'},
   {id:'accounting', label:'Accounting', icon:'accounting', color:'#16A34A'},
   {id:'analytics', label:'Analytics', icon:'analytics', color:'#F59E0B'},
@@ -472,8 +473,8 @@ function ModuleTile({tile, onClick}){
   );
 }
 
-/* Main Screen — greeting, module tiles, AI command bar. The tiles are the modules the signed-in
-   person opens in this workspace (ERP Settings → Users), plus Setting for its administrators. CRM
+/* Main Screen — greeting, module tiles, AI command bar. The tiles are the modules this organization
+   has (ERP Settings → Module Settings), for those with access to it, plus Setting for its administrators. CRM
    opens the CRM, Setting the ERP Settings; every other tile just surfaces a lightweight "not built
    yet" note instead of navigating anywhere or inventing module behavior. */
 function MainScreen({onOpenCrm, onOpenSettings}){
@@ -598,7 +599,9 @@ function App(){
     // The signed-in person is one of the workspace's users (added when they aren't yet).
     // One identity per person across workspaces: the signed-in person joins under their shared name.
     const shared = SESSION && directoryUsers().find(u => String(u.email || '').toLowerCase() === String(SESSION.email).toLowerCase());
-    const withMember0 = withSessionMember({users:base.users, seats:base.seats, presets:base.presets, people:base.people}, SESSION && {...SESSION, ...(shared ? {name:shared.name} : {})});
+    // People (the People module): this organization's own, or its People group's (moduleLinks.jsx).
+    const people = readSpace(peopleSpaceKey(ACTIVE_WORKSPACE.id)) || base.people;
+    const withMember0 = withSessionMember({users:base.users, seats:base.seats, presets:base.presets, people}, SESSION && {...SESSION, ...(shared ? {name:shared.name} : {})});
     // Members given CRM here (ERP Settings → Users) who aren't in its Users yet join them; everyone keeps their shared name.
     const withMember = {...withMember0, users:[...withMember0.users, ...crmUsersToAdd(withMember0.users)].map(u => {
       const d = directoryUsers().find(x => String(x.email || '').toLowerCase() === String(u.email || '').toLowerCase());
@@ -613,6 +616,11 @@ function App(){
   React.useEffect(() => { persistSlice('settings', settingsData); }, [settingsData]);
   // Shared people: this workspace's Users in the directory, its members set up (workspaces.jsx).
   React.useEffect(() => { syncWorkspacePeople(settingsData.users); }, [settingsData.users]);
+  /* People changes go to its People space — its own, or its group's when linked (each person with
+     the organization they came from). Linking and unlinking move the data and reload (moduleLinks.jsx). */
+  useWorkspaces();   // Module Settings changes (availability) apply at once
+  React.useEffect(() => { try { writeSpace(peopleSpaceKey(ACTIVE_WORKSPACE.id), stampOrg(settingsData.people || [], ACTIVE_WORKSPACE.id)); }
+    catch(e){ console.warn('HOF ERP: could not save People', e); } }, [settingsData.people]);
   setUserDirectory(settingsData.users);   // user IDs on records read as names
   // Who's signed in: the user with the session's email in this workspace.
   const sessionUser = SESSION && settingsData.users.find(u => String(u.email || '').toLowerCase() === String(SESSION.email).toLowerCase());
