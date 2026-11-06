@@ -1,14 +1,19 @@
 /* HOF Pulse ERP — Accounting: a record's payment structures (record detail → Accounting tab, on
    Contacts, Deals and Customers).
 
-   Two kinds:
-     Imported from a quote — New payment terms → Pull from quote: a quote sent to the record
-       (Sent or Signed) brings its payment terms (total and installments: description, percentage,
-       amount, tentative date — a "Day N" counting from the quote's sent date), marked "Imported
-       from Q-…". Each quote can be pulled once. Payments can be recorded once the quote is signed.
-     Manual — a title, the total, a start date and installments set up here, as on a quote
-       (description, percentage, Day N from the start date or a calendar date). Editable and
-       deletable until the first payment is recorded.
+   One payment structure per record ("Payment Terms"): every record starts with it — a First
+   installment, Unpaid (the default terms) — and none is created by hand. Its ⋯ (until the first
+   payment is recorded):
+     Edit Payment Terms — the title, the total, a start date and the installments (rename them,
+       their percentage, Day N from the start date or a calendar date), as on a quote.
+     Add installment    — the same editor with a new installment to fill in.
+     Pull from quote    — a quote sent to the record (Sent or Signed) fills the structure with its
+       payment terms (total and installments: description, percentage, amount, tentative date — a
+       "Day N" counting from the quote's sent date), marked "Imported from Quotation". Each quote
+       can be pulled once. Payments can be recorded once the quote is signed.
+   A record saved with more than one structure (before this rule) keeps one — the one with
+   payments, else a quote's, else its own (primaryTermsOf) — and the others stay, archived:
+   viewable, read-only, never deleted.
 
    Payments only move forward (no edit or undo until a correction workflow is defined):
      Unpaid          — nothing received.
@@ -52,6 +57,15 @@ function recordEditable(object, record){
 // The quotes on the record (its own).
 const recordQuotes = (hub, object, record) => (hub.quotes || []).filter(q => q.object === object && String(q.recordId) === String(record.id));
 const hasPayments = (s) => (s.installments || []).some(x => (x.payments || []).length);
+// A record's one payment structure among those saved for it (see the header); the rest are archived.
+function primaryTermsOf(list){
+  if(!list || !list.length) return null;
+  const paid = list.filter(hasPayments);
+  return paid.length ? paid[paid.length - 1] : list.find(s => s.source !== 'manual') || list.find(s => !s.isDefault) || list[0];
+}
+// A structure's installments as editable terms (a quote's become set dates or Day 0).
+const termsOfSchedule = (s) => s.source === 'manual' && s.terms ? s.terms
+  : (s.installments || []).filter(x => !x.parentId).map(x => ({id:x.id, description:x.description, percent:x.percent, due: x.dueDate ? {type:'date', date:x.dueDate} : {type:'days', days:0}}));
 // A quote's payment structure, as pulled.
 const scheduleFromQuote = (q, object, record) => ({
   id:`qs-${q.id}`, source:'quote', quoteId:q.id, quoteNumber:q.number, quoteTitle:q.title, object, recordId:record.id, createdAt:q.createdAt, createdBy:q.createdBy, total:quoteTotal(q),
@@ -83,16 +97,16 @@ const manualInstallments = (def) => (def.terms || []).map(x => ({id:x.id, parent
   dueDate: x.due && x.due.type === 'delivery' ? '' : x.due && x.due.type === 'date' ? x.due.date : def.startDate ? ymdOf(new Date(new Date(`${def.startDate}T00:00:00`).getTime() + (Number(x.due && x.due.days) || 0) * 86400000)) : '',
   tentative: x.due && x.due.type !== 'date' ? fmtTentative(x.due) : '', payments:[]}));
 
-/* ── New / Edit payment structure (manual): the creation side panel ── a title, the total, the
-   start date (Day 0) and the installments, as on a quote. */
-/* `pullable`: the quotes sent to the record whose terms aren't pulled yet; `onPull(quote)` brings one in. */
-function PaymentStructurePanel({initial, onCancel, onSave, pullable = [], onPull}){
+/* ── Edit Payment Terms: the side panel ── a title, the total, the start date (Day 0) and the
+   installments, as on a quote. `addRow`: opened from Add installment — a new installment to fill in. */
+/* `pullable`: the quotes sent to the record whose terms aren't pulled yet; `onPull(quote)` fills the terms with one. */
+function PaymentStructurePanel({initial, addRow, onCancel, onSave, pullable = [], onPull}){
   const [pickOpen, setPickOpen] = React.useState(false);
   const [title, setTitle] = React.useState(initial ? initial.title : '');
   const [total, setTotal] = React.useState(initial ? String(initial.total) : '');
   const [startDate, setStartDate] = React.useState(initial ? initial.startDate : ymdOf(new Date()));
-  const [terms, setTerms] = React.useState(() => initial ? initial.terms.map(x => ({...x, percent:String(x.percent), due:{...x.due}}))
-    : [{id:acId('mt'), description:'', percent:'100', due:{type:'days', days:0}}]);
+  const [terms, setTerms] = React.useState(() => [...(initial ? initial.terms.map(x => ({...x, percent:String(x.percent), due:{...x.due}}))
+    : [{id:acId('mt'), description:'', percent:'100', due:{type:'days', days:0}}]), ...(addRow ? [{id:acId('mt'), description:'', percent:'', due:{type:'days', days:0}}] : [])]);
   const setTerm = (id, p) => setTerms(ts => ts.map(x => x.id === id ? {...x, ...p} : x));
   const sum = terms.reduce((s, x) => s + (Number(x.percent) || 0), 0);
   const totalOk = total !== '' && Number(total) > 0;
@@ -107,7 +121,7 @@ function PaymentStructurePanel({initial, onCancel, onSave, pullable = [], onPull
       <StCta label="Save" disabled={!ok} onClick={save}/>
     </>}>
       {/* Pull from quote: a sent quote's payment terms, brought in as they are. */}
-      {!initial && onPull && (
+      {onPull && pullable.length > 0 && (
         <div style={{display:'flex', alignItems:'center', gap:10, padding:'12px 14px', marginBottom:18, border:`1px solid ${T.attioLine}`, borderRadius:10, background:T.headerBg}}>
           <Icon name="quote" size={15} color={T.gray600}/>
           <span style={{flex:1, fontSize:13, color:T.attioText}}>Pull payment terms from a sent quote</span>
@@ -258,8 +272,9 @@ function PaymentVerificationModal({inst, onClose}){
    the table scrolls sideways and Actions stays in view. */
 const SCHEDULE_COLS = 'minmax(220px, 2fr) minmax(96px, 1fr) minmax(112px, 1fr) minmax(124px, 1fr) minmax(140px, 1fr) minmax(120px, 1fr) 150px';
 const SCHEDULE_MIN_W = 962;
-// `canEdit`: edit the terms and record payments; `canDelete`: remove them (Payment Terms permissions).
-function PaymentScheduleCard({schedule, canEdit, canDelete = canEdit, canPay, quote, onPay, onView, onEdit, onDelete, onOpenQuote}){
+// `canEdit`: edit the terms and record payments (Payment Terms → Edit).
+// `archived`: a record's extra structure saved before one-per-record — shown read-only.
+function PaymentScheduleCard({schedule, canEdit, canPay, quote, pullable, archived, onPay, onView, onEdit, onAdd, onOpenQuote}){
   const t = scheduleTotals(schedule);
   // Every row (header included) one line, at the record tables' row height.
   const head = {fontSize:11.5, fontWeight:500, color:T.attioMuted, height:T.attioRowH, padding:'0 12px', display:'flex', alignItems:'center', whiteSpace:'nowrap'};
@@ -295,11 +310,13 @@ function PaymentScheduleCard({schedule, canEdit, canDelete = canEdit, canPay, qu
             </div>
             <span style={{fontSize:12, color:T.attioMuted}}>Created {fmtQuoteDate(schedule.createdAt)} by {schedule.createdBy}</span>
           </div>
-          {/* Edit (manual terms) and Remove: until the first payment is recorded — payments are never removed. */}
-          {(canEdit || canDelete) && (
+          {/* Edit, Add installment and Pull from quote: until the first payment is recorded — payments
+              are never removed. Archived terms (`archived`) have none. */}
+          {canEdit && !archived && (
             <RowActionsMenu title="Payment terms actions" items={[
-              ...(canEdit && schedule.source === 'manual' ? [{label:'Edit Payment', disabled:hasPayments(schedule), onClick:onEdit}] : []),
-              ...(canDelete ? [{label:'Remove Payment', danger:true, disabled:hasPayments(schedule), onClick:onDelete}] : [])]}/>
+              {label:'Edit Payment Terms', disabled:hasPayments(schedule), onClick:onEdit},
+              {label:'Add installment', disabled:hasPayments(schedule), onClick:onAdd},
+              ...(pullable && pullable.length ? [{label:'Pull from quote', disabled:hasPayments(schedule), onClick:onEdit}] : [])]}/>
           )}
         </div>
         <div style={{display:'flex', gap:8, flexWrap:'wrap'}}>
@@ -326,11 +343,13 @@ function PaymentScheduleCard({schedule, canEdit, canDelete = canEdit, canPay, qu
                   <span style={num}>{r2(inst.percent)}%</span>
                   <span style={num}>{fmtMoney(inst.amount)}</span>
                   {/* Its invoice (`invoicedAt`: when the installment was invoiced), on hover. */}
-                  <span style={cell} title={inst.invoicedAt ? `Invoiced ${fmtQuoteDate(inst.invoicedAt)}` : 'Not invoiced yet'}><PaymentStatusPill status={st.status}/></span>
+                  <span style={{...cell, gap:6}} title={inst.invoicedAt ? `Invoiced ${fmtQuoteDate(inst.invoicedAt)}` : 'Not invoiced yet'}><PaymentStatusPill status={st.status}/>
+                    {/* A workflow violation about this installment (e.g. it must be paid by now). */}
+                    {!archived && <ViolationMark inst={inst.id}/>}</span>
                   <span style={cell}><span style={clip} title={inst.tentative || undefined}>{inst.tentative || '—'}</span></span>
                   <span style={{...cell, fontVariantNumeric:'tabular-nums'}}><span style={clip}>{fmtQuoteDate(inst.dueDate) || '—'}</span></span>
                   <span style={{...cell, ...actionsCol, background:'#fff'}}>
-                    {st.status === 'unpaid' && canEdit && canPay && <button onClick={()=>onPay(inst)} style={{...btnSecondarySm, height:26, padding:'0 10px', whiteSpace:'nowrap'}}>Update status</button>}
+                    {st.status === 'unpaid' && canEdit && canPay && !archived && <button onClick={()=>onPay(inst)} style={{...btnSecondarySm, height:26, padding:'0 10px', whiteSpace:'nowrap'}}>Update status</button>}
                     {(inst.payments || []).length > 0 && (
                       <button onClick={()=>onView(inst)} style={{...formTextAction, display:'inline-flex', alignItems:'center', gap:6, whiteSpace:'nowrap'}}>
                         <Icon name="check" size={12} color="#027A48"/> View payment</button>
@@ -346,32 +365,32 @@ function PaymentScheduleCard({schedule, canEdit, canDelete = canEdit, canPay, qu
   );
 }
 
-/* ── The record's Accounting tab ── its structures pulled from quotes, then its manual ones;
-   New payment terms (with Pull from quote) at the top. */
+/* ── The record's Accounting tab ── its one Payment Terms (primaryTermsOf); any archived ones
+   under it, read-only. */
 function AccountingTab({object, record}){
   const hub = useRecordHub();
   const [paying, setPaying] = React.useState(null);   // {scheduleId, instId}
   const [viewing, setViewing] = React.useState(null); // {scheduleId, instId}: View payment
-  const [editing, setEditing] = React.useState(null); // {id?}: the manual structure panel
-  const [deleting, setDeleting] = React.useState(null);
+  const [editing, setEditing] = React.useState(null); // {id, add?}: the Edit Payment Terms panel
+  const [showArchived, setShowArchived] = React.useState(false);
   const [quoteOpen, setQuoteOpen] = React.useState(null); // the quotation opened from "Imported from Quotation"
   // Payment Terms permissions (Records → <Object> → Accounting), by the record's owner.
   const can = (action) => paymentTermsCan(action, object, record);
-  const canEdit = can('edit'), canCreate = can('create'), canDelete = can('delete');
+  const canEdit = can('edit');
   const stored = (hub.accounting || []).filter(s => s.object === object && String(s.recordId) === String(record.id));
   const quotes = recordQuotes(hub, object, record);
-  // Pulled quotes' structures, each with its quote (gone if it was deleted).
-  const imported = stored.filter(s => s.source !== 'manual').map(s => ({schedule:s, quote:quotes.find(q => q.id === s.quoteId) || null}));
   // Quotes sent to the record whose terms haven't been pulled yet.
   const pullable = quotes.filter(q => ['sent', 'signed'].includes(q.status) && !(hub.accounting || []).some(s => s.quoteId === q.id));
+  const all = stored;
+  const primary = primaryTermsOf(stored), archivedList = stored.filter(s => s !== primary);
+  // Pull from quote fills the one structure (same id) — only while nothing is paid; once per quote.
   const pull = (q) => {
-    if((hub.accounting || []).some(s => s.quoteId === q.id)) return;   // once per quote
-    hub.setAccounting(list => list.some(s => s.quoteId === q.id) ? list : [...list, {...scheduleFromQuote(q, object, record), createdAt:new Date(), createdBy:CURRENT_USER.name}]);
+    if(!primary || hasPayments(primary) || (hub.accounting || []).some(s => s.quoteId === q.id)) return;
+    hub.setAccounting(list => list.some(s => s.quoteId === q.id) ? list
+      : list.map(s => s.id === primary.id ? {...scheduleFromQuote(q, object, record), id:primary.id, createdAt:primary.createdAt, createdBy:primary.createdBy} : s));
     setEditing(null);
     hub.toast(`Payment terms pulled from ${q.number}`);
   };
-  const manual = stored.filter(s => s.source === 'manual');
-  const all = [...imported.map(x => x.schedule), ...manual];
   // Recording a payment: the structure (a quote's, as it stands) is saved with the payment.
   const savePayment = (scheduleId, instId, v) => {
     const base = all.find(s => s.id === scheduleId); if(!base) return;
@@ -395,52 +414,58 @@ function AccountingTab({object, record}){
     setPaying(null);
     hub.toast(v.status === 'paid' ? 'Installment marked as paid' : 'Partial payment recorded');
   };
+  // Saving the terms: they become the record's own (a quote's terms edited here are no longer the quote's).
   const saveManual = (def) => {
     const id = editing && editing.id;
-    if(id) hub.setAccounting(list => list.map(s => s.id === id && !hasPayments(s) ? {...s, ...def, installments:manualInstallments(def)} : s));
-    else hub.setAccounting(list => [...list, {id:acId('ps'), source:'manual', object, recordId:record.id, createdAt:new Date(), createdBy:CURRENT_USER.name, ...def, installments:manualInstallments(def)}]);
+    hub.setAccounting(list => list.map(s => s.id === id && !hasPayments(s)
+      ? {id:s.id, source:'manual', object:s.object, recordId:s.recordId, createdAt:s.createdAt, createdBy:s.createdBy, ...def, installments:manualInstallments(def)} : s));
     setEditing(null);
-    hub.toast(id ? 'Payment terms saved' : 'Payment terms created');
+    hub.toast('Payment terms saved');
   };
   const payingSchedule = paying && all.find(s => s.id === paying.scheduleId);
   const payingInst = payingSchedule && payingSchedule.installments.find(x => x.id === paying.instId);
   const viewingSchedule = viewing && all.find(s => s.id === viewing.scheduleId);
   const viewingInst = viewingSchedule && viewingSchedule.installments.find(x => x.id === viewing.instId);
   const openedQuote = quoteOpen && quotes.find(q => q.id === quoteOpen);
-  const editingDef = editing && editing.id ? manual.find(s => s.id === editing.id) : null;
+  const editingSchedule = editing && all.find(s => s.id === editing.id);
+  const editingDef = editingSchedule ? {title:editingSchedule.source === 'manual' ? editingSchedule.title : editingSchedule.quoteTitle, total:scheduleTotals(editingSchedule).total,
+    startDate:editingSchedule.startDate || ymdOf(new Date()), terms:termsOfSchedule(editingSchedule)} : null;
+  const card = (s, archived) => {
+    const quote = s.source !== 'manual' ? quotes.find(q => q.id === s.quoteId) || null : null;
+    return <PaymentScheduleCard key={s.id} schedule={s} quote={quote} archived={archived} canEdit={canEdit} pullable={pullable}
+      canPay={s.source === 'manual' || hasPayments(s) || (quote && quote.status === 'signed')}
+      onPay={(inst)=>setPaying({scheduleId:s.id, instId:inst.id})} onView={(inst)=>setViewing({scheduleId:s.id, instId:inst.id})}
+      onEdit={()=>setEditing({id:s.id})} onAdd={()=>setEditing({id:s.id, add:true})} onOpenQuote={(q)=>setQuoteOpen(q.id)}/>;
+  };
   if(!can('view')) return <div style={{flex:1, padding:'48px 24px', textAlign:'center', fontSize:13, color:T.gray400}}>You don't have access to this record's payment terms.</div>;
   return (
     <div style={{flex:1, minHeight:0, minWidth:0, display:'flex', flexDirection:'column', position:'relative'}}>
       <div style={{display:'flex', alignItems:'center', gap:10, padding:'12px 20px', borderBottom:`1px solid ${T.border}`, flexShrink:0}}>
         <span style={{fontSize:13, fontWeight:600, color:T.attioText}}>Payment Terms</span>
-        <span style={{fontSize:13, color:T.attioMuted, fontVariantNumeric:'tabular-nums'}}>{all.length}</span>
-        <div style={{flex:1}}/>
-        {canCreate && <button onClick={()=>setEditing({})} style={{...btnPrimarySm(), display:'inline-flex', alignItems:'center', gap:6}}><Icon name="plus" size={13} color="#fff"/> New payment terms</button>}
       </div>
       <div style={{flex:1, minHeight:0, overflowY:'auto', paddingBottom:32, display:'flex', flexDirection:'column'}}>
-        {imported.map(({schedule, quote}) => <PaymentScheduleCard key={schedule.id} schedule={schedule} quote={quote} canEdit={canEdit} canDelete={canDelete}
-          canPay={hasPayments(schedule) || (quote && quote.status === 'signed')} onPay={(inst)=>setPaying({scheduleId:schedule.id, instId:inst.id})}
-          onView={(inst)=>setViewing({scheduleId:schedule.id, instId:inst.id})} onDelete={()=>setDeleting(schedule)} onOpenQuote={(q)=>setQuoteOpen(q.id)}/>)}
-        {manual.map(s => <PaymentScheduleCard key={s.id} schedule={s} canEdit={canEdit} canDelete={canDelete} canPay onPay={(inst)=>setPaying({scheduleId:s.id, instId:inst.id})}
-          onView={(inst)=>setViewing({scheduleId:s.id, instId:inst.id})}
-          onEdit={()=>setEditing({id:s.id})} onDelete={()=>setDeleting(s)}/>)}
-        {!all.length && <div style={{padding:'40px 0', textAlign:'center', fontSize:13, color:T.attioMuted}}>No payment terms yet.</div>}
+        {primary && card(primary, false)}
+        {!primary && <div style={{padding:'40px 0', textAlign:'center', fontSize:13, color:T.attioMuted}}>No payment terms yet.</div>}
+        {/* Archived: extra structures saved before one-per-record — read-only. */}
+        {archivedList.length > 0 && <>
+          <button type="button" onClick={()=>setShowArchived(v => !v)} style={{...formTextAction, alignSelf:'flex-start', margin:'14px 24px 6px', display:'inline-flex', alignItems:'center', gap:6}}>
+            <Icon name="chevDown" size={11} color={T.gray600} style={{transform: showArchived ? 'none' : 'rotate(-90deg)'}}/>
+            Archived payment terms ({archivedList.length})
+          </button>
+          {showArchived && archivedList.map(s => card(s, true))}
+        </>}
       </div>
       {payingInst && <PaymentModal schedule={payingSchedule} inst={payingInst} onCancel={()=>setPaying(null)} onSave={(v)=>savePayment(payingSchedule.id, payingInst.id, v)}/>}
       {viewingInst && <PaymentVerificationModal inst={viewingInst} onClose={()=>setViewing(null)}/>}
-      {editing && <PaymentStructurePanel key={editing.id || 'new'} initial={editingDef} onCancel={()=>setEditing(null)} onSave={saveManual} pullable={pullable} onPull={pull}/>}
+      {editing && editingDef && <PaymentStructurePanel key={`${editing.id}-${editing.add ? 'add' : 'edit'}`} initial={editingDef} addRow={!!editing.add}
+        onCancel={()=>setEditing(null)} onSave={saveManual} pullable={pullable} onPull={pull}/>}
       {/* The quotation, as on Tools → Quotes. */}
       {openedQuote && <PageSidePanel width={560} title={`${openedQuote.number} · ${openedQuote.title}`} subtitle={`${QUOTE_STATUS[openedQuote.status].label} · ${fmtMoney(quoteTotal(openedQuote))}`}
         onClose={()=>setQuoteOpen(null)}>
         <div style={{flex:1, overflowY:'auto', padding:'4px 20px 24px'}}><QuoteDocument quote={openedQuote}/></div>
       </PageSidePanel>}
-      {/* Remove: only terms without payments (the menu disables it otherwise). */}
-      {deleting && ReactDOM.createPortal(<StModal title="Remove payment terms" primary="Remove" danger onCancel={()=>setDeleting(null)}
-        onSubmit={()=>{ hub.setAccounting(list => list.filter(s => s.id !== deleting.id || hasPayments(s))); setDeleting(null); hub.toast('Payment terms removed'); }}>
-        <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>{deleting.source === 'manual' ? deleting.title : deleting.quoteTitle} will be removed.</div>
-      </StModal>, document.body)}
     </div>
   );
 }
 
-Object.assign(window, {defaultPaymentTerms, packPaymentTerms, unpackPaymentTerms, AccountingTab, ACCOUNTING_RECORD_TYPES, installmentState, scheduleTotals});
+Object.assign(window, {primaryTermsOf, hasPayments, defaultPaymentTerms, packPaymentTerms, unpackPaymentTerms, AccountingTab, ACCOUNTING_RECORD_TYPES, installmentState, scheduleTotals});

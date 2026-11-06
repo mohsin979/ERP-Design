@@ -90,6 +90,17 @@ function StageTypeTag({stage, type}){
   return <span style={{fontSize:11, fontWeight:500, color:tone.fg, background:tone.bg, borderRadius:9999, padding:'1px 7px', flexShrink:0, whiteSpace:'nowrap'}}>{stageTypeLabel(t)}</span>;
 }
 
+/* The record types' names in the open workspace (Settings → Records; app.jsx sets them), for the
+   words a page uses — a workspace whose Deals are named "Leads" reads "Lead" throughout. */
+let OBJECT_NAMES = {};
+const setObjectNames = (objects) => { OBJECT_NAMES = Object.fromEntries((objects || []).map(o => [o.id, o.name])); };
+const typePlural = (id, fallback) => OBJECT_NAMES[id] || fallback;
+const typeSingular = (id, fallback) => { const n = OBJECT_NAMES[id]; return n ? n.replace(/ies$/, 'y').replace(/s$/, '') : fallback; };
+// Whether the open workspace has a record type (Accounting has no Contacts) — every type until names are set.
+const workspaceHasType = (id) => !Object.keys(OBJECT_NAMES).length || id in OBJECT_NAMES;
+// A record type's noun in running text: "lead", "deal".
+const typeNoun = (id, fallback) => typeSingular(id, fallback).toLowerCase();
+
 function stageIdOf(pipeline, record){
   if(pipeline.source === 'property'){
     const v = record[pipeline.propertyKey];
@@ -626,6 +637,7 @@ function PipelineSelector({pipelineId, onChange, pipelines = CONTACT_PIPELINES})
 
 Object.assign(window, {REMOVED_CONTACT_STAGES, withoutRemovedStage, 
   CONTACT_TYPE_STAGES, PIPELINES, pipelineById, setContactPipelines, stageIdOf, withStage,
+  setObjectNames, typePlural, typeSingular, typeNoun, workspaceHasType,
   STAGE_TYPES, CLOSED_STAGE_TYPES, stageTypeOf, isClosedStage, stageTypeLabel, withStageType, setStagePipelines, recordStageType, StageTypeTag,
   ContactBoard, PipelineSelector, toolbarDropdownBtn, ContactName, ContactCard, COLUMN_BG,
 });

@@ -257,7 +257,9 @@ const ACCOUNTING_TRIGGER_FIELDS = [
    readRecord:(terms) => { const l = liveInstallments(terms).slice(-1)[0]; return l ? l.i.dueDate || '' : ''; }},
 ];
 // A record's payment terms (Accounting), and one property's values across them (any may match).
-const recordPaymentTerms = (rec) => !rec ? [] : (WF_LIVE.accounting || []).filter(s => s.object === recordObjectOf(rec.id) && String(s.recordId) === String(rec.id));
+// Its one Payment Terms (accounting.jsx, primaryTermsOf) — archived ones don't count.
+const recordPaymentTerms = (rec) => { if(!rec) return [];
+  const p = primaryTermsOf((WF_LIVE.accounting || []).filter(s => s.object === recordObjectOf(rec.id) && String(s.recordId) === String(rec.id))); return p ? [p] : []; };
 const accountingValues = (rec, f) => f.level === 'installments' ? f.readAll(recordPaymentTerms(rec))
   : [f.readRecord(recordPaymentTerms(rec))];
 /* The fields a property trigger can watch in a scope (`prop:<key>`, as the record's own are). */
@@ -2814,6 +2816,109 @@ function violationExplanation(data, p){
   }[p.kind];
   return sentence(required ? required() : p.title);
 }
+/* ── Violations on the record ── a record's open violations stay in sight on the record itself
+   (its side panel and full page), not only in the Violations panel:
+     a red one-line notice at the top of the record (ViolationNotice) — the first violation in a
+       line (violationExplanation), "+N" for the others, View opens it in the Violations panel;
+     a red mark (ViolationMark) beside each place it asks for: the property to update (its row in
+       the record's properties), the tab where it's resolved (Tasks, Calls, Email, Meetings, Notes,
+       Customer Profile, an associated record's tab, Accounting) and, for accounting, the
+       installment it's about — beside its status (e.g. Unpaid).
+   Where (violationTargets): what's required — properties to set or clear, the stage, an activity,
+   a record — or, for a violation of a condition, the condition that fired (a property, an
+   accounting field, an activity count, an associated record). */
+const VIOLATION_TABS = {createTask:'tasks', addNote:'notes', sendEmail:'email', scheduleMeeting:'meetings', logMeeting:'meetings', logCall:'calls', initiateCall:'calls'};
+const VIOLATION_OWN_TARGET = ['setProperty', 'clearProperty', 'moveStage', 'createRecord', ...Object.keys(VIOLATION_TABS)];
+const activityTabOf = (key) => /email/i.test(key) ? 'email' : /call/i.test(key) ? 'calls' : /meeting/i.test(key) ? 'meetings' : /task/i.test(key) ? 'tasks' : /note/i.test(key) ? 'notes' : null;
+function violationTargets(data, p){
+  const props = new Set(), tabs = new Set(), accounting = new Set();
+  const pay = p.payload || {};
+  if(p.kind === 'setProperty') (pay.entries || []).forEach(e => e.property && props.add(e.property));
+  if(p.kind === 'clearProperty') (pay.keys || []).forEach(k => props.add(k));
+  if(p.kind === 'moveStage') props.add('stage');
+  if(p.kind === 'createRecord' && pay.object) tabs.add(pay.object);
+  if(VIOLATION_TABS[p.kind]) tabs.add(VIOLATION_TABS[p.kind]);
+  // Nothing required of its own (a condition violated, a blocked entry): the condition that fired.
+  const raw = !VIOLATION_OWN_TARGET.includes(p.kind) && (data.workflows || []).find(x => x.id === p.workflowId), w = raw ? normalizeWorkflow(raw) : null;
+  if(w){
+    const views = workflowTriggerViews(w), texts = (p.reasons || []).map(r => r.text);
+    const fired = views.filter(v => texts.includes(triggerSummary(data, v)));
+    (fired.length ? fired : views).forEach(v => {
+      const c = v.triggerConfig || {};
+      if(v.trigger === 'propertyUpdate' && c.property){
+        const scope = scopeOf(c);
+        if(scope === 'record') props.add(c.property);
+        else if(scope === 'accounting'){ accounting.add(c.property); props.add(`acc:${c.property}`); tabs.add('accounting'); }
+        else if(scope === 'profile') tabs.add('profile');
+      } else if(v.trigger === 'associatedRecord' && c.associatedObject) tabs.add(c.associatedObject);
+      else if(ACTIVITY_TRIGGER_TYPES[v.trigger]){ const t = activityTabOf(v.trigger); if(t) tabs.add(t); }
+    });
+  }
+  return {props:[...props], tabs:[...tabs], accounting:[...accounting]};
+}
+// The installments an accounting field points at, in the record's one Payment Terms.
+function violationInstallments(terms, key){
+  if(!terms) return [];
+  const live = liveInstallments([terms]);
+  if(key === 'firstInstallmentStatus'){ const i = (terms.installments || []).find(x => !x.parentId); return i ? [i.id] : []; }
+  if(key === 'nextInstallmentStatus' || key === 'nextInstallmentDueDate'){ const n = nextInstallment([terms]); return n ? [n.i.id] : []; }
+  if(key === 'lastInstallmentDueDate'){ const l = live.slice(-1)[0]; return l ? [l.i.id] : []; }
+  if(key === 'allInstallmentStatuses') return live.filter(({s, i}) => installmentState(s, i).status !== 'paid').map(({i}) => i.id);
+  return [];
+}
+const RecordViolationsCtx = React.createContext(null);
+const EMPTY_RECORD_VIOLATIONS = {list:[], props:{}, tabs:{}, installments:{}};
+// The open violations of one record, and where each points (props / tabs / installments → their lines).
+function RecordViolationsProvider({record, children}){
+  const ctx = useWorkflowEngineCtx(), hub = useRecordHub();
+  const id = record && record.id;
+  const list = ctx && id != null ? openViolations(ctx, p => String(p.dealId) === String(id)) : [];
+  const value = React.useMemo(() => {
+    if(!list.length) return EMPTY_RECORD_VIOLATIONS;
+    const object = recordObjectOf(id);
+    const terms = hub ? primaryTermsOf((hub.accounting || []).filter(s => s.object === object && String(s.recordId) === String(id))) : null;
+    const out = {list, object, props:{}, tabs:{}, installments:{}};
+    const add = (map, k, line) => { (map[k] = map[k] || []).includes(line) || map[k].push(line); };
+    list.forEach(p => {
+      const line = violationExplanation(ctx.data, p), t = violationTargets(ctx.data, p);
+      t.props.forEach(k => add(out.props, k, line));
+      t.tabs.forEach(k => add(out.tabs, k, line));
+      t.accounting.forEach(k => violationInstallments(terms, k).forEach(i => add(out.installments, i, line)));
+    });
+    return out;
+  }, [list.map(p => p.id).join('|'), id, hub && hub.accounting, ctx && ctx.data]);
+  return <RecordViolationsCtx.Provider value={value}>{children}</RecordViolationsCtx.Provider>;
+}
+const useRecordViolations = () => React.useContext(RecordViolationsCtx) || EMPTY_RECORD_VIOLATIONS;
+const VIOLATION_RED = '#D92D20';
+/* The red mark beside what needs attention: a property (`prop`), a tab (`tab`) or an installment
+   (`inst`); its violations on hover. Nothing when there's none. */
+function ViolationMark({prop, tab, inst}){
+  const v = useRecordViolations();
+  const lines = prop != null ? v.props[prop] : tab != null ? v.tabs[tab] : v.installments[inst];
+  if(!lines || !lines.length) return null;
+  return <span title={lines.join('\n')} aria-label={`Needs attention: ${lines.join(' ')}`}
+    style={{width:7, height:7, borderRadius:9999, background:VIOLATION_RED, flexShrink:0, display:'inline-block', boxShadow:'0 0 0 2px #FEE4E2'}}/>;
+}
+/* The record's red one-line notice: what needs attention first, +N for the rest (all of them on
+   hover); View opens it in the Violations panel. */
+function ViolationNotice(){
+  const v = useRecordViolations(), ctx = useWorkflowEngineCtx();
+  if(!v.list.length || !ctx) return null;
+  const lines = v.list.map(p => violationExplanation(ctx.data, p));
+  return (
+    <div role="alert" title={lines.join('\n')} style={{display:'flex', alignItems:'center', gap:8, padding:'7px 10px', marginBottom:14, borderRadius:8,
+      background:'#FEF3F2', border:'1px solid #FECDCA', color:'#B42318', fontSize:12.5, minWidth:0}}>
+      <Icon name="warningCircle" size={14} color={VIOLATION_RED}/>
+      <span style={{flex:1, minWidth:0, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{lines[0]}</span>
+      {lines.length > 1 && <span style={{flexShrink:0, fontWeight:600}}>+{lines.length - 1}</span>}
+      <button type="button" onClick={()=>ctx.openViolation(v.object, v.list[0].id)}
+        style={{flexShrink:0, border:'none', background:'transparent', padding:0, fontSize:12.5, fontWeight:600, color:'#B42318', cursor:'pointer', fontFamily:'inherit',
+          textDecorationLine:'underline', textUnderlineOffset:2}}>View</button>
+    </div>
+  );
+}
+
 const ViolationExplanation = ({p}) => {
   const ctx = useWorkflowEngineCtx();
   return ctx ? <div style={{fontSize:13, color:T.attioText, lineHeight:1.45}}>{violationExplanation(ctx.data, p)}</div> : null;
@@ -3818,5 +3923,5 @@ function WorkflowBell(){
   );
 }
 
-Object.assign(window, {recordObjectOf, recordKey, recordNoun, ACTIVITY_RECORD_OBJECTS, withSeeded, PROPERTY_CHANGE_OPERATORS, PROPERTY_CHANGE_UNITS, triggerPropertyOperators, isChangeOp, conditionsValid, triggerConditionComplete, TriggerPropertyCondition, CONDITION_OPERATORS, conditionKind, useWorkflowEngine, WorkflowEngineCtx, useWorkflowEngineCtx, WF_SAVED, reviveActivities, withStageEntry, ConditionsEditor, WorkflowRuns,
+Object.assign(window, {violationTargets, RecordViolationsProvider, useRecordViolations, ViolationMark, ViolationNotice, recordObjectOf, recordKey, recordNoun, ACTIVITY_RECORD_OBJECTS, withSeeded, PROPERTY_CHANGE_OPERATORS, PROPERTY_CHANGE_UNITS, triggerPropertyOperators, isChangeOp, conditionsValid, triggerConditionComplete, TriggerPropertyCondition, CONDITION_OPERATORS, conditionKind, useWorkflowEngine, WorkflowEngineCtx, useWorkflowEngineCtx, WF_SAVED, reviveActivities, withStageEntry, ConditionsEditor, WorkflowRuns,
   DealPromptMarker, WorkflowPromptModal, WorkflowBell, ViolationsButton, ViolationPanel, WorkflowNotices, AutomaticActionModal, workflowExpectations, workflowContextPath, orderedStages, stageMoveDirection, workflowTitle, conditionFields, evalConditions});

@@ -4,10 +4,19 @@
    or HOF Global domains is accepted, with no real Google account behind it. Signing in opens
    the last workspace; inside it the person is the user with that email, or joins its Users.
 
-   Workspaces: the top-left switcher in the ERP header. Each workspace is a separate account
-   environment — its own users, records and configuration (its own saved store, store.jsx).
-   Creating one asks for its name and, optionally, a logo; it starts empty, with its creator as
-   Super Admin.
+   Workspaces: the top-left switcher in the ERP header — the workspaces the signed-in person is a
+   member of. Each workspace is a separate account environment — its own records, CRM configuration
+   and CRM roles (its own saved store, store.jsx) — while people are shared: one identity each,
+   with each workspace's membership and module access set on its own (ERP Settings → Users). A
+   workspace can start from a template (WORKSPACE_TEMPLATES: the Accounting workspace's CRM).
+   Creating a workspace (name and optional logo; it starts empty, its creator Super Admin) is kept
+   but not offered for now (WORKSPACE_CREATION_ENABLED).
+
+   ERP Settings (the ERP home's Setting tile; workspace Super Admin and Admin):
+     Workspace — the open workspace's name and logo (HOF Migration keeps its own mark until a logo
+                 is uploaded).
+     Users     — everyone in the directory, the modules each opens in each workspace; Add user /
+                 Edit access / Assign access (several people at once).
 
    Brand (CRM → Marketing → Brand): workspace administrators set the workspace logo, brand
    colours (used on the workspace's mark and its quotations), the company email signature and
@@ -48,13 +57,14 @@ const wsInitials = (name) => String(name || '').split(/\s+/).filter(Boolean).sli
 /* A workspace's square mark: its logo, or its initials on its primary colour. */
 function WorkspaceTile({ws, size = 20}){
   const box = {width:size, height:size, borderRadius:Math.round(size / 4), flexShrink:0, overflow:'hidden', display:'flex', alignItems:'center', justifyContent:'center'};
+  // HOF Migration keeps its own mark until a logo is uploaded.
+  if(!ws.logo && ws.id === HOF_MIGRATION_WS) return <span style={{...box, background:'#fff', border:`1px solid ${T.attioLine}`}}><Logo variant="mark" height={Math.round(size * .72)}/></span>;
   if(ws.logo) return <span style={{...box, background:'#fff', border:`1px solid ${T.attioLine}`}}><img src={ws.logo} alt="" style={{width:'100%', height:'100%', objectFit:'contain'}}/></span>;
   return <span style={{...box, background:(ws.colors || DEFAULT_BRAND()).primary, color:'#fff', fontSize:Math.round(size * .42), fontWeight:700, letterSpacing:.2}}>{wsInitials(ws.name)}</span>;
 }
-/* The header lockup: HOF Migration's own lockup until it has a logo; any other workspace, its
-   logo (or initials) and its name. */
+/* The header lockup: the workspace's tile (its logo; HOF Migration's mark; or initials) and its
+   name — the name each workspace edits in ERP Settings → Workspace. */
 function WorkspaceLockup({ws}){
-  if(!ws.logo && ws.id === HOF_MIGRATION_WS) return <Logo variant="main" height={16}/>;
   return (
     <span style={{display:'inline-flex', alignItems:'center', gap:8, minWidth:0}}>
       <WorkspaceTile ws={ws} size={22}/>
@@ -65,7 +75,8 @@ function WorkspaceLockup({ws}){
 
 /* ── Workspace switcher (ERP header, top left) ── */
 function WorkspaceSwitcher(){
-  const {workspaces, active, update} = useWorkspaces();
+  const {workspaces:allWorkspaces, active, update} = useWorkspaces();
+  const workspaces = switchableWorkspaces();
   const [open, setOpen] = React.useState(false);
   const [creating, setCreating] = React.useState(false);
   return (
@@ -85,11 +96,13 @@ function WorkspaceSwitcher(){
             {w.id === active.id && <Icon name="check" size={12} color={T.blue}/>}
           </div>
         ))}
-        <div style={{height:1, background:T.border, margin:'4px 2px'}}/>
-        <MenuItem icon={<Icon name="plus" size={13} color={T.gray600}/>} label="Create workspace" onClick={()=>{ setOpen(false); setCreating(true); }}/>
+        {WORKSPACE_CREATION_ENABLED && <>
+          <div style={{height:1, background:T.border, margin:'4px 2px'}}/>
+          <MenuItem icon={<Icon name="plus" size={13} color={T.gray600}/>} label="Create workspace" onClick={()=>{ setOpen(false); setCreating(true); }}/>
+        </>}
       </MenuShell>
       {creating && <CreateWorkspaceModal onClose={()=>setCreating(false)} onCreate={(ws)=>{
-        update({workspaces:[...workspaces, ws]});
+        update({workspaces:[...allWorkspaces, ws]});
         reloadInto({activeId:ws.id});
       }}/>}
     </div>
@@ -97,7 +110,8 @@ function WorkspaceSwitcher(){
 }
 
 /* A logo field: preview, Upload / Replace and Remove. */
-function LogoField({value, onChange, disabled}){
+// `fallback`: what the preview shows without a logo (HOF Migration: its mark).
+function LogoField({value, onChange, disabled, fallback}){
   const input = React.useRef(null);
   const [error, setError] = React.useState('');
   const pick = (e) => {
@@ -110,7 +124,7 @@ function LogoField({value, onChange, disabled}){
     <div style={{display:'flex', flexDirection:'column', gap:6}}>
       <div style={{display:'flex', alignItems:'center', gap:12}}>
         <div style={{width:56, height:56, borderRadius:10, border:`1px dashed ${T.borderStrong}`, background:T.headerBg, display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden', flexShrink:0}}>
-          {value ? <img src={value} alt="Logo" style={{width:'100%', height:'100%', objectFit:'contain', background:'#fff'}}/> : <Icon name="brand" size={20} color={T.gray400}/>}
+          {value ? <img src={value} alt="Logo" style={{width:'100%', height:'100%', objectFit:'contain', background:'#fff'}}/> : fallback || <Icon name="brand" size={20} color={T.gray400}/>}
         </div>
         {!disabled && <>
           <input ref={input} type="file" accept="image/*" onChange={pick} style={{display:'none'}}/>
@@ -145,6 +159,322 @@ function CreateWorkspaceModal({onClose, onCreate}){
         <LogoField value={logo} onChange={setLogo}/>
       </div>
     </StModal>
+  );
+}
+
+/* ── Shared people and module access ── one identity per person (the registry's `users`); each
+   workspace's members and the modules each may open there (`members`). The modules are the ERP's
+   tiles (MODULE_TILES, app.jsx): each can be assigned per workspace except Setting (administrators
+   only); People (HRMS) is one module shared by the workspaces that have it, CRM is each
+   workspace's own. A person's CRM role (seat, team, permissions) is set in that workspace's CRM
+   (Users & Teams). */
+const WORKSPACE_CREATION_ENABLED = false;
+const visibleWorkspaces = () => WORKSPACE_REGISTRY.workspaces.filter(w => !w.hidden);
+const assignableModules = () => MODULE_TILES.filter(t => t.assignable !== false);
+const moduleLabel = (id) => { const t = MODULE_TILES.find(x => x.id === id); return t ? t.label : id; };
+const directoryUsers = () => WORKSPACE_REGISTRY.users || [];
+const sameEmail = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+const directoryUserByEmail = (email) => directoryUsers().find(u => sameEmail(u.email, email)) || null;
+const workspaceMembers = (wsId) => (WORKSPACE_REGISTRY.members || {})[wsId] || null;   // null: not set up yet
+const membershipOf = (wsId, userId) => (workspaceMembers(wsId) || []).find(m => m.userId === userId) || null;
+const signedInUserId = () => { const u = SESSION && directoryUserByEmail(SESSION.email); return u ? u.id : null; };
+// The workspaces the switcher offers: those the signed-in person belongs to (any not set up yet, too).
+const switchableWorkspaces = () => { const me = signedInUserId(); return visibleWorkspaces().filter(w => !me || !workspaceMembers(w.id) || membershipOf(w.id, me)); };
+// The modules the signed-in person opens in the open workspace (every one until its members are set up).
+const myModules = () => {
+  const list = workspaceMembers(ACTIVE_WORKSPACE.id), me = signedInUserId();
+  if(!list || !me) return assignableModules().map(t => t.id);
+  const m = list.find(x => x.userId === me); return m ? m.modules : [];
+};
+function setRegistry(patch){ saveWorkspaceRegistry(patch); window.dispatchEvent(new Event(WS_EVENT)); }
+// People's modules in workspaces, all at once: [{wsId, userId, modules}] — no modules, not a member.
+function setMemberships(changes, users = directoryUsers()){
+  const members = {...WORKSPACE_REGISTRY.members};
+  changes.forEach(({wsId, userId, modules}) => {
+    const list = (members[wsId] || []).filter(m => m.userId !== userId);
+    members[wsId] = modules.length ? [...list, {userId, modules}] : list;
+  });
+  setRegistry({users, members});
+}
+// A person into the directory (once) and into a workspace with these modules (added to theirs) — CRM's Add User.
+function joinWorkspaceDirectory(person, modules, wsId = ACTIVE_WORKSPACE.id){
+  const known = directoryUsers().find(u => u.id === person.id || sameEmail(u.email, person.email));
+  const users = known ? directoryUsers() : [...directoryUsers(), {id:person.id, name:person.name, email:person.email}];
+  const id = known ? known.id : person.id, cur = membershipOf(wsId, id);
+  setMemberships([{wsId, userId:id, modules:[...new Set([...(cur ? cur.modules : []), ...modules])]}], users);
+}
+/* Opening a workspace (app.jsx): its Users join the directory; a workspace with no members yet
+   takes its Users, each with every module; and the signed-in person, a member nowhere the switcher
+   offers, joins it as anyone signing in always has. */
+function syncWorkspacePeople(users){
+  const wsId = ACTIVE_WORKSPACE.id;
+  let dir = directoryUsers(), changed = false;
+  const members = {...WORKSPACE_REGISTRY.members};
+  users.forEach(u => { if(!dir.some(d => d.id === u.id || sameEmail(d.email, u.email))){ dir = [...dir, {id:u.id, name:u.name, email:u.email}]; changed = true; } });
+  const idOf = (u) => (dir.find(d => d.id === u.id || sameEmail(d.email, u.email)) || u).id;
+  const all = assignableModules().map(t => t.id);
+  if(!members[wsId]){ members[wsId] = users.map(u => ({userId:idOf(u), modules:all})); changed = true; }
+  const me = SESSION && dir.find(d => sameEmail(d.email, SESSION.email));
+  if(me && !members[wsId].some(m => m.userId === me.id) && !visibleWorkspaces().some(w => (members[w.id] || []).some(m => m.userId === me.id))){
+    members[wsId] = [...members[wsId], {userId:me.id, modules:all}]; changed = true;
+  }
+  if(changed) setRegistry({users:dir, members});
+}
+// The CRM users the open workspace still needs: members with CRM not in its Users yet — as CRM's Add User makes them (no seat, team or preset).
+function crmUsersToAdd(users){
+  const created = new Date().toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'});
+  return (workspaceMembers(ACTIVE_WORKSPACE.id) || []).filter(m => m.modules.includes('crm'))
+    .map(m => directoryUsers().find(d => d.id === m.userId)).filter(Boolean)
+    .filter(d => !users.some(u => u.id === d.id || sameEmail(u.email, d.email)))
+    .map(d => ({id:d.id, name:d.name, email:d.email, status:'Activated', teamId:null, preset:'', access:'manual', lastActive:null, created,
+      permissions:normalizePermissions(DEFAULT_CONTACT_PERMISSIONS(), levelOfPreset(''))}));
+}
+// Where the signed-in person belongs instead of the open workspace (not a member of it), or null.
+function workspaceRedirect(){
+  const me = signedInUserId();
+  if(!me || !workspaceMembers(ACTIVE_WORKSPACE.id) || membershipOf(ACTIVE_WORKSPACE.id, me)) return null;
+  const other = switchableWorkspaces().find(w => w.id !== ACTIVE_WORKSPACE.id && membershipOf(w.id, me));
+  return other ? other.id : null;
+}
+
+/* ── Workspace templates ── a workspace's CRM setup when it starts (store.jsx `template`). The
+   Accounting workspace's: two record types — Leads (the Deals record type, named Leads) and
+   Customers — linked Leads → Customers (one-to-many), their properties, the Lead Pipeline and the
+   customers' Service pipeline, and the Customer Profile form. No sample records. */
+const typedStages = (list) => list.map(([label, type]) => ({id:label.toLowerCase().replace(/[^a-z0-9]+/g, '-'), label, type}));
+const LEAD_OUTCOMES = ['Have Discussion', 'Need Some Time', 'Needs Follow-up', 'Documents Collected', 'Asking for Qualification', 'Asking for a Discount',
+  'Wants to Visit Office', 'Busy', 'Driving', 'Ghosting', 'Not interested'];
+const templateProp = (objectId, def, label, extra = {}) => { const {onCreate = false, mandatory = false, locked = false, ...p} = def;
+  return {...p, ...(label ? {label} : {}), system:true, objectId, onCreate, mandatory, locked, ...extra}; };
+const WORKSPACE_TEMPLATES = {
+  accounting: {
+    settings: () => {
+      const deal = (k) => DEAL_PROPERTY_SETUP.find(p => p.key === k), cust = (k) => CUSTOMER_PROPERTY_SETUP.find(p => p.key === k);
+      const company = (objectId) => ({key:'company', label:'Company Name', type:'Single-Line Text', system:false, objectId, onCreate:true, mandatory:false, locked:false, width:200});
+      return {
+        objects:[{id:'deals', name:'Leads', group:'Pre-Sales'}, {id:'customers', name:'Customers', group:'Sales'}],
+        associations:[{id:'as-deals-customers', a:'deals', b:'customers', type:'One-to-many'}],
+        properties:[
+          templateProp('deals', deal('name'), 'Lead Name'), templateProp('deals', deal('email')), company('deals'), templateProp('deals', deal('phone')),
+          templateProp('deals', deal('pipeline'), 'Lead Pipeline'), templateProp('deals', deal('stage'), 'Lead Stage'), templateProp('deals', deal('owner'), 'Lead Owner'),
+          {key:'outcomes', label:'Outcomes', type:'Multi-Selection', options:LEAD_OUTCOMES, system:false, objectId:'deals', onCreate:true, mandatory:false, locked:false, width:240},
+          templateProp('deals', deal('amount'), 'Amount'), templateProp('deals', deal('closeDate')), templateProp('deals', deal('actualCloseDate')),
+          templateProp('deals', deal('created')), templateProp('deals', deal('lastActivity')), templateProp('deals', deal('customers')), templateProp('deals', deal('currency')),
+          templateProp('customers', cust('name')), templateProp('customers', cust('email')), company('customers'), templateProp('customers', cust('phone')),
+          templateProp('customers', cust('pipeline')), templateProp('customers', cust('stage')), templateProp('customers', cust('owner')),
+          templateProp('customers', cust('customerSince')), templateProp('customers', cust('created')), templateProp('customers', cust('lastActivity')),
+          templateProp('customers', cust('nextActivity')), templateProp('customers', cust('deals'), 'Associated Lead'),
+        ],
+        pipelines:[
+          {id:'lead-pipeline', label:'Lead Pipeline', objectId:'deals', source:'record',
+            stages:typedStages([['Qualified', 'open'], ['Contacted', 'open'], ['Expected Sales', 'open'], ['Won', 'won'], ['Postponed', 'undecided'], ['Lost', 'lost']])},
+          {id:'service', label:'Service', objectId:'customers', source:'record', stages:typedStages([['In Service', 'open'], ['Needs Attention', 'open'], ['Close', 'undecided']])},
+        ],
+        propertySet:PROPERTY_SET_VERSION, noFormProperties:true,
+      };
+    },
+    // Customer Profile: the customer's business; each location only for its Business Location Type.
+    profileForms: () => [{id:'pf-acc-customer-profile', name:'Customer Profile', createdBy:'System', createdAt:'2026-11-06T09:00:00.000Z',
+      description:'The customer’s business: its revenue and where it’s licensed.', fields:[
+        pfField('acc-total-revenue', 'Total Revenue', 'Currency'),
+        pfField('acc-location-type', 'Business Location Type', 'Single Selection', {options:['Mainland', 'Free Zone']}),
+        pfField('acc-mainland-location', 'Mainland Location', 'Single-Line Text', {showIf:{fieldId:'acc-location-type', values:['Mainland']}}),
+        pfField('acc-freezone-location', 'Free Zone Location', 'Single-Line Text', {showIf:{fieldId:'acc-location-type', values:['Free Zone']}}),
+      ]}],
+  },
+};
+const workspaceTemplate = () => (WORKSPACE_TEMPLATE && WORKSPACE_TEMPLATES[WORKSPACE_TEMPLATE]) || null;
+
+/* ── ERP Settings ── the ERP home's Setting tile, for the open workspace's Super Admin and Admin:
+   the CRM settings' look — a Settings menu on the left (back arrow to the ERP home), the page on
+   the right. */
+const ERP_SETTINGS_NAV = {id:'erp.settings', label:'ERP Settings', group:true, items:[
+  {id:'erp.workspace', label:'Workspace', icon:'brand'}, {id:'erp.users', label:'Users', icon:'usersThree'}]};
+function ErpSettingsScreen({onBack, data, setData}){
+  const [page, setPage] = React.useState('erp.workspace');
+  return (
+    <div style={{flex:1, minHeight:0, display:'flex', background:'#fff', borderTop:`1px solid ${T.border}`}}>
+      <div style={{width:200, background:'#fff', borderRight:`1px solid ${T.border}`, display:'flex', flexDirection:'column', flexShrink:0, padding:'16px 12px'}}>
+        <div onClick={onBack} title="Back to the ERP home" style={{display:'flex', alignItems:'center', gap:8, marginBottom:16, padding:'0 2px', minHeight:18, cursor:'pointer', alignSelf:'flex-start'}}>
+          <Icon name="arrowLeft" size={14} color={T.gray600}/>
+          <span style={{fontSize:13, fontWeight:600, color:T.attioText}}>Settings</span>
+        </div>
+        <CrmNavGroup group={ERP_SETTINGS_NAV} active={page} setActive={setPage} first/>
+      </div>
+      <div style={{flex:1, minWidth:0, minHeight:0, display:'flex', flexDirection:'column', position:'relative'}}>
+        {page === 'erp.workspace' ? <WorkspaceSettingsPage/> : <ErpUsersPage data={data} setData={setData}/>}
+      </div>
+    </div>
+  );
+}
+
+// Workspace: the open workspace's name and logo.
+function WorkspaceSettingsPage(){
+  const {active, update} = useWorkspaces();
+  const [name, setName] = React.useState(active.name);
+  const [logo, setLogo] = React.useState(active.logo || null);
+  const [saved, setSaved] = React.useState(false);
+  const taken = WORKSPACE_REGISTRY.workspaces.some(w => w.id !== active.id && w.name.trim().toLowerCase() === name.trim().toLowerCase());
+  const dirty = name.trim() !== active.name || (logo || null) !== (active.logo || null);
+  const ok = !!name.trim() && !taken;
+  const save = () => { if(!ok) return; updateWorkspace(update, active.id, {name:name.trim(), logo}); setSaved(true); };
+  React.useEffect(() => { if(dirty) setSaved(false); }, [dirty]);
+  return (
+    <SettingsPage title="Workspace" description="The open workspace’s name and logo, as the workspace switcher and the header show them."
+      actions={dirty ? <><StSecondary label="Cancel" onClick={()=>{ setName(active.name); setLogo(active.logo || null); }}/><StCta label="Save changes" disabled={!ok} onClick={save}/></>
+        : saved ? <span style={{fontSize:12.5, color:T.attioMuted}}>Saved</span> : null}>
+      <div style={{maxWidth:560, display:'flex', flexDirection:'column', gap:20}}>
+        <div>
+          <label style={fieldLabel} htmlFor="ws-name">Workspace name</label>
+          <input id="ws-name" value={name} onChange={e=>setName(e.target.value)} style={{...fieldInput, borderColor: taken ? T.red : undefined}}/>
+          {taken && <div style={{fontSize:12, color:T.red, marginTop:4}}>A workspace with this name already exists.</div>}
+        </div>
+        <div>
+          <label style={fieldLabel}>Logo</label>
+          <LogoField value={logo} onChange={setLogo} fallback={active.id === HOF_MIGRATION_WS ? <Logo variant="mark" height={34}/> : <WorkspaceTile ws={{...active, name:name || active.name}} size={40}/>}/>
+        </div>
+      </div>
+    </SettingsPage>
+  );
+}
+
+/* Users: everyone in the directory with the modules they open in each workspace ("—": not a
+   member). Select people for Assign access, or a row's Edit access; Add user for someone new. A
+   person given CRM in the open workspace joins its CRM Users at once (other workspaces: when
+   they're next opened), with no seat, team or preset — set in that CRM's Users & Teams. */
+function ErpUsersPage({data, setData}){
+  useWorkspaces();   // follows directory and membership changes
+  const [query, setQuery] = React.useState('');
+  const [selected, setSelected] = React.useState([]);
+  const [panel, setPanel] = React.useState(null);   // {userIds} — [] adds someone new
+  const wss = visibleWorkspaces();
+  const q = query.trim().toLowerCase();
+  const users = directoryUsers().filter(u => !q || u.name.toLowerCase().includes(q) || String(u.email).toLowerCase().includes(q))
+    .slice().sort((a, b) => a.name.localeCompare(b.name));
+  const toggle = (id) => setSelected(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
+  const allOn = users.length > 0 && users.every(u => selected.includes(u.id));
+  const cols = `36px minmax(260px, 1.2fr) ${wss.map(() => 'minmax(240px, 1fr)').join(' ')} 120px`;
+  const head = {fontSize:12, fontWeight:500, color:T.attioMuted, padding:'0 12px', display:'flex', alignItems:'center', height:36, whiteSpace:'nowrap'};
+  const cell = {fontSize:13, color:T.attioText, padding:'0 12px', display:'flex', alignItems:'center', minHeight:48, minWidth:0};
+  const saved = (crmUsers) => { if(crmUsers.length) setData(d => ({...d, users:[...d.users, ...crmUsers.filter(u => !d.users.some(x => x.id === u.id))]})); setPanel(null); setSelected([]); };
+  return (
+    <SettingsPage fill title="Users" description="People are shared across workspaces; choose which modules each can open in each workspace."
+      actions={<>
+        {selected.length > 0 && <StSecondary label={`Assign access (${selected.length})`} onClick={()=>setPanel({userIds:selected})}/>}
+        <StCta label="Add user" onClick={()=>setPanel({userIds:[]})}/>
+      </>}>
+      <div style={{position:'relative', width:280, marginBottom:12}}>
+        <div style={{position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', display:'flex'}}><Icon name="search" size={13} color={T.gray400}/></div>
+        <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search users" aria-label="Search users" style={{...fieldInput, paddingLeft:30}}/>
+      </div>
+      <div style={{flex:1, minHeight:0, overflow:'auto', border:`1px solid ${T.attioLine}`, borderRadius:8}}>
+        {/* Wide enough for every workspace column; module chips wrap inside theirs. */}
+        <div style={{minWidth:36 + 260 + wss.length * 240 + 120}}>
+          <div style={{display:'grid', gridTemplateColumns:cols, background:T.headerBg, borderBottom:`1px solid ${T.attioLine}`, position:'sticky', top:0, zIndex:1}}>
+            <span style={{...head, justifyContent:'center'}}><RowCheckbox checked={allOn} onChange={()=>setSelected(allOn ? [] : users.map(u => u.id))}/></span>
+            <span style={head}>User</span>
+            {wss.map(w => <span key={w.id} style={{...head, gap:8}}><WorkspaceTile ws={w} size={16}/>{w.name}</span>)}
+            <span style={head}/>
+          </div>
+          {users.map(u => (
+            <div key={u.id} style={{display:'grid', gridTemplateColumns:cols, borderBottom:`1px solid ${T.attioLine}`, background: selected.includes(u.id) ? T.blueLight : '#fff'}}>
+              <span style={{...cell, justifyContent:'center'}}><RowCheckbox checked={selected.includes(u.id)} onChange={()=>toggle(u.id)}/></span>
+              <span style={{...cell, gap:10}}>
+                <Avatar name={u.name} size={26}/>
+                <span style={{minWidth:0, display:'flex', flexDirection:'column'}}>
+                  <span style={{fontWeight:500, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{u.name}</span>
+                  <span style={{fontSize:12, color:T.attioMuted, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{u.email}</span>
+                </span>
+              </span>
+              {wss.map(w => { const m = membershipOf(w.id, u.id);
+                return <span key={w.id} style={{...cell, flexWrap:'wrap', gap:4, padding:'8px 12px'}}>
+                  {m ? m.modules.map(id => <span key={id} style={{fontSize:11.5, padding:'1px 8px', borderRadius:9999, background:T.headerBg, color:T.gray800, whiteSpace:'nowrap'}}>{moduleLabel(id)}</span>)
+                    : <span style={{color:T.attioFaint}}>—</span>}
+                </span>; })}
+              <span style={{...cell, justifyContent:'flex-end'}}><StTextAction label="Edit access" onClick={()=>setPanel({userIds:[u.id]})}/></span>
+            </div>
+          ))}
+          {!users.length && <div style={{padding:'24px 16px', fontSize:13, color:T.attioMuted}}>No users match “{query.trim()}”.</div>}
+        </div>
+      </div>
+      {panel && <UserAccessPanel userIds={panel.userIds} onClose={()=>setPanel(null)} onSaved={saved} crmUsers={data.users}/>}
+    </SettingsPage>
+  );
+}
+
+/* Add user / Edit access / Assign access — the creation side panel: the people (someone new —
+   name and email on the sign-in domains — or those chosen), then per workspace the modules they
+   open there (none: not a member). For several people it starts from what they all have, and
+   saving gives each exactly what's ticked. */
+function UserAccessPanel({userIds, onClose, onSaved, crmUsers}){
+  const isNew = !userIds.length;
+  const wss = visibleWorkspaces(), mods = assignableModules();
+  const [name, setName] = React.useState('');
+  const [email, setEmail] = React.useState('');
+  const [access, setAccess] = React.useState(() => Object.fromEntries(wss.map(w => {
+    const sets = userIds.map(id => (membershipOf(w.id, id) || {modules:[]}).modules);
+    return [w.id, isNew ? [] : mods.map(t => t.id).filter(id => sets.every(s => s.includes(id)))];
+  })));
+  const people = userIds.map(id => directoryUsers().find(u => u.id === id)).filter(Boolean);
+  const emailTaken = isNew && !!directoryUserByEmail(email);
+  const ok = isNew ? !!name.trim() && signInAllowed(email) && !emailTaken : people.length > 0;
+  const flip = (wsId, mod) => setAccess(a => ({...a, [wsId]:a[wsId].includes(mod) ? a[wsId].filter(x => x !== mod) : [...a[wsId], mod]}));
+  const save = () => {
+    if(!ok) return;
+    let dir = directoryUsers(), targets = people;
+    if(isNew){
+      const base = name.trim().toLowerCase().replace(/[^a-z]+/g, '-').replace(/^-|-$/g, '') || 'user';
+      const person = {id: dir.some(u => u.id === base) ? `${base}-${Date.now().toString(36)}` : base, name:name.trim(), email:email.trim().toLowerCase()};
+      dir = [...dir, person]; targets = [person];
+    }
+    setMemberships(targets.flatMap(p => wss.map(w => ({wsId:w.id, userId:p.id, modules:mods.map(t => t.id).filter(id => access[w.id].includes(id))}))), dir);
+    // CRM in the open workspace: into its CRM Users now (no seat, team or preset).
+    onSaved(access[ACTIVE_WORKSPACE.id].includes('crm') ? crmUsersToAdd(crmUsers) : []);
+  };
+  const title = isNew ? 'Add user' : people.length === 1 ? 'Edit access' : `Assign access · ${people.length} users`;
+  return (
+    <CreatePanelFrame title={title} onClose={onClose} more={false} placement="fixed" width={520} actions={<>
+      <StSecondary label="Cancel" onClick={onClose}/>
+      <StCta label={isNew ? 'Add user' : 'Save changes'} disabled={!ok} onClick={save}/>
+    </>}>
+      {stack(<>
+        {isNew ? <>
+          <Field label="Name"><input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="Full name" style={fieldText}/></Field>
+          <Field label="Email"><input value={email} onChange={e=>setEmail(e.target.value)} placeholder="name@hof-global.com" style={{...fieldText, borderColor: emailTaken ? T.red : undefined}}/>
+            {emailTaken && <div style={{fontSize:12, color:T.red, marginTop:4}}>This person is already a user.</div>}
+            {email.trim() && !emailTaken && !signInAllowed(email) && <div style={{fontSize:12, color:T.red, marginTop:4}}>Use a hofmigration.com or hof-global.com address.</div>}
+          </Field>
+        </> : (
+          <Field label={people.length === 1 ? 'User' : 'Users'}>
+            <div style={{display:'flex', flexWrap:'wrap', gap:6, paddingTop:4}}>
+              {people.map(p => <span key={p.id} style={{display:'inline-flex', alignItems:'center', gap:6, fontSize:12.5, padding:'3px 10px 3px 4px', borderRadius:9999, background:T.headerBg, color:T.attioText}}>
+                <Avatar name={p.name} size={20}/>{p.name}</span>)}
+            </div>
+            {people.length > 1 && <div style={{fontSize:12, color:T.attioMuted, marginTop:6}}>Each of them gets exactly the modules ticked below.</div>}
+          </Field>
+        )}
+      </>)}
+      <div style={{borderTop:`1px solid ${T.border}`, margin:'18px -20px 14px'}}/>
+      <div style={{display:'flex', flexDirection:'column', gap:18}}>
+        {wss.map(w => (
+          <div key={w.id} style={{display:'flex', flexDirection:'column', gap:8}}>
+            <div style={{display:'flex', alignItems:'center', gap:8}}>
+              <WorkspaceTile ws={w} size={18}/>
+              <span style={{fontSize:13, fontWeight:600, color:T.attioText, flex:1}}>{w.name}</span>
+              <span style={{fontSize:12, color:T.attioMuted}}>{access[w.id].length ? 'Member' : 'Not a member'}</span>
+            </div>
+            <div style={{display:'grid', gridTemplateColumns:'repeat(2, minmax(0, 1fr))', gap:'4px 16px', paddingLeft:26}}>
+              {mods.map(t => (
+                <label key={t.id} style={{display:'flex', alignItems:'center', gap:8, fontSize:13, color:T.attioText, cursor:'pointer', padding:'4px 0'}}>
+                  <RowCheckbox checked={access[w.id].includes(t.id)} onChange={()=>flip(w.id, t.id)}/>
+                  {t.label}{t.shared && <span style={{fontSize:11.5, color:T.attioMuted}}>· {t.note || 'Shared'}</span>}
+                </label>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </CreatePanelFrame>
   );
 }
 
@@ -446,5 +776,7 @@ function BrandPage(){
 // The open workspace's brand (quotations, documents).
 const workspaceBrand = () => { const w = WORKSPACE_REGISTRY.workspaces.find(x => x.id === WORKSPACE_REGISTRY.activeId) || ACTIVE_WORKSPACE; return {...w, colors:{...DEFAULT_BRAND(), ...(w.colors || {})}}; };
 
-Object.assign(window, {ALLOWED_EMAIL_DOMAINS, signInAllowed, isWorkspaceAdmin, signOut, useWorkspaces, WorkspaceTile, WorkspaceLockup, WorkspaceSwitcher,
+Object.assign(window, {WORKSPACE_CREATION_ENABLED, visibleWorkspaces, assignableModules, directoryUsers, workspaceMembers, membershipOf, signedInUserId, switchableWorkspaces,
+  myModules, setMemberships, joinWorkspaceDirectory, syncWorkspacePeople, crmUsersToAdd, workspaceRedirect, WORKSPACE_TEMPLATES, workspaceTemplate, LEAD_OUTCOMES,
+  ErpSettingsScreen, WorkspaceSettingsPage, ErpUsersPage, UserAccessPanel, ALLOWED_EMAIL_DOMAINS, signInAllowed, isWorkspaceAdmin, signOut, useWorkspaces, WorkspaceTile, WorkspaceLockup, WorkspaceSwitcher,
   CreateWorkspaceModal, LoginScreen, BrandPage, LogoField, readImageFile, workspaceBrand});

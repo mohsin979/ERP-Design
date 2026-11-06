@@ -12,20 +12,32 @@
    Owners (and anyone else a record points at) are stored as user IDs from Users; the directory
    turns an ID back into a name wherever one is shown. */
 
-/* ── Workspaces ── each workspace is its own account environment: its own saved store (users,
-   records, settings — everything below), so nothing is shared between them. The registry (its own
-   key) lists the workspaces — name, logo, brand colours — which one is open, and who is signed in
-   (mocked Google sign-in, workspaces.jsx). HOF Migration keeps the store it always had and starts
-   with the sample data; every other workspace starts empty. */
+/* ── Workspaces ── each workspace is its own account environment: its own saved store (records,
+   CRM settings and its users' CRM roles — everything below). The registry (its own key) is what
+   they share: the workspaces — name, logo, brand colours, `template`, `hidden` — which one is
+   open, who is signed in (mocked Google sign-in, workspaces.jsx), and the people:
+     users    — one identity per person ({id, name, email}), whichever workspaces they belong to;
+     members  — per workspace, who belongs to it and the modules each may open
+                ({[workspaceId]: [{userId, modules}]}); a workspace with no list yet takes its own
+                Users once (app.jsx).
+   HOF Migration keeps the store it always had and starts with the sample data; a workspace made
+   from a template (WORKSPACE_TEMPLATES, workspaces.jsx) starts with that template's setup; any
+   other starts empty. Hidden workspaces keep their data but aren't offered. */
 const WORKSPACES_KEY = 'hof-erp-workspaces-v1';
 const HOF_MIGRATION_WS = 'ws-hof-migration';
 const DEFAULT_BRAND = () => ({primary:'#15141B', secondary:'#FF0004'});
 // HOF Migration's brand: black primary, blue secondary.
 const HOF_MIGRATION_BRAND = () => ({primary:'#000000', secondary:'#1869EC'});
+const ACCOUNTING_WS = 'ws-accounting';
 const DEFAULT_WORKSPACES = () => [
   {id:HOF_MIGRATION_WS, name:'HOF Migration', logo:null, colors:HOF_MIGRATION_BRAND(), sample:true, createdAt:'2026-08-01'},
-  {id:'ws-hof-global',  name:'HOF Global',    logo:null, colors:DEFAULT_BRAND(), sample:false, createdAt:'2026-10-16'},
+  {id:'ws-hof-global',  name:'HOF Global',    logo:null, colors:DEFAULT_BRAND(), sample:false, createdAt:'2026-10-16', hidden:true},
+  {id:ACCOUNTING_WS,    name:'Accounting',    logo:null, colors:DEFAULT_BRAND(), sample:false, createdAt:'2026-11-06', template:'accounting'},
 ];
+// The Accounting workspace's first member: the Super Admin, with CRM and People (HRMS).
+const DEFAULT_MEMBERS = () => ({[ACCOUNTING_WS]:[{userId:'waleed-bin-zaman', modules:['crm', 'people']}]});
+// Registry layout 2: Accounting added; HOF Global and created workspaces hidden from the switcher (data kept).
+const REGISTRY_LAYOUT = 2;
 const WORKSPACE_REGISTRY = (() => {
   let r = null;
   try { const raw = window.localStorage.getItem(WORKSPACES_KEY); r = raw ? JSON.parse(raw) : null; } catch(e){}
@@ -33,10 +45,18 @@ const WORKSPACE_REGISTRY = (() => {
   // HOF Migration saved before it had its own colours (still the untouched default) takes them.
   const old = DEFAULT_BRAND();
   workspaces = workspaces.map(w => w.id === HOF_MIGRATION_WS && (!w.colors || (w.colors.primary === old.primary && w.colors.secondary === old.secondary)) ? {...w, colors:HOF_MIGRATION_BRAND()} : w);
-  const activeId = r && workspaces.some(w => w.id === r.activeId) ? r.activeId : workspaces[0].id;
-  return {workspaces, activeId, session: (r && r.session) || null};
+  if(!r || (r.layout || 0) < REGISTRY_LAYOUT){
+    const acc = DEFAULT_WORKSPACES().find(w => w.id === ACCOUNTING_WS);
+    workspaces = [...workspaces.map(w => w.id === HOF_MIGRATION_WS || w.id === ACCOUNTING_WS ? w : {...w, hidden:true}), ...(workspaces.some(w => w.id === ACCOUNTING_WS) ? [] : [acc])];
+  }
+  const shown = workspaces.filter(w => !w.hidden);
+  const activeId = r && shown.some(w => w.id === r.activeId) ? r.activeId : shown[0].id;
+  return {workspaces, activeId, session: (r && r.session) || null, accounts:(r && r.accounts) || [], layout:REGISTRY_LAYOUT,
+    users:(r && r.users) || [], members:{...DEFAULT_MEMBERS(), ...((r && r.members) || {})}};
 })();
 const ACTIVE_WORKSPACE = WORKSPACE_REGISTRY.workspaces.find(w => w.id === WORKSPACE_REGISTRY.activeId);
+// The open workspace's template (its CRM setup when it starts), if it was made from one.
+const WORKSPACE_TEMPLATE = ACTIVE_WORKSPACE.template || null;
 function saveWorkspaceRegistry(patch){
   Object.assign(WORKSPACE_REGISTRY, patch);
   try { window.localStorage.setItem(WORKSPACES_KEY, JSON.stringify(WORKSPACE_REGISTRY)); } catch(e){ console.warn('HOF ERP: could not save workspaces', e); }
@@ -108,4 +128,4 @@ const userLabel = (v) => { if(!v) return ''; const u = USER_DIRECTORY.find(x => 
 // A user reference as an ID: an ID stays, a name is looked up, anything else is no user.
 const userIdOf = (v, users = USER_DIRECTORY) => { if(!v) return ''; if(users.some(u => u.id === v)) return v; const u = users.find(x => x.name === v); return u ? u.id : ''; };
 
-Object.assign(window, {WORKSPACE_REGISTRY, ACTIVE_WORKSPACE, HOF_MIGRATION_WS, DEFAULT_BRAND, saveWorkspaceRegistry, reloadInto, APP_SAVED, persistSlice, usePersistedState, savedSlice, resetAppStore, newRecordId, ensureIdFloor, idFloorOf, setUserDirectory, userLabel, userIdOf, writeAppStore});
+Object.assign(window, {WORKSPACE_TEMPLATE, ACCOUNTING_WS, WORKSPACE_REGISTRY, ACTIVE_WORKSPACE, HOF_MIGRATION_WS, DEFAULT_BRAND, saveWorkspaceRegistry, reloadInto, APP_SAVED, persistSlice, usePersistedState, savedSlice, resetAppStore, newRecordId, ensureIdFloor, idFloorOf, setUserDirectory, userLabel, userIdOf, writeAppStore});

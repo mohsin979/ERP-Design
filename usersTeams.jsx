@@ -844,6 +844,8 @@ function UsersModule({data, setData, onStub, focus}){
       {addingUser && <AddUserModal data={data} onStub={onStub} onClose={()=>setAddingUser(false)}
         onAdd={(u, setPermissions) => {
           setData(d => ({...d, users:[...d.users, u]}));
+          // A CRM user is a member of this workspace with CRM (shared people, workspaces.jsx).
+          joinWorkspaceDirectory(u, ['crm']);
           setAddingUser(false);
           // Save and Set Permission: straight into Edit Permissions for the new user.
           if(setPermissions) setEditing({...u, seat:'', team:teamName(data.teams, u.teamId)});

@@ -205,7 +205,8 @@ const migrateDataModel = (d) => {
   // Users' properties: the defined ones (saved ones as saved), then any added.
   properties = [...properties, ...userDefaultProperties().filter(up => !properties.some(p => p.objectId === 'users' && p.key === up.key))];
   // Form Name and Form Submission Date, on each record type that doesn't have them yet.
-  properties = [...properties, ...['contacts', 'deals', 'customers'].filter(has).flatMap(formRecordProperties).filter(fp => !properties.some(p => p.objectId === fp.objectId && p.key === fp.key))];
+  // (Not in a workspace whose template leaves them out — `noFormProperties`.)
+  if(!d.noFormProperties) properties = [...properties, ...['contacts', 'deals', 'customers'].filter(has).flatMap(formRecordProperties).filter(fp => !properties.some(p => p.objectId === fp.objectId && p.key === fp.key))];
   // The sources gained Website Form (a Website RFQ or public-link submission).
   properties = properties.map(p => p.key === 'source' && ['contacts', 'deals', 'customers'].includes(p.objectId) && (p.options || []).length && !p.options.includes('Website Form') ? {...p, options:[...p.options, 'Website Form']} : p);
   /* Property types saved before are their new types (propertyTypes.jsx); the system properties

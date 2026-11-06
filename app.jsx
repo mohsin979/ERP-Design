@@ -1,15 +1,18 @@
 /* HOF Pulse ERP — app shell only (Header + Main Screen). No module content yet —
    module requirements will be provided separately. */
 
+/* The ERP's modules. Each is given per workspace to each member (ERP Settings → Users, workspaces.jsx),
+   except Setting — the ERP Settings, for the workspace's Super Admin and Admin (`assignable:false`).
+   People (HRMS) is `shared`: one HRMS for every workspace that has it; CRM is each workspace's own. */
 const MODULE_TILES = [
   {id:'crm', label:'CRM', icon:'crm', color:'#1869EC'},
-  {id:'people', label:'People', icon:'people', color:'#7C3AED'},
+  {id:'people', label:'People', icon:'people', color:'#7C3AED', shared:true, note:'Shared HRMS'},
   {id:'marketing', label:'Marketing', icon:'marketing', color:'#EC4899'},
   {id:'accounting', label:'Accounting', icon:'accounting', color:'#16A34A'},
   {id:'analytics', label:'Analytics', icon:'analytics', color:'#F59E0B'},
   {id:'academy', label:'Academy', icon:'academy', color:'#0D9488'},
   {id:'complience', label:'Complience', icon:'complience', color:'#DC2626'},
-  {id:'setting', label:'Setting', icon:'setting', color:'#64748B'},
+  {id:'setting', label:'Setting', icon:'setting', color:'#64748B', assignable:false},
 ];
 
 /* ── Header (ERP and CRM) ─────────────────────────────────────────────────────────────────
@@ -469,11 +472,16 @@ function ModuleTile({tile, onClick}){
   );
 }
 
-/* Main Screen — greeting, module tiles, AI command bar. Only CRM leads anywhere (to Contacts,
-   the one module built so far); every other tile just surfaces a lightweight "not built yet"
-   note instead of navigating anywhere or inventing module behavior. */
-function MainScreen({onOpenCrm}){
+/* Main Screen — greeting, module tiles, AI command bar. The tiles are the modules the signed-in
+   person opens in this workspace (ERP Settings → Users), plus Setting for its administrators. CRM
+   opens the CRM, Setting the ERP Settings; every other tile just surfaces a lightweight "not built
+   yet" note instead of navigating anywhere or inventing module behavior. */
+function MainScreen({onOpenCrm, onOpenSettings}){
   const [notice, setNotice] = React.useState(null);
+  useWorkspaces();   // follows module access changes
+  // The modules the signed-in person opens in this workspace; Setting for its administrators.
+  const mine = myModules();
+  const tiles = MODULE_TILES.filter(t => t.assignable === false ? isWorkspaceAdmin() : mine.includes(t.id));
 
   return (
     <div style={{flex:1, overflow:'auto', background:T.pageBg, display:'flex', alignItems:'center', justifyContent:'center'}}>
@@ -484,8 +492,9 @@ function MainScreen({onOpenCrm}){
             the 48px of horizontal padding above = 960 minimum); nowrap keeps them from
             ever wrapping to a second row at this container width. */}
         <div style={{display:'flex', gap:16, flexWrap:'nowrap', marginBottom:12}}>
-          {MODULE_TILES.map(t => (
-            <ModuleTile key={t.id} tile={t} onClick={(tile)=> tile.id==='crm' ? onOpenCrm() : setNotice(`${tile.label} hasn't been built yet — module requirements haven't been provided.`)}/>
+          {tiles.map(t => (
+            <ModuleTile key={t.id} tile={t} onClick={(tile)=> tile.id==='crm' ? onOpenCrm() : tile.id === 'setting' ? onOpenSettings()
+              : setNotice(`${tile.label} hasn't been built yet — module requirements haven't been provided.`)}/>
           ))}
         </div>
         {notice && (
@@ -551,7 +560,7 @@ const withSampleValues = (list, samples, keys) => {
 };
 
 function App(){
-  const [screen, setScreen] = React.useState('main'); // 'main' | 'crm'
+  const [screen, setScreen] = React.useState('main'); // 'main' | 'crm' | 'erpSettings'
   const [crmActive, setCrmActive] = React.useState(null);
   // CRM navigation setup (Edit Nav) — kept here so it survives leaving and re-entering CRM, and saved.
   const [crmNav, setCrmNav] = usePersistedState('crmNav', CRM_NAV_DEFAULT);
@@ -572,7 +581,9 @@ function App(){
      and profiles, navigation, views. A browser that saved only the workflow store before
      (hof-erp-workflow-engine-v1: workflows, pipelines, templates, deals) starts from that once. */
   const [settingsData, setSettingsData] = React.useState(() => {
-    const d = DEFAULT_SETTINGS_DATA(), v2 = savedSlice('settings');
+    // A workspace made from a template (Accounting) starts from its CRM setup (workspaces.jsx).
+    const tpl = workspaceTemplate();
+    const d = {...DEFAULT_SETTINGS_DATA(), ...(tpl ? tpl.settings() : {})}, v2 = savedSlice('settings');
     const saved = v2 || WF_SAVED || {};
     // Sample pipelines and deals are added once; deleted ones stay deleted.
     // Contacts → Deals is One-to-many (decided); settings saved before say Many-to-many.
@@ -585,7 +596,13 @@ function App(){
     const base = {...loaded, users:(loaded.users || []).map(u => ({...u, permissions:normalizePermissions(u.permissions, levelOfPreset(u.preset))})),
       presets:(loaded.presets || []).map(x => ({...x, permissions:normalizePermissions(x.permissions, levelOfPreset(x.name))}))};
     // The signed-in person is one of the workspace's users (added when they aren't yet).
-    const withMember = withSessionMember({users:base.users, seats:base.seats, presets:base.presets, people:base.people}, SESSION);
+    // One identity per person across workspaces: the signed-in person joins under their shared name.
+    const shared = SESSION && directoryUsers().find(u => String(u.email || '').toLowerCase() === String(SESSION.email).toLowerCase());
+    const withMember0 = withSessionMember({users:base.users, seats:base.seats, presets:base.presets, people:base.people}, SESSION && {...SESSION, ...(shared ? {name:shared.name} : {})});
+    // Members given CRM here (ERP Settings → Users) who aren't in its Users yet join them; everyone keeps their shared name.
+    const withMember = {...withMember0, users:[...withMember0.users, ...crmUsersToAdd(withMember0.users)].map(u => {
+      const d = directoryUsers().find(x => String(x.email || '').toLowerCase() === String(u.email || '').toLowerCase());
+      return d && d.name !== u.name ? {...u, name:d.name} : u; })};
     return migrateDataModel({...base, ...withMember, associations,
       // Workflows were cleared once (WORKFLOWS_CLEARED): what's saved since is kept.
       workflows: saved.workflowsCleared === WORKFLOWS_CLEARED ? (saved.workflows || []) : [], workflowsCleared:WORKFLOWS_CLEARED,
@@ -594,6 +611,8 @@ function App(){
       ...(!v2 && saved.emailTemplates ? {emailTemplates:saved.emailTemplates} : {})});
   });
   React.useEffect(() => { persistSlice('settings', settingsData); }, [settingsData]);
+  // Shared people: this workspace's Users in the directory, its members set up (workspaces.jsx).
+  React.useEffect(() => { syncWorkspacePeople(settingsData.users); }, [settingsData.users]);
   setUserDirectory(settingsData.users);   // user IDs on records read as names
   // Who's signed in: the user with the session's email in this workspace.
   const sessionUser = SESSION && settingsData.users.find(u => String(u.email || '').toLowerCase() === String(SESSION.email).toLowerCase());
@@ -693,6 +712,7 @@ function App(){
   setTaskPipelines(taskPipelinesOf(settingsData));
   setContactPipelines(objectPipelines(settingsData, 'contacts'));
   setStagePipelines(settingsData.pipelines);
+  setObjectNames(settingsData.objects);
   setAccessContext({user:signedInUser, users:settingsData.users, data:settingsData,
     history:(object, id) => object === 'contacts' ? contactActivities[id] : object === 'deals' ? dealActivities[id] : object === 'customers' ? customerActivities[id] : []});
   /* The workflow engine: every deal and customer change goes through engine.setDeals /
@@ -860,10 +880,13 @@ function App(){
       <PageVisibleCtx.Provider value={screen === 'crm' && crmActive === id}>{el}</PageVisibleCtx.Provider></div>
   );
 
-  const main = screen === 'main' && (
+  // The ERP home — or ERP Settings (its Setting tile), under the same header.
+  const main = (screen === 'main' || screen === 'erpSettings') && (
     <div style={{display:'flex', flexDirection:'column', height:'100vh', width:'100vw', overflow:'hidden', background:T.pageBg}}>
       <Header session={session} setSession={setSession}/>
-      <MainScreen onOpenCrm={()=>{ setCrmActive(a => a || crmDefaultPage(crmNavWithObjects)); setScreen('crm'); }}/>
+      {screen === 'erpSettings' && isWorkspaceAdmin()
+        ? <ErpSettingsScreen onBack={()=>setScreen('main')} data={settingsData} setData={setSettingsData}/>
+        : <MainScreen onOpenCrm={()=>{ setCrmActive(a => a || crmDefaultPage(crmNavWithObjects)); setScreen('crm'); }} onOpenSettings={()=>setScreen('erpSettings')}/>}
     </div>
   );
   React.useEffect(() => { setEventAway(false); }, [engine.event, engine.openPromptId]);
@@ -899,7 +922,7 @@ function App(){
       {engine.event && <AutomaticActionModal key={engine.event.id} event={engine.event} onClose={engine.closeEvent} hidden={eventAway}/>}
     </WorkflowEngineCtx.Provider>
   );
-  if(screen === 'main' && !crmOpened) return withEngine(main);
+  if(screen !== 'crm' && !crmOpened) return withEngine(main);
 
   // CRM screen: the nav spans the full viewport height on the left; the header belongs only
   // to the right-hand content pane (not the sidebar), so it never duplicates the sidebar's
@@ -967,4 +990,11 @@ function App(){
    Moving onto, off or between form links starts the page over. */
 const PUBLIC_FORM_ROUTE = formPublicRoute(window.location.hash);
 window.addEventListener('hashchange', () => { if(JSON.stringify(formPublicRoute(window.location.hash)) !== JSON.stringify(PUBLIC_FORM_ROUTE)) window.location.reload(); });
-ReactDOM.createRoot(document.getElementById('root')).render(PUBLIC_FORM_ROUTE ? <PublicFormPage route={PUBLIC_FORM_ROUTE}/> : SESSION ? <App/> : <LoginScreen/>);
+/* Signed in to a workspace they aren't a member of (the last one opened in this browser): the
+   first workspace they belong to opens instead (workspaces.jsx). */
+function WorkspaceGate(){
+  const to = React.useMemo(workspaceRedirect, []);
+  React.useEffect(() => { if(to) reloadInto({activeId:to}); }, []);
+  return to ? null : <App/>;
+}
+ReactDOM.createRoot(document.getElementById('root')).render(PUBLIC_FORM_ROUTE ? <PublicFormPage route={PUBLIC_FORM_ROUTE}/> : SESSION ? <WorkspaceGate/> : <LoginScreen/>);

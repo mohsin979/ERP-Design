@@ -181,7 +181,8 @@ const CUSTOMER_PANEL_BASE_PROPERTIES = [
 // Labels from Settings; every other Customer property follows (name, email and phone head the panel).
 const customerPanelProperties = (props) => {
   const prop = (k) => (props || []).find(p => p.key === k);
-  const base = CUSTOMER_PANEL_BASE_PROPERTIES.map(p => ({key:p.key, label:(prop(p.key) || p).label}));
+  // Without Contacts in the workspace, no Associated Contact.
+  const base = CUSTOMER_PANEL_BASE_PROPERTIES.filter(p => workspaceHasType('contacts') || p.key !== 'contact').map(p => ({key:p.key, label:(prop(p.key) || p).label}));
   return [...base, ...(props || []).filter(p => !['name', 'email', 'phone'].includes(p.key) && !base.some(b => b.key === p.key)).map(p => ({key:p.key, label:p.label}))];
 };
 const customerSubtitleOptions = (props) => customerPanelProperties(props).filter(p => !['ownerAssigned', 'ownerChanged', 'lastActivity', 'nextActivity'].includes(p.key)).map(p => ({value:p.key, label:p.label}));
@@ -287,8 +288,8 @@ function CustomerInfo({customer, view, acts, contact, deals, keys, props, onOpen
         const spec = panelEditSpec(hub, 'customers', customer, k);
         return (
           <div key={k} style={{display:'flex', alignItems:'baseline', gap:12, padding:'7px 0', borderBottom:`1px solid ${T.attioLine}`, minHeight:32}}>
-            <span title={labels[k]} style={{width:158, flexShrink:0, fontSize:12.5, color:T.attioMuted, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{labels[k]}</span>
-            {k === 'profileType' ? <ProfileTypeValue contactId={contact ? contact.id : null}/>
+            <PropertyRowLabel k={k} label={labels[k]}/>
+            {k === 'profileType' ? <ProfileTypeValue contactId={contact ? contact.id : !workspaceHasType('contacts') ? customer.id : null}/>
               : spec ? <PanelEditableValue spec={spec} display={rows[k] ? (r.value == null ? '' : String(r.value)) : undefined}/>
               : r.owner ? <OwnerValue object="customers" record={customer} name={r.value}/>
               : !r.value ? <span style={{fontSize:13, color:T.attioFaint}}>—</span>
@@ -313,10 +314,13 @@ function CustomerDetailBody({customer, view, acts, contact, deals, settings, pro
    person); Contacts and Deals list its associated records. */
 function CustomerDetail({mode, customer, view, acts, contact, deals, data, profiles, props, settings, menu, requestedTab, team, activityViews,
                          onQuick, onOpenDeal, onOpenContact, onCreateProfile, onStub, onCopied, onClose, onExpand, onCollapse, onUpdateActivity, onAddActivity, onReassignOwner}){
+  /* Whose profile: the associated contact's — or, in a workspace without Contacts (Accounting),
+     the customer's own. */
+  const profileOwner = contact || (!(data.objects || []).some(o => o.id === 'contacts') ? customer : null);
   const renderTab = (tab, openTab, q) => {
-    if(tab.id === 'profile') return contact
-      ? <CustomerProfileTab contact={contact} profiles={profiles} onCall={()=>onStub('Call')}
-          onCreate={(templateId)=>onCreateProfile(contact, templateId)} onStub={onStub}/>
+    if(tab.id === 'profile') return profileOwner
+      ? <CustomerProfileTab contact={profileOwner} profiles={profiles} onCall={()=>onStub('Call')}
+          onCreate={(templateId)=>onCreateProfile(profileOwner, templateId)} onStub={onStub}/>
       : <div style={{padding:'40px 24px', textAlign:'center', fontSize:13, color:T.gray400}}>This customer has no contact, so it has no Customer Profile.</div>;
     if(tab.id === 'deals') return <AssociatedRecords columns={ASSOCIATED_DEAL_COLUMNS} rows={deals.map(d => dealListRow(data, d))} q={q}
       onOpen={(d)=>onOpenDeal(d)} empty="No deals for this customer."/>;
@@ -333,7 +337,8 @@ function CustomerDetail({mode, customer, view, acts, contact, deals, data, profi
         onQuick={onQuick} onOpenDeal={onOpenDeal} onOpenContact={onOpenContact} onStub={onStub} onCopied={onCopied}/>}
       workspace={<ContactWorkspace contact={view} acts={acts} onStub={onStub} requestedTab={requestedTab}
         team={team} onUpdateActivity={onUpdateActivity} onAddActivity={onAddActivity} onReassignOwner={onReassignOwner}
-        tabs={CUSTOMER_TABS} renderTab={renderTab} activityViews={activityViews}/>}/>
+        tabs={CUSTOMER_TABS.filter(t => workspaceHasType(t.id === 'contacts' ? 'contacts' : t.id === 'deals' ? 'deals' : 'customers'))
+          .map(t => t.id === 'deals' ? {...t, label:typePlural('deals', 'Deals')} : t)} renderTab={renderTab} activityViews={activityViews}/>}/>
   );
 }
 

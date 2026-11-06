@@ -45,7 +45,7 @@ const DEAL_PANEL_SECTIONS = {
   quickActions:   'Quick Actions',
   smartSummary:   'Smart Summary',
   dropdowns:      'Dropdowns',
-  dealProperties: 'Deal Properties',
+  get dealProperties(){ return `${typeSingular('deals', 'Deal')} Properties`; },
 };
 /* Deal Properties: the Deal's own, plus the ones the record works out (owner dates, last
    activity) and its contact — the Contact Properties' counterparts. Custom Deal properties join
@@ -67,7 +67,8 @@ const DEAL_PANEL_BASE_PROPERTIES = [
 // Labels from Settings; every other Deal property follows (Deal Name heads the panel).
 const dealPanelProperties = (props) => {
   const prop = (k) => (props || []).find(p => p.key === k);
-  const base = DEAL_PANEL_BASE_PROPERTIES.map(p => ({key:p.key, label:(prop(p.key) || p).label}));
+  // Without Contacts in the workspace, no Associated Contact and no (contact's) Customer Profile Type.
+  const base = DEAL_PANEL_BASE_PROPERTIES.filter(p => workspaceHasType('contacts') || !['contact', 'profileType'].includes(p.key)).map(p => ({key:p.key, label:(prop(p.key) || p).label}));
   return [...base, ...(props || []).filter(p => !['name', 'currency'].includes(p.key) && !base.some(b => b.key === p.key)).map(p => ({key:p.key, label:p.label}))];
 };
 // Avatar subtitle: any Deal property but the worked-out dates.
@@ -153,7 +154,7 @@ function DealInfo({deal, view, acts, contact, customers = [], keys, props, onOpe
   return (
     <div>
       <div style={{marginBottom:6}}>
-        <span style={{fontSize:11, fontWeight:600, color:T.attioFaint, textTransform:'uppercase', letterSpacing:.4}}>Deal Properties</span>
+        <span style={{fontSize:11, fontWeight:600, color:T.attioFaint, textTransform:'uppercase', letterSpacing:.4}}>{typeSingular('deals', 'Deal')} Properties</span>
       </div>
       {shown.map(k => {
         const r = rows[k] || {value:deal[k]};   // custom Deal properties: the stored value
@@ -161,7 +162,7 @@ function DealInfo({deal, view, acts, contact, customers = [], keys, props, onOpe
         const spec = panelEditSpec(hub, 'deals', deal, k);
         return (
           <div key={k} style={{display:'flex', alignItems:'baseline', gap:12, padding:'7px 0', borderBottom:`1px solid ${T.attioLine}`, minHeight:32}}>
-            <span title={labels[k]} style={{width:158, flexShrink:0, fontSize:12.5, color:T.attioMuted, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{labels[k]}</span>
+            <PropertyRowLabel k={k} label={labels[k]}/>
             {k === 'profileType' ? <ProfileTypeValue contactId={contact ? contact.id : null}/>
               : spec ? <PanelEditableValue spec={spec} display={rows[k] ? (r.value == null ? '' : String(r.value)) : undefined}/>
               : r.owner ? <OwnerValue object="deals" record={deal} name={r.value}/>
@@ -235,7 +236,7 @@ function DealDetailBody({deal, view, acts, contact, customers, settings, props, 
 const dealCopyText = (deal, contact) => [deal.name, contact && contact.name, contact && contact.phone, contact && contact.email].filter(Boolean).join('\n');
 function DealActionsMenu({deal, contact, onTool, onCreateCustomer, onEdit, onOwner, onEnrich, onDelete, onCopied, onViewSettings, visible}){
   return (
-    <StandardRecordMenu object="deals" record={deal} noun="Deal" email={contact && contact.email} phone={contact && contact.phone} copyText={dealCopyText(deal, contact)}
+    <StandardRecordMenu object="deals" record={deal} noun={typeSingular('deals', 'Deal')} email={contact && contact.email} phone={contact && contact.phone} copyText={dealCopyText(deal, contact)}
       onTool={onTool} onCreateCustomer={onCreateCustomer} onEdit={onEdit} onOwner={onOwner} onEnrich={onEnrich} onDelete={onDelete}
       onCopied={onCopied} onViewSettings={onViewSettings} visible={visible}/>
   );
@@ -282,24 +283,24 @@ function DealDetail({mode, deal, view, acts, contact, profiles, props, settings,
     if(tab.id === 'profile') return contact
       ? <CustomerProfileTab contact={contact} profiles={profiles} onCall={()=>onStub('Call')}
           onCreate={(templateId)=>onCreateProfile(contact, templateId)} onStub={onStub}/>
-      : <div style={{padding:'40px 24px', textAlign:'center', fontSize:13, color:T.gray400}}>This deal has no contact, so it has no Customer Profile.</div>;
+      : <div style={{padding:'40px 24px', textAlign:'center', fontSize:13, color:T.gray400}}>This {typeNoun('deals', 'deal')} has no contact, so it has no Customer Profile.</div>;
     if(tab.id === 'contacts') return <AssociatedRecords columns={ASSOCIATED_CONTACT_COLUMNS} rows={contact ? [contactView(contact)] : []} q={q}
-      onOpen={(c)=>onOpenContact(c)} empty="No contacts on this deal."/>;
+      onOpen={(c)=>onOpenContact(c)} empty={`No contacts on this ${typeNoun('deals', 'deal')}.`}/>;
     // Deals → Customers: the deal's customers.
     if(tab.id === 'customers') return <AssociatedRecords columns={ASSOCIATED_CUSTOMER_COLUMNS} rows={customers} q={q}
-      onOpen={(x)=>onOpenCustomer && onOpenCustomer(x)} empty="No customers on this deal."/>;
+      onOpen={(x)=>onOpenCustomer && onOpenCustomer(x)} empty={`No customers on this ${typeNoun('deals', 'deal')}.`}/>;
     return undefined;
   };
   return (
     <ContactDetail mode={mode} contact={view} acts={acts} onClose={onClose} onExpand={onExpand} onCollapse={onCollapse} onStub={onStub}
-      backLabel="Deals"
+      backLabel={typePlural('deals', 'Deals')}
       renderName={(headerActions) => <DealNameRow deal={deal} subtitle={dealSubtitle(deal, view, contact, settings)} headerActions={headerActions}/>}
       menu={menu}
       body={<DealDetailBody deal={deal} view={view} acts={acts} contact={contact} customers={customers} settings={settings} props={props}
         onQuick={onQuick} onOpenContact={onOpenContact} onOpenCustomer={onOpenCustomer} onStub={onStub} onCopied={onCopied}/>}
       workspace={<ContactWorkspace contact={view} acts={acts} onStub={onStub} requestedTab={requestedTab}
         team={team} onUpdateActivity={onUpdateActivity} onAddActivity={onAddActivity} onReassignOwner={onReassignOwner}
-        tabs={DEAL_TABS} renderTab={renderTab} activityViews={activityViews}/>}/>
+        tabs={DEAL_TABS.filter(t => workspaceHasType('contacts') || !['profile', 'contacts'].includes(t.id))} renderTab={renderTab} activityViews={activityViews}/>}/>
   );
 }
 
@@ -334,7 +335,7 @@ function CreateDealModal({contact, data, onCancel, onSave}){
   // Starts from the contact: its name, email, phone and owner — every one editable.
   const initial = {name:contact.name || '', email:contact.email || '', phone:contact.phone || '', owner:contactOwner ? contactOwner.id : '',
     ...(pipelines.length === 1 ? {pipeline:pipelines[0].id} : {})};
-  return <ContactFormModal mode="add" initial={initial} properties={objectFormProperties(data, 'deals')} noun="deal" subtitle={`From ${contact.name}`}
+  return <ContactFormModal mode="add" initial={initial} properties={objectFormProperties(data, 'deals')} noun={typeNoun('deals', 'deal')} subtitle={`From ${contact.name}`}
     optionsFor={pipelineFormOptions(data, 'deals')} adjust={pipelineFormAdjust(data, 'deals')} onCancel={onCancel} onSave={(vals)=>onSave(vals)}/>;
 }
 

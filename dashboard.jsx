@@ -263,11 +263,12 @@ const DASH_RECORD_ONE = {contacts:'Contact', deals:'Deal', customers:'Customer'}
 const DASH_KPI_DEFS = [
   ...DASH_KPIS.map(k => ({id:k.key, group:'Financial', label:k.label, icon:k.icon, kind:'money', accounting:true, hint:k.hint,
     read:(ctx) => companyKpis(ctx.data, ctx.range)[k.key]})),
-  ...['contacts', 'deals', 'customers'].map(o => ({id:`winRate:${o}`, group:'Conversion', label:`Total ${DASH_RECORD_ONE[o]} Win Rate`, icon:'gauge', kind:'percent',
+  // Per record type, named as the workspace names it (Leads in the Accounting workspace); only types it has (`object`).
+  ...['contacts', 'deals', 'customers'].map(o => ({id:`winRate:${o}`, object:o, group:'Conversion', get label(){ return `Total ${typeSingular(o, DASH_RECORD_ONE[o])} Win Rate`; }, icon:'gauge', kind:'percent',
     hint:`${DASH_RECORD_NOUN[o]} won ÷ ${DASH_RECORD_NOUN[o].toLowerCase()} closed in the period`, read:(ctx) => dashWinRate(dashStage(ctx, o)), sub:() => 'Won ÷ Closed'})),
-  ...['contacts', 'deals', 'customers'].map(o => ({id:`open:${o}`, group:'Record Volume', label:`Total Open ${DASH_RECORD_NOUN[o]}`, icon:o, kind:'count',
+  ...['contacts', 'deals', 'customers'].map(o => ({id:`open:${o}`, object:o, group:'Record Volume', get label(){ return `Total Open ${typePlural(o, DASH_RECORD_NOUN[o])}`; }, icon:o, kind:'count',
     hint:`${DASH_RECORD_NOUN[o]} in an Open stage now`, read:(ctx) => dashStage(ctx, o).open, sub:() => 'In an Open stage'})),
-  ...['contacts', 'deals', 'customers'].map(o => ({id:`closed:${o}`, group:'Record Volume', label:`Total Closed ${DASH_RECORD_NOUN[o]}`, icon:o, kind:'count',
+  ...['contacts', 'deals', 'customers'].map(o => ({id:`closed:${o}`, object:o, group:'Record Volume', get label(){ return `Total Closed ${typePlural(o, DASH_RECORD_NOUN[o])}`; }, icon:o, kind:'count',
     hint:`${DASH_RECORD_NOUN[o]} that reached a Won, Lost or Undecided stage in the period`, read:(ctx) => dashStage(ctx, o).closed,
     sub:(ctx) => { const k = dashStage(ctx, o); return `W ${k.won} / L ${k.lost} / U ${k.undecided}`; }})),
   {id:'contactToDeal', group:'Business Performance', label:'Contact to Deal', icon:'contacts', kind:'hours', hint:'Business Velocity: average time from first contact to deal creation',
@@ -281,7 +282,7 @@ const DASH_KPI_DEFS = [
 ];
 const dashKpiDef = (id) => DASH_KPI_DEFS.find(k => k.id === id) || null;
 // What the viewer may see: accounting KPIs need View Payment Terms.
-const dashKpiVisible = (k) => !!k && (!k.accounting || accountingViewAny());
+const dashKpiVisible = (k) => !!k && (!k.accounting || accountingViewAny()) && (!k.object || !Object.keys(OBJECT_NAMES).length || k.object in OBJECT_NAMES);
 const DASH_KPI_MAX_OTHERS = 4;
 const DASH_FIGURE_FONT = "'Fira Sans Extra Condensed', 'DM Sans', sans-serif";
 const DASH_BLUE = '#3A5BF9';
@@ -866,10 +867,10 @@ const DASH_WIDGET_DEFS = [
   {id:'tasks', label:'Total Tasks', width:1, render:(c) => <DueTasksWidget hub={c.hub}/>},
   {id:'businessVelocity', label:'Business Velocity', width:1,
     render:(c) => <DashWidgetCard title="Business Velocity"><VelocityList velocity={companyVelocity(c.data, c.range)}/></DashWidgetCard>},
-  {id:'dealWon', label:'Deal Won', width:1,
-    render:(c) => <DashWidgetCard title="Deal Won"><DealOutcomeList deals={c.deals} type="won" tone={T.good} range={c.range} now={new Date(c.data.now)} onOpen={c.onOpenDeal}/></DashWidgetCard>},
-  {id:'dealLost', label:'Deal Lost', width:1,
-    render:(c) => <DashWidgetCard title="Deal Lost"><DealOutcomeList deals={c.deals} type="lost" tone={T.red} range={c.range} now={new Date(c.data.now)} onOpen={c.onOpenDeal}/></DashWidgetCard>},
+  {id:'dealWon', get label(){ return `${typeSingular('deals', 'Deal')} Won`; }, width:1,
+    render:(c) => <DashWidgetCard title={`${typeSingular('deals', 'Deal')} Won`}><DealOutcomeList deals={c.deals} type="won" tone={T.good} range={c.range} now={new Date(c.data.now)} onOpen={c.onOpenDeal}/></DashWidgetCard>},
+  {id:'dealLost', get label(){ return `${typeSingular('deals', 'Deal')} Lost`; }, width:1,
+    render:(c) => <DashWidgetCard title={`${typeSingular('deals', 'Deal')} Lost`}><DealOutcomeList deals={c.deals} type="lost" tone={T.red} range={c.range} now={new Date(c.data.now)} onOpen={c.onOpenDeal}/></DashWidgetCard>},
 ];
 const dashWidgetDef = (id) => DASH_WIDGET_DEFS.find(w => w.id === id) || null;
 const dashWidgetVisible = (w) => !!w && (!w.can || w.can());
@@ -1030,7 +1031,7 @@ function DashViewSettingsModal({config, onApply, onRearrange, onClose}){
       {section === 'kpis' ? DASH_KPI_GROUPS.map(g => (
         <div key={g} style={{display:'flex', flexDirection:'column', gap:2, marginTop:6}}>
           <div style={{...settingsSectionLabel, padding:'8px 6px 4px'}}>{g}</div>
-          {DASH_KPI_DEFS.filter(k => k.group === g).map(k => {
+          {DASH_KPI_DEFS.filter(k => k.group === g && (!k.object || !Object.keys(OBJECT_NAMES).length || k.object in OBJECT_NAMES)).map(k => {
             const prom = k.id === draft.prominent, on = prom || others.includes(k.id);
             return <SettingsCheckRow key={k.id} label={k.label} checked={on} onToggle={()=>toggleKpi(k.id)}
               right={radio(prom, ()=>makeProminent(k.id), `Pin ${k.label} as first`)}/>;

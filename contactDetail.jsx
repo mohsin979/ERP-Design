@@ -172,6 +172,16 @@ function OwnerLink({name, onOpen}){
   );
 }
 
+/* A property's label in a record's properties list (one line, the full label on hover), with the
+   red mark when an open workflow violation asks for it. */
+function PropertyRowLabel({k, label}){
+  return (
+    <span title={label} style={{width:158, flexShrink:0, display:'inline-flex', alignItems:'center', gap:6, minWidth:0}}>
+      <span style={{fontSize:12.5, color:T.attioMuted, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', minWidth:0}}>{label}</span>
+      <ViolationMark prop={k}/>
+    </span>
+  );
+}
 function ContactInfo({contact, acts, onStub, keys, onOpenDeals, onOpenCustomers, panelProperties}){
   const owner = ownerDates(contact, acts);
   const hub = useRecordHub();
@@ -206,7 +216,7 @@ function ContactInfo({contact, acts, onStub, keys, onOpenDeals, onOpenCustomers,
       {shown.map(r => (
         <div key={r.key} style={{display:'flex', alignItems:'baseline', gap:12, padding:'7px 0', borderBottom:`1px solid ${T.attioLine}`, minHeight:32}}>
           {/* A label longer than the column truncates (full label on hover). */}
-          <span title={r.label} style={{width:158, flexShrink:0, fontSize:12.5, color:T.attioMuted, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{r.label}</span>
+          <PropertyRowLabel k={r.key} label={r.label}/>
           {r.key === 'profileType' ? <ProfileTypeValue contactId={contact.id}/>
           : panelEditSpec(hub, 'contacts', contact, r.key) ? <PanelEditableValue spec={panelEditSpec(hub, 'contacts', contact, r.key)} display={r.value}/>
           : r.ownerLink ? <OwnerValue object="contacts" record={contact} name={r.value}/>
@@ -344,6 +354,8 @@ function WorkspaceTab({tab, active, onClick}){
         borderBottom:`2px solid ${active ? T.attioText : 'transparent'}`,
       }}>
       <Icon name={tab.icon} size={14} color={active ? T.attioText : T.attioMuted}/>{tab.label}
+      {/* An open workflow violation resolved in this tab (workflowEngine.jsx). */}
+      <ViolationMark tab={tab.id}/>
     </button>
   );
 }
@@ -686,6 +698,8 @@ function ContactDetail({mode, contact, acts, properties, panelProperties, onClos
 
   return (
     <OwnerProfileCtx.Provider value={ownerProfile}>
+    {/* The record's open workflow violations: the notice, and the marks on its properties, tabs and installments. */}
+    <RecordViolationsProvider record={contact}>
     <div style={{
       position:'absolute', top:0, right:0, bottom:0, zIndex:70, overflow:'hidden',
       width: full ? '100%' : DETAIL_PANEL_W, maxWidth:'100%',
@@ -732,6 +746,7 @@ function ContactDetail({mode, contact, acts, properties, panelProperties, onClos
             })()}
           </div>
           <div style={{flex:1, minHeight:0, overflowY:'auto', padding:'0 20px 24px'}}>
+            <ViolationNotice/>
             {body || <ContactDetailBody contact={contact} acts={acts} onStub={onStub} onCopied={onCopied}
               onCall={actions && actions.onCall} withName={false} settings={panelSettings} actions={actions} panelProperties={panelProperties}/>}
           </div>
@@ -753,8 +768,9 @@ function ContactDetail({mode, contact, acts, properties, panelProperties, onClos
       </div>
       {ownerOpen && <OwnerProfilePanel key={ownerOpen} name={ownerOpen} onClose={()=>setOwnerOpen(null)}/>}
     </div>
+    </RecordViolationsProvider>
     </OwnerProfileCtx.Provider>
   );
 }
 
-Object.assign(window, {AssociatedRecordsValue, panelEditSpec, PanelEditableValue, ContactDetail, ContactDetailBody, ContactWorkspace, ownerDates, NameRow, ContactLine, QuickAction, OwnerLink, barIconBtn, CONTACT_TABS});
+Object.assign(window, {PropertyRowLabel, AssociatedRecordsValue, panelEditSpec, PanelEditableValue, ContactDetail, ContactDetailBody, ContactWorkspace, ownerDates, NameRow, ContactLine, QuickAction, OwnerLink, barIconBtn, CONTACT_TABS});

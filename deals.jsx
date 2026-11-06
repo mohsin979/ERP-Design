@@ -135,7 +135,7 @@ function dealSchema(props, pipelines, users){
       currency:CURRENCIES.map(currencyCode),
       ...Object.fromEntries(props.filter(p => p.options).map(p => [p.key, p.options])),
     },
-    noun:'deal', searchKeys:['name', 'owner'],
+    noun:typeNoun('deals', 'deal'), searchKeys:['name', 'owner'],
   };
 }
 
@@ -311,7 +311,7 @@ function RecordCard({kind, record, row, acts = [], settings, properties, onQuick
     </div>
   );
 }
-const DEAL_RECORD_KIND = {object:'deals', noun:'deal', dataAttr:'data-deal-id', defaults:() => DEFAULT_DEAL_CARD_SETTINGS(), dropdowns:DEAL_DROPDOWNS, cardRow:(row) => dealCardRow(row),
+const DEAL_RECORD_KIND = {object:'deals', get noun(){ return typeNoun('deals', 'deal'); }, dataAttr:'data-deal-id', defaults:() => DEFAULT_DEAL_CARD_SETTINGS(), dropdowns:DEAL_DROPDOWNS, cardRow:(row) => dealCardRow(row),
   tags:(deal, cs) => {
     const hc = DEAL_HEALTH[deal.health];
     return [cs.tags.health && hc && <span key="h" title={`Deal Health: ${deal.health}`} style={{...cardTag, padding:'0 9px', border:`1.5px solid ${hc}`, color:hc}}>{deal.health}</span>,
@@ -483,7 +483,7 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
     /* Laid out exactly as Contacts: no wrapper fill or padding, the page inset toolbar. */
     <div style={{flex:1, minWidth:0, minHeight:0, display:'flex', flexDirection:'column', position:'relative', overflow:'hidden'}}>
       <RecordViewsModule inset="page" schema={fullSchema} rows={rows} columns={props.map(p => p.key)}
-        defaultViews={[{id:'dv-all', name:'All Deals', sort:{key:'name', dir:'asc'}}]}
+        defaultViews={[{id:'dv-all', name:`All ${typePlural('deals', 'Deals')}`, sort:{key:'name', dir:'asc'}}]}
         board={{pipelines, defaultPipelineId:pipelines[0] && pipelines[0].id,
           cardSettings:{defaults:DEFAULT_DEAL_CARD_SETTINGS,
             renderModal:({draft, setDraft, onApply, onClose}) => <CardSettingsModal kind={dealCardKind} draft={draft} setDraft={setDraft}
@@ -492,10 +492,10 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
             const pipeline = pipelineOf(pipelineId) || pipelines[0];
             // The board shows the selected pipeline's deals; the filters and search still apply.
             const onBoard = filtered.map(r => byId.get(r.id)).filter(d => d && recordInPipeline(pipeline, d));
-            return <ContactBoard rows={onBoard} search={search} pipeline={pipeline} searchKeys={['name']} noun="deal" bulkActions={false}
+            return <ContactBoard rows={onBoard} search={search} pipeline={pipeline} searchKeys={['name']} noun={typeNoun('deals', 'deal')} bulkActions={false}
               onChangeStage={(id, stageId)=>{
                 const d0 = deals.find(d => d.id === id);
-                if(d0 && !stageMoveCan('deals', d0)) return hub && hub.toast("You can't move this deal between stages");
+                if(d0 && !stageMoveCan('deals', d0)) return hub && hub.toast(`You can't move this ${typeNoun('deals', 'deal')} between stages`);
                 setDeals(ds => ds.map(d => d.id === id ? withStage(pipeline, d, stageId) : d));
               }}
               onAddToStage={(pl, stageId)=>setForm({mode:'add', initial:withStage(pl, {}, stageId)})}
@@ -503,19 +503,19 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
           }}}
         actions={(btn) => <>
           <button onClick={()=>setStub('Export')} style={btn}><Icon name="export" size={13} color={T.gray600}/> Export</button>
-          <button onClick={()=>setForm({mode:'add', initial:null})} title="Add deal" style={toolbarIconButton}><Icon name="plus" size={14} color={T.gray800}/></button>
+          <button onClick={()=>setForm({mode:'add', initial:null})} title={`Add ${typeNoun('deals', 'deal')}`} style={toolbarIconButton}><Icon name="plus" size={14} color={T.gray800}/></button>
         </>}
         filterControls={(v) => <ViolationsButton object="deals" pipelines={viewPipelines(v)} active={violationMode} onClick={()=>setViolationMode(!violationMode)}/>}
         overlay={(v) => violationMode && <ViolationPanel object="deals" pipelines={viewPipelines(v)} onClose={()=>setViolationMode(false)}/>}/>
-      {form && <ContactFormModal mode={form.mode} initial={form.initial} properties={props} noun="deal"
+      {form && <ContactFormModal mode={form.mode} initial={form.initial} properties={props} noun={typeNoun('deals', 'deal')}
         canEditField={form.mode === 'edit' ? (p)=>fieldEditCan('deals', form.initial, p) : undefined}
         optionsFor={formOptions} adjust={adjust} association={association} onCancel={()=>setForm(null)} onSave={save}/>}
-      {changingOwner && <ChangeOwnerModal record={changingOwner} noun="Deal" users={owners} ownerName={ownerName} onClose={()=>setChangingOwner(null)}
+      {changingOwner && <ChangeOwnerModal record={changingOwner} noun={typeSingular('deals', 'Deal')} users={owners} ownerName={ownerName} onClose={()=>setChangingOwner(null)}
         onSave={(owner) => { changeOwner(changingOwner.id, owner); setChangingOwner(null); }}/>}
       {dealBulk.bulkModal}
       {/* Delete Deal: its activity goes with it; its customers stay, no longer linked to it. */}
-      {pendingDelete && <DeleteConfirmModal contactName={pendingDelete.name} noun="Deal"
-        note={associatedNote([['customer', 'customers', customersOf(pendingDelete.id).length]], 'deal')}
+      {pendingDelete && <DeleteConfirmModal contactName={pendingDelete.name} noun={typeSingular('deals', 'Deal')}
+        note={associatedNote([['customer', 'customers', customersOf(pendingDelete.id).length]], typeNoun('deals', 'deal'))}
         onCancel={()=>setPendingDelete(null)}
         onConfirm={()=>{
           const id = pendingDelete.id;

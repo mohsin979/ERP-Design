@@ -155,7 +155,9 @@ const PF_RENAMED_FORMS = {'pf-canada-crs':{from:'Canada CRS Assessment', to:'Can
 /* Fields saved with Required or a Fill from link (since removed) lose them. A shipped form saved
    before gets the fields shipped since (Age, the CLB levels), each after the field it follows. */
 const withSeedProfileForms = (saved) => {
-  const seeds = SEED_PROFILE_FORMS();
+  // A workspace made from a template has its template's forms instead (workspaces.jsx).
+  const tpl = workspaceTemplate();
+  const seeds = tpl ? (tpl.profileForms ? tpl.profileForms() : []) : SEED_PROFILE_FORMS();
   if(!saved) return seeds;
   const clean = saved.map(f => {
     let fields = (f.fields || []).filter(x => !PF_REMOVED_SEED_FIELDS.includes(x.id)).map(({fill, ...x}) => ({...x, required:false}));
