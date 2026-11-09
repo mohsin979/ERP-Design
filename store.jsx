@@ -56,7 +56,7 @@ const DB = (() => {
     // Before a reload: anything not confirmed yet goes again, and waits.
     flush:() => { [...pending.keys()].forEach(k => { try { if(k in cache) send('PUT', k, cache[k], true); else send('DELETE', k, null, true); } catch(e){} }); },
     fresh:(k) => { try { const [x, go] = http('GET', `/api/kv/${encodeURIComponent(k)}`, null, false); go();
-      if(x.status === 200){ cache[k] = x.responseText; return cache[k]; } if(x.status === 404){ delete cache[k]; return null; } } catch(e){} return Object.prototype.hasOwnProperty.call(cache, k) ? cache[k] : null; },
+      if(x.status === 200){ cache[k] = x.responseText; return cache[k]; } if(x.status === 204 || x.status === 404){ delete cache[k]; return null; } } catch(e){} return Object.prototype.hasOwnProperty.call(cache, k) ? cache[k] : null; },
   };
 })();
 
@@ -64,7 +64,8 @@ const DB = (() => {
    own saved store (records, CRM settings and its users' CRM roles — everything below). The
    registry (its own key) is what they share: the workspaces — name, `region` (shown in
    organization lists: "HOF Migration (Pakistan)"), logo, brand colours, `template`, `hidden` —
-   which one is open, who is signed in (mocked Google sign-in, workspaces.jsx), and:
+   and (which one is open and who is signed in — mocked Google sign-in, workspaces.jsx — are
+   this browser's own: BROWSER_KEY below):
      users    — one identity per person ({id, name, email}), whichever workspaces they belong to;
      members  — per workspace, who can access it ({[workspaceId]: [{userId}]}); a workspace with no
                 list yet takes its own Users once (app.jsx);
@@ -78,6 +79,14 @@ const DB = (() => {
    from a template (WORKSPACE_TEMPLATES, workspaces.jsx) starts with that template's setup; any
    other starts empty. Hidden workspaces keep their data but aren't offered. */
 const WORKSPACES_KEY = 'hof-erp-workspaces-v1';
+/* Which workspace is open, who's signed in and the accounts offered at sign-in belong to this
+   browser, not to the shared data: they're read from the browser's own storage (localStorage).
+   With SQLite every browser and tab on localhost reads one registry — read from there, switching
+   workspace or signing out in one would have done it in all. The registry keeps the last ones
+   too: where a browser starts the first time (they were saved only there before). */
+const BROWSER_KEY = 'hof-erp-browser-v1';
+const BROWSER_FIELDS = ['activeId', 'session', 'accounts'];
+const browserState = (() => { try { return JSON.parse(window.localStorage.getItem(BROWSER_KEY) || 'null'); } catch(e){ return null; } })();
 const HOF_MIGRATION_WS = 'ws-hof-migration';
 const DEFAULT_BRAND = () => ({primary:'#15141B', secondary:'#FF0004'});
 // HOF Migration's brand: black primary, blue secondary.
@@ -126,9 +135,9 @@ const WORKSPACE_REGISTRY = (() => {
       const {hidden, ...rest} = w; return {...rest, region:w.region || d.region, ...(w.id === HOF_PARTNERS_WS && w.name === 'Accounting' ? {name:d.name} : {})}; };
     workspaces = [...defs.map(org), ...workspaces.filter(w => !orgIds.includes(w.id)).map(w => ({...w, hidden:true}))];
   }
-  const shown = workspaces.filter(w => !w.hidden);
-  const activeId = r && shown.some(w => w.id === r.activeId) ? r.activeId : shown[0].id;
-  return {workspaces, activeId, session: (r && r.session) || null, accounts:(r && r.accounts) || [], layout:REGISTRY_LAYOUT,
+  const shown = workspaces.filter(w => !w.hidden), b = browserState || r || {};
+  const activeId = shown.some(w => w.id === b.activeId) ? b.activeId : shown[0].id;
+  return {workspaces, activeId, session:b.session || null, accounts:b.accounts || [], layout:REGISTRY_LAYOUT,
     users:(r && r.users) || [], members:{...DEFAULT_MEMBERS(), ...((r && r.members) || {})}, modules:normalizeModules((r && r.modules) || DEFAULT_MODULES())};
 })();
 const ACTIVE_WORKSPACE = WORKSPACE_REGISTRY.workspaces.find(w => w.id === WORKSPACE_REGISTRY.activeId);
@@ -136,6 +145,8 @@ const ACTIVE_WORKSPACE = WORKSPACE_REGISTRY.workspaces.find(w => w.id === WORKSP
 const WORKSPACE_TEMPLATE = ACTIVE_WORKSPACE.template || null;
 function saveWorkspaceRegistry(patch){
   Object.assign(WORKSPACE_REGISTRY, patch);
+  try { window.localStorage.setItem(BROWSER_KEY, JSON.stringify(Object.fromEntries(BROWSER_FIELDS.map(k => [k, WORKSPACE_REGISTRY[k]])))); }
+  catch(e){ console.warn('HOF ERP: could not save this browser’s workspace', e); }
   try { DB.setItem(WORKSPACES_KEY, JSON.stringify(WORKSPACE_REGISTRY)); } catch(e){ console.warn('HOF ERP: could not save workspaces', e); }
 }
 // Opening another workspace (or signing in or out) loads its own store: the page starts over.

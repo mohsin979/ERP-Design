@@ -282,8 +282,8 @@ const normalizeTriggerEntry = (t) => {
    Contact); other Objects don't offer workflows until they're supported. */
 const WORKFLOW_OBJECTS = ['contacts', 'deals', 'customers'];
 const workflowsAvailableFor = (objectId) => WORKFLOW_OBJECTS.includes(objectId);
-// Associated Record: the Objects whose records can be associated with this Object's (the others).
-const associatedObjectsOf = (objectId) => WORKFLOW_OBJECTS.filter(o => o !== objectId);
+// Associated Record: the Objects whose records can be associated with this Object's (the workspace's others).
+const associatedObjectsOf = (objectId) => WORKFLOW_OBJECTS.filter(o => o !== objectId && workspaceHasType(o));
 /* Its parameters. Is not created: the record still has none of them (one created earlier counts).
    Is changed: any property or stage change on any of them. Is not changed: none of them changed.
    The two "not" ones are checked after a duration — or In this stage (a Stage context), as for a
@@ -973,7 +973,8 @@ const DEFAULT_EMAIL_TEMPLATES = [
     list:['Your eligibility for the US National Interest Waiver.', 'The evidence we recommend gathering for your petition.', 'The expected timeline from filing to decision.'],
     cta:'Book Your Next Call'})},
 ];
-const emailTemplatesOf = (data) => data.emailTemplates || DEFAULT_EMAIL_TEMPLATES;
+// Saved templates, else the sample workspace's (another workspace starts with none).
+const emailTemplatesOf = (data) => data.emailTemplates || (ACTIVE_WORKSPACE.sample ? DEFAULT_EMAIL_TEMPLATES : []);
 /* Email Sequences — reusable: an ordered list of {templateId, delay}; no recipients. */
 const DEFAULT_EMAIL_SEQUENCES = [
   {id:'es-onboarding', name:'US NIW Onboarding', emails:[
@@ -986,7 +987,7 @@ const DEFAULT_EMAIL_SEQUENCES = [
     {templateId:'et-payment',  delay:{amount:'1', unit:'Weeks'}},
   ]},
 ];
-const emailSequencesOf = (data) => data.emailSequences || DEFAULT_EMAIL_SEQUENCES;
+const emailSequencesOf = (data) => data.emailSequences || (ACTIVE_WORKSPACE.sample ? DEFAULT_EMAIL_SEQUENCES : []);
 
 /* Side-panel header — the Contact side panel's name row: title (17/600), a muted line under it,
    and the header actions (Close, ⋯) on the right. */
@@ -1652,7 +1653,7 @@ function DeleteRecordConfig({config, setConfig, context}){
 function UpdateAssociatedConfig({config, setConfig, data, context}){
   const c = config || {}, ctx = context || {};
   if(!ctx.object) return needsRecord(ctx);
-  const targets = ASSOCIATED_OBJECTS[ctx.object] || [];
+  const targets = (ASSOCIATED_OBJECTS[ctx.object] || []).filter(workspaceHasType);
   return cfgPad(<>
     {cfgField('Associated record', <FormSelect value={c.object || ''} placeholder="Select record" options={targets.map(o => ({value:o, label:objectName(data, o).replace(/s$/, '')}))}
       onChange={(v)=>setConfig({...c, object:v, properties:[]})}/>)}

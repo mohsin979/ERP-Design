@@ -19,8 +19,9 @@
                        logo is uploaded).
      Users           — search, Add user and everyone, one line each; ⋯ Access to Workspaces
                        (which organizations they can open).
-     Module Settings — each module: its availability per organization (Enable), and its linkage
-                       groups (moduleLinks.jsx) — Link Modules, Add organizations, Unlink.
+     Module Settings — two tabs over the modules: Status (each module's availability per
+                       organization — Enable) and Linkage (its linkage groups, moduleLinks.jsx —
+                       Link Modules, Add organizations, Unlink).
    Design-system pattern (ERP Settings): a settings page carries no title or explanation that
    repeats the menu it's opened from — only its controls (search, actions, the table).
 
@@ -469,11 +470,14 @@ function WorkspaceAccessPanel({userId, onClose, onSaved, crmUsers}){
   );
 }
 
-/* Module Settings: the modules on the left (every one, whichever organizations have it); on the
-   right, no heading — the module in each organization with its Enable switch (availability), then
-   its linkage groups (moduleLinks.jsx): each group's organizations marked as one, ⋯ Unlink per
-   organization, and the group's ⋯ to add organizations or unlink it. Link Modules (top right)
-   opens the side panel for a new group. Moving data asks first. */
+/* Module Settings: two tabs over the modules (left, every one, whichever organizations have it) —
+   kept apart, as availability and linkage are (enabling a module never shares its data):
+     Status  — the module in each organization with its Enable switch (availability).
+     Linkage — the module's linkage groups (moduleLinks.jsx): each group's organizations marked as
+               one, ⋯ Unlink per organization, and the group's ⋯ to add organizations or unlink it.
+               Link Modules (top right) opens the side panel for a new group. Moving data asks first.
+   No heading on either (the tab says where you are). */
+const MODULE_SETTINGS_TABS = [{id:'status', name:'Status', icon:'sliders'}, {id:'linkage', name:'Linkage', icon:'arrowsDownUp'}];
 const LINK_TONES = ['#3A5BF9', '#16A34A', '#D97706', '#DB2777', '#7C3AED', '#0D9488'];
 const mtHead = {fontSize:12, fontWeight:500, color:T.attioMuted, whiteSpace:'nowrap'};
 const mtRow = {display:'flex', alignItems:'center', gap:12, padding:'0 12px 0 16px', height:T.attioRowH, borderBottom:`1px solid ${T.attioLine}`, fontSize:13, color:T.attioText};
@@ -488,6 +492,7 @@ const orgCell = (mod, w) => (
 function ModuleSettingsPage(){
   useWorkspaces();   // follows module changes
   const mods = orgModules();
+  const [tab, setTab] = React.useState('status');
   const [modId, setModId] = React.useState(mods[0].id);
   const [panel, setPanel] = React.useState(null);     // {groupId?}: Link Modules
   const [confirm, setConfirm] = React.useState(null); // {title, primary, body, run, danger}
@@ -506,59 +511,64 @@ function ModuleSettingsPage(){
     setConfirm({title:`Link ${m.label}`, primary:'Link', body:<>{names(orgIds)}</>, run});
   };
   return (
-    <div style={{flex:1, minHeight:0, display:'flex', background:'#fff'}}>
-      <div style={{width:200, flexShrink:0, borderRight:`1px solid ${T.border}`, padding:'14px 12px', overflowY:'auto'}}>
-        {mods.map(m => <CrmNavItem key={m.id} icon={null} label={m.label} active={m.id === mod.id} onClick={()=>{ setModId(m.id); setError(''); }}/>)}
-      </div>
-      <div style={{flex:1, minWidth:0, minHeight:0, overflowY:'auto', padding:'12px 16px 24px', display:'flex', flexDirection:'column', gap:16}}>
-        <div style={{display:'flex', alignItems:'center', gap:12, minHeight:30}}>
-          {error && <span style={{fontSize:12.5, color:T.red}}>{error}</span>}
-          <div style={{flex:1}}/>
-          <StCta label="Link Modules" onClick={()=>setPanel({})}/>
+    <div style={{flex:1, minHeight:0, display:'flex', flexDirection:'column', background:'#fff'}}>
+      <PrimaryTabs inset="settings" items={MODULE_SETTINGS_TABS} active={tab} onSelect={(id)=>{ setTab(id); setError(''); }}/>
+      <div style={{flex:1, minHeight:0, display:'flex'}}>
+        <div style={{width:200, flexShrink:0, borderRight:`1px solid ${T.border}`, padding:'14px 12px', overflowY:'auto'}}>
+          {mods.map(m => <CrmNavItem key={m.id} icon={null} label={m.label} active={m.id === mod.id} onClick={()=>{ setModId(m.id); setError(''); }}/>)}
         </div>
-        <div style={{...mtTable, maxWidth:720}}>
-          <div style={mtHeadRow}><span style={{...mtHead, flex:1}}>Module</span><span style={{...mtHead, width:96}}>Status</span></div>
-          {wss.map(w => { const on = moduleEnabled(mod.id, w.id);
-            return (
-              <div key={w.id} style={mtRow}>
-                {orgCell(mod, w)}
-                <span style={{width:96, display:'flex', alignItems:'center', gap:8}}>
-                  <UtToggle on={on} onChange={(v)=>setModuleOrg(mod.id, w.id, v)}/>
-                  <span style={{fontSize:12.5, color: on ? T.attioText : T.attioMuted}}>{on ? 'Enabled' : 'Disabled'}</span>
-                </span>
-              </div>
-            ); })}
-        </div>
-        {groups.length > 0 && (
-          <div style={{...mtTable, maxWidth:720}}>
-            <div style={mtHeadRow}><span style={{...mtHead, flex:1}}>Linked</span><span style={{width:28}}/></div>
-            {groups.map((g, i) => { const tone = LINK_TONES[i % LINK_TONES.length];
+        <div style={{flex:1, minWidth:0, minHeight:0, overflowY:'auto', padding:'12px 16px 24px', display:'flex', flexDirection:'column', gap:16}}>
+          {tab === 'status' && <div style={{...mtTable, maxWidth:720}}>
+            <div style={mtHeadRow}><span style={{...mtHead, flex:1}}>Module</span><span style={{...mtHead, width:96}}>Status</span></div>
+            {wss.map(w => { const on = moduleEnabled(mod.id, w.id);
               return (
-                <div key={g.id} style={{position:'relative'}}>
-                  {/* One group: a coloured bar down its rows. */}
-                  <span aria-hidden="true" style={{position:'absolute', left:0, top:0, bottom:0, width:3, background:tone}}/>
-                  <div style={{...mtRow, background:T.pageBg}}>
-                    <span style={{flex:1, minWidth:0, display:'flex', alignItems:'center', gap:8, fontWeight:500}}>
-                      <span style={{width:8, height:8, borderRadius:9999, background:tone, flexShrink:0}}/>Linkage {i + 1}
-                      <span style={{fontWeight:400, color:T.attioMuted}}>· {g.orgs.length}</span>
-                    </span>
-                    <RowActionsMenu title="Linkage actions" width={MENU_W} items={[
-                      {label:'Add organizations', onClick:()=>setPanel({groupId:g.id})},
-                      {label:'Unlink all', danger:true, onClick:()=>ask({title:`Unlink ${mod.label}`, primary:'Unlink', danger:true, body:<>{names(g.orgs)}</>,
-                        run:()=>{ setConfirm(null); unlinkGroup(mod.id, g.id); }})}]}/>
-                  </div>
-                  {g.orgs.map(id => byId[id] && (
-                    <div key={id} style={{...mtRow, paddingLeft:32}}>
-                      {orgCell(mod, byId[id])}
-                      <RowActionsMenu title="Organization actions" width={MENU_W} items={[
-                        {label:'Unlink', danger:true, onClick:()=>ask({title:`Unlink ${mod.label} in ${orgLabel(byId[id])}`, primary:'Unlink', danger:true, body:null,
-                          run:()=>{ setConfirm(null); unlinkOrg(mod.id, g.id, id); }})}]}/>
-                    </div>
-                  ))}
+                <div key={w.id} style={mtRow}>
+                  {orgCell(mod, w)}
+                  <span style={{width:96, display:'flex', alignItems:'center', gap:8}}>
+                    <UtToggle on={on} onChange={(v)=>setModuleOrg(mod.id, w.id, v)}/>
+                    <span style={{fontSize:12.5, color: on ? T.attioText : T.attioMuted}}>{on ? 'Enabled' : 'Disabled'}</span>
+                  </span>
                 </div>
               ); })}
-          </div>
-        )}
+          </div>}
+          {tab === 'linkage' && <>
+            <div style={{display:'flex', alignItems:'center', gap:12, minHeight:30, maxWidth:720}}>
+              {error && <span style={{fontSize:12.5, color:T.red}}>{error}</span>}
+              <div style={{flex:1}}/>
+              <StCta label="Link Modules" onClick={()=>setPanel({})}/>
+            </div>
+            {groups.length > 0 ? (
+              <div style={{...mtTable, maxWidth:720}}>
+                <div style={mtHeadRow}><span style={{...mtHead, flex:1}}>Linked</span><span style={{width:28}}/></div>
+                {groups.map((g, i) => { const tone = LINK_TONES[i % LINK_TONES.length];
+                  return (
+                    <div key={g.id} style={{position:'relative'}}>
+                      {/* One group: a coloured bar down its rows. */}
+                      <span aria-hidden="true" style={{position:'absolute', left:0, top:0, bottom:0, width:3, background:tone}}/>
+                      <div style={{...mtRow, background:T.pageBg}}>
+                        <span style={{flex:1, minWidth:0, display:'flex', alignItems:'center', gap:8, fontWeight:500}}>
+                          <span style={{width:8, height:8, borderRadius:9999, background:tone, flexShrink:0}}/>Linkage {i + 1}
+                          <span style={{fontWeight:400, color:T.attioMuted}}>· {g.orgs.length}</span>
+                        </span>
+                        <RowActionsMenu title="Linkage actions" width={MENU_W} items={[
+                          {label:'Add organizations', onClick:()=>setPanel({groupId:g.id})},
+                          {label:'Unlink all', danger:true, onClick:()=>ask({title:`Unlink ${mod.label}`, primary:'Unlink', danger:true, body:<>{names(g.orgs)}</>,
+                            run:()=>{ setConfirm(null); unlinkGroup(mod.id, g.id); }})}]}/>
+                      </div>
+                      {g.orgs.map(id => byId[id] && (
+                        <div key={id} style={{...mtRow, paddingLeft:32}}>
+                          {orgCell(mod, byId[id])}
+                          <RowActionsMenu title="Organization actions" width={MENU_W} items={[
+                            {label:'Unlink', danger:true, onClick:()=>ask({title:`Unlink ${mod.label} in ${orgLabel(byId[id])}`, primary:'Unlink', danger:true, body:null,
+                              run:()=>{ setConfirm(null); unlinkOrg(mod.id, g.id, id); }})}]}/>
+                        </div>
+                      ))}
+                    </div>
+                  ); })}
+              </div>
+            ) : <div style={{maxWidth:720}}><StEmpty title="No linkages yet"/></div>}
+          </>}
+        </div>
       </div>
       {panel && <LinkModulesPanel moduleId={mod.id} groupId={panel.groupId} onClose={()=>setPanel(null)} onLink={link}/>}
       {confirm && <StModal title={confirm.title} primary={confirm.primary} danger={confirm.danger} onCancel={()=>setConfirm(null)} onSubmit={confirm.run}>

@@ -58,6 +58,7 @@ const CRM_SETTINGS_NAV = [
   {id:'settings.crm', label:'CRM Settings', group:true, items:[
     {id:'settings.defaults',      label:'Defaults',      icon:'sliders'},
     {id:'settings.usersTeams',    label:'Users & Teams', icon:'usersThree'},
+    {id:'settings.goals',         label:'Goals',         icon:'target'},
     {id:'settings.notifications', label:'Notifications', icon:'notification'},
     {id:'settings.navigation',    label:'Navigation',    icon:'listBullets'},
   ]},
@@ -290,7 +291,7 @@ function CrmSettingsNav({active, setActive, onClose, data, onOpenEntity}){
       {data && <SettingsQuickSearch query={query} setQuery={setQuery} onKey={onKey}/>}
       <div role={query.trim() ? 'listbox' : undefined} style={{flex:1, minHeight:0, overflowY:'auto', margin:'0 -12px', padding:'0 12px 8px'}}>
         {query.trim() ? <SettingsSearchResults results={results} cursor={cursor} setCursor={setCursor} onOpen={open}/>
-          : CRM_SETTINGS_NAV.map((g, i) => <CrmNavGroup key={g.id} group={g} active={active} setActive={setActive} first={i === 0}/>)}
+          : CRM_SETTINGS_NAV.map((g, i) => <CrmNavGroup key={g.id} group={{...g, items:g.items.filter(x => x.id !== 'settings.goals' || goalsCan('view'))}} active={active} setActive={setActive} first={i === 0}/>)}
       </div>
     </div>
   );
@@ -358,7 +359,8 @@ function NavigationSettings({nav, setNav}){
   </>;
   return (
     <SettingsPage description="The CRM navigation for everyone: drag to reorder, hide what isn't needed." actions={actions}>
-      <div style={{maxWidth:460}}><NavManagementList draft={draft} setDraft={setDraft}/></div>
+      {/* The rows run the page's width, each row's eye (show / hide) at its far right. */}
+      <NavManagementList draft={draft} setDraft={setDraft}/>
     </SettingsPage>
   );
 }

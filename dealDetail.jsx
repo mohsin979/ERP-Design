@@ -12,7 +12,8 @@
        Customers.
      • Workspace tabs — the Contact's, with Deals → Contacts and a Meetings tab. Activity tabs
        hold the deal's own history; Customer Profile is the associated contact's profile (one
-       profile per person, shared with every deal of theirs); Contacts lists the contact.
+       profile per person, shared with every deal of theirs — without Contacts, HOF Partners, the
+       lead's own, shared with its customer); Contacts lists the contact.
 
    A deal belongs to the contact it was created from (`contactId`). Records link to each other:
    the contact on a deal, and a contact's deals, open the other record (App switches page).
@@ -67,8 +68,8 @@ const DEAL_PANEL_BASE_PROPERTIES = [
 // Labels from Settings; every other Deal property follows (Deal Name heads the panel).
 const dealPanelProperties = (props) => {
   const prop = (k) => (props || []).find(p => p.key === k);
-  // Without Contacts in the workspace, no Associated Contact and no (contact's) Customer Profile Type.
-  const base = DEAL_PANEL_BASE_PROPERTIES.filter(p => workspaceHasType('contacts') || !['contact', 'profileType'].includes(p.key)).map(p => ({key:p.key, label:(prop(p.key) || p).label}));
+  // Without Contacts in the workspace, no Associated Contact (the lead holds its own Customer Profile).
+  const base = DEAL_PANEL_BASE_PROPERTIES.filter(p => workspaceHasType('contacts') || p.key !== 'contact').map(p => ({key:p.key, label:(prop(p.key) || p).label}));
   return [...base, ...(props || []).filter(p => !['name', 'currency'].includes(p.key) && !base.some(b => b.key === p.key)).map(p => ({key:p.key, label:p.label}))];
 };
 // Avatar subtitle: any Deal property but the worked-out dates.
@@ -163,7 +164,7 @@ function DealInfo({deal, view, acts, contact, customers = [], keys, props, onOpe
         return (
           <div key={k} style={{display:'flex', alignItems:'baseline', gap:12, padding:'7px 0', borderBottom:`1px solid ${T.attioLine}`, minHeight:32}}>
             <PropertyRowLabel k={k} label={labels[k]}/>
-            {k === 'profileType' ? <ProfileTypeValue contactId={contact ? contact.id : null}/>
+            {k === 'profileType' ? <ProfileTypeValue contactId={profileHolderId('deals', deal)}/>
               : spec ? <PanelEditableValue spec={spec} display={rows[k] ? (r.value == null ? '' : String(r.value)) : undefined}/>
               : r.owner ? <OwnerValue object="deals" record={deal} name={r.value}/>
               : !r.value ? <span style={{fontSize:13, color:T.attioFaint}}>—</span>
@@ -222,9 +223,11 @@ function RecordDetailBody({object, record, view, acts, email, phone, settings, d
     </div>
   );
 }
-// A deal shows its contact's email and phone.
+// A deal shows its contact's email and phone — its own where it has no contact (HOF Partners' Leads have no Contacts).
+const dealEmail = (deal, contact) => (contact && contact.email) || deal.email || '';
+const dealPhone = (deal, contact) => (contact && contact.phone) || deal.phone || '';
 function DealDetailBody({deal, view, acts, contact, customers, settings, props, onQuick, onOpenContact, onOpenCustomer, onStub, onCopied}){
-  return <RecordDetailBody object="deals" record={deal} view={view} acts={acts} email={contact && contact.email} phone={contact && contact.phone}
+  return <RecordDetailBody object="deals" record={deal} view={view} acts={acts} email={dealEmail(deal, contact)} phone={dealPhone(deal, contact)}
     settings={settings} dropdowns={DEAL_DROPDOWNS} propertiesKey="dealProperties" onQuick={onQuick} onStub={onStub} onCopied={onCopied}
     info={(keys) => <DealInfo deal={deal} view={view} acts={acts} contact={contact} customers={customers} props={props} onOpenContact={onOpenContact}
       onOpenCustomer={onOpenCustomer} onStub={onStub} keys={keys}/>}/>;
@@ -232,11 +235,11 @@ function DealDetailBody({deal, view, acts, contact, customers, settings, props, 
 
 /* The deal ⋯ menu — the one record menu (StandardRecordMenu): the tools · Create Customer (a
    customer linked to this deal; a deal can't create a deal) · Copy Email and Copy Phone Number
-   (its contact's), Edit Deal, Edit Deal Owner, Copy Deal, Enrich Deal · View settings · Delete Deal. */
-const dealCopyText = (deal, contact) => [deal.name, contact && contact.name, contact && contact.phone, contact && contact.email].filter(Boolean).join('\n');
+   (its contact's, else its own), Edit Deal, Edit Deal Owner, Copy Deal, Enrich Deal · View settings · Delete Deal. */
+const dealCopyText = (deal, contact) => [deal.name, contact && contact.name, dealPhone(deal, contact), dealEmail(deal, contact)].filter(Boolean).join('\n');
 function DealActionsMenu({deal, contact, onTool, onCreateCustomer, onEdit, onOwner, onEnrich, onDelete, onCopied, onViewSettings, visible}){
   return (
-    <StandardRecordMenu object="deals" record={deal} noun={typeSingular('deals', 'Deal')} email={contact && contact.email} phone={contact && contact.phone} copyText={dealCopyText(deal, contact)}
+    <StandardRecordMenu object="deals" record={deal} noun={typeSingular('deals', 'Deal')} email={dealEmail(deal, contact)} phone={dealPhone(deal, contact)} copyText={dealCopyText(deal, contact)}
       onTool={onTool} onCreateCustomer={onCreateCustomer} onEdit={onEdit} onOwner={onOwner} onEnrich={onEnrich} onDelete={onDelete}
       onCopied={onCopied} onViewSettings={onViewSettings} visible={visible}/>
   );
@@ -278,11 +281,12 @@ const ASSOCIATED_CONTACT_COLUMNS = [
 
 function DealDetail({mode, deal, view, acts, contact, profiles, props, settings, menu, requestedTab, team, activityViews, customers = [], onOpenCustomer,
                      onQuick, onOpenContact, onCreateProfile, onStub, onCopied, onClose, onExpand, onCollapse, onUpdateActivity, onAddActivity, onReassignOwner}){
+  // One Customer Profile per person: the deal shows (and creates) its contact's — without Contacts (HOF Partners), the lead's own.
+  const holder = contact || (!workspaceHasType('contacts') ? deal : null);
   const renderTab = (tab, openTab, q) => {
-    // One Customer Profile per person: the deal shows (and creates) its contact's.
-    if(tab.id === 'profile') return contact
-      ? <CustomerProfileTab contact={contact} profiles={profiles} onCall={()=>onStub('Call')}
-          onCreate={(templateId)=>onCreateProfile(contact, templateId)} onStub={onStub}/>
+    if(tab.id === 'profile') return holder
+      ? <CustomerProfileTab contact={holder} profiles={profiles} onCall={()=>onStub('Call')}
+          onCreate={(templateId)=>onCreateProfile(holder, templateId)} onStub={onStub}/>
       : <div style={{padding:'40px 24px', textAlign:'center', fontSize:13, color:T.gray400}}>This {typeNoun('deals', 'deal')} has no contact, so it has no Customer Profile.</div>;
     if(tab.id === 'contacts') return <AssociatedRecords columns={ASSOCIATED_CONTACT_COLUMNS} rows={contact ? [contactView(contact)] : []} q={q}
       onOpen={(c)=>onOpenContact(c)} empty={`No contacts on this ${typeNoun('deals', 'deal')}.`}/>;
@@ -300,7 +304,7 @@ function DealDetail({mode, deal, view, acts, contact, profiles, props, settings,
         onQuick={onQuick} onOpenContact={onOpenContact} onOpenCustomer={onOpenCustomer} onStub={onStub} onCopied={onCopied}/>}
       workspace={<ContactWorkspace contact={view} acts={acts} onStub={onStub} requestedTab={requestedTab}
         team={team} onUpdateActivity={onUpdateActivity} onAddActivity={onAddActivity} onReassignOwner={onReassignOwner}
-        tabs={DEAL_TABS.filter(t => workspaceHasType('contacts') || !['profile', 'contacts'].includes(t.id))} renderTab={renderTab} activityViews={activityViews}/>}/>
+        tabs={DEAL_TABS.filter(t => workspaceHasType('contacts') || t.id !== 'contacts')} renderTab={renderTab} activityViews={activityViews}/>}/>
   );
 }
 

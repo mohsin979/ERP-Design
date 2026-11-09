@@ -96,6 +96,7 @@ const SAMPLE_DEALS = () => {
    Added to saved activity too (by id, once). */
 const WORKFLOW_SAMPLE_CALL_DAYS = [3, 9, 15, 22];
 function withWorkflowSampleCalls(acts, users){
+  if(!ACTIVE_WORKSPACE.sample) return acts;   // the sample workspace's deal only
   const list = acts['deal-11'];
   if(!list || list.some(a => a.id === 'deal-11-wf-na-1')) return acts;
   const by = (users.find(u => u.id === 'hamza-siddiqui') || {}).name || '';
@@ -177,15 +178,15 @@ const DEAL_CARD_SECTIONS = {
 // A deal's quick actions: the shared set (contactActions.jsx) — Go to Contact in place of Create Deal.
 const DEAL_QUICK_ACTIONS = Object.fromEntries(OBJECT_QUICK_ACTIONS.deals.map(k => [k, {label:quickActionLabel('deals', k), icon:QUICK_ACTION_DEFS[k].icon}]));
 const DEAL_TAGS = [
-  {key:'health',    label:'Deal Health', hint:'At Risk · Needs Attention · Healthy'},
-  {key:'dealScore', label:'Deal Score'},
+  {key:'health',    get label(){ return `${typeSingular('deals', 'Deal')} Health`; }, hint:'At Risk · Needs Attention · Healthy'},
+  {key:'dealScore', get label(){ return `${typeSingular('deals', 'Deal')} Score`; }},
 ];
 const DEAL_DROPDOWNS = [
   ...CARD_DROPDOWNS,
   {key:'meeting', setting:'Meetings', label:'Meetings', icon:'calendar', type:'meeting', link:'View all meetings', empty:'No meetings yet.'},
 ];
 const DEAL_RELATED_FIELDS = [
-  {key:'owner',         label:'Deal Owner'},
+  {key:'owner',         get label(){ return `${typeSingular('deals', 'Deal')} Owner`; }},
   {key:'ownerAssigned', label:'Owner Assignment Date'},
 ];
 // Card properties: every Deal property but Deal Name (always on top) and Currency (always AED).
@@ -539,15 +540,15 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
           schemaFor:(tabId) => activityFilterSchema(tabId, data),
         };
         return <RecordAccessCtx.Provider value={{object:'deals', record:dd}}><DealDetail mode={detail.mode} deal={dd} view={view} acts={acts} contact={contact} activityViews={activityViews}
-          profiles={contact && profileStore ? profileStore.profiles[contact.id] : undefined} props={props} settings={settings}
+          profiles={profileStore ? profileStore.profiles[profileHolderId('deals', dd)] : undefined} props={props} settings={settings}
           menu={dealMenu(dd, ()=>setPanelDraft(JSON.parse(JSON.stringify(settings))))}
           requestedTab={detail.tab} team={owners.map(u => u.name)}
           customers={customersOf(dd.id).map(c => customerListRow(c, data))} onOpenCustomer={(x)=>onOpenCustomer && onOpenCustomer(x.id, detail.mode)}
           onQuick={(key)=>onQuick(key, dd)}
           onOpenContact={(c)=>onOpenContact ? onOpenContact(c.id, detail.mode) : setStub(c.name)} onCopied={showToast}
           onCreateProfile={(c, templateId)=>{
-            // The contact's latest call (Sales Notes, transcript) feeds the profile, as from the contact.
-            const lastCall = (contactActivities[c.id] || []).find(a => a.type === 'call' && ((a.transcript && a.transcript.length) || a.notes));
+            // The holder's latest call (Sales Notes, transcript) feeds the profile: the contact's — a lead's own where it holds the profile.
+            const lastCall = (contactActivities[c.id] || (c.id === dd.id ? acts : []) || []).find(a => a.type === 'call' && ((a.transcript && a.transcript.length) || a.notes));
             setProfileRun({contactId:c.id, dealId:dd.id, templateIds: templateId ? [templateId] : undefined,
               call: lastCall ? {id:lastCall.id, segments:lastCall.transcript || [], notes:lastCall.notes || '', startedAt:lastCall.at} : null});
           }}
@@ -576,7 +577,7 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
           onApply={()=>{ setPanelSettings(panelDraft); setPanelDraft(null); }}/>;
       })()}
       {(() => {
-        const rc = profileRun && contacts.find(c => c.id === profileRun.contactId);
+        const rc = profileRun && (contacts.find(c => c.id === profileRun.contactId) || byId.get(profileRun.contactId));
         if(!rc || !profileStore) return null;
         return <ProfileFormFill contact={rc} call={profileRun.call} formId={(profileRun.templateIds || [])[0]}
           onCancel={()=>setProfileRun(null)}

@@ -7,11 +7,15 @@
        in for the recipient). Used by the email composer (emails.jsx) and by workflows.
      Email Sequences — a named, ordered list of templates, each sent a set time after the one
        before. Used by workflows' Enroll in Email Sequence ("Choose email sequence template").
-     Quote Templates — a configured quote saved from the quote builder (quotes.jsx): its services
-       and milestones, payment terms, discount and VAT, and terms; each has a code (QT-001…).
-       Listed, viewed, renamed and deleted here; new ones come from a quote (Save as template).
+     Quote Templates — a configured quote (quotes.jsx): its services and milestones, payment
+       terms, discount and VAT, and terms; each has a code (QT-001…). Created here (the quote
+       builder's Services and Payment Terms fields) or from a quote (Save as template); listed,
+       viewed, renamed and deleted here.
    Email templates and sequences are created, viewed, edited and deleted here; a template or sequence a workflow (or a
-   sequence) uses can't be deleted until it's no longer used, so nothing that runs loses its email. */
+   sequence) uses can't be deleted until it's no longer used, so nothing that runs loses its email.
+   One shape for every tab: the tabs row (as Users & Teams), the list with its icon-only Add
+   (StCta) opening the creation side panel (CreatePanelFrame, Field rows), and a detail panel
+   (DetailPanel: title, separator, label | value fields, the content). */
 
 /* Each tab is a kind of template with its own permissions (Edit Permissions → Templates): a tab
    shows to those who may view some of its items, and each item's actions follow View / Create /
@@ -42,23 +46,29 @@ const templateBodyOf = (t) => {
 // Where a template or sequence is used: workflows (any of their settings) and, for templates, sequences.
 const usedInWorkflows = (data, id) => (data.workflows || []).filter(w => JSON.stringify(w).includes(`"${id}"`));
 
-function TemplateFormModal({initial, onCancel, onSave}){
+// The creation panels' Cancel / Save pair.
+const panelActions = (onCancel, label, ok, onSave) => <><StSecondary label="Cancel" onClick={onCancel}/><StCta label={label} disabled={!ok} onClick={()=>ok && onSave()}/></>;
+
+function TemplateFormPanel({initial, onCancel, onSave}){
   const [t, setT] = React.useState(() => ({name:(initial && initial.name) || '', subject:(initial && initial.subject) || '', body: initial ? templateBodyOf(initial) : ''}));
   const set = (p) => setT(x => ({...x, ...p}));
   const ok = !!t.name.trim() && !!t.subject.trim() && !!t.body.trim();
+  const save = () => onSave({name:t.name.trim(), subject:t.subject.trim(), body:t.body.trim()});
   return (
-    <StModal title={initial ? 'Edit email template' : 'New email template'} primary={initial ? 'Save changes' : 'Create template'} canSubmit={ok} width={600} onCancel={onCancel}
-      onSubmit={()=>onSave({name:t.name.trim(), subject:t.subject.trim(), body:t.body.trim()})}>
-      <div><label style={fieldLabel}>Name</label><input autoFocus value={t.name} onChange={e=>set({name:e.target.value})} placeholder="e.g. Document request" style={fieldInput}/></div>
-      <div><label style={fieldLabel}>Subject</label><input value={t.subject} onChange={e=>set({subject:e.target.value})} style={fieldInput}/></div>
-      <div><label style={fieldLabel}>Message</label>
-        <textarea value={t.body} onChange={e=>set({body:e.target.value})} rows={12} placeholder={'Hi {{first_name}},\n\n…'} style={{...fieldInput, resize:'vertical', lineHeight:1.55}}/>
-        <div style={{...stTextB, fontSize:12, marginTop:4}}>{'{{first_name}}'} is replaced with the recipient's first name.</div></div>
-    </StModal>
+    <CreatePanelFrame title={initial ? 'Edit Email Template' : 'New Email Template'} onClose={onCancel} actions={panelActions(onCancel, initial ? 'Save changes' : 'Create template', ok, save)}>
+      {stack(<>
+        <Field label="Name"><input autoFocus value={t.name} onChange={e=>set({name:e.target.value})} placeholder="e.g. Document request" style={fieldText}/></Field>
+        <Field label="Subject"><input value={t.subject} onChange={e=>set({subject:e.target.value})} style={fieldText}/></Field>
+        <Field label="Message">
+          <textarea value={t.body} onChange={e=>set({body:e.target.value})} rows={12} placeholder={'Hi {{first_name}},\n\n…'} style={{...fieldText, resize:'vertical', lineHeight:1.55}}/>
+          <div style={{fontSize:12, color:T.attioMuted, marginTop:6}}>{'{{first_name}}'} is replaced with the recipient's first name.</div>
+        </Field>
+      </>)}
+    </CreatePanelFrame>
   );
 }
 
-function SequenceFormModal({initial, templates, onCancel, onSave}){
+function SequenceFormPanel({initial, templates, onCancel, onSave}){
   const [s, setS] = React.useState(() => ({name:(initial && initial.name) || '',
     emails:((initial && initial.emails) || [{templateId:'', delay:{amount:'1', unit:'Days'}}]).map((e, i) => ({key:`se-${i}-${Math.random().toString(36).slice(2, 6)}`, ...e, delay:{...e.delay}}))}));
   const setEmail = (i, p) => setS(x => ({...x, emails:x.emails.map((e, j) => j === i ? {...e, ...p} : e)}));
@@ -66,12 +76,12 @@ function SequenceFormModal({initial, templates, onCancel, onSave}){
   const ok = !!s.name.trim() && s.emails.length > 0 && s.emails.every(e => e.templateId && Number(e.delay.amount) >= 0 && e.delay.amount !== '');
   const iconBtn = (icon, title, onClick, disabled) => <button type="button" title={title} disabled={disabled} onClick={onClick}
     style={{border:'none', background:'transparent', cursor: disabled ? 'default' : 'pointer', display:'flex', padding:4, opacity: disabled ? .35 : 1}}><Icon name={icon} size={13} color={T.gray600}/></button>;
+  const save = () => onSave({name:s.name.trim(), emails:s.emails.map(({key, ...e}) => e)});
   return (
-    <StModal title={initial ? 'Edit email sequence' : 'New email sequence'} primary={initial ? 'Save changes' : 'Create sequence'} canSubmit={ok} width={600} onCancel={onCancel}
-      onSubmit={()=>onSave({name:s.name.trim(), emails:s.emails.map(({key, ...e}) => e)})}>
-      <div><label style={fieldLabel}>Name</label><input autoFocus value={s.name} onChange={e=>setS(x => ({...x, name:e.target.value}))} placeholder="e.g. New client onboarding" style={fieldInput}/></div>
-      <div style={{maxHeight:'44vh', overflowY:'auto', display:'flex', flexDirection:'column', gap:8}}>
-        <label style={fieldLabel}>Emails</label>
+    <CreatePanelFrame title={initial ? 'Edit Email Sequence' : 'New Email Sequence'} onClose={onCancel} actions={panelActions(onCancel, initial ? 'Save changes' : 'Create sequence', ok, save)}>
+      {stack(<>
+      <Field label="Name"><input autoFocus value={s.name} onChange={e=>setS(x => ({...x, name:e.target.value}))} placeholder="e.g. New client onboarding" style={fieldText}/></Field>
+      <Field label="Emails"><div style={{display:'flex', flexDirection:'column', gap:8, paddingTop:2}}>
         {s.emails.map((e, i) => (
           <div key={e.key} style={{border:`1px solid ${T.attioLine}`, borderRadius:10, padding:10, display:'flex', flexDirection:'column', gap:8}}>
             <div style={{display:'flex', alignItems:'center', gap:6}}>
@@ -84,7 +94,7 @@ function SequenceFormModal({initial, templates, onCancel, onSave}){
             <div style={{display:'flex', alignItems:'center', gap:8}}>
               <span style={{fontSize:12.5, color:T.gray600, whiteSpace:'nowrap'}}>{i === 0 ? 'Send after' : 'Then after'}</span>
               <input value={e.delay.amount} onChange={ev=>setEmail(i, {delay:{...e.delay, amount:ev.target.value.replace(/[^0-9]/g, '')}})} inputMode="numeric" aria-label={`Email ${i + 1} delay`}
-                style={{...fieldInput, width:80, fontVariantNumeric:'tabular-nums'}}/>
+                style={{...fieldText, width:80, fontVariantNumeric:'tabular-nums'}}/>
               <div style={{width:130}}><FormSelect value={e.delay.unit} placeholder="Unit" options={SEQUENCE_UNITS} onChange={(v)=>setEmail(i, {delay:{...e.delay, unit:v || 'Days'}})}/></div>
             </div>
           </div>
@@ -93,17 +103,49 @@ function SequenceFormModal({initial, templates, onCancel, onSave}){
           style={{alignSelf:'flex-start', display:'inline-flex', alignItems:'center', gap:6, border:'none', background:'transparent', padding:'4px 0', fontSize:13, fontWeight:500, color:T.attioText, cursor:'pointer', fontFamily:'inherit'}}>
           <Icon name="plus" size={13} color={T.gray600}/> Add email
         </button>
-      </div>
-    </StModal>
+      </div></Field>
+      </>)}
+    </CreatePanelFrame>
   );
 }
 
-/* Quote Templates: code, name, what it holds; View (the template's contents), Rename, Delete. */
+/* New quote template: a name (and its code), then the quote builder's Services and Payment Terms
+   fields and the terms — in one panel, the builder's width. */
+function QuoteTemplateFormPanel({templates, onCancel, onSave}){
+  const [t, setT] = React.useState({name:'', title:'', items:[], installments:[], discount:{type:'percent', value:''}, vatRate:QUOTE_VAT_RATE, terms:''});
+  const set = (p) => setT(x => ({...x, ...p}));
+  const checks = quoteConfigChecks(t);
+  const ok = !!t.name.trim() && checks.itemsOk && checks.discountOk && checks.installmentsOk;
+  const save = () => onSave({name:t.name.trim(), ...normalizeQuoteConfig(t), vatRate:t.vatRate, terms:t.terms});
+  const divider = <div style={{borderTop:`1px solid ${T.border}`, margin:'4px -20px 0'}}/>;
+  return (
+    <CreatePanelFrame title="New Quote Template" width={QUOTE_PANEL_W} onClose={onCancel} actions={panelActions(onCancel, 'Create template', ok, save)}>
+      <div style={{display:'flex', flexDirection:'column', gap:16}}>
+        {stack(<>
+          <Field label="Name"><input autoFocus value={t.name} onChange={e=>set({name:e.target.value})} placeholder="e.g. US NIW Standard" style={fieldText}/></Field>
+          <Field label="Code"><ReadValue>{nextTemplateCode(templates)}</ReadValue></Field>
+        </>)}
+        {divider}
+        <span style={QUOTE_SECTION}>Services</span>
+        <QuoteServicesFields q={t} set={set} checks={checks}/>
+        {divider}
+        <span style={QUOTE_SECTION}>Payment terms</span>
+        <QuotePaymentFields q={t} set={set} checks={checks}/>
+        {divider}
+        <span style={QUOTE_SECTION}>Terms & conditions</span>
+        <RichTextEditor value={t.terms} onChange={(v)=>set({terms:v})} minHeight={200} ariaLabel="Terms and conditions"/>
+      </div>
+    </CreatePanelFrame>
+  );
+}
+
+/* Quote Templates: code, name, what it holds; New (the panel above), View (the template's contents), Rename, Delete. */
 function QuoteTemplatesTab({data, setData, say}){
   const can = (action, t) => templateCan('quoteTemplates', action, t);
-  const list = quoteTemplatesOf(data).filter(t => can('view', t));
+  const all = quoteTemplatesOf(data), list = all.filter(t => can('view', t));
   const setList = (fn) => setData(d => ({...d, quoteTemplates:fn(quoteTemplatesOf(d))}));
   const [openId, setOpenId] = React.useState(null);
+  const [creating, setCreating] = React.useState(false);
   const [renaming, setRenaming] = React.useState(null);   // {id, name}
   const [deleting, setDeleting] = React.useState(null);
   const open = list.find(t => t.id === openId) || null;
@@ -120,17 +162,23 @@ function QuoteTemplatesTab({data, setData, say}){
       : key === 'installments' ? <span style={{fontVariantNumeric:'tabular-nums'}}>{r.installments}</span> : undefined,
     renderActions:(r) => <RowActionsMenu title="Actions" width={MENU_W} items={actions(list.find(t => t.id === r.id))}/>,
   };
-  const section = {fontSize:11, fontWeight:600, color:T.attioFaint, textTransform:'uppercase', letterSpacing:.4, marginBottom:8};
+  const section = {...QUOTE_SECTION, marginBottom:8};
   const totals = open ? quoteTotals(open) : null;
   const row = (l, v, key) => <div key={key} style={{display:'flex', justifyContent:'space-between', gap:12, fontSize:13, color:T.attioText, padding:'4px 0'}}><span>{l}</span><span style={{fontVariantNumeric:'tabular-nums'}}>{v}</span></div>;
+  const create = (vals) => {
+    const t = {id:`qt-${Date.now().toString(36)}`, code:nextTemplateCode(all), createdBy:CURRENT_USER.name, createdAt:new Date(), ...vals};
+    setList(ts => [...ts, t]); setCreating(false); setOpenId(t.id); say(`Template ${t.code} created`);
+  };
   return (
     <div style={{display:'flex', flexDirection:'column', flex:1, minHeight:0}}>
       <RecordViewsModule schema={schema} rows={rows} columns={cols.map(c => c.key)} storeKey="views:templates-quoteTemplates"
         defaultViews={[{id:'tv-quoteTemplates', name:'All Quote Templates', sort:{key:'code', dir:'asc'}}]}
-        overlay={open && <PageSidePanel width={560} title={open.name} subtitle={open.code} onClose={()=>setOpenId(null)} menuItems={actions(open).filter(it => !/^View/.test(it.label))}>
-          <div style={{flex:1, overflowY:'auto', padding:'4px 20px 24px', display:'flex', flexDirection:'column', gap:20}}>
+        actions={() => can('create') && <StCta icon="plus" title="New quote template" onClick={()=>{ setOpenId(null); setCreating(true); }}/>}
+        overlay={creating ? <QuoteTemplateFormPanel templates={all} onCancel={()=>setCreating(false)} onSave={create}/>
+          : open && <DetailPanel width={560} title={open.name} onClose={()=>setOpenId(null)} menuItems={actions(open).filter(it => !/^View/.test(it.label))}
+          fields={[['Code', open.code], ['Services', String((open.items || []).length)], ['Total', fmtMoney(totals.total)], ['Created', fmtQuoteDate(open.createdAt)], ['Created by', creatorOf(open)]]}>
             <div>
-              <div style={section}>Services · {(open.items || []).length}</div>
+              <div style={section}>Services</div>
               {(open.items || []).map(it => (
                 <div key={it.id} style={{padding:'8px 0', borderTop:`1px solid ${T.attioLine}`}}>
                   <div style={{display:'flex', justifyContent:'space-between', gap:12}}><span style={{fontSize:13.5, fontWeight:600, color:T.attioText}}>{it.name}</span>
@@ -156,8 +204,7 @@ function QuoteTemplatesTab({data, setData, say}){
               <div style={section}>Terms & conditions</div>
               {richIsEmpty(richHtmlOf(open.terms)) ? <div style={{fontSize:13, color:T.attioMuted}}>None.</div> : <RichTextView html={open.terms} style={{fontSize:12.5}}/>}
             </div>
-          </div>
-        </PageSidePanel>}/>
+        </DetailPanel>}/>
       {renaming && <StModal title="Rename template" primary="Save" canSubmit={!!renaming.name.trim()} onCancel={()=>setRenaming(null)}
         onSubmit={()=>{ setList(ts => ts.map(t => t.id === renaming.id ? {...t, name:renaming.name.trim()} : t)); setRenaming(null); say('Saved'); }}>
         <div><label style={fieldLabel}>Template name</label><input autoFocus value={renaming.name} onChange={e=>setRenaming(r => ({...r, name:e.target.value}))} style={fieldInput}/></div>
@@ -228,7 +275,8 @@ function TemplatesSettings({data, setData}){
   return (
     <div style={{position:'relative', flex:1, minHeight:0, display:'flex', flexDirection:'column', overflow:'hidden'}}>
       <SettingsPage fill>
-        <div style={{display:'flex', alignItems:'center', gap:4, marginBottom:8}}>
+        {/* The tabs row as Users & Teams: no gap under it — the view row's own padding sets the space. */}
+        <div style={{display:'flex', gap:8, borderBottom:`1px solid ${T.borderStrong}`, flexShrink:0}}>
           {tabs.map(t => <UtTab key={t.id} icon={t.icon} label={t.label} active={tab === t.id} onClick={()=>{ setTab(t.id); setOpenId(null); }}/>)}
         </div>
         {!tab ? <div style={{...stTextB, padding:'24px 0'}}>You don't have access to any templates.</div> :
@@ -238,10 +286,13 @@ function TemplatesSettings({data, setData}){
         <div style={{display:'flex', flexDirection:'column', flex:1, minHeight:0}}>
           <RecordViewsModule key={tab} schema={schema} rows={rows} columns={cols.map(c => c.key)} storeKey={`views:templates-${tab}`}
             defaultViews={[{id:`tv-${tab}`, name: isT ? 'All Templates' : 'All Sequences', sort:{key:'name', dir:'asc'}}]}
-            actions={() => can('create') && <StCta icon="plus" label={isT ? 'New template' : 'New sequence'} onClick={()=>setForm({kind:tab})}/>}
-            overlay={open && <PageSidePanel width={isT ? 620 : 480} title={open.name} subtitle={isT ? open.subject : plural(open.emails.length, 'email')} onClose={()=>setOpenId(null)}
-              menuItems={[...(can('edit', open) ? [{label:`Edit ${noun}`, onClick:()=>setForm({kind:tab, initial:open})}] : []), ...(can('delete', open) ? [{label:`Delete ${noun}`, danger:true, onClick:()=>setDeleting({kind:tab, item:open})}] : [])]}>
-              <div style={{flex:1, overflowY:'auto', padding:'4px 20px 24px'}}>
+            actions={() => can('create') && <StCta icon="plus" title={isT ? 'New template' : 'New sequence'} onClick={()=>{ setOpenId(null); setForm({kind:tab}); }}/>}
+            overlay={form ? (form.kind === 'templates'
+                ? <TemplateFormPanel key={form.initial ? form.initial.id : 'new'} initial={form.initial} onCancel={()=>setForm(null)} onSave={save}/>
+                : <SequenceFormPanel key={form.initial ? form.initial.id : 'new'} initial={form.initial} templates={templates} onCancel={()=>setForm(null)} onSave={save}/>)
+              : open && <DetailPanel width={isT ? 620 : 480} title={open.name} onClose={()=>setOpenId(null)}
+              menuItems={[...(can('edit', open) ? [{label:`Edit ${noun}`, onClick:()=>setForm({kind:tab, initial:open})}] : []), ...(can('delete', open) ? [{label:`Delete ${noun}`, danger:true, onClick:()=>setDeleting({kind:tab, item:open})}] : [])]}
+              fields={[isT ? ['Subject', open.subject] : ['Emails', String(open.emails.length)], ['Used by', usage(tab, open.id).length ? usage(tab, open.id).join(', ') : 'Not used'], ['Created by', creatorOf(open)]]}>
                 {isT ? <div style={{border:`1px solid ${T.border}`, borderRadius:10, overflow:'hidden'}} dangerouslySetInnerHTML={{__html:open.html || ''}}/>
                   : <ol style={{margin:0, padding:0, listStyle:'none', display:'flex', flexDirection:'column', gap:10}}>
                       {open.emails.map((e, i) => (
@@ -251,14 +302,9 @@ function TemplatesSettings({data, setData}){
                         </li>
                       ))}
                     </ol>}
-                {usage(tab, open.id).length > 0 && <div style={{...stTextB, marginTop:16}}>Used by {usage(tab, open.id).join(', ')}.</div>}
-              </div>
-            </PageSidePanel>}/>
+            </DetailPanel>}/>
         </div>}
       </SettingsPage>
-      {form && (form.kind === 'templates'
-        ? <TemplateFormModal initial={form.initial} onCancel={()=>setForm(null)} onSave={save}/>
-        : <SequenceFormModal initial={form.initial} templates={templates} onCancel={()=>setForm(null)} onSave={save}/>)}
       {listBulk.bulkModal}
       {deleting && <StModal title={`Delete ${deleting.kind === 'templates' ? 'template' : 'sequence'}`} primary={used.length ? null : 'Delete'} danger onCancel={()=>setDeleting(null)}
         onSubmit={()=>{ (deleting.kind === 'templates' ? setTemplates : setSequences)(xs => xs.filter(x => x.id !== deleting.item.id)); if(openId === deleting.item.id) setOpenId(null); setDeleting(null); say('Deleted'); }}>

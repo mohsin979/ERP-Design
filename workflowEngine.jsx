@@ -153,7 +153,8 @@ const activityConditionFields = (data) => [
    (`contactId` / `dealId` / `customerId`). */
 const recordObjectOf = (id) => { const s = String(id ?? ''); return s.startsWith('cust-') ? 'customers' : /^\d+$/.test(s) ? 'contacts' : 'deals'; };
 const recordKey = (id) => { const o = recordObjectOf(id); return o === 'customers' ? {customerId:id} : o === 'contacts' ? {contactId:Number(id)} : {dealId:id}; };
-const recordNoun = (id) => ({customers:'customer', contacts:'contact', deals:'deal'})[recordObjectOf(id)];
+// A record's noun as the workspace names its type (HOF Partners: "lead").
+const recordNoun = (id) => { const o = recordObjectOf(id); return typeNoun(o, ({customers:'customer', contacts:'contact', deals:'deal'})[o]); };
 // Objects whose records have activity (the activity conditions apply to them).
 const ACTIVITY_RECORD_OBJECTS = ['contacts', 'deals', 'customers'];
 /* ── Data scopes (property triggers) ── a property trigger reads one of four sets of properties:
@@ -203,16 +204,20 @@ const formRecordValue = (key, rec) => {
    Language, Designation and any added), each with its type; then the system-generated metrics. */
 const userPropertyFields = (data) => [
   ...(((data && data.properties) || WF_LIVE.properties || []).filter(p => p.objectId === 'users' && !p.archived).map(p => ({key:p.key, label:p.label, kind:conditionKind(p.type), prop:p}))),
-  ...USER_METRIC_FIELDS];
+  ...USER_METRIC_FIELDS.filter(f => !f.needs || workspaceHasType(f.needs))];
 /* The statistics — the user's profile panel's (USER_STATS, dashboard.jsx), all-time, from the
-   CRM's records. Averages in days or hours, as labelled. */
+   CRM's records. Averages in days or hours, as labelled. Deals by the workspace's name for them
+   (HOF Partners: Leads); the Contact ones only where it has Contacts (`needs`). */
+const wfDeal = () => typeSingular('deals', 'Deal'), wfDeals = () => typePlural('deals', 'Deals');
 const USER_METRIC_FIELDS = [
   {key:'invoiceCash', label:'Total Invoice Cash'}, {key:'cashReceived', label:'Total Cash Received'}, {key:'cashForecasted', label:'Total Cash Forecasted'},
-  {key:'dealsCreated', label:'Total Deals Created'}, {key:'dealsClosed', label:'Deals Closed'}, {key:'dealsWon', label:'Deal Won'}, {key:'dealsLost', label:'Deal Lost'},
-  {key:'contactToClosed', label:'Contact to Deal Closed (days)'}, {key:'contactToDeal', label:'Contact to Deal (days)'},
-  {key:'contactToCustomer', label:'Contact to Customer (days)'}, {key:'qualifiedToWon', label:'Qualified Client to Deal Won (days)'},
+  {key:'dealsCreated', get label(){ return `Total ${wfDeals()} Created`; }}, {key:'dealsClosed', get label(){ return `${wfDeals()} Closed`; }},
+  {key:'dealsWon', get label(){ return `${wfDeal()} Won`; }}, {key:'dealsLost', get label(){ return `${wfDeal()} Lost`; }},
+  {key:'contactToClosed', get label(){ return `Contact to ${wfDeal()} Closed (days)`; }, needs:'contacts'}, {key:'contactToDeal', get label(){ return `Contact to ${wfDeal()} (days)`; }, needs:'contacts'},
+  {key:'contactToCustomer', label:'Contact to Customer (days)', needs:'contacts'}, {key:'qualifiedToWon', get label(){ return `Qualified Client to ${wfDeal()} Won (days)`; }},
   {key:'responseTime', label:'Client Response Time (hours)'}, {key:'invoiceToCash', label:'Invoice to Cash (hours)'},
-].map(f => ({...f, kind:'number'}));
+];
+USER_METRIC_FIELDS.forEach(f => { f.kind = 'number'; });
 const USER_PROPERTY_FIELDS = USER_METRIC_FIELDS;   // the metrics (properties: userPropertyFields)
 /* A user's User Properties (by id or name): what's set on the user (`profile`, else the value fixed
    per user), and their statistics — empty where there's nothing to average. */
@@ -220,8 +225,8 @@ const userPropertiesOf = (data, who) => { const u = (data.users || []).find(x =>
   if(!u) return null;
   const stats = Object.fromEntries(Object.entries(userStatsAllTime(u.id)).map(([k, v]) => [k, v == null ? '' : Math.round(v * 100) / 100]));
   return {...(u.profile || {}), ...ownerProfileMock(u.name, u).raw, ...stats}; };
-// The person whose Customer Profile a record has: a contact itself; a deal's or customer's contact.
-const profileContactId = (rec) => !rec ? null : recordObjectOf(rec.id) === 'contacts' ? Number(rec.id) : (rec.contactId ?? null);
+// The person whose Customer Profile a record has: a contact itself; a deal's or customer's contact (board.jsx profileHolderId).
+const profileContactId = (rec) => !rec ? null : recordObjectOf(rec.id) === 'contacts' ? Number(rec.id) : profileHolderId(recordObjectOf(rec.id), rec);
 const PROFILE_TRIGGER_FIELDS = () => [
   // Each Customer Profile form field: the person's current answer (WF_LIVE.profiles: their filled forms).
   ...PROFILE_FORM_TRIGGER_FIELDS(),
@@ -1074,7 +1079,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
   function guardLoop(run, w, deal){
     const key = `${w.id}:${deal.id}`;
     if(run.chain.depth >= WF_MAX_DEPTH || run.chain.visited.includes(key)){
-      addRun({...run, status:'loopPrevented', reason: run.chain.depth >= WF_MAX_DEPTH ? `Chain limit (${WF_MAX_DEPTH}) reached` : 'Already ran for this deal in this chain'});
+      addRun({...run, status:'loopPrevented', reason: run.chain.depth >= WF_MAX_DEPTH ? `Chain limit (${WF_MAX_DEPTH}) reached` : `Already ran for this ${recordNoun(deal.id)} in this chain`});
       return false;
     }
     run.chain = {...run.chain, visited:[...run.chain.visited, key]};
@@ -1146,13 +1151,13 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
     const action = (w.actions || []).find(a => a.id === step.actionId);
     if(!action) return patchStep(runId, stepId, {status:'skipped', result:'Removed from the workflow'});
     const deal = getDeal(run.dealId);
-    if(!deal) return patchStep(runId, stepId, {status:'failed', result:'The deal no longer exists'});
+    if(!deal) return patchStep(runId, stepId, {status:'failed', result:`The ${recordNoun(run.dealId)} no longer exists`});
     // An identical workflow applies to the record's owner now (they were excluded from this one): what's left is cancelled.
     if(((w.excludedUsers) || []).includes(deal.owner)) return patchStep(runId, stepId, {status:'cancelled', result:`Another workflow applies to ${userName(dataRef.current, deal.owner) || 'the owner'}`});
     if(delayed){
       if(['stageEntryForward', 'stageEntryBackward', 'stayAtStage'].includes(run.trigger) && (deal.pipeline !== run.pipeline || deal.stage !== run.stage)) return patchStep(runId, stepId, {status:'skipped', result:'The deal left the stage'});
       // Other triggers stay within the workflow's context (a stage context: the deal is still in it).
-      if((workflowTrigger(run.trigger) || {}).group !== 'stage' && !inContext(w, deal)) return patchStep(runId, stepId, {status:'skipped', result:"The deal left the workflow's context"});
+      if((workflowTrigger(run.trigger) || {}).group !== 'stage' && !inContext(w, deal)) return patchStep(runId, stepId, {status:'skipped', result:`The ${recordNoun(deal.id)} left the workflow's context`});
     }
     let res;
     try { res = withEffects(runId, stepId, () => performAction(action, deal, run, step, w)); }
@@ -1353,7 +1358,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
     if(object === 'customers'){
       // A deal has one customer: one that already has it isn't given a second (no duplicates).
       const existing = from === 'deals' && dealCustomer(rec.id);
-      if(existing) return `Customer already exists: ${existing.name || ''} · linked to this deal (no duplicate created)`;
+      if(existing) return `${typeSingular('customers', 'Customer')} already exists: ${existing.name || ''} · linked to this ${typeNoun('deals', 'deal')} (no duplicate created)`;
       /* Linked to the deal it came from (Deals ↔ Customers) and to the contact (Contacts → Customers),
          in the service pipeline for the deal's pipeline (CUSTOMER_PIPELINE_FOR_DEAL), with its details. */
       const forDeal = from === 'deals' && !values.pipeline ? pipes.find(x => x.id === CUSTOMER_PIPELINE_FOR_DEAL[rec.pipeline]) : null;
@@ -1373,7 +1378,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
     editActivities(m => ({...m, [nd.id]:[]}));
     setDealsTracked(rs => [...rs.map(r => from === 'customers' && linked && r.id === rec.id ? {...r, dealIds:[nd.id]} : r), nd], childChain(run));
     recordEffect({kind:'record', object:'deals', recordId:nd.id});
-    return `Deal created: ${nd.name || ''}${linked ? ` · linked to this ${fromNoun}` : ' · not linked (the customer already has a deal)'}`;
+    return `${typeSingular('deals', 'Deal')} created: ${nd.name || ''}${linked ? ` · linked to this ${fromNoun}` : ` · not linked (the ${typeNoun('customers', 'customer')} already has a ${typeNoun('deals', 'deal')})`}`;
   }
   /* Delete Record: what deleting it on its page does — its activity goes with it; the records
      associated with it stay, no longer linked to it; its other open violations no longer apply. */
@@ -1482,7 +1487,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
           if(open) return {status:'skipped', result:`Already in ${label} · its values still need changing`};
           return {status:'prompted', promptIds:[createPrompt(run, step, deal, 'blockEntry', 'Change values', {existing:true})], result:`Already in ${label} · waiting for ${owner || 'the record owner'} to change values`};
         }
-        if(!run.entryAttempt) return {status:'skipped', result:`Applies as a deal tries to enter ${label}`};
+        if(!run.entryAttempt) return {status:'skipped', result:`Applies as a ${recordNoun(deal.id)} tries to enter ${label}`};
         const stays = stageLabelOf(data, deal.pipeline, deal.stage);
         return {status:'done', result:`Entry to ${label} blocked · stays in ${stays}`, message:(c.message || '').trim() || null, blocked: run.entryAttempt.byPerson ? {attempted:ctx.stage} : null};
       }
@@ -1809,7 +1814,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
           editActivities(m => ({...m, [cust.id]:[]}));
           setDealsTracked(rs => [...rs, cust], childChain(run));
           recordEffect({kind:'record', object:'customers', recordId:cust.id});
-          outcome = `Customer created: ${cust.name || ''} · linked to this deal`;
+          outcome = `${typeSingular('customers', 'Customer')} created: ${cust.name || ''} · linked to this ${typeNoun('deals', 'deal')}`;
         } else if(p.payload.object === 'deals' && recordObjectOf(deal.id) === 'customers'){
           /* A deal created through this customer: the customer's contact's deal, and the customer's
              deal — a customer has one (Deals → Customers is One-to-many), so one that has a deal keeps it. */
@@ -1819,7 +1824,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
           editActivities(m => ({...m, [nd.id]:[]}));
           setDealsTracked(rs => [...rs.map(r => linked && r.id === deal.id ? {...r, dealIds:[nd.id]} : r), nd], childChain(run));
           recordEffect({kind:'record', object:'deals', recordId:nd.id});
-          outcome = `Deal created: ${nd.name || ''}${linked ? ' · linked to this customer' : ' · not linked (the customer already has a deal)'}`;
+          outcome = `${typeSingular('deals', 'Deal')} created: ${nd.name || ''}${linked ? ` · linked to this ${typeNoun('customers', 'customer')}` : ` · not linked (the ${typeNoun('customers', 'customer')} already has a ${typeNoun('deals', 'deal')})`}`;
         } else outcome = `${objectName(data, p.payload.object)}: not defined yet`;
         break;
       }

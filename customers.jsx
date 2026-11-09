@@ -143,12 +143,12 @@ const CUSTOMER_RELATED_FIELDS = [
 ];
 // Card properties: every Customer property but Customer Name (always on top), and its associated contact and deals.
 const customerCardProperties = (props) => [...props.filter(p => p.key !== 'name').map(p => ({key:p.key, label:p.label})),
-  {key:'contact', label:'Associated Contact'}, {key:'deals', label:'Associated Deals'}];
+  ...(workspaceHasType('contacts') ? [{key:'contact', label:'Associated Contact'}] : []), {key:'deals', label:`Associated ${typePlural('deals', 'Deals')}`}];
 const DEFAULT_CUSTOMER_CARD_SETTINGS = () => ({
   order: ['quickActions', 'properties', 'smartFeatures', 'dropdowns', 'relatedProperties'],
   quickActions: defaultQuickActions('customers'),
   tags: {},
-  properties: ['stage', 'owner', 'contact', 'deals', 'created'].map(key => ({key, enabled:true})),
+  properties: ['stage', 'owner', 'contact', 'deals', 'created'].filter(key => key !== 'contact' || workspaceHasType('contacts')).map(key => ({key, enabled:true})),
   smartFeatures: {summary:false, actions:false},
   dropdowns: DEAL_DROPDOWNS.map(dd => ({key:dd.key, enabled:dd.key === 'all', count:5})),
   relatedProperties: {rows:[{id:'r1', left:'owner', right:'ownerAssigned'}]},
@@ -221,9 +221,10 @@ function CustomerFormModal({data, mode = 'add', initial, links, contacts = [], d
   const pipelines = recordPipelines(data, 'customers');
   // One Customer pipeline: it's the one a new customer joins.
   const start = mode === 'add' && pipelines.length === 1 && !(initial && initial.pipeline) ? {...(initial || {}), pipeline:pipelines[0].id} : initial;
+  // The workspace's record types only, by their names (HOF Partners: no Contacts; its Deals are Leads).
   const linkFields = [
-    {key:'contactId', noun:'contact', options:contacts.map(c => ({value:c.id, label:c.email ? `${c.name} · ${c.email}` : c.name}))},
-    {key:'dealId', noun:'deal', options:deals.map(d => ({value:d.id, label:d.name}))},
+    ...(workspaceHasType('contacts') ? [{key:'contactId', noun:'contact', options:contacts.map(c => ({value:c.id, label:c.email ? `${c.name} · ${c.email}` : c.name}))}] : []),
+    ...(workspaceHasType('deals') ? [{key:'dealId', noun:typeNoun('deals', 'deal'), options:deals.map(d => ({value:d.id, label:d.name}))}] : []),
   ];
   return <ContactFormModal mode={mode} initial={start} properties={objectFormProperties(data, 'customers')} noun="customer"
     canEditField={mode === 'edit' ? (p)=>fieldEditCan('customers', initial, p) : undefined}
@@ -289,7 +290,7 @@ function CustomerInfo({customer, view, acts, contact, deals, keys, props, onOpen
         return (
           <div key={k} style={{display:'flex', alignItems:'baseline', gap:12, padding:'7px 0', borderBottom:`1px solid ${T.attioLine}`, minHeight:32}}>
             <PropertyRowLabel k={k} label={labels[k]}/>
-            {k === 'profileType' ? <ProfileTypeValue contactId={contact ? contact.id : !workspaceHasType('contacts') ? customer.id : null}/>
+            {k === 'profileType' ? <ProfileTypeValue contactId={profileHolderId('customers', customer)}/>
               : spec ? <PanelEditableValue spec={spec} display={rows[k] ? (r.value == null ? '' : String(r.value)) : undefined}/>
               : r.owner ? <OwnerValue object="customers" record={customer} name={r.value}/>
               : !r.value ? <span style={{fontSize:13, color:T.attioFaint}}>—</span>
@@ -311,19 +312,20 @@ function CustomerDetailBody({customer, view, acts, contact, deals, settings, pro
 }
 
 /* The workspace tabs, as on a deal: Customer Profile is the associated contact's profile (one per
-   person); Contacts and Deals list its associated records. */
+   person — without Contacts, HOF Partners, its lead's); Contacts and Deals list its associated records. */
 function CustomerDetail({mode, customer, view, acts, contact, deals, data, profiles, props, settings, menu, requestedTab, team, activityViews,
                          onQuick, onOpenDeal, onOpenContact, onCreateProfile, onStub, onCopied, onClose, onExpand, onCollapse, onUpdateActivity, onAddActivity, onReassignOwner}){
-  /* Whose profile: the associated contact's — or, in a workspace without Contacts (Accounting),
-     the customer's own. */
-  const profileOwner = contact || (!(data.objects || []).some(o => o.id === 'contacts') ? customer : null);
+  /* Whose profile: the associated contact's — or, without Contacts (HOF Partners), its lead's (the
+     customer was made from it: one person), else the customer's own (board.jsx profileHolderId). */
+  const holderId = profileHolderId('customers', customer);
+  const profileOwner = contact || (holderId == null ? null : holderId === customer.id ? customer : deals.find(d => d.id === holderId) || customer);
   const renderTab = (tab, openTab, q) => {
     if(tab.id === 'profile') return profileOwner
       ? <CustomerProfileTab contact={profileOwner} profiles={profiles} onCall={()=>onStub('Call')}
           onCreate={(templateId)=>onCreateProfile(profileOwner, templateId)} onStub={onStub}/>
       : <div style={{padding:'40px 24px', textAlign:'center', fontSize:13, color:T.gray400}}>This customer has no contact, so it has no Customer Profile.</div>;
     if(tab.id === 'deals') return <AssociatedRecords columns={ASSOCIATED_DEAL_COLUMNS} rows={deals.map(d => dealListRow(data, d))} q={q}
-      onOpen={(d)=>onOpenDeal(d)} empty="No deals for this customer."/>;
+      onOpen={(d)=>onOpenDeal(d)} empty={`No ${typePlural('deals', 'Deals').toLowerCase()} for this customer.`}/>;
     if(tab.id === 'contacts') return <AssociatedRecords columns={ASSOCIATED_CONTACT_COLUMNS} rows={contact ? [contactView(contact)] : []} q={q}
       onOpen={(c)=>onOpenContact(c)} empty="No contacts for this customer."/>;
     return undefined;
@@ -388,7 +390,9 @@ function CustomersModule({data, customers, setCustomers, activities, setActiviti
      customer's contact) and → Deals (whether it has deals, and every Deal filter property: a
      customer matches when any of its deals does). */
   const contactAssoc = React.useMemo(()=>assocFilterSchema('Contacts', 'Contact', customContactSchema(objectFormProperties(data, 'contacts'))), [data.properties]);
-  const dealAssoc = React.useMemo(()=>assocFilterSchema('Deals', 'Deal', dealFilterSchema(data), 'Has associated deals'), [data.properties, data.pipelines, data.users]);
+  // Named as the workspace names Deals (HOF Partners: Leads); the filter keys stay 'Deals'.
+  const dealAssoc = React.useMemo(()=>assocFilterSchema('Deals', typeSingular('deals', 'Deal'), dealFilterSchema(data), `Has associated ${typePlural('deals', 'Deals').toLowerCase()}`, typePlural('deals', 'Deals')),
+    [data.properties, data.pipelines, data.users, data.objects]);
   const rows = React.useMemo(()=>customers.map(c => {
     const k = contactOf(c);
     // With the worked-out Customer properties (Associated Contact / Deal come with the row).
@@ -512,16 +516,16 @@ function CustomersModule({data, customers, setCustomers, activities, setActiviti
         }}/>}
       {/* Create Deal: the Deal form, starting from the customer's name and owner, with the
           customer's contact (any existing contact, or none); the new deal joins the customer's deals. */}
-      {creatingDeal && <ContactFormModal mode="add" initial={{name:creatingDeal.name, owner:creatingDeal.owner}} properties={objectFormProperties(data, 'deals')} noun="deal"
+      {creatingDeal && <ContactFormModal mode="add" initial={{name:creatingDeal.name, owner:creatingDeal.owner}} properties={objectFormProperties(data, 'deals')} noun={typeNoun('deals', 'deal')}
         optionsFor={dealFormOptions(data)} adjust={dealFormAdjust(data)} onCancel={()=>setCreatingDeal(null)}
-        links={[{key:'contactId', noun:'contact', options:contacts.map(c => ({value:c.id, label:c.email ? `${c.name} · ${c.email}` : c.name}))}]}
+        links={workspaceHasType('contacts') ? [{key:'contactId', noun:'contact', options:contacts.map(c => ({value:c.id, label:c.email ? `${c.name} · ${c.email}` : c.name}))}] : []}
         initialLinks={{contactId:creatingDeal.contactId ?? null}}
         onSave={(vals, _assoc, l)=>{
           // A customer has one deal (Deals → Customers is One-to-many): linked only when it has none yet.
           const c = creatingDeal, deal = onCreateDeal(vals, l.contactId ?? null), linked = !(c.dealIds || []).length;
           if(linked) setCustomers(cs => cs.map(x => x.id === c.id ? {...x, dealIds:[deal.id]} : x));
           setCreatingDeal(null);
-          showToast(`Deal created · ${deal.name}${linked ? '' : ' · not linked (the customer already has a deal)'}`, {label:'Open deal', onClick:()=>{ setToast(null); onOpenDeal && onOpenDeal(deal.id, 'panel'); }});
+          showToast(`${typeSingular('deals', 'Deal')} created · ${deal.name}${linked ? '' : ` · not linked (the customer already has a ${typeNoun('deals', 'deal')})`}`, {label:`Open ${typeNoun('deals', 'deal')}`, onClick:()=>{ setToast(null); onOpenDeal && onOpenDeal(deal.id, 'panel'); }});
         }}/>}
       {(() => {
         const dc = detail && byId.get(detail.id);
@@ -535,12 +539,12 @@ function CustomersModule({data, customers, setCustomers, activities, setActiviti
           schemaFor:(tabId) => activityFilterSchema(tabId, data),
         };
         return <RecordAccessCtx.Provider value={{object:'customers', record:dc}}><CustomerDetail mode={detail.mode} customer={dc} view={view} acts={acts}
-          contact={contact} deals={cdeals} data={data} profiles={contact && profileStore ? profileStore.profiles[contact.id] : undefined}
+          contact={contact} deals={cdeals} data={data} profiles={profileStore ? profileStore.profiles[profileHolderId('customers', dc)] : undefined}
           props={props} settings={settings} menu={menu(dc, ()=>setPanelDraft(JSON.parse(JSON.stringify(settings))))} requestedTab={detail.tab}
           team={owners.map(u => u.name)} activityViews={activityViews}
           onQuick={(k)=>onQuick(k, dc)} onOpenDeal={(d)=>onOpenDeal && onOpenDeal(d.id, detail.mode)} onOpenContact={(c)=>onOpenContact && onOpenContact(c.id, detail.mode)}
           onCreateProfile={(c, templateId)=>{
-            const lastCall = (contactActivities[c.id] || []).find(a => a.type === 'call' && ((a.transcript && a.transcript.length) || a.notes));
+            const lastCall = (contactActivities[c.id] || activities[c.id] || []).find(a => a.type === 'call' && ((a.transcript && a.transcript.length) || a.notes));
             setProfileRun({contactId:c.id, customerId:dc.id, templateIds: templateId ? [templateId] : undefined,
               call: lastCall ? {id:lastCall.id, segments:lastCall.transcript || [], notes:lastCall.notes || '', startedAt:lastCall.at} : null});
           }}
@@ -566,7 +570,8 @@ function CustomersModule({data, customers, setCustomers, activities, setActiviti
           onApply={()=>{ setPanelSettings(panelDraft); setPanelDraft(null); }}/>;
       })()}
       {(() => {
-        const rc = profileRun && contacts.find(c => c.id === profileRun.contactId);
+        // The profile's holder: a contact — or the customer itself (a workspace without Contacts).
+        const rc = profileRun && (contacts.find(c => c.id === profileRun.contactId) || deals.find(d => d.id === profileRun.contactId) || customers.find(c => c.id === profileRun.contactId));
         if(!rc || !profileStore) return null;
         return <ProfileFormFill contact={rc} call={profileRun.call} formId={(profileRun.templateIds || [])[0]}
           onCancel={()=>setProfileRun(null)}

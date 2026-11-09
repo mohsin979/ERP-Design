@@ -890,8 +890,10 @@ function PropertiesSettings({data, setData, records = {}, updateRecords, onWorkf
       <div style={{display:'flex', flexDirection:'column', flex:1, minHeight:0}}>
         {/* Its own store (views saved before these defaults keep theirs elsewhere). */}
         <RecordViewsModule flushTop storeKey="views:prv-all-v3" schema={schema} rows={rows} columns={PROPERTY_COLS.map(c => c.key)}
-          defaultViews={[{id:'prv-all', name:'All Properties'}, {id:'prv-contacts', name:'Contact Properties', filters:objectFilter(objectName(data, 'contacts'))},
-            {id:'prv-deals', name:'Deal Properties', filters:objectFilter(objectName(data, 'deals'))}, {id:'prv-customers', name:'Customer Properties', filters:objectFilter(objectName(data, 'customers'))},
+          defaultViews={[{id:'prv-all', name:'All Properties'},
+            // One per record type the workspace has, by its name (HOF Partners: Lead Properties, Customer Properties).
+            ...[['contacts', 'Contact'], ['deals', 'Deal'], ['customers', 'Customer']].filter(([id]) => data.objects.some(o => o.id === id))
+              .map(([id, one]) => ({id:`prv-${id}`, name:`${typeSingular(id, one)} Properties`, filters:objectFilter(objectName(data, id))})),
             {id:'prv-users', name:'User Properties', filters:objectFilter('Users')}]} focus={focus}
           actions={() => addableHolders.length > 0 && <button onClick={()=>setEditing('new')} title="Add Property" style={iconBtn}><Icon name="plus" size={14} color={T.gray800}/></button>}/>
       </div>
@@ -1053,7 +1055,7 @@ function NewPipelinePanel({data, records = {}, onCancel, onSave}){
           {taken && <div style={{fontSize:12, color:T.red, marginTop:4}}>This record already has a pipeline with this name.</div>}
         </Field>
         <Field label="Record">
-          <Select value={objectId} placeholder="Select record" options={RECORD_OBJECTS.filter(id => pipelineAdminCan(id, 'create')).map(id => ({value:id, label:objectName(data, id)}))}
+          <Select value={objectId} placeholder="Select record" options={RECORD_OBJECTS.filter(id => data.objects.some(o => o.id === id) && pipelineAdminCan(id, 'create')).map(id => ({value:id, label:objectName(data, id)}))}
             onChange={v=>{ setObjectId(v || ''); setPropertyKey(''); if(v === 'contacts') setKind('property'); }}/>
         </Field>
         <Field label="Type">

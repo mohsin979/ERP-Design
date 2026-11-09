@@ -19,11 +19,12 @@
                ends: its data becomes that organization's own.
    People — the HRMS people (`people`), per organization or group.
    CRM    — the whole CRM store: records, activity, quotes, accounting, Customer Profiles,
-            workflow runs, and its configuration, combined (every pipeline, workflow and form from
+            workflow runs and change times (each with its record), and its configuration, combined (every pipeline, workflow and form from
             each organization; a custom property of the same key but a different definition stays
             a separate copy); one Users & Teams for the group. An organization's own CRM roles
-            (users, seats, teams, presets) and page settings stay in its own store while linked
-            and are its own again when it unlinks. */
+            (users, seats, teams, presets), page settings and record structure (its record types,
+            their associations and system properties) stay in its own store while linked and are
+            its own again when it unlinks. */
 
 const readSpace = (key) => { try { const raw = DB.getItem(key); return raw ? JSON.parse(raw) : null; } catch(e){ return null; } };
 const writeSpace = (key, value) => DB.setItem(key, JSON.stringify(value));
@@ -54,6 +55,23 @@ const CRM_OBJECTS = [['contacts', 'contacts', 'contactActivities', null], ['deal
 const PROFILE_SLICES = ['profileFormData', 'profiles', 'profileFacts'];
 // Kept in an organization's own store while its CRM is linked (its roles and its own page settings).
 const CRM_OWN_SETTINGS = ['users', 'seats', 'teams', 'presets', 'people'];
+// Its custom properties renamed while linked (a key the group had) take their own key back, on its records too.
+function restoreKeys(store, org){
+  const st = store.settings || {}, back = (st.properties || []).filter(p => p.org === org && p.renamedFrom);
+  if(!back.length) return store;
+  const out = {...store, settings:{...st, properties:st.properties.map(p => { if(!back.includes(p)) return p; const {renamedFrom, ...x} = p; return {...x, key:renamedFrom}; })}};
+  CRM_OBJECTS.forEach(([o, slice]) => { const ks = back.filter(p => p.objectId === o); if(!ks.length || !out[slice]) return;
+    out[slice] = out[slice].map(r => { const x = {...r}; ks.forEach(p => { if(p.key in x){ x[p.renamedFrom] = x[p.key]; delete x[p.key]; } }); return x; }); });
+  return out;
+}
+/* Its record structure — its record types and their names, their associations and its system
+   properties (HOF Partners' Leads and Customers) — is its own again when it unlinks; the custom
+   properties that go back with it are added to it. */
+const ownStructure = (ownSt, partSt) => {
+  const sys = (ownSt.properties || []).filter(p => p.system);
+  return {objects:ownSt.objects, associations:ownSt.associations || [], noFormProperties:!!ownSt.noFormProperties,
+    properties:[...sys, ...((partSt && partSt.properties) || []).filter(p => !p.system && !sys.some(s => s.objectId === p.objectId && s.key === p.key))]};
+};
 const isRecordSlice = (k) => CRM_OBJECTS.some(([, slice, acts]) => k === slice || k === acts) || PROFILE_SLICES.includes(k) || ['quotes', 'accounting', 'engine', 'forms', 'services'].includes(k);
 const idNum = (id) => Number(String(id).split('-').pop()) || 0;
 const objectOfId = (id) => /^deal-/.test(String(id)) ? 'deals' : /^cust-/.test(String(id)) ? 'customers' : 'contacts';
@@ -88,10 +106,13 @@ function mergeCrmInto(G, B, orgB){
   (sB.properties || []).forEach(p => {
     const same = properties.find(x => x.objectId === p.objectId && x.key === p.key);
     if(!same){ properties.push(p); return; }
-    if(p.system || same.system) return;
+    // A defined (system) property of B: the group's own. A custom one with a key the group has (its
+    // own custom one, or a system one — HOF Partners' Company Name, HOF Migration's Associated
+    // Company): kept as a copy with its own key, given back when B unlinks (`renamedFrom`).
+    if(p.system) return;
     const {org:_a, ...x} = same, {org:_b, ...y} = p;
-    if(JSON.stringify(x) === JSON.stringify(y)) return;
-    const key = `${p.key}_${slug}`; (keyMap[p.objectId] = keyMap[p.objectId] || {})[p.key] = key; properties.push({...p, key});
+    if(!same.system && JSON.stringify(x) === JSON.stringify(y)) return;
+    const key = `${p.key}_${slug}`; (keyMap[p.objectId] = keyMap[p.objectId] || {})[p.key] = key; properties.push({...p, key, renamedFrom:p.key});
   });
   const flows = unionById(sA.workflows, (sB.workflows || []).map(w => replaceIds(w, pipes.map)), slug, true);
   const forms = unionById(sA.profileForms, sB.profileForms, slug, true);
@@ -120,7 +141,7 @@ function mergeCrmInto(G, B, orgB){
     Object.entries(keyMap[o] || {}).forEach(([k, nk]) => { if(k in x){ x[nk] = x[k]; delete x[k]; } });
     return x;
   };
-  const out = {...B, ...G, settings, ids};
+  const out = {...G, settings, ids};
   CRM_OBJECTS.forEach(([o, slice, acts]) => {
     out[slice] = [...(G[slice] || []), ...(B[slice] || []).map(r => remap(o, r))];
     out[acts] = {...(G[acts] || {}), ...Object.fromEntries(Object.entries(B[acts] || {}).map(([k, v]) => [String(mapId(o, o === 'contacts' ? (isNaN(k) ? k : Number(k)) : k)), v]))};
@@ -128,14 +149,18 @@ function mergeCrmInto(G, B, orgB){
   PROFILE_SLICES.forEach(k => { out[k] = {...(G[k] || {}), ...Object.fromEntries(Object.entries(B[k] || {}).map(([id, v]) => [String(mapAny(isNaN(id) ? id : Number(id))), v]))}; });
   const quotes = unionById(G.quotes, (B.quotes || []).map(q => ({...q, recordId:mapId(q.object, q.recordId)})), slug, true);
   out.quotes = quotes.out;
-  out.accounting = unionById(G.accounting, (B.accounting || []).map(s => ({...s, recordId:mapId(s.object, s.recordId), ...(s.quoteId && quotes.map[s.quoteId] ? {quoteId:quotes.map[s.quoteId]} : {})})), slug, true).out;
+  // Payment terms are saved packed (accounting.jsx): read as structures, saved packed again.
+  out.accounting = packPaymentTerms(unionById(unpackPaymentTerms(G.accounting), unpackPaymentTerms(B.accounting).map(s => ({...s, recordId:mapId(s.object, s.recordId),
+    ...(s.quoteId && quotes.map[s.quoteId] ? {quoteId:quotes.map[s.quoteId]} : {})})), slug, true).out);
   out.forms = unionById(G.forms, B.forms, slug, true).out;
   out.services = unionById(G.services, B.services, slug, true).out;
   const eG = G.engine || {}, eB = B.engine || {};
   const remapEv = (x) => ({...x, ...(x.dealId != null ? {dealId:mapAny(x.dealId)} : {}), ...(x.recordId != null ? {recordId:mapAny(x.recordId)} : {})});
-  out.engine = {...eB, ...eG, ...Object.fromEntries(['events', 'runs', 'prompts', 'notifications'].map(k => [k, [...(eG[k] || []), ...(eB[k] || []).map(remapEv)]]))};
-  // Page settings (views, navigation, panels): the group's; any only B has are added.
-  Object.keys(B).forEach(k => { if(!(k in out)) out[k] = B[k]; });
+  // When a record's scoped properties last changed ("<record>|<property>"): both sides', B's following its renumbered records.
+  const scopedB = Object.fromEntries(Object.entries(eB.scopeChangedAt || {}).map(([k, v]) => { const i = k.indexOf('|'); return [`${mapAny(k.slice(0, i))}${k.slice(i)}`, v]; }));
+  out.engine = {...eB, ...eG, scopeChangedAt:{...(eG.scopeChangedAt || {}), ...scopedB}, ...Object.fromEntries(['events', 'runs', 'prompts', 'notifications'].map(k => [k, [...(eG[k] || []), ...(eB[k] || []).map(remapEv)]]))};
+  /* Page settings (views, navigation, panels): the group's only — B's stay in its own store and are
+     its own again when it unlinks (none of them is left behind with the group). */
   return out;
 }
 // What goes back to `org` when it leaves: its records (and what hangs on them) and its configuration.
@@ -164,11 +189,16 @@ function splitCrm(G, org){
     Object.keys(G[acts] || {}).forEach(k => { const target = inPart(o, k) ? part[acts] : rest[acts]; target[k] = add(G[acts], o === 'contacts' ? (isNaN(k) ? k : Number(k)) : k) || G[acts][k]; });
   });
   PROFILE_SLICES.forEach(k => { part[k] = {}; rest[k] = {}; Object.entries(G[k] || {}).forEach(([id, v]) => { (inPart(objectOfId(id), id) ? part[k] : rest[k])[id] = v; }); });
-  ['quotes', 'accounting'].forEach(k => { part[k] = (G[k] || []).filter(x => inPart(x.object, x.recordId)); rest[k] = (G[k] || []).filter(x => !inPart(x.object, x.recordId)); });
+  part.quotes = (G.quotes || []).filter(x => inPart(x.object, x.recordId)); rest.quotes = (G.quotes || []).filter(x => !inPart(x.object, x.recordId));
+  // Payment terms are saved packed (accounting.jsx): each goes with its record.
+  const acc = unpackPaymentTerms(G.accounting);
+  part.accounting = packPaymentTerms(acc.filter(x => inPart(x.object, x.recordId))); rest.accounting = packPaymentTerms(acc.filter(x => !inPart(x.object, x.recordId)));
   ['forms', 'services'].forEach(k => { part[k] = (G[k] || []).filter(x => mine(x) || !x.org); rest[k] = (G[k] || []).filter(x => !mine(x)); });
   const eG = G.engine || {}, onPart = (x) => inPart(objectOfId(x.dealId ?? x.recordId), x.dealId ?? x.recordId);
-  part.engine = {...eG, triggerProgress:{}, ...Object.fromEntries(['events', 'runs', 'prompts', 'notifications'].map(k => [k, (eG[k] || []).filter(onPart)]))};
-  rest.engine = {...eG, ...Object.fromEntries(['events', 'runs', 'prompts', 'notifications'].map(k => [k, (eG[k] || []).filter(x => !onPart(x))]))};
+  // Scoped-property change times ("<record>|<property>"), each with its record.
+  const scoped = Object.entries(eG.scopeChangedAt || {}), scopedOnPart = ([k]) => { const id = k.slice(0, k.indexOf('|')); return inPart(objectOfId(id), id); };
+  part.engine = {...eG, triggerProgress:{}, scopeChangedAt:Object.fromEntries(scoped.filter(scopedOnPart)), ...Object.fromEntries(['events', 'runs', 'prompts', 'notifications'].map(k => [k, (eG[k] || []).filter(onPart)]))};
+  rest.engine = {...eG, scopeChangedAt:Object.fromEntries(scoped.filter(x => !scopedOnPart(x))), ...Object.fromEntries(['events', 'runs', 'prompts', 'notifications'].map(k => [k, (eG[k] || []).filter(x => !onPart(x))]))};
   // Configuration: its own goes with it; what belongs to no organization (system) stays with both.
   const sG = G.settings || {}, cfg = (list, side) => (list || []).filter(x => side ? (mine(x) || !x.org) : !mine(x));
   const cfgKeys = ['pipelines', 'workflows', 'profileForms'];
@@ -183,11 +213,14 @@ const CRM_DATA = {
   readOwn:(ws) => readSpace(ownStoreKey(ws)),
   merge:(parts) => parts.filter(p => p.data).reduce((G, {org, data}) => G ? mergeCrmInto(G, stampStoreOrigins(data, org), org) : stampStoreOrigins(data, org), null),
   split:splitCrm,
-  // Back in its own store: what goes back with it, over its own roles and page settings.
-  writeOwn:(ws, part) => {
-    const own = readSpace(ownStoreKey(ws)) || {};
-    const settings = {...part.settings, ...Object.fromEntries(CRM_OWN_SETTINGS.filter(k => own.settings && own.settings[k]).map(k => [k, own.settings[k]]))};
-    writeSpace(ownStoreKey(ws), {...own, ...part, settings});
+  /* Back in its own store: its records and configuration, with its own roles, record structure and
+     page settings (views, navigation, panels) — the group's page settings only where it has none. */
+  writeOwn:(ws, moving) => {
+    const part = restoreKeys(moving, ws), own = readSpace(ownStoreKey(ws)) || {}, ownSt = own.settings || {};
+    const settings = {...part.settings, ...Object.fromEntries(CRM_OWN_SETTINGS.filter(k => ownSt[k]).map(k => [k, ownSt[k]])),
+      ...(ownSt.objects ? ownStructure(ownSt, part.settings) : {})};
+    const moved = Object.fromEntries(Object.entries(part).filter(([k]) => isRecordSlice(k) || k === 'ids'));
+    writeSpace(ownStoreKey(ws), {...part, ...own, ...moved, settings});
   },
   // Its records moved into the group: its own store keeps only its roles and page settings.
   leaveOwn:(ws) => {

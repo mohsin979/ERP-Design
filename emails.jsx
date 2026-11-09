@@ -21,7 +21,7 @@ const templateText = (tpl, person) => templateBodyOf(tpl).replace(/\{\{\s*first_
    `onClose(result, id, target)`: 'sent' / 'scheduled', the new email's id and its record, or nothing (cancelled). */
 function EmailComposer({object, id, replyTo, forward, onClose, placement = 'inline'}){
   const hub = useRecordHub();
-  const [target, setTarget] = React.useState(() => object && id != null ? {object, id} : {object:object || 'contacts', id:null});
+  const [target, setTarget] = React.useState(() => object && id != null ? {object, id} : {object:object || hubObjects()[0], id:null});
   const fixed = !!(object && id != null);
   const person = target.id != null ? hubRecordPerson(hub, target.object, target.id) : null;
   const templates = emailTemplatesOf(hub.data);

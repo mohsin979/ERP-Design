@@ -82,12 +82,12 @@ function recordStageType(object, record, pipelineId){
   const st = pl && pl.stages.find(s => s.id === record.stage);
   return st ? stageTypeOf(st) : null;
 }
-// The board column's and stage lists' tag for a closed stage (Won / Lost / Undecided).
-const STAGE_TYPE_TONE = {won:{fg:'#1E7A46', bg:'#E7F5EC'}, lost:{fg:'#B42318', bg:'#FDECEA'}, undecided:{fg:'#5B5F6B', bg:'#EEEFF2'}};
+// The board column's mark for a closed stage: a dot — Won green, Lost red, Undecided grey — named on hover.
+const STAGE_TYPE_TONE = {won:'#1E7A46', lost:'#B42318', undecided:'#8E929C'};
 function StageTypeTag({stage, type}){
   const t = type || stageTypeOf(stage), tone = STAGE_TYPE_TONE[t];
   if(!tone) return null;
-  return <span style={{fontSize:11, fontWeight:500, color:tone.fg, background:tone.bg, borderRadius:9999, padding:'1px 7px', flexShrink:0, whiteSpace:'nowrap'}}>{stageTypeLabel(t)}</span>;
+  return <span role="img" aria-label={stageTypeLabel(t)} title={stageTypeLabel(t)} style={{width:8, height:8, borderRadius:9999, background:tone, flexShrink:0, display:'inline-block'}}/>;
 }
 
 /* The record types' names in the open workspace (Settings → Records; app.jsx sets them), for the
@@ -98,6 +98,13 @@ const typePlural = (id, fallback) => OBJECT_NAMES[id] || fallback;
 const typeSingular = (id, fallback) => { const n = OBJECT_NAMES[id]; return n ? n.replace(/ies$/, 'y').replace(/s$/, '') : fallback; };
 // Whether the open workspace has a record type (Accounting has no Contacts) — every type until names are set.
 const workspaceHasType = (id) => !Object.keys(OBJECT_NAMES).length || id in OBJECT_NAMES;
+/* Whose Customer Profile a record has (profiles are kept by this id): a contact's own; a deal's or
+   customer's contact. In a workspace without Contacts (HOF Partners) the lead holds it — a lead's
+   own, and a customer's is its lead's (the customer is made from the lead: one person, one
+   profile); a customer with no lead keeps its own. */
+const profileHolderId = (object, record) => !record ? null : object === 'contacts' ? record.id
+  : record.contactId != null ? record.contactId : workspaceHasType('contacts') ? null
+  : object === 'deals' ? record.id : ((record.dealIds || [])[0] ?? record.id);
 // A record type's noun in running text: "lead", "deal".
 const typeNoun = (id, fallback) => typeSingular(id, fallback).toLowerCase();
 
@@ -637,7 +644,7 @@ function PipelineSelector({pipelineId, onChange, pipelines = CONTACT_PIPELINES})
 
 Object.assign(window, {REMOVED_CONTACT_STAGES, withoutRemovedStage, 
   CONTACT_TYPE_STAGES, PIPELINES, pipelineById, setContactPipelines, stageIdOf, withStage,
-  setObjectNames, typePlural, typeSingular, typeNoun, workspaceHasType,
+  setObjectNames, typePlural, typeSingular, typeNoun, workspaceHasType, profileHolderId,
   STAGE_TYPES, CLOSED_STAGE_TYPES, stageTypeOf, isClosedStage, stageTypeLabel, withStageType, setStagePipelines, recordStageType, StageTypeTag,
   ContactBoard, PipelineSelector, toolbarDropdownBtn, ContactName, ContactCard, COLUMN_BG,
 });

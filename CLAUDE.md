@@ -457,7 +457,7 @@ Do not make product decisions that the product designer has not made. Technical 
 * Each file starts with a header comment describing its scope and decisions. Read it before editing the file and keep it current.
 
 24.2 State and data
-* store.jsx + app.jsx: one store per workspace (`hof-erp-store-v2[:workspaceId]`), saved as a single JSON through `DB` (store.jsx): SQLite via serve.py on localhost, localStorage elsewhere (the hosted copy). A module linked between organizations keeps its data in its group's space instead (moduleLinks.jsx). Owners keep slices via persistSlice / usePersistedState. Record IDs come from per-object counters that only increase.
+* store.jsx + app.jsx: one store per workspace (`hof-erp-store-v2[:workspaceId]`), saved as a single JSON through `DB` (store.jsx): SQLite via serve.py on localhost, localStorage elsewhere (the hosted copy). The open workspace and the sign-in are per browser (localStorage, `BROWSER_KEY`), not in the shared registry. A module linked between organizations keeps its data in its group's space instead (moduleLinks.jsx). Owners keep slices via persistSlice / usePersistedState. Record IDs come from per-object counters that only increase.
 * Owners and other user references are stored as user IDs and resolved through the Users directory.
 * businessData.jsx seeds ~1,000 sample contacts → deals → customers once per workspace, following the data model.
 * recordHub.jsx (`hub`): the single read/write path for records and their activity across workspace-wide pages (Tools, emails, files, quotes). Deal/Customer activity goes through the workflow engine so workflows see it.
@@ -479,7 +479,7 @@ Do not make product decisions that the product designer has not made. Technical 
 * Sales: services.jsx (catalog), quotes.jsx (6-step builder; quotes keep their own copy of services), accounting.jsx (payment structures per record, from a quote or manual).
 * Customer Profile: customerProfile.jsx, profileEngine.jsx (fact library), profileExtractor.jsx (in-browser stand-in for AI extraction).
 * Automation: workflows.jsx (builder: context, triggers, actions), workflowEngine.jsx (triggers, conditions, actions, execution), workflowsPage.jsx, pipelinePanel.jsx.
-* Marketing: forms.jsx. Settings: settings.jsx, usersTeams.jsx (users, seats, teams, permission presets), templates.jsx, playbooks.jsx, cardSettings.jsx, panelSettings.jsx.
+* Marketing: forms.jsx. Settings: settings.jsx, usersTeams.jsx (users, seats, teams, permission presets), goals.jsx (Cash Received targets: company → teams → users, with the dashboard's Target KPI and Goals widget), templates.jsx, playbooks.jsx, cardSettings.jsx, panelSettings.jsx.
 * Shell: app.jsx (header, main screen, store), workspaces.jsx (sign-in, workspace switcher, brand), dashboard.jsx, logos.jsx, moduleIcons.jsx.
 * Not built yet: Case Management, Petition Studio, HRMS.
 

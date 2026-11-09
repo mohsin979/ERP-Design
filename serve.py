@@ -4,7 +4,7 @@ reuse a cached copy, so every reload runs the current .jsx files (no stale-scrip
 It also keeps the prototype's saved data in SQLite (data/hof-erp.sqlite) instead of the browser's
 localStorage — one key-value table, the same keys the app used there (store.jsx `DB`):
   GET    /api/kv          every key and its value, as one JSON object (read once per page load)
-  GET    /api/kv/<key>    one value (404 when there's none)
+  GET    /api/kv/<key>    one value (204, empty, when there's none — a check, not an error)
   PUT    /api/kv/<key>    save a value (the body); X-Ver: a newer version only replaces an older one
   DELETE /api/kv/<key>    remove it (X-Ver as above)
   POST   /api/kv          save several at once (a JSON object of key → value): the first import of
@@ -65,7 +65,7 @@ class NoCache(http.server.SimpleHTTPRequestHandler):
             if key == '':
                 return self._send(200, json.dumps({k: v for k, v in con.execute('SELECT key, value FROM kv')}))
             row = con.execute('SELECT value FROM kv WHERE key = ?', (key,)).fetchone()
-        return self._send(200, row[0], 'text/plain; charset=utf-8') if row else self._send(404, '')
+        return self._send(200, row[0], 'text/plain; charset=utf-8') if row else self._send(204)
 
     def do_PUT(self):
         key = self._key()

@@ -24,10 +24,13 @@ const OVERVIEW_DEFAULT_PINNED = {
 };
 // Pins saved before the one Accounting list: Next Installment is Next Installment Due Date.
 const HIGHLIGHT_RENAMED = {'acc:nextInstallment':'acc:nextInstallmentDueDate'};
-// A record type's Overview settings: saved pins, else the defaults.
+// A record type's Overview settings: saved pins, else the defaults — those the workspace has
+// (HOF Partners has no Canada CRS form and no Customer Status).
 function overviewSettingsOf(hub, object){
   const saved = ((hub && hub.overviewSettings) || {})[object] || {};
-  return {pinned: (saved.pinned || OVERVIEW_DEFAULT_PINNED[object] || []).map(id => HIGHLIGHT_RENAMED[id] || id)};
+  if(saved.pinned) return {pinned:saved.pinned.map(id => HIGHLIGHT_RENAMED[id] || id)};
+  const have = new Set(highlightPool(hub, null, object).flatMap(c => c.groups.flatMap(g => g.items.map(it => it.id))));
+  return {pinned:(OVERVIEW_DEFAULT_PINNED[object] || []).filter(id => have.has(id))};
 }
 
 // The pool, grouped: [{id, label, groups:[{label?, items:[{id, label}]}]}].
@@ -81,7 +84,7 @@ function HighlightCard({id, item, object, ctx}){
   if(kind === 'acc') return <KpiCard label={label} value={kpiText(extendedValueText(id, ctx.record))}/>;
   if(kind === 'pf'){
     const form = (store.forms || []).find(f => f.id === a), field = form && (form.fields || []).find(f => f.id === b);
-    const cid = object === 'contacts' ? ctx.record.id : ctx.record.contactId;
+    const cid = profileHolderId(object, ctx.record);
     if(!field) return <KpiCard label={label} value={notSet()}/>;
     const v = cid != null ? ((((store.data || {})[cid] || {})[a] || {}).values || {})[b] : undefined;
     if(cid == null) return <KpiCard label={label} value={notSet()}/>;

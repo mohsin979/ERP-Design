@@ -4,9 +4,11 @@
    Building one is six steps (QuoteBuilder):
      1. Basics — the record (when not started from one), the recipient's name and email, the
         quote's title, a description (rich text) and how long it's valid;
-     2. Services — a saved quote template, or services added one by one from the catalog (Tools →
-        Services): each with its name, description and milestones (name, description, price —
-        the price editable for this quote); the services subtotal;
+     2. Services — a saved quote template, or services added one by one from the catalog
+        (Settings → Templates → Services), or a new one made here (New service: the Services
+        panel, the service then ready to add): each with its name, description and milestones
+        (name, description, price — the price editable for this quote), or, without milestones,
+        its price; the services subtotal;
      3. Payment Terms — installments (a description and a share of the total), then the discount
         on the services subtotal (a percentage or an AED amount) and 5% VAT on the discounted
         subtotal, down to the total;
@@ -20,7 +22,8 @@
 
    Quote templates (Settings → Templates → Quote Templates, each with a code) hold a configured
    quote's services and milestones, payment terms, discount and VAT, and terms; picking one on
-   the Services step fills those in.
+   the Services step fills those in. The Services and Payment Terms steps (QuoteServicesFields,
+   QuotePaymentFields, quoteConfigChecks) are the template's form too (templates.jsx).
 
    Shown on the record's Quotes tab (RecordQuotesTab) and on Tools → Quotes (QuotesPage), both
    with the same quotation view (QuoteDocument). */
@@ -64,9 +67,9 @@ const quoteNumber = (quotes) => {
   return `Q-${year}-${String(n).padStart(3, '0')}`;
 };
 const fmtQuoteDate = (v) => { if(!v) return ''; const d = typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? new Date(`${v}T00:00:00`) : new Date(v); return d.toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'}); };
-// A service as quoted: its name, description and milestones with their prices.
+// A service as quoted: its name, description and milestones with their prices — or, without milestones, its price.
 const quoteItemOf = (s) => { const svc = withMilestonePrices(s);
-  return {id:qid('qi'), serviceId:s.id, name:s.name, description:s.description || '', milestones:(svc.milestones || []).map(m => ({...m, id:qid('qm'), price:Number(m.price) || 0}))}; };
+  return {id:qid('qi'), serviceId:s.id, name:s.name, description:s.description || '', price:Number(s.price) || 0, milestones:(svc.milestones || []).map(m => ({...m, id:qid('qm'), price:Number(m.price) || 0}))}; };
 // A quote saved before milestone prices: its service price on the first milestone.
 const withItemMilestonePrices = (it) => (it.milestones || []).some(m => m.price != null) || !(it.milestones || []).length ? it
   : {...it, milestones:it.milestones.map((m, i) => ({...m, price: i === 0 ? Number(it.price) || 0 : 0}))};
@@ -153,9 +156,12 @@ function QuoteDocument({quote}){
           <div style={section}>Services</div>
           {(quote.items || []).map(raw => { const it = withItemMilestonePrices(raw); return (
             <div key={it.id} style={{borderTop:`1px solid ${T.attioLine}`, padding:'14px 0', display:'flex', flexDirection:'column', gap:10}}>
-              <div>
-                <div style={{fontSize:14, fontWeight:600, color:T.attioText}}>{it.name}</div>
-                <RichTextView html={it.description} style={{fontSize:12.5, color:T.attioMuted, marginTop:4}}/>
+              <div style={{display:'flex', gap:12, alignItems:'baseline'}}>
+                <div style={{flex:1, minWidth:0}}>
+                  <div style={{fontSize:14, fontWeight:600, color:T.attioText}}>{it.name}</div>
+                  <RichTextView html={it.description} style={{fontSize:12.5, color:T.attioMuted, marginTop:4}}/>
+                </div>
+                {!(it.milestones || []).length && <span style={{...money, fontSize:13, color:T.attioText}}>{fmtMoney(quoteItemTotal(it))}</span>}
               </div>
               {(it.milestones || []).map((m, i) => (
                 <div key={m.id || i} style={{display:'flex', gap:12, alignItems:'baseline', paddingLeft:12, borderLeft:`2px solid ${T.attioLine}`}}>
@@ -236,6 +242,122 @@ function sendQuoteVia(hub, q){
    for its six steps, which run down their own column on the left; the step's content on the
    right — on Basics, under Record Type and the record when it isn't known (Tools → Quotes). */
 const QUOTE_STEPS = ['Basics', 'Services', 'Payment Terms', 'Terms & Conditions', 'E-Signature', 'Branding'];
+const priceOk = (v) => v !== '' && v != null && Number.isFinite(Number(v)) && Number(v) >= 0;
+const itemPricesOk = (it) => (it.milestones || []).length ? it.milestones.every(m => priceOk(m.price)) : priceOk(it.price);
+/* What the Services and Payment Terms steps check (the builder and a quote template): a service
+   or more, every price given; the discount within the subtotal (or 100%); installments, if any,
+   each described and dated, adding up to 100%. */
+function quoteConfigChecks(q){
+  const totals = quoteTotals(q), inst = q.installments || [], d = q.discount || {type:'percent', value:''};
+  const instSum = inst.reduce((s, x) => s + (Number(x.percent) || 0), 0);
+  const discountOk = d.value === '' || (Number(d.value) >= 0 && (d.type === 'amount' ? Number(d.value) <= totals.subtotal : Number(d.value) <= 100));
+  const installmentsOk = !inst.length || (inst.every(x => x.description.trim() && Number(x.percent) > 0 && tentativeOk(x.due)) && Math.abs(instSum - 100) < 0.001);
+  return {totals, itemsOk:(q.items || []).length > 0 && q.items.every(itemPricesOk), discountOk, installmentsOk};
+}
+// The services, installments and discount as saved: prices as numbers, dates normalized.
+const normalizeQuoteConfig = (q) => ({
+  items:(q.items || []).map(it => ({...it, price:Number(it.price) || 0, milestones:(it.milestones || []).map(m => ({...m, price:Number(m.price)}))})),
+  installments:(q.installments || []).map(x => ({...x, description:x.description.trim(), percent:Number(x.percent), due:normalizeDue(x.due)})),
+  discount:{type:(q.discount || {}).type || 'percent', value:Number((q.discount || {}).value) || 0},
+});
+const QUOTE_SECTION = {fontSize:11, fontWeight:600, color:T.attioFaint, textTransform:'uppercase', letterSpacing:.4};
+const QUOTE_MONEY = {fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap'};
+const quoteSumRow = (l, v, strong) => <div style={{display:'flex', justifyContent:'space-between', gap:12, padding:'6px 0', fontSize: strong ? 15 : 13, fontWeight: strong ? 700 : 400, color:T.attioText}}><span>{l}</span><span style={QUOTE_MONEY}>{v}</span></div>;
+
+/* Services — a quote template to start from (`templates` / `onUseTemplate`, the builder only), a
+   service from the catalog (Add), or a new one (New service: the Services panel; the new service
+   is then selected, ready to add); each service added with its milestone prices (or its price)
+   editable here; the services subtotal. */
+function QuoteServicesFields({q, set, checks, templates, onUseTemplate}){
+  const hub = useRecordHub();
+  const [pick, setPick] = React.useState('');
+  const [creating, setCreating] = React.useState(false);
+  const catalog = hub.services.filter(s => !q.items.some(it => it.serviceId === s.id));
+  const label = {fontSize:12.5, color:T.gray600, marginBottom:6, display:'block'};
+  const setMilestone = (iid, mid, p) => set({items:q.items.map(it => it.id !== iid ? it : {...it, milestones:it.milestones.map(m => m.id === mid ? {...m, ...p} : m)})});
+  const setItem = (iid, p) => set({items:q.items.map(it => it.id !== iid ? it : {...it, ...p})});
+  const addService = (id) => { const s = hub.services.find(x => x.id === id); if(s){ set({items:[...q.items, quoteItemOf(s)], ...(q.title === '' ? {title:s.name} : {})}); setPick(''); } };
+  const priceInput = (value, onChange, ariaLabel) => (
+    <div style={{width:150, flexShrink:0, position:'relative'}}>
+      <span style={{position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', fontSize:12, color:T.attioMuted, pointerEvents:'none'}}>{DEAL_CURRENCY}</span>
+      <input value={value} onChange={e=>onChange(e.target.value.replace(/[^0-9.]/g, ''))} inputMode="decimal" aria-label={ariaLabel}
+        style={{...fieldText, paddingLeft:44, textAlign:'right', fontVariantNumeric:'tabular-nums', borderColor: priceOk(value) ? T.borderStrong : T.red}}/>
+    </div>
+  );
+  return (<>
+    <div style={{display:'grid', gridTemplateColumns: templates ? 'minmax(0, 1fr) minmax(0, 1fr)' : 'minmax(0, 1fr)', gap:12, alignItems:'end'}}>
+      {templates && <div style={{minWidth:0}}><label style={label}>Quote template</label>
+        <FormSelect value={q.templateId || ''} placeholder={templates.length ? 'Select a quote template' : 'No quote templates yet'}
+          options={templates.map(t => ({value:t.id, label:`${t.code} · ${t.name}`}))} onChange={onUseTemplate}/></div>}
+      <div style={{display:'flex', alignItems:'flex-end', gap:8, minWidth:0}}>
+        <div style={{flex:1, minWidth:0}}><label style={label}>Add a service</label>
+          <SearchableSelect value={pick} options={catalog.map(s => ({value:s.id, label:`${s.name} · ${fmtMoney(servicePrice(withMilestonePrices(s)), s.currency)}`}))} onChange={setPick}
+            placeholder={hub.services.length ? 'Select a service' : 'No services yet'} searchPlaceholder="Search services"/></div>
+        <StCta label="Add" disabled={!pick} onClick={()=>addService(pick)}/>
+        {templateCan('services', 'create') && <StSecondary label="New service" onClick={()=>setCreating(true)}/>}
+      </div>
+    </div>
+    {q.items.map(it => (
+      <div key={it.id} style={{border:`1px solid ${T.attioLine}`, borderRadius:12, padding:16, display:'flex', flexDirection:'column', gap:12}}>
+        <div style={{display:'flex', alignItems:'flex-start', gap:10}}>
+          <div style={{flex:1, minWidth:0}}>
+            <div style={{fontSize:14.5, fontWeight:600, color:T.attioText}}>{it.name}</div>
+            <RichTextView html={it.description} style={{fontSize:12.5, color:T.attioMuted, marginTop:4}}/>
+          </div>
+          {!it.milestones.length && priceInput(it.price ?? '', (v)=>setItem(it.id, {price:v}), `${it.name} price`)}
+          <button type="button" title="Remove service" onClick={()=>set({items:q.items.filter(x => x.id !== it.id)})} style={{border:'none', background:'transparent', cursor:'pointer', display:'flex', padding:4}}>
+            <Icon name="trash" size={14} color={T.gray600}/></button>
+        </div>
+        {it.milestones.map((m, i) => (
+          <div key={m.id} style={{display:'flex', alignItems:'center', gap:12, padding:'10px 12px', borderRadius:8, background:T.headerBg}}>
+            <span style={{width:20, height:20, borderRadius:9999, background:'#fff', border:`1px solid ${T.attioLine}`, fontSize:11, fontWeight:600, color:T.attioText,
+              display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, fontVariantNumeric:'tabular-nums'}}>{i + 1}</span>
+            <div style={{flex:1, minWidth:0}}>
+              <div style={{fontSize:13, fontWeight:500, color:T.attioText}}>{m.name}</div>
+              {m.description && <div style={{fontSize:12.5, color:T.attioMuted, lineHeight:1.45}}>{m.description}</div>}
+            </div>
+            {priceInput(m.price, (v)=>setMilestone(it.id, m.id, {price:v}), `${m.name} price`)}
+          </div>
+        ))}
+        {it.milestones.length > 0 && <div style={{display:'flex', justifyContent:'flex-end', gap:12, fontSize:12.5, color:T.attioMuted}}>
+          <span>Service total</span><span style={{...QUOTE_MONEY, color:T.attioText, fontWeight:500}}>{fmtMoney(quoteItemTotal(it))}</span>
+        </div>}
+      </div>
+    ))}
+    {!q.items.length && <div style={{fontSize:13, color:T.attioMuted}}>{templates ? 'Add the services this quote is for, or start from a quote template.' : 'Add the services this template is for.'}</div>}
+    {q.items.length > 0 && <div style={{borderTop:`1px solid ${T.border}`, paddingTop:8}}>{quoteSumRow('Services subtotal', fmtMoney(checks.totals.subtotal), true)}</div>}
+    {creating && <ServiceFormPanel zIndex={90} onCancel={()=>setCreating(false)}
+      onSave={(vals)=>{ const rec = newServiceRecord(vals); hub.setServices(ss => [...ss, rec]); setPick(rec.id); setCreating(false); hub.toast('Service created'); }}/>}
+  </>);
+}
+/* Payment Terms — installments, then the discount on the services subtotal (a percentage or an
+   amount) and VAT on the discounted subtotal, down to the total. */
+function QuotePaymentFields({q, set, checks}){
+  const {totals, discountOk} = checks;
+  return (<>
+    <InstallmentsEditor rows={q.installments} onChange={(rows)=>set({installments:rows})} total={totals.total} newId={()=>qid('in')}/>
+    <div style={{borderTop:`1px solid ${T.border}`, margin:'4px -20px 0'}}/>
+    <span style={QUOTE_SECTION}>Discount & tax</span>
+    <div style={{maxWidth:420, width:'100%', alignSelf:'flex-end'}}>
+      {quoteSumRow('Services subtotal', fmtMoney(totals.subtotal))}
+      <div style={{display:'flex', alignItems:'center', gap:10, padding:'6px 0'}}>
+        <span style={{flex:1, fontSize:13, color:T.attioText}}>Discount</span>
+        <div role="radiogroup" aria-label="Discount type" style={{display:'inline-flex', border:`1px solid ${T.borderStrong}`, borderRadius:8, overflow:'hidden'}}>
+          {[['percent', '%'], ['amount', DEAL_CURRENCY]].map(([k, l]) => (
+            <button key={k} type="button" role="radio" aria-checked={q.discount.type === k} onClick={()=>set({discount:{...q.discount, type:k}})}
+              style={{border:'none', cursor:'pointer', padding:'5px 10px', fontSize:12.5, fontWeight:500, fontFamily:'inherit', background: q.discount.type === k ? T.black : 'transparent', color: q.discount.type === k ? '#fff' : T.gray600}}>{l}</button>
+          ))}
+        </div>
+        <input value={q.discount.value} onChange={e=>set({discount:{...q.discount, value:e.target.value.replace(/[^0-9.]/g, '')}})} inputMode="decimal" placeholder="0" aria-label="Discount"
+          style={{...fieldText, width:110, textAlign:'right', fontVariantNumeric:'tabular-nums', borderColor: discountOk ? T.borderStrong : T.red}}/>
+      </div>
+      {quoteSumRow('Discount amount', `− ${fmtMoney(totals.discount)}`)}
+      {quoteSumRow('Discounted subtotal', fmtMoney(totals.discounted))}
+      {quoteSumRow(`VAT (${totals.vatRate}% of the discounted subtotal)`, fmtMoney(totals.vat))}
+      <div style={{borderTop:`2px solid ${T.attioText}`, marginTop:6, paddingTop:4}}>{quoteSumRow('Total', fmtMoney(totals.total), true)}</div>
+    </div>
+  </>);
+}
 const QUOTE_STEPPER_W = 200, QUOTE_PANEL_W = 1160;
 /* `mode` 'new' (`object` / `id`: the record it's for, when started from one) or 'edit' (`id`: the
    quote). Always full height at the CRM's right edge (placement 'fixed'), wherever it's opened.
@@ -245,7 +367,7 @@ function QuoteBuilder({mode, id, object, onClose, placement = 'fixed'}){
   const existing = mode === 'edit' ? hub.quotes.find(q => q.id === id) : null;
   const recordId0 = mode === 'new' && object && id != null ? id : null;
   const [step, setStep] = React.useState(0);
-  const [target, setTarget] = React.useState(() => existing ? {object:existing.object, id:existing.recordId} : {object:object || 'contacts', id:recordId0});
+  const [target, setTarget] = React.useState(() => existing ? {object:existing.object, id:existing.recordId} : {object:object || hubObjects()[0], id:recordId0});
   const fixedRecord = !!existing || (mode === 'new' && object && recordId0 != null);
   const person0 = target.id != null ? hubRecordPerson(hub, target.object, target.id) : null;
   const [q, setQ] = React.useState(() => existing ? {...JSON.parse(JSON.stringify(existing)), description:existing.description || richHtmlOf(existing.notes || ''), notes:undefined,
@@ -262,17 +384,10 @@ function QuoteBuilder({mode, id, object, onClose, placement = 'fixed'}){
   const [templating, setTemplating] = React.useState(null); // Save as template: its name
   const templates = quoteTemplatesOf(hub.data);
   const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((q.recipient.email || '').trim());
-  const priceOk = (v) => v !== '' && v != null && Number.isFinite(Number(v)) && Number(v) >= 0;
-  const totals = quoteTotals({...q, items:q.items});
-  const instSum = q.installments.reduce((s, x) => s + (Number(x.percent) || 0), 0);
-  const discountOk = q.discount.value === '' || (Number(q.discount.value) >= 0 && (q.discount.type === 'amount' ? Number(q.discount.value) <= totals.subtotal : Number(q.discount.value) <= 100));
-  const installmentsOk = !q.installments.length || (q.installments.every(x => x.description.trim() && Number(x.percent) > 0 && tentativeOk(x.due)) && Math.abs(instSum - 100) < 0.001);
-  const stepOk = [target.id != null && !!q.recipient.name.trim() && validEmail, q.items.length > 0 && q.items.every(it => it.milestones.every(m => priceOk(m.price))),
-    discountOk && installmentsOk, true, true, true];
+  const checks = quoteConfigChecks(q), totals = checks.totals;
+  const stepOk = [target.id != null && !!q.recipient.name.trim() && validEmail, checks.itemsOk, checks.discountOk && checks.installmentsOk, true, true, true];
   const draft = () => ({...q, title:q.title.trim() || (q.items[0] && q.items[0].name) || 'Quotation', recipient:{name:q.recipient.name.trim(), email:q.recipient.email.trim()},
-    items:q.items.map(it => ({...it, milestones:it.milestones.map(m => ({...m, price:Number(m.price)}))})),
-    installments:q.installments.map(x => ({...x, description:x.description.trim(), percent:Number(x.percent), due:normalizeDue(x.due)})),
-    discount:{type:q.discount.type, value:Number(q.discount.value) || 0}, object:target.object, recordId:target.id});
+    ...normalizeQuoteConfig(q), object:target.object, recordId:target.id});
   const save = (andSend) => {
     let saved;
     if(existing){ saved = {...existing, ...draft()}; hub.setQuotes(qs => qs.map(x => x.id === existing.id ? saved : x)); }
@@ -297,14 +412,8 @@ function QuoteBuilder({mode, id, object, onClose, placement = 'fixed'}){
     hub.setData(x => ({...x, quoteTemplates:[...quoteTemplatesOf(x), t]}));
     setTemplating(null); hub.toast(`Template ${t.code} saved`);
   };
-  const catalog = hub.services.filter(s => !q.items.some(it => it.serviceId === s.id));
-  const label = {fontSize:12.5, color:T.gray600, marginBottom:6, display:'block'};
-  const section = {fontSize:11, fontWeight:600, color:T.attioFaint, textTransform:'uppercase', letterSpacing:.4};
-  const money = {fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap'};
-  const setMilestone = (iid, mid, p) => set({items:q.items.map(it => it.id !== iid ? it : {...it, milestones:it.milestones.map(m => m.id === mid ? {...m, ...p} : m)})});
-  const setInst = (iid, p) => set({installments:q.installments.map(x => x.id === iid ? {...x, ...p} : x)});
+  const section = QUOTE_SECTION;
   const preview = {...draft(), number: existing ? existing.number : quoteNumber(hub.quotes), createdAt: existing ? existing.createdAt : new Date(), status:'draft'};
-  const sumRow = (l, v, strong) => <div style={{display:'flex', justifyContent:'space-between', gap:12, padding:'6px 0', fontSize: strong ? 15 : 13, fontWeight: strong ? 700 : 400, color:T.attioText}}><span>{l}</span><span style={money}>{v}</span></div>;
   const brand = workspaceBrand();
   const last = QUOTE_STEPS.length - 1;
   return (
@@ -347,76 +456,10 @@ function QuoteBuilder({mode, id, object, onClose, placement = 'fixed'}){
           </>)}
 
           {/* 2 · Services */}
-          {step === 1 && <>
-            <div style={{display:'grid', gridTemplateColumns:'minmax(0, 1fr) minmax(0, 1fr)', gap:12, alignItems:'end'}}>
-              <div style={{minWidth:0}}><label style={label}>Quote template</label>
-                <FormSelect value={q.templateId || ''} placeholder={templates.length ? 'Select a quote template' : 'No quote templates yet'}
-                  options={templates.map(t => ({value:t.id, label:`${t.code} · ${t.name}`}))} onChange={useTemplate}/></div>
-              <div style={{display:'flex', alignItems:'flex-end', gap:8, minWidth:0}}>
-                <div style={{flex:1, minWidth:0}}><label style={label}>Add a service</label>
-                  <SearchableSelect value={pick} options={catalog.map(s => ({value:s.id, label:`${s.name} · ${fmtMoney(servicePrice(withMilestonePrices(s)), s.currency)}`}))} onChange={setPick}
-                    placeholder={hub.services.length ? 'Select a service' : 'No services yet — add them in Tools → Services'} searchPlaceholder="Search services"/></div>
-                <StCta label="Add" disabled={!pick} onClick={()=>{ const s = hub.services.find(x => x.id === pick); if(s){ set({items:[...q.items, quoteItemOf(s)], title:q.title || s.name}); setPick(''); } }}/>
-              </div>
-            </div>
-            {q.items.map(it => (
-              <div key={it.id} style={{border:`1px solid ${T.attioLine}`, borderRadius:12, padding:16, display:'flex', flexDirection:'column', gap:12}}>
-                <div style={{display:'flex', alignItems:'flex-start', gap:10}}>
-                  <div style={{flex:1, minWidth:0}}>
-                    <div style={{fontSize:14.5, fontWeight:600, color:T.attioText}}>{it.name}</div>
-                    <RichTextView html={it.description} style={{fontSize:12.5, color:T.attioMuted, marginTop:4}}/>
-                  </div>
-                  <button type="button" title="Remove service" onClick={()=>set({items:q.items.filter(x => x.id !== it.id)})} style={{border:'none', background:'transparent', cursor:'pointer', display:'flex', padding:4}}>
-                    <Icon name="trash" size={14} color={T.gray600}/></button>
-                </div>
-                {it.milestones.map((m, i) => (
-                  <div key={m.id} style={{display:'flex', alignItems:'center', gap:12, padding:'10px 12px', borderRadius:8, background:T.headerBg}}>
-                    <span style={{width:20, height:20, borderRadius:9999, background:'#fff', border:`1px solid ${T.attioLine}`, fontSize:11, fontWeight:600, color:T.attioText,
-                      display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, fontVariantNumeric:'tabular-nums'}}>{i + 1}</span>
-                    <div style={{flex:1, minWidth:0}}>
-                      <div style={{fontSize:13, fontWeight:500, color:T.attioText}}>{m.name}</div>
-                      {m.description && <div style={{fontSize:12.5, color:T.attioMuted, lineHeight:1.45}}>{m.description}</div>}
-                    </div>
-                    <div style={{width:150, flexShrink:0, position:'relative'}}>
-                      <span style={{position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', fontSize:12, color:T.attioMuted, pointerEvents:'none'}}>{DEAL_CURRENCY}</span>
-                      <input value={m.price} onChange={e=>setMilestone(it.id, m.id, {price:e.target.value.replace(/[^0-9.]/g, '')})} inputMode="decimal" aria-label={`${m.name} price`}
-                        style={{...fieldText, paddingLeft:44, textAlign:'right', fontVariantNumeric:'tabular-nums', borderColor: priceOk(m.price) ? T.borderStrong : T.red}}/>
-                    </div>
-                  </div>
-                ))}
-                <div style={{display:'flex', justifyContent:'flex-end', gap:12, fontSize:12.5, color:T.attioMuted}}>
-                  <span>Service total</span><span style={{...money, color:T.attioText, fontWeight:500}}>{fmtMoney(quoteItemTotal(it))}</span>
-                </div>
-              </div>
-            ))}
-            {!q.items.length && <div style={{fontSize:13, color:T.attioMuted}}>Add the services this quote is for, or start from a quote template.</div>}
-            {q.items.length > 0 && <div style={{borderTop:`1px solid ${T.border}`, paddingTop:8}}>{sumRow('Services subtotal', fmtMoney(totals.subtotal), true)}</div>}
-          </>}
+          {step === 1 && <QuoteServicesFields q={q} set={set} checks={checks} templates={templates} onUseTemplate={useTemplate}/>}
 
           {/* 3 · Payment Terms — installments, then the discount and VAT. */}
-          {step === 2 && <>
-            <InstallmentsEditor rows={q.installments} onChange={(rows)=>set({installments:rows})} total={totals.total} newId={()=>qid('in')}/>
-            <div style={{borderTop:`1px solid ${T.border}`, margin:'4px -20px 0'}}/>
-            <span style={section}>Discount & tax</span>
-            <div style={{maxWidth:420, width:'100%', alignSelf:'flex-end'}}>
-              {sumRow('Services subtotal', fmtMoney(totals.subtotal))}
-              <div style={{display:'flex', alignItems:'center', gap:10, padding:'6px 0'}}>
-                <span style={{flex:1, fontSize:13, color:T.attioText}}>Discount</span>
-                <div role="radiogroup" aria-label="Discount type" style={{display:'inline-flex', border:`1px solid ${T.borderStrong}`, borderRadius:8, overflow:'hidden'}}>
-                  {[['percent', '%'], ['amount', DEAL_CURRENCY]].map(([k, l]) => (
-                    <button key={k} type="button" role="radio" aria-checked={q.discount.type === k} onClick={()=>set({discount:{...q.discount, type:k}})}
-                      style={{border:'none', cursor:'pointer', padding:'5px 10px', fontSize:12.5, fontWeight:500, fontFamily:'inherit', background: q.discount.type === k ? T.black : 'transparent', color: q.discount.type === k ? '#fff' : T.gray600}}>{l}</button>
-                  ))}
-                </div>
-                <input value={q.discount.value} onChange={e=>set({discount:{...q.discount, value:e.target.value.replace(/[^0-9.]/g, '')}})} inputMode="decimal" placeholder="0" aria-label="Discount"
-                  style={{...fieldText, width:110, textAlign:'right', fontVariantNumeric:'tabular-nums', borderColor: discountOk ? T.borderStrong : T.red}}/>
-              </div>
-              {sumRow('Discount amount', `− ${fmtMoney(totals.discount)}`)}
-              {sumRow('Discounted subtotal', fmtMoney(totals.discounted))}
-              {sumRow(`VAT (${totals.vatRate}% of the discounted subtotal)`, fmtMoney(totals.vat))}
-              <div style={{borderTop:`2px solid ${T.attioText}`, marginTop:6, paddingTop:4}}>{sumRow('Total', fmtMoney(totals.total), true)}</div>
-            </div>
-          </>}
+          {step === 2 && <QuotePaymentFields q={q} set={set} checks={checks}/>}
 
           {/* 4 · Terms & Conditions */}
           {step === 3 && <>
@@ -736,6 +779,7 @@ function QuotesPage(){
   const [builder, setBuilder] = React.useState(null);   // {mode:'new'} | {mode:'edit', id}: the creation panel
   const [signing, setSigning] = React.useState(null);
   const [deleting, setDeleting] = React.useState(null);
+  const [newService, setNewService] = React.useState(false);   // New service: the Services panel
   const rows = hub.quotes.map(q => { const r = hubRecord(hub, q.object, q.recordId); return {...q, recordName:r ? r.name : '—', objectLabel:HUB_NOUN[q.object],
     recipientName:q.recipient.name, total:quoteTotal(q), totalText:fmtMoney(quoteTotal(q)), statusLabel:QUOTE_STATUS[q.status].label, createdText:fmtQuoteDate(q.createdAt)}; });
   const open = hub.quotes.find(q => q.id === openId) || null;
@@ -759,8 +803,12 @@ function QuotesPage(){
         defaultViews={[{id:'qv-all', name:'All Quotes', sort:{key:'number', dir:'desc'}},
           {id:'qv-draft', name:'Drafts', filters:{nodes:[{id:'f-qd', kind:'row', joinOp:'AND', prop:'statusLabel', op:'is', value:'Draft', value2:'', values:[]}]}},
           {id:'qv-sent', name:'Sent', filters:{nodes:[{id:'f-qs', kind:'row', joinOp:'AND', prop:'statusLabel', op:'is', value:'Sent', value2:'', values:[]}]}}]}
-        actions={() => <button onClick={()=>{ setOpenId(null); setBuilder({mode:'new'}); }} title="New quote" style={toolbarIconButton}><Icon name="plus" size={14} color={T.gray800}/></button>}
-        overlay={builder ? <QuoteBuilder key={builder.id || 'new'} {...builder} onClose={(saved)=>{ setBuilder(null); if(saved) setOpenId(saved.id); }}/>
+        actions={() => <>
+          {templateCan('services', 'create') && <button onClick={()=>setNewService(true)} style={toolbarButton}><Icon name="services" size={13} color={T.gray600}/> New service</button>}
+          <button onClick={()=>{ setOpenId(null); setBuilder({mode:'new'}); }} title="New quote" style={toolbarIconButton}><Icon name="plus" size={14} color={T.gray800}/></button>
+        </>}
+        overlay={newService ? <ServiceFormPanel onCancel={()=>setNewService(false)} onSave={(vals)=>{ hub.setServices(ss => [...ss, newServiceRecord(vals)]); setNewService(false); hub.toast('Service created'); }}/>
+          : builder ? <QuoteBuilder key={builder.id || 'new'} {...builder} onClose={(saved)=>{ setBuilder(null); if(saved) setOpenId(saved.id); }}/>
           : open && <PageSidePanel width={560} title={`${open.number} · ${open.title}`} subtitle={`${QUOTE_STATUS[open.status].label} · ${fmtMoney(quoteTotal(open))}`}
           onClose={()=>setOpenId(null)} menuItems={quoteActions(hub, open, {onDelete:setDeleting, onEdit:edit, onSign:setSigning})}>
           <div style={{flex:1, overflowY:'auto', padding:'4px 20px 24px'}}><QuoteDocument quote={open}/></div>
@@ -772,4 +820,5 @@ function QuotesPage(){
   );
 }
 
-Object.assign(window, {InstallmentsEditor, tentativeOk, normalizeDue, readUpload, EvidenceFile, fmtTentative, tentativeDate, installmentAmount, SAMPLE_QUOTES, SAMPLE_QUOTE_TEMPLATES, quoteTemplatesOf, quoteTotals, quoteItemTotal, nextTemplateCode, copyItems, QuoteBuilder, QuoteDocument, RecordQuotesTab, QuoteActivityDetail, QuotesPage, quoteTotal, QUOTE_STATUS, sendQuoteVia});
+Object.assign(window, {InstallmentsEditor, tentativeOk, normalizeDue, readUpload, EvidenceFile, fmtTentative, tentativeDate, installmentAmount, SAMPLE_QUOTES, SAMPLE_QUOTE_TEMPLATES, quoteTemplatesOf, quoteTotals, quoteItemTotal, nextTemplateCode, copyItems, QuoteBuilder, QuoteDocument, RecordQuotesTab, QuoteActivityDetail, QuotesPage, quoteTotal, QUOTE_STATUS, sendQuoteVia,
+  QuoteServicesFields, QuotePaymentFields, quoteConfigChecks, normalizeQuoteConfig, QUOTE_SECTION, QUOTE_PANEL_W, QUOTE_VAT_RATE});

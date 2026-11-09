@@ -208,7 +208,7 @@ function PipelinePanel({data, setData, pipelineId, deals = [], onClose, onStub, 
 /* Pipeline ⋯ menu (Pipelines table and the panel): Edit, and Delete — disabled while the
    pipeline has deals (and for property-driven pipelines, whose stages are a property's values). */
 const pipelineDealCount = (pipeline, deals) => (deals || []).filter(d => d.pipeline === pipeline.id).length;
-const pipelineMenuItems = (pipeline, deals, onEdit, noun = 'deal') => {
+const pipelineMenuItems = (pipeline, deals, onEdit, noun = typeNoun('deals', 'deal')) => {
   const n = pipelineDealCount(pipeline, deals);
   const own = pipeline.source === 'record';
   // Settings & Administration → Pipelines: Edit and Delete, for the pipeline's record type.

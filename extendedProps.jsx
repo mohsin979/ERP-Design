@@ -56,7 +56,7 @@ function extendedValue(key, record){
     return Array.isArray(v) ? [...new Set(v)].join(', ') : (v ?? '');
   }
   const [, formId, fieldId] = key.split(':');
-  const cid = object === 'contacts' ? record.id : record.contactId;
+  const cid = profileHolderId(object, record);
   if(cid == null) return '';
   const v = ((((WF_LIVE.profiles || {})[cid] || {})[formId] || {}).values || {})[fieldId];
   return v == null ? '' : v;

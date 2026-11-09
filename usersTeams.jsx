@@ -100,9 +100,10 @@ const PERMISSION_TEMPLATES = [
   // Customer Profile templates (Settings → Customer Profile forms): Create, Edit form fields, Delete.
   {key:'profileForms',   tab:'Customer Profile', noun:'Customer Profile Template', plural:'Customer Profile Templates', rows:['create', 'edit', 'delete']},
 ];
-const ADMIN_TABS = ['Records', 'Properties', 'Pipelines', 'Tools Settings', 'Company Defaults', 'Users & Teams', 'Permission Management'];
+const ADMIN_TABS = ['Records', 'Properties', 'Pipelines', 'Tools Settings', 'Company Defaults', 'Users & Teams', 'Goals', 'Permission Management'];
 const PERMISSION_TABS = {
-  Records: ['Contacts', 'Deals', 'Customers'],
+  // The workspace's record types, by their names (HOF Partners: Leads, Customers).
+  get Records(){ return PERMISSION_OBJECTS.filter(o => workspaceHasType(o.key)).map(o => o.tab); },
   Templates: PERMISSION_TEMPLATES.map(t => t.tab),
   'Settings & Administration': ADMIN_TABS,
 };
@@ -117,11 +118,8 @@ const ADMIN_RECORD_OBJECTS = ['contacts', 'deals', 'customers'];
    Permission Life: until the record is reassigned (the permission goes with the owner), or until
    the record is removed (it stays after the record is reassigned to someone else). All <records>
    needs no Permission Life (`life` null). */
-const PERMISSION_OBJECTS = [
-  {key:'contacts',  tab:'Contacts',  noun:'Contact',  plural:'Contacts'},
-  {key:'deals',     tab:'Deals',     noun:'Deal',     plural:'Deals'},
-  {key:'customers', tab:'Customers', noun:'Customer', plural:'Customers'},
-];
+const permissionObject = (key, one, many) => ({key, get tab(){ return typePlural(key, many); }, get noun(){ return typeSingular(key, one); }, get plural(){ return typePlural(key, many); }});
+const PERMISSION_OBJECTS = [permissionObject('contacts', 'Contact', 'Contacts'), permissionObject('deals', 'Deal', 'Deals'), permissionObject('customers', 'Customer', 'Customers')];
 /* Tools, per Object: the activity a record carries. Each its own table — Create, View, Edit,
    Delete (Calls: Create only — placing a call; the calls themselves are Call Logs). Type and
    Permission Life go by the record the activity is on (its owner). The Tools switch turns every
@@ -208,7 +206,7 @@ function normalizeToolPermissions(t, std){
 /* ── Beyond Records ── one shape for everything with Create / View / Edit / Delete: Create on /
    off; the others with a Type (by owner — the record's for Customer Profile, the creator's for
    Templates, Workflows, Settings → Records, Properties and Pipelines (these two per record type)
-   and Customer Profile forms). Tools Settings and Company Defaults are on / off. Users & Teams and Permission
+   and Customer Profile forms). Tools Settings, Company Defaults and Goals (View / Edit) are on / off. Users & Teams and Permission
    Management go by the user's team: Their Team Users or All Users. `level`: what a matrix saved
    before these existed starts with — 'all' (Super Admin, Admin), else 'view' (View on Customer
    Profile, Templates and Workflows; nothing in Settings & Administration). */
@@ -230,6 +228,7 @@ function extendedPermissions(level){
       tools: Object.fromEntries(ADMIN_TOOL_SETTINGS.map(t => [t.key, flag(all)])),
       defaults: {edit:flag(all)},
       users: {add:flag(all), edit:scopedPermission(all, 'all'), deactivate:scopedPermission(all, 'all'), delete:scopedPermission(all, 'all')},
+      goals: {view:flag(all), edit:flag(all)},
       permissions: {edit:scopedPermission(all, 'all'), assign:scopedPermission(all, 'all')},
     },
   };
@@ -355,7 +354,7 @@ const paymentTermsCan = (action, object, record) => {
   return action === 'create' || !record ? !!p.on : permissionCovers(p, object, record);
 };
 // May see accounting figures at all (any record): cash KPIs and statistics show only then.
-const accountingViewAny = () => !ACCESS_ON() || ADMIN_RECORD_OBJECTS.some(o => paymentTermsCan('view', o));
+const accountingViewAny = () => !ACCESS_ON() || ADMIN_RECORD_OBJECTS.filter(workspaceHasType).some(o => paymentTermsCan('view', o));
 /* Customer Profile Properties — universal, on every record: an answer may be edited (given,
    changed or cleared) when its property is allowed ('all', or '<form>:<field>' in the list). */
 const profilePropCan = (formId, fieldId) => { if(!ACCESS_ON()) return true; const l = ACCESS.perms.profileProps; return !Array.isArray(l) || l.includes(`${formId}:${fieldId}`); };
@@ -374,6 +373,8 @@ const pipelineAdminCan = (object, action, pipeline) => !ACCESS_ON() || ownedCan(
 const profileFormCan = (action, form) => action === 'view' || templateCan('profileForms', action, form);
 const toolSettingCan = (tool) => !ACCESS_ON() || !!((adminOf().tools || {})[tool] || {}).on;
 const defaultsCan = () => !ACCESS_ON() || !!((adminOf().defaults || {}).edit || {}).on;
+// Settings → Goals (goals.jsx): View (the page shows) and Edit (targets can be set).
+const goalsCan = (action) => !ACCESS_ON() || !!((adminOf().goals || {})[action] || {}).on;
 // Users & Teams, Permission Management: Their Team Users (the user is in the actor's team) or All Users.
 const userAdminCan = (section, action, target) => {
   if(!ACCESS_ON()) return true;
@@ -1391,7 +1392,7 @@ const USERS_SCOPES = ['team', 'all'];
 function PermissionMatrixEditor({seat, perms, setPerms, readOnly}){
   const hub = useRecordHub();
   const [category, setCategory] = React.useState('Records');
-  const [tabs, setTabs] = React.useState({Records:'Contacts', Templates:PERMISSION_TEMPLATES[0].tab, 'Settings & Administration':ADMIN_TABS[0]});
+  const [tabs, setTabs] = React.useState({Records:PERMISSION_TABS.Records[0], Templates:PERMISSION_TEMPLATES[0].tab, 'Settings & Administration':ADMIN_TABS[0]});
   const [find, setFind] = React.useState('');
   const def = seatDef(seat);
   const viewOnly = def.extended === 'view';
@@ -1441,14 +1442,15 @@ function PermissionMatrixEditor({seat, perms, setPerms, readOnly}){
     const admin = ['admin'];
     // Records, Properties, Pipelines: by who created each (the shipped ones are the workspace creator's).
     if(tab === 'Records') return section('Settings → Records', crudTable([...admin, 'records'], {key:'recordTypes', noun:'Record', plural:'Records'}, {noLife:true, adminOnly:true}));
-    if(tab === 'Properties') return ADMIN_RECORD_OBJECTS.map(o => section(`${nounOf(o)} Properties`,
+    if(tab === 'Properties') return ADMIN_RECORD_OBJECTS.filter(workspaceHasType).map(o => section(`${nounOf(o)} Properties`,
       <PermissionTable obj={{key:`${o}-properties`, noun:`${nounOf(o)} Property`, plural:`${nounOf(o)} Properties`}} idKey={`admin-properties-${o}`}
         value={getAt([...admin, 'properties', o])} set={(key, patch)=>setAt([...admin, 'properties', o], key, patch)}
         rows={[{key:'add', label:() => 'Add new properties', unscoped:true}, {key:'edit', label:() => 'Edit'}, {key:'delete', label:() => 'Delete'}].map(a => ({...a, noLife:true, allowed:!viewOnly}))}/>));
-    if(tab === 'Pipelines') return ADMIN_RECORD_OBJECTS.map(o => section(`${nounOf(o)} Pipelines`,
+    if(tab === 'Pipelines') return ADMIN_RECORD_OBJECTS.filter(workspaceHasType).map(o => section(`${nounOf(o)} Pipelines`,
       crudTable([...admin, 'pipelines', o], {key:`${o}-pipelines`, noun:`${nounOf(o)} Pipeline`, plural:`${nounOf(o)} Pipelines`}, {noLife:true, adminOnly:true})));
     if(tab === 'Tools Settings') return flatTable([...admin, 'tools'], {key:'tools', plural:'Tools'}, ADMIN_TOOL_SETTINGS.map(t => row(t.key, `Connect ${t.label}`)), 'Settings → Tools');
     if(tab === 'Company Defaults') return flatTable([...admin, 'defaults'], {key:'defaults', plural:'Defaults'}, [row('edit', 'Edit company defaults')], 'Settings → Defaults');
+    if(tab === 'Goals') return flatTable([...admin, 'goals'], {key:'goals', plural:'Goals'}, [row('view', 'View goals'), row('edit', 'Edit goals')], 'Settings → Goals');
     if(tab === 'Users & Teams') return (
       <PermissionTable title="Users" obj={{key:'users', noun:'User', plural:'Users'}} idKey="admin-users" value={getAt([...admin, 'users'])}
         set={(key, patch)=>setAt([...admin, 'users'], key, patch)}

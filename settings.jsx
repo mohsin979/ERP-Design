@@ -79,10 +79,11 @@ const stValidEmail = (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
 
 const stTextB = {fontSize:13, color:T.gray600, lineHeight:1.4};
 
-function StCta({icon, label, onClick, disabled}){
+// Without a label: the icon-only filled button (Add on the Templates tabs), named by `title`.
+function StCta({icon, label, title, onClick, disabled}){
   return (
-    <button onClick={onClick} disabled={disabled} style={{
-      display:'inline-flex', alignItems:'center', justifyContent:'center', gap:6, height:29, padding:'0 12px',
+    <button onClick={onClick} disabled={disabled} title={title} aria-label={title} style={{
+      display:'inline-flex', alignItems:'center', justifyContent:'center', gap:6, height:29, padding: label ? '0 12px' : 0, width: label ? undefined : 29,
       borderRadius:8, border:'none', background: disabled ? T.gray400 : T.black, color:'#fff',
       fontSize:14, fontWeight:500, fontFamily:'inherit', cursor: disabled ? 'default' : 'pointer', flexShrink:0,
     }}>

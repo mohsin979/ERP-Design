@@ -13,8 +13,8 @@
 
 const ACTIVITY_TAB_NOUNS = {activity:'activity', calls:'calls', email:'emails', notes:'notes', tasks:'tasks', meetings:'meetings'};
 const ACTIVITY_FEED_OBJECTS = ['contacts', 'deals', 'customers'];
-// The three feeds of a tab, one per record type.
-const activityFeeds = (tabId) => ACTIVITY_FEED_OBJECTS.map(o => ({id:o, name:`${HUB_NOUN[o]} ${ACTIVITY_TAB_NOUNS[tabId]}`}));
+// The feeds of a tab, one per record type of the workspace (HOF Partners: Lead and Customer).
+const activityFeeds = (tabId) => ACTIVITY_FEED_OBJECTS.filter(workspaceHasType).map(o => ({id:o, name:`${HUB_NOUN[o]} ${ACTIVITY_TAB_NOUNS[tabId]}`}));
 /* A record's associated records of each type (its own type: none — that feed is its own activity). */
 function associatedRecords(hub, object, record){
   const all = (o) => (hub && hub.records[o]) || [];
@@ -98,7 +98,7 @@ function ActivityViewsArea({tabId, store, sources, schema, controls, render}){
   const ownObject = ra ? ra.object : 'contacts';
   const feeds = activityFeeds(tabId);
   const saved = (store.state[tabId] || {}).feed;
-  const feedId = ACTIVITY_FEED_OBJECTS.includes(saved) ? saved : ownObject;
+  const feedId = feeds.some(f => f.id === saved) ? saved : ownObject;
   const own = feedId === ownObject;
   const related = React.useMemo(() => !own && ra ? associatedFeedRows(hub, feedId, associatedRecords(hub, ownObject, ra.record)[feedId]) : null,
     [own, feedId, ownObject, ra && ra.record, hub && hub.records, hub && hub.activities]);

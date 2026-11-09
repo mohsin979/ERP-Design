@@ -262,7 +262,7 @@ function FormEditorPanel({form, onCancel, onSave}){
   const hub = useRecordHub();
   const [name, setName] = React.useState(form ? form.name : '');
   const [description, setDescription] = React.useState(form ? form.description || '' : '');
-  const [target, setTarget] = React.useState((form && form.target) || 'contacts');
+  const [target, setTarget] = React.useState((form && form.target) || FORM_TARGETS.find(workspaceHasType));
   const [fields, setFields] = React.useState(() => ((form && form.fields) || []).map(f => ({...f, type:formFieldType(f.type), options:[...(f.options || [])]})));
   const setField = (id, p) => setFields(fs => fs.map(f => f.id === id ? {...f, ...p} : f));
   // Changing the record type clears mappings it doesn't have.
@@ -301,7 +301,7 @@ function FormEditorPanel({form, onCancel, onSave}){
         <div style={{display:'flex', flexDirection:'column', gap:8}}>
           <span style={label}>Creates</span>
           <div role="radiogroup" aria-label="Record type" style={{display:'inline-flex', alignSelf:'flex-start', border:`1px solid ${T.borderStrong}`, borderRadius:8, overflow:'hidden'}}>
-            {FORM_TARGETS.map(o => <button key={o} type="button" role="radio" aria-checked={target === o} onClick={()=>pickTarget(o)}
+            {FORM_TARGETS.filter(workspaceHasType).map(o => <button key={o} type="button" role="radio" aria-checked={target === o} onClick={()=>pickTarget(o)}
               style={{border:'none', cursor:'pointer', padding:'5px 12px', fontSize:12.5, fontWeight:500, fontFamily:'inherit',
                 background: target === o ? T.black : 'transparent', color: target === o ? '#fff' : T.gray600}}>{HUB_NOUN[o]}</button>)}
           </div>
@@ -589,14 +589,13 @@ function FormsPage(){
    with SQLite), else when it next opens — through the same submission path (submitFormValues). */
 const FORM_INBOX_KEY = (wsId) => `hof-erp-form-inbox:${wsId}`;
 const formPublicRoute = (hash) => { const m = /^#f~([A-Za-z0-9._-]+)~([A-Za-z0-9._-]+)$/.exec(hash || ''); return m ? {wsId:m[1], formId:m[2]} : null; };
-const workspaceStoreKey = (wsId) => wsId === HOF_MIGRATION_WS ? 'hof-erp-store-v2' : `hof-erp-store-v2:${wsId}`;
 const readFormInbox = (wsId) => { try { return JSON.parse(DB.fresh(FORM_INBOX_KEY(wsId)) || '[]', (k, v) => typeof v === 'string' && ISO_DATE_RE.test(v) ? new Date(v) : v) || []; } catch(e){ return []; } };
 const writeFormInbox = (wsId, list) => { try { DB.setItem(FORM_INBOX_KEY(wsId), JSON.stringify(list)); DB.flush(); return true; } catch(e){ return false; } };
-// The workspace's forms as last saved (the sample workspace before it saved any: its sample forms).
+// The workspace's forms as last saved — in the store its CRM uses, its group's when linked (the sample workspace before it saved any: its sample forms).
 function publicWorkspaceForms(wsId){
   const ws = WORKSPACE_REGISTRY.workspaces.find(w => w.id === wsId);
   if(!ws) return null;
-  try { const raw = DB.getItem(workspaceStoreKey(wsId)), saved = raw ? JSON.parse(raw) : null;
+  try { const raw = DB.getItem(crmStoreKey(wsId)), saved = raw ? JSON.parse(raw) : null;
     if(saved && Array.isArray(saved.forms)) return {ws, forms:saved.forms}; } catch(e){}
   return {ws, forms: ws.sample ? SAMPLE_FORMS() : []};
 }

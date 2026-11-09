@@ -549,8 +549,10 @@ function EmptyCrmCanvas({activeId, label:objectLabel}){
 // Australia and Canada were briefly two pipelines; saved ones become the one pipeline.
 const SPLIT_AC_PIPELINES = ['australia', 'canada'];
 /* Sample records saved before a property was defined get its mocked value — only where they have
-   none. A deal's Actual Close Date only while it's still in the sample's stage. */
+   none. A deal's Actual Close Date only while it's still in the sample's stage. Only in the sample
+   workspace (another's records share the sample's IDs, not its data). */
 const withSampleValues = (list, samples, keys) => {
+  if(!SEED) return list;
   const byId = new Map(samples.map(x => [x.id, x]));
   return list.map(r => {
     const x = byId.get(r.id);
@@ -664,7 +666,7 @@ function App(){
   const [contactActivities, setContactActivities] = usePersistedState('contactActivities', () => SEED ? withUpcomingMeetings(withSampleAttachments(generateActivities(SAMPLE_CONTACTS)), 9) : {},
     (m) => withTaskStatuses(withBizMap(m, 'contactActivities'), prevSettings.taskPipelines));
   // Sample calls, emails and notes for Run Customer Profile to read (a few sample contacts; added once).
-  React.useEffect(() => { setContactActivities(m => withSampleProfileSources(m, contacts)); }, []);
+  React.useEffect(() => { if(SEED) setContactActivities(m => withSampleProfileSources(m, contacts)); }, []);
   /* Customer records and their activity — here so contacts and deals can create customers and show
      theirs. A customer's contact (`contactId`) and deals (`dealIds`) are optional links. Sample
      customers are added once (deleted ones stay deleted); customers saved in the earlier shape are
@@ -708,9 +710,10 @@ function App(){
     return list.some(f => f.id === own) ? own : (list[0] || {}).id; };
   const setProfileType = (cid, formId) => setProfileFormData(m => ({...m, [cid]:{...(m[cid] || {}), _type:formId}}));
   // Sample profiles for a few sample people (added once).
-  React.useEffect(() => { setProfileFormData(m => withSampleProfileData(m, contacts)); }, []);
+  React.useEffect(() => { if(SEED) setProfileFormData(m => withSampleProfileData(m, contacts)); }, []);
   const profileFormsStore = {forms:settingsData.profileForms || [], data:profileFormData, save:saveProfileForm, saveField:saveProfileField, typeOf:profileTypeOf, setType:setProfileType,
-    activitiesOf:(cid) => contactActivities[cid] || []};
+    // The profile holder's activity: a contact's — a lead's or customer's own where it holds the profile (HOF Partners).
+    activitiesOf:(cid) => contactActivities[cid] || dealActivities[cid] || customerActivities[cid] || []};
   // `profiles`: what each person has filled in (Create Deal offers a profile when there's none).
   const profileStore = {profiles:profileFormData, facts:profileFacts};
   /* Permissions apply to the signed-in user. Registered for every permission check (usersTeams.jsx)

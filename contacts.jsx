@@ -415,13 +415,14 @@ function applyFilters(list, filters, props){
    ("Deal · Deal Stage"), `field`: the property on the associated records. `hasLabel` adds a
    Yes / No filter on whether a record has any associated records ("Has associated deals").
    Rows to filter carry their associated records in `_assoc` (withAssocRecords). */
-const assocFilterSchema = (object, noun, schema, hasLabel) => {
+// `plural`: the associated type's name on its Filters pane (its key, `object`, when not given).
+const assocFilterSchema = (object, noun, schema, hasLabel, plural) => {
   const own = (schema.filterProps || []).filter(p => !p.assoc && !p.section);
   const hasKey = `assoc:${object}:has`;
   return {
     filterProps:[
-      ...(hasLabel ? [{key:hasKey, label:hasLabel, type:'select', ops:['is'], assoc:object, assocNoun:noun, assocHas:true}] : []),
-      ...own.map(p => ({...p, key:`assoc:${object}:${p.key}`, assoc:object, assocNoun:noun, field:p.key})),
+      ...(hasLabel ? [{key:hasKey, label:hasLabel, type:'select', ops:['is'], assoc:object, assocNoun:noun, assocPlural:plural, assocHas:true}] : []),
+      ...own.map(p => ({...p, key:`assoc:${object}:${p.key}`, assoc:object, assocNoun:noun, assocPlural:plural, field:p.key})),
     ],
     selectValues:{...(hasLabel ? {[hasKey]:['Yes', 'No']} : {}), ...Object.fromEntries(own.map(p => [`assoc:${object}:${p.key}`, (schema.selectValues || {})[p.key] || []]))},
   };
@@ -582,7 +583,7 @@ function FilterByField({value, autoOpen, onPick}){
         ) : pane === 'assoc' ? (
           <>
             {back('root')}
-            {assocObjects.length ? assocObjects.map(o => drill(o, o)) : (
+            {assocObjects.length ? assocObjects.map(o => drill((filterProps.find(p => p.assoc === o) || {}).assocPlural || o, o)) : (
               <div style={{padding:'10px', fontSize:12.5, color:T.gray400, lineHeight:1.5}}>
                 No associated objects defined yet.
               </div>

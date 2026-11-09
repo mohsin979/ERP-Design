@@ -14,10 +14,12 @@ const RecordHubCtx = React.createContext(null);
 const useRecordHub = () => React.useContext(RecordHubCtx);
 
 const HUB_OBJECTS = ['contacts', 'deals', 'customers'];
-const HUB_NOUN = {contacts:'Contact', deals:'Deal', customers:'Customer'};
+// The open workspace's record types (HOF Partners: Leads and Customers — no Contacts), each by its name there.
+const hubObjects = () => HUB_OBJECTS.filter(workspaceHasType);
+const HUB_NOUN = {get contacts(){ return typeSingular('contacts', 'Contact'); }, get deals(){ return typeSingular('deals', 'Deal'); }, get customers(){ return typeSingular('customers', 'Customer'); }};
 
 const hubRecord = (hub, object, id) => hub && ((hub.records[object] || []).find(r => r.id === id) || null);
-// Who a record's email and calls reach: the contact itself; a deal's contact; a customer's own details, else its contact's.
+// Who a record's email and calls reach: the contact itself; a deal's contact, else its own details; a customer's own details, else its contact's.
 function hubRecordPerson(hub, object, id){
   const r = hubRecord(hub, object, id);
   if(!r) return null;
@@ -25,7 +27,7 @@ function hubRecordPerson(hub, object, id){
   if(object === 'contacts') return {name:r.name, email:r.email || '', phone:r.phone || ''};
   const c = contactOf(r.contactId);
   if(object === 'customers') return {name:r.name, email:r.email || (c && c.email) || '', phone:r.phone || (c && c.phone) || ''};
-  return {name: c ? c.name : r.name, email:(c && c.email) || '', phone:(c && c.phone) || ''};
+  return {name: c ? c.name : r.name, email:(c && c.email) || r.email || '', phone:(c && c.phone) || r.phone || ''};
 }
 // Every activity of the workspace (of one type), with the record it's on.
 const hubActivities = (hub, type) => HUB_OBJECTS.flatMap(object => Object.entries((hub && hub.activities[object]) || {}).flatMap(([rid, list]) => {
@@ -47,11 +49,12 @@ const ActivityDeleteCtx = React.createContext(null);
 const useActivityDelete = () => React.useContext(ActivityDeleteCtx);
 const hubRecordOptions = (hub, object) => ((hub && hub.records[object]) || []).map(r => ({value:r.id, label:r.name}));
 
-/* A record to attach something to: the Object (Contact / Deal / Customer), then the record.
-   `value`: {object, id}. */
-function RecordPicker({value, onChange, objects = HUB_OBJECTS}){
+/* A record to attach something to: the Object (Contact / Deal / Customer — the workspace's), then
+   the record. `value`: {object, id}. */
+function RecordPicker({value, onChange, objects: given}){
   const hub = useRecordHub();
-  const v = value || {object:objects[0], id:null};
+  const objects = (given || HUB_OBJECTS).filter(workspaceHasType);
+  const v = value && objects.includes(value.object) ? value : {object:objects[0], id:null};
   const seg = (o) => (
     <button key={o} type="button" role="radio" aria-checked={v.object === o} onClick={()=>onChange({object:o, id:null})}
       style={{border:'none', cursor:'pointer', padding:'5px 12px', fontSize:12.5, fontWeight:500, fontFamily:'inherit',
@@ -111,4 +114,4 @@ function RecordHubProvider({value, children}){
   );
 }
 
-Object.assign(window, {hubFindActivity, ActivityDeleteCtx, useActivityDelete, RecordHubCtx, useRecordHub, HUB_OBJECTS, HUB_NOUN, hubRecord, hubRecordPerson, hubActivities, hubRecordOptions, RecordPicker, HubRecordLink, RecordHubProvider});
+Object.assign(window, {hubFindActivity, ActivityDeleteCtx, useActivityDelete, RecordHubCtx, useRecordHub, HUB_OBJECTS, hubObjects, HUB_NOUN, hubRecord, hubRecordPerson, hubActivities, hubRecordOptions, RecordPicker, HubRecordLink, RecordHubProvider});

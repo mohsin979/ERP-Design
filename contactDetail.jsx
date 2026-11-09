@@ -663,7 +663,7 @@ function OwnerProfilePanel({name, onClose, user: userProp, editable, onSaveProfi
                   : <span style={{fontSize:13, color: shown[p.key] ? T.attioText : T.attioFaint, minWidth:0, overflowWrap:'anywhere'}}>{shown[p.key] || '—'}</span>}
               </div>
             ))}
-            <UserStatistics person={person} filter={filter} setFilter={setFilter} properties={props} values={shown} onTrend={setTrend}/>
+            <UserStatistics person={person} userId={user ? user.id : name} filter={filter} setFilter={setFilter} properties={props} values={shown} onTrend={setTrend}/>
           </>}
       </div>
     </div>

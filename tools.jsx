@@ -57,7 +57,7 @@ const TOOL_PAGES = {
 function ToolPanel({page, entry, creating, onClose, onCreated}){
   const hub = useRecordHub();
   const team = (hub.data.users || []).filter(u => u.status === 'Activated').map(u => u.name);
-  const [target, setTarget] = React.useState({object:'contacts', id:null});
+  const [target, setTarget] = React.useState({object:hubObjects()[0], id:null});
   const object = entry ? entry.object : target.object, recordId = entry ? entry.recordId : target.id;
   const record = recordId != null ? hubRecord(hub, object, recordId) : null;
   const view = record && {...record, owner:userLabel(record.owner) || record.owner};
@@ -150,14 +150,15 @@ function ToolActivityPage({pageId}){
    Filters; the items on the left, each identified by its Contact, Deal or Customer; the selected
    item on the right in its usual detail (Edit, comments, Reply, ⋯ Delete). Adding asks for the
    record first, then opens the item's usual form (Email: the composer). */
-const RECORD_FEEDS = (noun) => [{id:'all', name:`All ${noun}s`}, {id:'contacts', name:`Contact ${noun}s`}, {id:'deals', name:`Deal ${noun}s`}, {id:'customers', name:`Customer ${noun}s`}];
+// The workspace's record types only, by their names (HOF Partners: Lead calls, Customer calls).
+const RECORD_FEEDS = (noun) => [{id:'all', name:`All ${noun}s`}, ...hubObjects().map(o => ({id:o, name:`${HUB_NOUN[o]} ${noun}s`}))];
 const byRecordFeed = (e, feed) => feed === 'all' || e.object === feed;
 // Emails' and Meetings' second level: by the record each is on.
-const SECOND_LEVEL = (plural) => [{id:'all', name:`All ${plural}`}, ...['Contact', 'Deal', 'Customer'].map((n, i) => ({id:['contacts', 'deals', 'customers'][i], name:`${n} ${plural}`}))];
+const SECOND_LEVEL = (plural) => [{id:'all', name:`All ${plural}`}, ...hubObjects().map(o => ({id:o, name:`${HUB_NOUN[o]} ${plural}`}))];
 const emailFolder = (a) => a.status === 'scheduled' ? 'scheduled' : a.direction === 'received' ? 'inbox' : 'sent';
 const meetingWhen = (a) => isUpcoming(a) ? 'upcoming' : 'past';
 const LIST_PAGES = {
-  calls: {type:'call', noun:'call', addTab:'calls', feeds:RECORD_FEEDS('call'), inFeed:byRecordFeed, showDirection:true,
+  calls: {type:'call', noun:'call', addTab:'calls', get feeds(){ return RECORD_FEEDS('call'); }, inFeed:byRecordFeed, showDirection:true,
     line:(a) => callResult(a), added:'Call logged', search:(a) => [a.outcome, byName(a), a.body],
         fields:(a) => ({callType:isInboundCall(a) ? 'Inbound' : 'Outbound', logged:a.logged ? 'Call log' : 'Call', outcome:a.outcome || ''}),
     filters:[{key:'callType', label:'Call Type', type:'select', ops:['is', 'isNot'], values:['Inbound', 'Outbound']},
@@ -165,18 +166,18 @@ const LIST_PAGES = {
       {key:'outcome', label:'Call Outcome', type:'select', ops:['is', 'isNot', 'isAnyOf']}],
     byLabel:'Call By', dateLabel:'Call Date'},
   // `tabs`: Inbox / Sent / Scheduled as the tab strip, the record types as the pills (as Meetings).
-  emails: {type:'email', noun:'email', addTab:'email', feeds:EMAIL_FOLDER_TABS, secondary:SECOND_LEVEL('Emails'), tabs:true,
+  emails: {type:'email', noun:'email', addTab:'email', feeds:EMAIL_FOLDER_TABS, get secondary(){ return SECOND_LEVEL('Emails'); }, tabs:true,
     inFeed:(e, feed) => emailFolder(e.act) === feed, line:(a) => a.title || '(No subject)',
     when:(a) => a.status === 'scheduled' ? new Date(a.scheduledFor || a.at) : new Date(a.at),
     fields:() => ({}), filters:[], byRecordType:true, search:(a) => [a.title, byName(a), a.body, ...(a.to || [])], byLabel:'From / By', dateLabel:'Email Date'},
   // `tabs`: Upcoming / Past as the tab strip (Settings → Templates'), the record types as the pills.
-  meetings: {type:'meeting', noun:'meeting', addTab:'meetings', feeds:MEETING_TIME_TABS, secondary:SECOND_LEVEL('Meetings'), tabs:true,
+  meetings: {type:'meeting', noun:'meeting', addTab:'meetings', feeds:MEETING_TIME_TABS, get secondary(){ return SECOND_LEVEL('Meetings'); }, tabs:true,
     inFeed:(e, feed) => meetingWhen(e.act) === feed, line:(a) => a.title || 'Meeting',
     when:(a) => new Date(a.scheduledFor || a.at), added:'Meeting added', byRecordType:true, search:(a) => [a.title, byName(a), a.body, a.platform],
     fields:(a) => ({meetingType:a.logged ? 'Meeting log' : 'Meeting', platform:a.platform || ''}),
     filters:[{key:'meetingType', label:'Meeting Type', type:'select', ops:['is', 'isNot'], values:['Meeting', 'Meeting log']}, {key:'platform', label:'Platform', type:'select', ops:['is', 'isNot', 'isAnyOf']}],
     byLabel:'Organiser', dateLabel:'Meeting Date'},
-  notes: {type:'note', noun:'note', addTab:'notes', feeds:RECORD_FEEDS('note'), inFeed:byRecordFeed, line:(a) => richTextPlain(a.body) || 'Note',
+  notes: {type:'note', noun:'note', addTab:'notes', get feeds(){ return RECORD_FEEDS('note'); }, inFeed:byRecordFeed, line:(a) => richTextPlain(a.body) || 'Note',
     added:'Note added', search:(a) => [byName(a), richTextPlain(a.body)], fields:(a) => ({linked:a.callId ? 'Call' : a.meetingId ? 'Meeting' : 'None'}),
     filters:[{key:'linked', label:'Linked To', type:'select', ops:['is', 'isNot'], values:['Call', 'Meeting', 'None']}], byLabel:'Note By', dateLabel:'Note Date'},
 };
@@ -205,7 +206,7 @@ function visibilityScope(type){
   if(!ACCESS.user || !ACCESS.perms) return 'all';
   const tool = VISIBILITY_TOOL[type];
   let best = -1;
-  ['contacts', 'deals', 'customers'].forEach(o => {
+  hubObjects().forEach(o => {
     const p = ACCESS.perms[o];
     if(!p || !p.enabled) return;
     const v = tool ? (p.tools && p.tools.enabled && p.tools[tool] && p.tools[tool].view) : p.view;
@@ -357,7 +358,7 @@ function ListToolItem({page, e, selected, onSelect, personLed}){
    'Task', 'Schedule Meeting', 'Log Meeting'. `onDone(id, target)`. */
 function NewActivityPanel({what, initialObject, team, prefill, onDone}){
   const hub = useRecordHub();
-  const [target, setTarget] = React.useState({object:initialObject || 'contacts', id:null});
+  const [target, setTarget] = React.useState({object:initialObject || hubObjects()[0], id:null});
   const record = target.id != null ? hubRecord(hub, target.object, target.id) : null;
   const view = record && {...record, owner:userLabel(record.owner) || record.owner};
   const onAdd = (a) => record && hub.add(target.object, target.id, a);
@@ -414,7 +415,7 @@ function ListToolPage({pageId}){
   const pick = (what) => {
     if(what === 'Start Meeting') return setStub('Start Meeting');   // a live meeting: not defined yet
     setCompose(null); setAdding(null);
-    if(what === 'Email') return setCompose({object: ['contacts', 'deals', 'customers'].includes(scope) ? scope : ['contacts', 'deals', 'customers'].includes(feed) ? feed : undefined});
+    if(what === 'Email') return setCompose({object: hubObjects().includes(scope) ? scope : hubObjects().includes(feed) ? feed : undefined});
     setAdding(what);
   };
   const view = (r) => r && {...r, owner:userLabel(r.owner) || r.owner};
@@ -450,7 +451,7 @@ function ListToolPage({pageId}){
             ) : null}
           </div>
           {/* New items: the creation side panel over this area (record first). */}
-          {adding && <NewActivityPanel key={adding} what={adding} initialObject={['contacts', 'deals', 'customers'].includes(scope) ? scope : ['contacts', 'deals', 'customers'].includes(feed) ? feed : 'contacts'} team={team} onDone={done}/>}
+          {adding && <NewActivityPanel key={adding} what={adding} initialObject={hubObjects().includes(scope) ? scope : hubObjects().includes(feed) ? feed : hubObjects()[0]} team={team} onDone={done}/>}
           {compose && <EmailComposer key={compose.replyTo ? `re-${compose.replyTo.id}` : compose.forward ? `fw-${compose.forward.id}` : 'new'} {...compose} onClose={emailDone}/>}
         </div>
         </ComposeHostCtx.Provider>
@@ -467,7 +468,7 @@ const CallsToolPage = () => <ListToolPage pageId="calls"/>;
    completes it; to In Progress reopens it — asking for a new due date when it's past due; nothing
    is dragged into Overdue (it's worked out). Opening a card shows the task's usual detail (Edit,
    assignment, due date, ⋯ Delete) and its record; Add task asks for the record, then the form. */
-const TASK_FEEDS = RECORD_FEEDS('task');
+const TASK_FEEDS = () => RECORD_FEEDS('task');
 function TaskCard({e, onOpen, onDragStart, dragging, showAssignee}){
   const a = e.act;
   // The board card's property rows: label on the left, value on the right.
@@ -576,7 +577,7 @@ function TasksBoardPage(){
   return (
     <RecordSchema.Provider value={schema}>
       <div style={{flex:1, minWidth:0, minHeight:0, display:'flex', flexDirection:'column', overflow:'hidden', background:'#fff', position:'relative'}}>
-        <RecordToolbar inset="page" views={TASK_FEEDS} activeViewId={feed} onSelectView={setFeed}
+        <RecordToolbar inset="page" views={TASK_FEEDS()} activeViewId={feed} onSelectView={setFeed}
           controls={<div style={{display:'flex', alignItems:'center', gap:8}}>
             <PipelineSelector pipelines={pipelines.map(p => ({id:p.id, label:p.name}))} pipelineId={pipeline.id} onChange={setPipelineId}/>
             <VisibilitySelector vis={vis} noun="Task"/><ActivityAddButton iconOnly tabId="tasks" onPick={()=>{ setPanel(null); setAdding(true); }}/></div>}
@@ -586,7 +587,7 @@ function TasksBoardPage(){
         <TaskStatusBoard entries={shown} showAssignee={vis.personLed} onUpdate={(e, patch)=>hub.update(e.object, e.recordId, e.act.id, patch)}
           onOpen={(e)=>setPanel({ref:{object:e.object, recordId:e.recordId, actId:e.act.id}})}/>
         {/* New task: the creation side panel over the board (record first). */}
-        {adding && <NewActivityPanel what="Task" initialObject={['contacts', 'deals', 'customers'].includes(feed) ? feed : 'contacts'} team={team} prefill={{pipelineId:pipeline.id}}
+        {adding && <NewActivityPanel what="Task" initialObject={hubObjects().includes(feed) ? feed : hubObjects()[0]} team={team} prefill={{pipelineId:pipeline.id}}
           onDone={(id, target)=>{ setAdding(false); if(id){ setPanel({ref:{object:target.object, recordId:target.id, actId:id}}); hub.toast('Task added'); } }}/>}
         </div>
         {panel && (

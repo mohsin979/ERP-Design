@@ -3,11 +3,14 @@
    deletes each service (by who created it — the sample services are no one's).
 
    The workspace's service catalog — what quotations are built from (quotes.jsx). A service has
-   a name, a description (rich text, richText.jsx) and its milestones: the stages the service is
-   delivered in, each with a name, a description and a price (AED, as every deal). The
-   service's price is the sum of its milestones'. Services are created, viewed, edited and deleted here; a quotation keeps its own
-   copy of a service as it was quoted, so changing or deleting a service never changes a quote
-   already made. */
+   a name, a description (rich text, richText.jsx) and either its milestones — Enable milestones:
+   the stages the service is delivered in, each with a name, a description and a price (AED, as
+   every deal), the service's price their sum — or, milestones off, one price. Services are
+   created, viewed, edited and deleted here, and created from the quote builder and the Quotes
+   page too (the same panel); a quotation keeps its own copy of a service as it was quoted, so
+   changing or deleting a service never changes a quote already made.
+   Detail panels (DetailPanel, PanelFields) — every template's: the title, a separator, the
+   structured information as label | value rows, then the content. */
 
 const SAMPLE_SERVICES = () => {
   const ms = (pairs) => pairs.map(([name, description], i) => ({id:`ms-${i + 1}`, name, description}));
@@ -57,13 +60,37 @@ const richPlain = (html) => { const d = document.createElement('div'); d.innerHT
 const serviceRow = (s) => ({...s, createdBy:creatorOf(s), price:servicePrice(s), priceText:fmtMoney(servicePrice(s), s.currency), milestoneCount:(s.milestones || []).length, description:richPlain(s.description)});
 
 /* A side panel over the page (a service, a quotation, an activity on the Tools pages): the
-   Contact side panel's header, its content scrolling below. */
-function PageSidePanel({title, subtitle, onClose, menuItems, children, width = 460}){
+   Contact side panel's header, its content scrolling below. `divided`: a separator under the header. */
+function PageSidePanel({title, subtitle, onClose, menuItems, children, width = 460, divided}){
   return (
     <ContentSidePanel width={width} zIndex={75} style={{background:'#fff', borderLeft:`1px solid ${T.border}`, boxShadow:'-8px 0 24px rgba(16,24,40,.08)', display:'flex', flexDirection:'column'}}>
-      <SidePanelHeader title={title} subtitle={subtitle} onClose={onClose} menuItems={menuItems}/>
+      <div style={divided ? {borderBottom:`1px solid ${T.border}`, flexShrink:0} : {flexShrink:0}}><SidePanelHeader title={title} subtitle={subtitle} onClose={onClose} menuItems={menuItems}/></div>
       <div style={{flex:1, minHeight:0, display:'flex', flexDirection:'column', overflow:'hidden'}}>{children}</div>
     </ContentSidePanel>
+  );
+}
+/* A detail panel's structured information: label | value rows, as a record panel's properties. */
+function PanelFields({rows}){
+  return (
+    <div>
+      {rows.filter(Boolean).map(([label, value]) => (
+        <div key={label} style={{display:'flex', alignItems:'baseline', gap:12, padding:'7px 0', borderBottom:`1px solid ${T.attioLine}`, minHeight:32}}>
+          <span style={{width:120, flexShrink:0, fontSize:12.5, color:T.attioMuted}}>{label}</span>
+          <span style={{fontSize:13, color:T.attioText, minWidth:0, overflowWrap:'anywhere', fontVariantNumeric:'tabular-nums'}}>{value === '' || value == null ? '—' : value}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+/* A template's detail panel: one title, a separator, its fields (label | value), then its content. */
+function DetailPanel({title, onClose, menuItems, width, fields, children}){
+  return (
+    <PageSidePanel width={width} title={title} onClose={onClose} menuItems={menuItems} divided>
+      <div style={{flex:1, overflowY:'auto', padding:'8px 20px 24px', display:'flex', flexDirection:'column', gap:18}}>
+        {fields && <PanelFields rows={fields}/>}
+        {children}
+      </div>
+    </PageSidePanel>
   );
 }
 
@@ -104,44 +131,49 @@ function MilestonesEditor({value, onChange}){
 }
 
 /* New / edit service: the creation side panel (CreatePanelFrame) over the catalog — Name,
-   Description (rich text), Milestones with their prices, and the Price they add up to; Cancel and
-   Save at the bottom. */
-function ServiceFormPanel({initial, onCancel, onSave}){
-  const [s, setS] = React.useState(() => ({name:'', description:'', milestones:[], ...(initial ? withMilestonePrices(initial) : {})}));
+   Description (rich text), Enable milestones: on, Milestones with their prices and the Price they
+   add up to; off, the Price; Cancel and Save at the bottom. `zIndex`: over the quote builder. */
+function ServiceFormPanel({initial, onCancel, onSave, zIndex}){
+  const [s, setS] = React.useState(() => ({name:'', description:'', milestones:[], price:'', ...(initial ? withMilestonePrices(initial) : {})}));
+  const [withMilestones, setWithMilestones] = React.useState(() => !initial || (initial.milestones || []).length > 0);
   const set = (p) => setS(x => ({...x, ...p}));
   const priceOk = (v) => v !== '' && v != null && Number.isFinite(Number(v)) && Number(v) >= 0;
-  const ok = !!s.name.trim() && s.milestones.length > 0 && s.milestones.every(m => m.name.trim() && priceOk(m.price));
-  const total = s.milestones.reduce((sum, m) => sum + (Number(m.price) || 0), 0);
+  const ok = !!s.name.trim() && (withMilestones ? s.milestones.length > 0 && s.milestones.every(m => m.name.trim() && priceOk(m.price)) : priceOk(s.price));
+  const total = withMilestones ? s.milestones.reduce((sum, m) => sum + (Number(m.price) || 0), 0) : Number(s.price) || 0;
   const save = () => onSave({...s, name:s.name.trim(), description:s.description || '', price:total, currency:DEAL_CURRENCY,
-    milestones:s.milestones.map(m => ({...m, name:m.name.trim(), description:(m.description || '').trim(), price:Number(m.price)}))});
+    milestones: withMilestones ? s.milestones.map(m => ({...m, name:m.name.trim(), description:(m.description || '').trim(), price:Number(m.price)})) : []});
   return (
-    <CreatePanelFrame title={initial ? 'Edit Service' : 'New Service'} onClose={onCancel} actions={<>
+    <CreatePanelFrame title={initial ? 'Edit Service' : 'New Service'} onClose={onCancel} zIndex={zIndex} actions={<>
       <StSecondary label="Cancel" onClick={onCancel}/>
       <StCta label="Save" disabled={!ok} onClick={()=>ok && save()}/>
     </>}>
       {stack(<>
         <Field label="Name"><input autoFocus value={s.name} onChange={e=>set({name:e.target.value})} placeholder="e.g. US NIW Petition" style={fieldText}/></Field>
         <Field label="Description"><RichTextEditor value={s.description} onChange={(v)=>set({description:v})} ariaLabel="Service description"/></Field>
-        <Field label="Milestones"><div style={{paddingTop:2}}><MilestonesEditor value={s.milestones} onChange={(v)=>set({milestones:v})}/></div></Field>
-        <Field label="Price"><ReadValue>{fmtMoney(total)}</ReadValue></Field>
+        <Field label="Enable milestones"><label style={{display:'inline-flex', alignItems:'center', minHeight:34, cursor:'pointer'}}><UtToggle on={withMilestones} onChange={setWithMilestones}/></label></Field>
+        {withMilestones && <Field label="Milestones"><div style={{paddingTop:2}}><MilestonesEditor value={s.milestones} onChange={(v)=>set({milestones:v})}/></div></Field>}
+        {withMilestones
+          ? <Field label="Price"><ReadValue>{fmtMoney(total)}</ReadValue></Field>
+          : <Field label="Price"><div style={{position:'relative', width:200}}>
+              <span style={{position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', fontSize:12, color:T.attioMuted, pointerEvents:'none'}}>{DEAL_CURRENCY}</span>
+              <input value={s.price ?? ''} onChange={e=>set({price:e.target.value.replace(/[^0-9.]/g, '')})} inputMode="decimal" placeholder="0" aria-label="Price"
+                style={{...fieldText, paddingLeft:44, textAlign:'right', fontVariantNumeric:'tabular-nums'}}/>
+            </div></Field>}
       </>)}
     </CreatePanelFrame>
   );
 }
+// A new service as the catalog keeps it (ServicesPage, the quote builder and the Quotes page).
+const newServiceRecord = (vals) => ({id:`svc-${Date.now().toString(36)}`, created:todayLabel(), createdBy:CURRENT_USER.name, ...vals});
 
+/* The service's fields, then its description and milestones (none when milestones are off). */
 function ServiceDetail({service: raw}){
   const service = withMilestonePrices(raw);
-  const row = (label, value) => (
-    <div style={{display:'flex', alignItems:'baseline', gap:12, padding:'7px 0', borderBottom:`1px solid ${T.attioLine}`}}>
-      <span style={{width:120, flexShrink:0, fontSize:12.5, color:T.attioMuted}}>{label}</span>
-      <span style={{fontSize:13, color:T.attioText, minWidth:0, overflowWrap:'anywhere'}}>{value || '—'}</span>
-    </div>
-  );
-  return (
-    <div style={{flex:1, overflowY:'auto', padding:'4px 20px 24px', display:'flex', flexDirection:'column', gap:18}}>
-      <RichTextView html={service.description} style={{lineHeight:1.6}}/>
-      <div>{row('Price', fmtMoney(servicePrice(service), service.currency))}{row('Created', service.created)}</div>
-      <div>
+  return (<>
+    <PanelFields rows={[['Price', fmtMoney(servicePrice(service), service.currency)], ['Milestones', service.milestones.length ? String(service.milestones.length) : 'Off'],
+      ['Created', service.created], ['Created by', creatorOf(service)]]}/>
+    {!richIsEmpty(richHtmlOf(service.description)) && <RichTextView html={service.description} style={{lineHeight:1.6}}/>}
+    {service.milestones.length > 0 && <div>
         <div style={{fontSize:11, fontWeight:600, color:T.attioFaint, textTransform:'uppercase', letterSpacing:.4, marginBottom:8}}>Milestones · {service.milestones.length}</div>
         <ol style={{margin:0, padding:0, listStyle:'none', display:'flex', flexDirection:'column', gap:10}}>
           {service.milestones.map((m, i) => (
@@ -155,11 +187,9 @@ function ServiceDetail({service: raw}){
               <span style={{fontSize:13, color:T.attioText, whiteSpace:'nowrap', fontVariantNumeric:'tabular-nums'}}>{fmtMoney(m.price, service.currency)}</span>
             </li>
           ))}
-          {!service.milestones.length && <li style={{fontSize:13, color:T.attioMuted}}>No milestones yet.</li>}
         </ol>
-      </div>
-    </div>
-  );
+      </div>}
+  </>);
 }
 
 const SERVICE_COLUMNS = [
@@ -191,7 +221,7 @@ function ServicesPage(){
   };
   const save = (vals) => {
     if(form.initial) setServices(ss => ss.map(s => s.id === form.initial.id ? {...s, ...vals} : s));
-    else { const id = `svc-${Date.now().toString(36)}`; setServices(ss => [...ss, {id, created:todayLabel(), createdBy:CURRENT_USER.name, ...vals}]); setOpenId(id); }
+    else { const rec = newServiceRecord(vals); setServices(ss => [...ss, rec]); setOpenId(rec.id); }
     setForm(null);
     hub.toast(form.initial ? 'Service saved' : 'Service created');
   };
@@ -199,12 +229,12 @@ function ServicesPage(){
     <div style={{flex:1, minWidth:0, minHeight:0, display:'flex', flexDirection:'column', position:'relative', overflow:'hidden'}}>
       <RecordViewsModule schema={schema} rows={shown.map(serviceRow)} columns={SERVICE_COLUMNS.map(c => c.key)}
         defaultViews={[{id:'svcv-all', name:'All Services', sort:{key:'name', dir:'asc'}}]}
-        actions={() => can('create') && <StCta icon="plus" label="New service" onClick={()=>{ setOpenId(null); setForm({}); }}/>}
+        actions={() => can('create') && <StCta icon="plus" title="New service" onClick={()=>{ setOpenId(null); setForm({}); }}/>}
         overlay={form ? <ServiceFormPanel key={form.initial ? form.initial.id : 'new'} initial={form.initial} onCancel={()=>setForm(null)} onSave={save}/>
-          : open && <PageSidePanel title={open.name} subtitle={fmtMoney(open.price, open.currency)} onClose={()=>setOpenId(null)}
+          : open && <DetailPanel title={open.name} onClose={()=>setOpenId(null)}
           menuItems={[...(can('edit', open) ? [{label:'Edit service', onClick:()=>setForm({initial:open})}] : []), ...(can('delete', open) ? [{label:'Delete service', danger:true, onClick:()=>setDeleting(open)}] : [])]}>
           <ServiceDetail service={open}/>
-        </PageSidePanel>}/>
+        </DetailPanel>}/>
       {serviceBulk.bulkModal}
       {deleting && <StModal title="Delete service" primary="Delete service" danger onCancel={()=>setDeleting(null)}
         onSubmit={()=>{ setServices(ss => ss.filter(s => s.id !== deleting.id)); if(openId === deleting.id) setOpenId(null); setDeleting(null); hub.toast('Service deleted'); }}>
@@ -216,4 +246,4 @@ function ServicesPage(){
   );
 }
 
-Object.assign(window, {SAMPLE_SERVICES, withMilestonePrices, servicePrice, ServicesPage, ServiceFormPanel, MilestonesEditor, PageSidePanel, fmtMoney});
+Object.assign(window, {SAMPLE_SERVICES, withMilestonePrices, servicePrice, ServicesPage, ServiceFormPanel, newServiceRecord, MilestonesEditor, PageSidePanel, PanelFields, DetailPanel, fmtMoney});

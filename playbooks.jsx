@@ -20,7 +20,8 @@ const SAMPLE_PLAYBOOKS = () => [
     {id:'pb-f-2', header:'Explain the payment terms', text:'Walk through the installments and when each one is due. Ask whether the customer is willing to pay, and when.'},
   ]},
 ];
-const playbooksOf = (data) => (data && data.playbooks) || SAMPLE_PLAYBOOKS();
+// Saved playbooks, else the sample workspace's samples (another workspace starts with none).
+const playbooksOf = (data) => (data && data.playbooks) || (ACTIVE_WORKSPACE.sample ? SAMPLE_PLAYBOOKS() : []);
 
 /* A playbook's sections as they read: header, then its text (line breaks kept). */
 function PlaybookSections({playbook, empty = 'No sections yet.'}){
@@ -107,7 +108,7 @@ function PlaybookEditorPanel({playbook, onCancel, onSave}){
   );
 }
 
-/* Settings → Templates → Playbooks: the list (as Quote Templates), View / Edit / Delete, New playbook. */
+/* Settings → Templates → Playbooks: the list (as Quote Templates), View (DetailPanel) / Edit / Delete, New playbook (icon-only Add). */
 function PlaybooksTab({data, setData, say}){
   const list = playbooksOf(data);
   const setList = (fn) => setData(d => ({...d, playbooks:fn(playbooksOf(d))}));
@@ -138,11 +139,11 @@ function PlaybooksTab({data, setData, say}){
     <div style={{display:'flex', flexDirection:'column', flex:1, minHeight:0}}>
       <RecordViewsModule schema={schema} rows={rows} columns={cols.map(c => c.key)} storeKey="views:templates-playbooks"
         defaultViews={[{id:'tv-playbooks', name:'All Playbooks', sort:{key:'name', dir:'asc'}}]}
-        actions={() => can('create') && <StCta icon="plus" label="New playbook" onClick={()=>setEditing({})}/>}
-        overlay={open && <PageSidePanel width={520} title={open.name} subtitle={plural(open.sections.length, 'section')} onClose={()=>setOpenId(null)}
-          menuItems={actions(open).filter(it => !/^View/.test(it.label))}>
-          <div style={{flex:1, overflowY:'auto', padding:'4px 20px 24px'}}><PlaybookSections playbook={open}/></div>
-        </PageSidePanel>}/>
+        actions={() => can('create') && <StCta icon="plus" title="New playbook" onClick={()=>{ setOpenId(null); setEditing({}); }}/>}
+        overlay={open && <DetailPanel width={520} title={open.name} onClose={()=>setOpenId(null)} menuItems={actions(open).filter(it => !/^View/.test(it.label))}
+          fields={[['Sections', String(open.sections.length)], ['Created', open.createdAt ? fmtQuoteDate(open.createdAt) : ''], ['Created by', creatorOf(open)]]}>
+          <PlaybookSections playbook={open}/>
+        </DetailPanel>}/>
       {editing && <PlaybookEditorPanel playbook={editing.playbook} onCancel={()=>setEditing(null)} onSave={save}/>}
       {deleting && <StModal title="Delete playbook" primary="Delete" danger onCancel={()=>setDeleting(null)}
         onSubmit={()=>{ setList(ps => ps.filter(p => p.id !== deleting.id)); if(openId === deleting.id) setOpenId(null); setDeleting(null); say('Deleted'); }}>

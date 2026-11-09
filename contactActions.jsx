@@ -97,9 +97,9 @@ function StandardRecordMenu({object, record, noun, email, phone, copyText:copied
   return (
     <RecordActionsMenu title={`${noun} actions`} visible={visible} groups={[
       onTool ? RECORD_TOOLS.filter(([k]) => canAdd(object, record, k)).map(([k, label]) => ({label, onClick:()=>onTool(k)})) : [],
-      [onCreateDeal && {label:'Create Deal', disabled:!!createDealDisabled, onClick:onCreateDeal},
-       onCreateCustomer && {label:'Create Customer', onClick:onCreateCustomer},
-       onGoToDeal && {label:'Go to Deal', onClick:onGoToDeal}],
+      [onCreateDeal && workspaceHasType('deals') && {label:quickActionLabel(object, 'createDeal'), disabled:!!createDealDisabled, onClick:onCreateDeal},
+       onCreateCustomer && workspaceHasType('customers') && {label:quickActionLabel(object, 'createCustomer'), onClick:onCreateCustomer},
+       onGoToDeal && workspaceHasType('deals') && {label:quickActionLabel(object, 'goToDeal'), onClick:onGoToDeal}],
       [{label:'Copy Email', onClick:copyAction(email, 'email', onCopied)},
        onEdit && {label:`Edit ${noun}`, onClick:onEdit},
        onOwner && {label:`Edit ${noun} Owner`, onClick:onOwner},
@@ -130,10 +130,12 @@ const QUICK_ACTION_DEFS = {
   call:{label:'Call', icon:'call'}, email:{label:'Email', icon:'envelope'}, meeting:{label:'Meeting', icon:'calendar'},
   task:{label:'Task', icon:'tasks'}, note:{label:'Note', icon:'notepad'}, file:{label:'File', icon:'folder'}, quote:{label:'Quote', icon:'quote'},
   owner:{label:(noun) => `Edit ${noun} Owner`, icon:'userSwitch'},
-  createDeal:{label:'Create Deal', icon:'deals'}, createCustomer:{label:'Create Customer', icon:'customers'},
-  goToContact:{label:'Go to Contact', icon:'contacts'},
+  // Named by the workspace's record types (HOF Partners: Create Lead, Go to Lead).
+  createDeal:{get label(){ return `Create ${typeSingular('deals', 'Deal')}`; }, icon:'deals', needs:'deals'},
+  createCustomer:{get label(){ return `Create ${typeSingular('customers', 'Customer')}`; }, icon:'customers', needs:'customers'},
+  goToContact:{get label(){ return `Go to ${typeSingular('contacts', 'Contact')}`; }, icon:'contacts', needs:'contacts'},
   // A customer's parent deal; it takes Create Deal's place once the customer has one (switched on as Create Deal is).
-  goToDeal:{label:'Go to Deal', icon:'deals', inherits:'createDeal'},
+  goToDeal:{get label(){ return `Go to ${typeSingular('deals', 'Deal')}`; }, icon:'deals', inherits:'createDeal', needs:'deals'},
 };
 const QUICK_TOOL_KEYS = ['call', 'email', 'meeting', 'task', 'note', 'file', 'quote'];
 const OBJECT_QUICK_ACTIONS = {
@@ -146,16 +148,18 @@ const OBJECT_QUICK_ACTIONS = {
 const customerHasDeal = (c) => !!(c && (c.dealIds || []).length);
 const QUICK_ACTION_AVAILABLE = {customers:{createDeal:(r) => !customerHasDeal(r), goToDeal:(r) => customerHasDeal(r)}};
 const quickActionAvailable = (object, key, record) => { const f = (QUICK_ACTION_AVAILABLE[object] || {})[key]; return !f || !record || f(record); };
-const OBJECT_NOUNS = {contacts:'Contact', deals:'Deal', customers:'Customer'};
+const OBJECT_NOUNS = {get contacts(){ return typeSingular('contacts', 'Contact'); }, get deals(){ return typeSingular('deals', 'Deal'); }, get customers(){ return typeSingular('customers', 'Customer'); }};
+// The Object's quick actions in the open workspace: none that goes to or creates a record type it doesn't have.
+const objectQuickActions = (object) => (OBJECT_QUICK_ACTIONS[object] || []).filter(k => !(QUICK_ACTION_DEFS[k] || {}).needs || workspaceHasType(QUICK_ACTION_DEFS[k].needs));
 const quickActionLabel = (object, key) => { const d = QUICK_ACTION_DEFS[key]; return !d ? key : typeof d.label === 'function' ? d.label(OBJECT_NOUNS[object]) : d.label; };
-const quickActionLabels = (object) => Object.fromEntries(OBJECT_QUICK_ACTIONS[object].map(k => [k, quickActionLabel(object, k)]));
+const quickActionLabels = (object) => Object.fromEntries(objectQuickActions(object).map(k => [k, quickActionLabel(object, k)]));
 // Saved before Quote replaced Send Quote.
 const QUICK_ACTION_RENAMES = {sendQuote:'quote'};
 const DEFAULT_QUICK_ON = ['call', 'email', 'task', 'note'];
 /* The Object's quick actions in the saved order ({key, enabled}): renamed ones mapped, unknown ones
    dropped, new ones added at the end — switched on only for a fresh list (`enabled` defaults). */
 const normalizeQuickActions = (list, object, enabledByDefault = DEFAULT_QUICK_ON) => {
-  const keys = OBJECT_QUICK_ACTIONS[object] || [], out = [];
+  const keys = objectQuickActions(object), out = [];
   (list || []).forEach(it => { const key = QUICK_ACTION_RENAMES[it.key] || it.key; if(keys.includes(key) && !out.some(x => x.key === key)) out.push({key, enabled:!!it.enabled}); });
   // A new one that takes another's place (Go to Deal for Create Deal) is switched on as that one is.
   keys.forEach(k => { if(!out.some(x => x.key === k)){ const twin = list && (QUICK_ACTION_DEFS[k] || {}).inherits && out.find(x => x.key === QUICK_ACTION_DEFS[k].inherits);
@@ -454,4 +458,4 @@ function ContactFormModal({mode, initial, properties, owners, stages, onCancel, 
   );
 }
 
-Object.assign(window, {customerHasDeal, quickActionAvailable, RecordFields, AssociatedCreation, RecordLinkField, RecordActionsMenu, StandardRecordMenu, RECORD_TOOLS, ChangeOwnerModal, associatedNote, QUICK_ACTION_DEFS, QUICK_TOOL_KEYS, OBJECT_QUICK_ACTIONS, OBJECT_NOUNS, quickActionLabel, quickActionLabels, normalizeQuickActions, defaultQuickActions, shownQuickActions, runQuickAction, copyAction, viewSettingsItem, contactCopyText, ContactActionsMenu, ContactFormModal, CopyToast, copyText, todayLabel});
+Object.assign(window, {customerHasDeal, quickActionAvailable, RecordFields, AssociatedCreation, RecordLinkField, RecordActionsMenu, StandardRecordMenu, RECORD_TOOLS, ChangeOwnerModal, associatedNote, QUICK_ACTION_DEFS, QUICK_TOOL_KEYS, OBJECT_QUICK_ACTIONS, objectQuickActions, OBJECT_NOUNS, quickActionLabel, quickActionLabels, normalizeQuickActions, defaultQuickActions, shownQuickActions, runQuickAction, copyAction, viewSettingsItem, contactCopyText, ContactActionsMenu, ContactFormModal, CopyToast, copyText, todayLabel});

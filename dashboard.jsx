@@ -11,7 +11,8 @@
      Widgets             — a three-column grid (DashWidgetGrid) of the shown widgets from the widget
                            catalogue (DASH_WIDGET_DEFS), each spanning its width (1, 2 or 3 columns):
                            Key Indicator User (Revenue, Volume, Compliance, Speed — sales
-                           professionals ranked), Total Tasks, Business Velocity, Deal Won, Deal Lost.
+                           professionals ranked), Total Tasks, Business Velocity, Deal Won, Deal Lost,
+                           Goals (goals.jsx: the company's, each team's and each user's progress).
      Rearrange           — from View Settings: the four KPIs after the pinned one and the widgets
                            drag to reorder (live), and any of the four can be pinned as first; Done
                            saves and the dashboard returns to viewing.
@@ -130,18 +131,22 @@ function personMetrics(p, range){
    owner of the deals, customers and contacts), over any range. One source for the user profile
    panel (its figures and trends) and for workflows' User Properties (all-time). `kind`: 'money'
    (sums, AED), 'count', 'days' / 'hours' (averages — empty when there's nothing to average). */
+// The Deal record type as the workspace names it (HOF Partners: Lead).
+const dashDeal = () => typeSingular('deals', 'Deal'), dashDeals = () => typePlural('deals', 'Deals');
+/* `needs`: a statistic about a record type the workspace may not have (Contacts): shown only where it has it. */
+const dashStatShown = (st) => (!st.accounting || accountingViewAny()) && (!st.needs || workspaceHasType(st.needs));
 const USER_STATS = [
   {key:'invoiceCash',      label:'Total Invoice Cash',           kind:'money', accounting:true, read:(p, r) => dashSum(p.ev.invoices.filter(x => dashIn(x.at, r)), x => x.amount)},
   {key:'cashReceived',     label:'Total Cash Received',          kind:'money', accounting:true, read:(p, r) => dashSum(p.ev.payments.filter(x => dashIn(x.at, r)), x => x.amount)},
   {key:'cashForecasted',   label:'Total Cash Forecasted',        kind:'money', accounting:true, read:(p, r) => dashSum(p.ev.installments.filter(x => dashIn(x.due, r)), x => x.amount)},
-  {key:'dealsCreated',     label:'Total Deals Created',          kind:'count', read:(p, r) => p.ev.created.filter(x => dashIn(x.at, r)).length},
-  {key:'dealsClosed',      label:'Deals Closed',                 kind:'count', read:(p, r) => p.ev.closed.filter(x => dashIn(x.at, r)).length},
-  {key:'dealsWon',         label:'Deal Won',                     kind:'count', read:(p, r) => p.ev.closed.filter(x => x.outcome === 'won' && dashIn(x.at, r)).length},
-  {key:'dealsLost',        label:'Deal Lost',                    kind:'count', read:(p, r) => p.ev.closed.filter(x => x.outcome === 'lost' && dashIn(x.at, r)).length},
-  {key:'contactToClosed',  label:'Contact to Deal Closed',       kind:'days',  read:(p, r) => dashAvg(p.ev.closed.filter(x => dashIn(x.at, r)), x => x.contactToClosed)},
-  {key:'contactToDeal',    label:'Contact to Deal',              kind:'days',  read:(p, r) => dashAvg(p.ev.closed.filter(x => dashIn(x.at, r)), x => x.contactToDeal)},
-  {key:'contactToCustomer',label:'Contact to Customer',          kind:'days',  read:(p, r) => dashAvg(p.ev.closed.filter(x => dashIn(x.at, r)), x => x.contactToCustomer)},
-  {key:'qualifiedToWon',   label:'Qualified Client to Deal Won', kind:'days',  read:(p, r) => dashAvg(p.ev.closed.filter(x => dashIn(x.at, r)), x => x.qualifiedToWon)},
+  {key:'dealsCreated',     get label(){ return `Total ${dashDeals()} Created`; }, kind:'count', read:(p, r) => p.ev.created.filter(x => dashIn(x.at, r)).length},
+  {key:'dealsClosed',      get label(){ return `${dashDeals()} Closed`; }, kind:'count', read:(p, r) => p.ev.closed.filter(x => dashIn(x.at, r)).length},
+  {key:'dealsWon',         get label(){ return `${dashDeal()} Won`; }, kind:'count', read:(p, r) => p.ev.closed.filter(x => x.outcome === 'won' && dashIn(x.at, r)).length},
+  {key:'dealsLost',        get label(){ return `${dashDeal()} Lost`; }, kind:'count', read:(p, r) => p.ev.closed.filter(x => x.outcome === 'lost' && dashIn(x.at, r)).length},
+  {key:'contactToClosed',  get label(){ return `Contact to ${dashDeal()} Closed`; }, needs:'contacts', kind:'days',  read:(p, r) => dashAvg(p.ev.closed.filter(x => dashIn(x.at, r)), x => x.contactToClosed)},
+  {key:'contactToDeal',    get label(){ return `Contact to ${dashDeal()}`; }, needs:'contacts', kind:'days',  read:(p, r) => dashAvg(p.ev.closed.filter(x => dashIn(x.at, r)), x => x.contactToDeal)},
+  {key:'contactToCustomer',label:'Contact to Customer', needs:'contacts', kind:'days',  read:(p, r) => dashAvg(p.ev.closed.filter(x => dashIn(x.at, r)), x => x.contactToCustomer)},
+  {key:'qualifiedToWon',   get label(){ return `Qualified Client to ${dashDeal()} Won`; }, kind:'days',  read:(p, r) => dashAvg(p.ev.closed.filter(x => dashIn(x.at, r)), x => x.qualifiedToWon)},
   {key:'responseTime',     label:'Client Response Time',         kind:'hours', read:(p, r) => dashAvg(p.ev.responses.filter(x => dashIn(x.at, r)), x => x.hours)},
   {key:'invoiceToCash',    label:'Invoice to Cash',              kind:'hours', accounting:true, read:(p, r) => dashAvg(p.ev.payments.filter(x => x.sent != null && dashIn(x.at, r)), x => Math.max(0, x.at - x.sent) / 36e5)},
 ];
@@ -258,22 +263,25 @@ const DASH_KPIS = [
 const dashWinRate = (k) => k.closed ? Math.round(k.won / k.closed * 100) : null;
 const DASH_KPI_GROUPS = ['Financial', 'Conversion', 'Record Volume', 'Business Performance'];
 const dashStage = (ctx, object) => stageTotals((ctx.records || {})[object], object, ctx.range);
-const DASH_RECORD_NOUN = {contacts:'Contacts', deals:'Deals', customers:'Customers'};
+const DASH_RECORD_NOUN = {get contacts(){ return typePlural('contacts', 'Contacts'); }, get deals(){ return dashDeals(); }, get customers(){ return typePlural('customers', 'Customers'); }};
 const DASH_RECORD_ONE = {contacts:'Contact', deals:'Deal', customers:'Customer'};
 const DASH_KPI_DEFS = [
   ...DASH_KPIS.map(k => ({id:k.key, group:'Financial', label:k.label, icon:k.icon, kind:'money', accounting:true, hint:k.hint,
     read:(ctx) => companyKpis(ctx.data, ctx.range)[k.key]})),
+  // The company's Cash Received target for the goal period (Settings → Goals), with how much of it is reached.
+  {id:'goalCompany', group:'Financial', label:'Company Target', icon:'target', kind:'money', accounting:true, hint:'The Cash Received target set in Settings → Goals, for its period',
+    read:(ctx) => goalKpi(ctx).target, sub:(ctx) => goalKpi(ctx).sub},
   // Per record type, named as the workspace names it (Leads in the Accounting workspace); only types it has (`object`).
   ...['contacts', 'deals', 'customers'].map(o => ({id:`winRate:${o}`, object:o, group:'Conversion', get label(){ return `Total ${typeSingular(o, DASH_RECORD_ONE[o])} Win Rate`; }, icon:'gauge', kind:'percent',
-    hint:`${DASH_RECORD_NOUN[o]} won ÷ ${DASH_RECORD_NOUN[o].toLowerCase()} closed in the period`, read:(ctx) => dashWinRate(dashStage(ctx, o)), sub:() => 'Won ÷ Closed'})),
+    get hint(){ return `${DASH_RECORD_NOUN[o]} won ÷ ${DASH_RECORD_NOUN[o].toLowerCase()} closed in the period`; }, read:(ctx) => dashWinRate(dashStage(ctx, o)), sub:() => 'Won ÷ Closed'})),
   ...['contacts', 'deals', 'customers'].map(o => ({id:`open:${o}`, object:o, group:'Record Volume', get label(){ return `Total Open ${typePlural(o, DASH_RECORD_NOUN[o])}`; }, icon:o, kind:'count',
-    hint:`${DASH_RECORD_NOUN[o]} in an Open stage now`, read:(ctx) => dashStage(ctx, o).open, sub:() => 'In an Open stage'})),
+    get hint(){ return `${DASH_RECORD_NOUN[o]} in an Open stage now`; }, read:(ctx) => dashStage(ctx, o).open, sub:() => 'In an Open stage'})),
   ...['contacts', 'deals', 'customers'].map(o => ({id:`closed:${o}`, object:o, group:'Record Volume', get label(){ return `Total Closed ${typePlural(o, DASH_RECORD_NOUN[o])}`; }, icon:o, kind:'count',
-    hint:`${DASH_RECORD_NOUN[o]} that reached a Won, Lost or Undecided stage in the period`, read:(ctx) => dashStage(ctx, o).closed,
+    get hint(){ return `${DASH_RECORD_NOUN[o]} that reached a Won, Lost or Undecided stage in the period`; }, read:(ctx) => dashStage(ctx, o).closed,
     sub:(ctx) => { const k = dashStage(ctx, o); return `W ${k.won} / L ${k.lost} / U ${k.undecided}`; }})),
-  {id:'contactToDeal', group:'Business Performance', label:'Contact to Deal', icon:'contacts', kind:'hours', hint:'Business Velocity: average time from first contact to deal creation',
+  {id:'contactToDeal', object:'contacts', group:'Business Performance', get label(){ return `Contact to ${dashDeal()}`; }, icon:'contacts', kind:'hours', get hint(){ return `Business Velocity: average time from first contact to ${dashDeal().toLowerCase()} creation`; },
     read:(ctx) => companyVelocity(ctx.data, ctx.range).contactToDeal, sub:() => 'Business Velocity'},
-  {id:'dealToCustomer', group:'Business Performance', label:'Deal to Customer', icon:'customers', kind:'hours', hint:'Business Velocity: average time from deal creation to its customer being created',
+  {id:'dealToCustomer', group:'Business Performance', get label(){ return `${dashDeal()} to Customer`; }, icon:'customers', kind:'hours', get hint(){ return `Business Velocity: average time from ${dashDeal().toLowerCase()} creation to its customer being created`; },
     read:(ctx) => companyVelocity(ctx.data, ctx.range).dealToCustomer, sub:() => 'Business Velocity'},
   {id:'response', group:'Business Performance', label:'Client Response Time', icon:'envelope', kind:'hours', hint:'Business Velocity: average time for a client to reply to a call or email',
     read:(ctx) => companyVelocity(ctx.data, ctx.range).response, sub:() => 'Business Velocity'},
@@ -585,15 +593,18 @@ const FAME_TABS = [
     {key:'invoiced', label:'Total Cash Invoiced', fmt:fmtMoney}, {key:'received', label:'Total Cash Received', fmt:fmtMoney}]},
   // Volume: deals closed (reached an outcome), and of them Won and Lost — each count opens its deals; any column sorts.
   {id:'volume', label:'Volume', rankBy:'closed', best:'high', columns:[
-    {key:'closed', label:'Deals Closed', fmt:(n)=>String(n), render:(r, ctx) => <DealCountMenu deals={r.closedDeals} count={r.closed} onOpen={ctx.openDeal}/>},
-    {key:'won', label:'Deal Won', fmt:(n)=>String(n), render:(r, ctx) => <DealCountMenu deals={r.wonDeals} count={r.won} onOpen={ctx.openDeal}/>},
-    {key:'lost', label:'Deal Lost', fmt:(n)=>String(n), render:(r, ctx) => <DealCountMenu deals={r.lostDeals} count={r.lost} onOpen={ctx.openDeal}/>}]},
+    {key:'closed', get label(){ return `${dashDeals()} Closed`; }, fmt:(n)=>String(n), render:(r, ctx) => <DealCountMenu deals={r.closedDeals} count={r.closed} onOpen={ctx.openDeal}/>},
+    {key:'won', get label(){ return `${dashDeal()} Won`; }, fmt:(n)=>String(n), render:(r, ctx) => <DealCountMenu deals={r.wonDeals} count={r.won} onOpen={ctx.openDeal}/>},
+    {key:'lost', get label(){ return `${dashDeal()} Lost`; }, fmt:(n)=>String(n), render:(r, ctx) => <DealCountMenu deals={r.lostDeals} count={r.lost} onOpen={ctx.openDeal}/>}]},
   {id:'compliance', label:'Compliance', rankBy:'violations', best:'low', columns:[{key:'violations', label:'Violations', fmt:(n)=>String(n),
     render:(r, ctx) => <ViolationsValue list={r.violationList} onOpen={ctx.openViolation}/>}]},
   {id:'speed', label:'Speed', rankBy:'contactToClosed', best:'low', wide:true, columns:[
-    {key:'contactToClosed', label:'Contact to Deal Closed', fmt:fmtDays}, {key:'contactToDeal', label:'Contact to Deal', fmt:fmtDays},
-    {key:'contactToCustomer', label:'Contact to Customer', fmt:fmtDays}, {key:'qualifiedToWon', label:'Qualified Client to Deal Won', fmt:fmtDays}]},
+    {key:'contactToClosed', get label(){ return `Contact to ${dashDeal()} Closed`; }, needs:'contacts', fmt:fmtDays}, {key:'contactToDeal', get label(){ return `Contact to ${dashDeal()}`; }, needs:'contacts', fmt:fmtDays},
+    {key:'contactToCustomer', label:'Contact to Customer', needs:'contacts', fmt:fmtDays}, {key:'qualifiedToWon', get label(){ return `Qualified Client to ${dashDeal()} Won`; }, fmt:fmtDays}]},
 ];
+// The tabs as the workspace has them: no Contact column without Contacts (HOF Partners) — ranked by the first left.
+const fameTabs = () => FAME_TABS.map(t => { const columns = t.columns.filter(c => !c.needs || workspaceHasType(c.needs));
+  return {id:t.id, label:t.label, best:t.best, wide:t.wide, columns, rankBy: columns.some(c => c.key === t.rankBy) ? t.rankBy : (columns[0] || {}).key}; });
 
 /* The tab's rows for the period, sorted by `sort` ({key, dir}); rows without a value in the sorted
    column (Speed: no closed deals) always sit last, unranked. # is the position in that order —
@@ -636,7 +647,7 @@ function CountMenu({items, count, labelOf, icon, title, onOpen}){
   </>);
 }
 // Volume: the deals closed — picking one opens the deal.
-const DealCountMenu = ({deals, count, onOpen}) => <CountMenu items={deals} count={count} title={`${count} deals`} labelOf={d => d.name}
+const DealCountMenu = ({deals, count, onOpen}) => <CountMenu items={deals} count={count} title={`${count} ${dashDeals().toLowerCase()}`} labelOf={d => d.name}
   icon={<Icon name="deals" size={14} color={T.gray600}/>} onOpen={onOpen}/>;
 /* Compliance: none — 0; one — the violation itself (workflow · record); more — the count, opening
    the list. Picking one opens it in Workflow Violations. */
@@ -718,7 +729,7 @@ function KeyIndicators({data, range, rangeKey, violations, onOpenUser, onOpenDea
   const [sorts, setSorts] = React.useState({});
   const [orders, setOrders] = React.useState({});
   const [page, setPage] = React.useState(1);
-  const tab = FAME_TABS.find(t => t.id === tabId) || FAME_TABS[0];
+  const tabs = fameTabs(), tab = tabs.find(t => t.id === tabId) || tabs[0];
   const sort = sorts[tabId] || fameDefaultSort(tab);
   const order = orders[tabId] || fameColumns(tab).map(c => c.key);
   // Search narrows the list; each person keeps their rank.
@@ -768,8 +779,9 @@ function DashWidgetCard({title, right, children}){
 // Business Velocity: company-wide average durations for the range.
 function VelocityList({velocity}){
   const rows = [
-    {key:'contactToDeal', label:'Contact to Deal', icon:'contacts', hint:'Average time from first contact to deal creation'},
-    {key:'dealToCustomer', label:'Deal to Customer', icon:'customers', hint:'Average time from deal creation to its customer being created'},
+    // Contact to Deal only where the workspace has Contacts (not HOF Partners).
+    ...(workspaceHasType('contacts') ? [{key:'contactToDeal', label:`Contact to ${dashDeal()}`, icon:'contacts', hint:`Average time from first contact to ${dashDeal().toLowerCase()} creation`}] : []),
+    {key:'dealToCustomer', label:`${dashDeal()} to Customer`, icon:'customers', hint:`Average time from ${dashDeal().toLowerCase()} creation to its customer being created`},
     {key:'response', label:'Client Response Time', icon:'envelope', hint:'Average time for a client to reply to a call or email'},
     // Invoice to Cash is an accounting figure: it needs View Payment Terms.
     ...(accountingViewAny() ? [{key:'invoiceToCash', label:'Invoice to Cash', icon:'coins', hint:'Average time from an installment invoiced to it paid'}] : []),
@@ -807,7 +819,7 @@ function DealOutcomeList({deals, type, tone, range, now, onOpen}){
           <span style={{fontSize:12.5, color:T.attioMuted, fontVariantNumeric:'tabular-nums'}}>{d.amount ? fmtMoney(d.amount) : ''}</span>
         </div>
       ))}
-      {!list.length && <div style={{fontSize:13, color:T.attioMuted, borderTop:`1px solid ${T.attioLine}`, padding:'14px 0'}}>No deals in this range.</div>}
+      {!list.length && <div style={{fontSize:13, color:T.attioMuted, borderTop:`1px solid ${T.attioLine}`, padding:'14px 0'}}>No {dashDeals().toLowerCase()} in this range.</div>}
     </div>
   );
 }
@@ -871,6 +883,8 @@ const DASH_WIDGET_DEFS = [
     render:(c) => <DashWidgetCard title={`${typeSingular('deals', 'Deal')} Won`}><DealOutcomeList deals={c.deals} type="won" tone={T.good} range={c.range} now={new Date(c.data.now)} onOpen={c.onOpenDeal}/></DashWidgetCard>},
   {id:'dealLost', get label(){ return `${typeSingular('deals', 'Deal')} Lost`; }, width:1,
     render:(c) => <DashWidgetCard title={`${typeSingular('deals', 'Deal')} Lost`}><DealOutcomeList deals={c.deals} type="lost" tone={T.red} range={c.range} now={new Date(c.data.now)} onOpen={c.onOpenDeal}/></DashWidgetCard>},
+  // Goals (goals.jsx): Cash Received against the targets — needs View Payment Terms, as the cash KPIs.
+  {id:'goals', label:'Goals', width:1, can:() => accountingViewAny(), render:(c) => <GoalsWidget data={c.data} settings={c.settings} onOpenUser={c.onOpenUser}/>},
 ];
 const dashWidgetDef = (id) => DASH_WIDGET_DEFS.find(w => w.id === id) || null;
 const dashWidgetVisible = (w) => !!w && (!w.can || w.can());
@@ -1072,7 +1086,7 @@ const userPinnedOf = (hub) => ((((hub && hub.overviewSettings) || {}).users || {
 // The pool: the User Properties, then the statistics. Ids 'prop:<key>' / 'stat:<key>'.
 const userPinPool = (properties) => [
   {id:'props', label:'User Properties', items:properties.map(p => ({id:`prop:${p.key}`, label:p.label}))},
-  {id:'stats', label:'Statistics', items:USER_STATS.filter(st => !st.accounting || accountingViewAny()).map(st => ({id:`stat:${st.key}`, label:st.label}))},
+  {id:'stats', label:'Statistics', items:USER_STATS.filter(dashStatShown).map(st => ({id:`stat:${st.key}`, label:st.label}))},
 ];
 const userPinLabel = (pool, id) => { for(const g of pool){ const it = g.items.find(x => x.id === id); if(it) return it.label; } return 'Property removed'; };
 const userStatAxis = (kind) => kind === 'money' ? dashShort : (n) => String(Math.round(n * 10) / 10);
@@ -1082,13 +1096,14 @@ function UserTrendButton({label, onClick}){
 }
 
 /* `values`: the user's property values as shown ({key: text}); `onTrend(key)` opens a statistic's trend. */
-function UserStatistics({person, filter, setFilter, properties, values, onTrend}){
+// `userId`: whose target (goals.jsx UserGoalRow) — with Cash Received, so with View Payment Terms.
+function UserStatistics({person, userId, filter, setFilter, properties, values, onTrend}){
   const hub = useRecordHub();
   const [pinning, setPinning] = React.useState(false);
   const range = dashRangeOf(filter, new Date());
   const pool = userPinPool(properties);
   // Accounting statistics (cash, Invoice to Cash) only with View Payment Terms somewhere.
-  const stats = USER_STATS.filter(st => !st.accounting || accountingViewAny());
+  const stats = USER_STATS.filter(dashStatShown);
   const pinnedRaw = userPinnedOf(hub), pinned = pinnedRaw.startsWith('stat:') && !stats.some(st => `stat:${st.key}` === pinnedRaw) ? `stat:${stats[0].key}` : pinnedRaw;
   const [kind, key] = pinned.split(':');
   const stat = kind === 'stat' ? userStat(key) : null;
@@ -1109,6 +1124,7 @@ function UserStatistics({person, filter, setFilter, properties, values, onTrend}
         <div style={{fontFamily:DASH_FIGURE_FONT, fontSize:30, fontWeight:700, color:T.attioText, lineHeight:1.1, fontVariantNumeric:'tabular-nums', overflowWrap:'anywhere'}}>{lead}</div>
       </div>
       <div>
+        {userId != null && accountingViewAny() && <UserGoalRow userId={userId}/>}
         {stats.filter(st => `stat:${st.key}` !== pinned).map(st => (
           <div key={st.key} style={{display:'flex', alignItems:'center', gap:12, padding:'4px 0', borderBottom:`1px solid ${T.attioLine}`, minHeight:34}}>
             <span style={{flex:1, minWidth:0, fontSize:12.5, color:T.attioMuted}}>{st.label}</span>
@@ -1205,9 +1221,9 @@ function DashboardPage(){
   const saved = dashConfigOf(hub), config = arranging || saved;
   const saveConfig = (c) => hub && hub.setOverviewSettings(s => ({...(s || {}), dashboard:c}));
   const kpiIds = [config.prominent, ...config.kpis];
-  const kpiCtx = {data, range, records:(hub && hub.records) || {}};
+  const kpiCtx = {data, range, records:(hub && hub.records) || {}, settings:(hub && hub.data) || {}};
   const shownWidgets = config.widgets.filter(w => !w.hidden).map(w => dashWidgetDef(w.id)).filter(dashWidgetVisible);
-  const widgetCtx = {hub, data, range, rangeKey:range.join('-'), deals, violations, onOpenUser:setUser, onOpenDeal:openDeal, onOpenViolation:openViolation};
+  const widgetCtx = {hub, data, range, rangeKey:range.join('-'), deals, violations, settings:(hub && hub.data) || {}, onOpenUser:setUser, onOpenDeal:openDeal, onOpenViolation:openViolation};
   // Rearranging: the four KPIs after the pinned one, and the shown widgets, move by drag; any of
   // the four can be pinned as first (the pinned one takes its place).
   const arrangeKpis = arranging && {
