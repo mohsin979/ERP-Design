@@ -925,12 +925,16 @@ function DashWidgetGrid({items, ctx, arrange}){
   // Each widget's height, so it spans its rows.
   const inner = React.useRef({});
   const [heights, setHeights] = React.useState({});
+  /* Measured when the widgets change, then by the ResizeObserver whenever one grows or shrinks
+     (at most once a frame). Measuring after every render fed the spans back into the grid and
+     could chain until React stopped the page (going back into the CRM from the ERP home). While
+     the CRM is hidden (display none: no offsetParent) the last heights are kept, not zeroed. */
   const measure = React.useCallback(() => setHeights(h => {
     let n = h;
-    Object.entries(inner.current).forEach(([id, el]) => { if(!el) return; const v = el.offsetHeight; if(h[id] !== v){ if(n === h) n = {...h}; n[id] = v; } });
+    Object.entries(inner.current).forEach(([id, el]) => { if(!el || el.offsetParent === null) return; const v = el.offsetHeight; if(h[id] !== v){ if(n === h) n = {...h}; n[id] = v; } });
     return n;
   }), []);
-  React.useLayoutEffect(measure);
+  React.useLayoutEffect(measure, [ids.join('|'), measure]);
   React.useEffect(() => {
     if(typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(measure);
