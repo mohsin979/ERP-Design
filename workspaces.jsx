@@ -746,15 +746,15 @@ function useBrandDraft({brand, admin, toast, setActions, key, blank, label, vali
 }
 
 /* Email Signature: the company's reusable signature — the form, and the signature as it will
-   read at the end of an email. The logo is the company logo (Logo), shown or not. "Additional info
-   beneath company address" reads under the address. Emails use it as configured (emails.jsx:
+   read at the end of an email. The logo is the company logo (Logo), shown or not. "Additional info"
+   reads under the address. Emails use it as configured (emails.jsx:
    beneath a Simple Text Body, at the end of the Default HTML Template, added to a custom HTML
    email when asked). */
 const SIGNATURE_FIELDS = [
   {key:'name', label:'Name', placeholder:'e.g. Asim Ali'}, {key:'designation', label:'Designation', placeholder:'e.g. Senior Migration Consultant'},
   {key:'email', label:'Email', placeholder:'name@hofmigration.com'}, {key:'phone', label:'Phone', placeholder:'+971 4 000 0000'},
   {key:'website', label:'Website', placeholder:'https://hofmigration.com'}, {key:'address', label:'Company address', multiline:true},
-  {key:'additional', label:'Additional info beneath company address', multiline:true},
+  {key:'additional', label:'Additional info', multiline:true},
 ];
 const SIGNATURE_BLANK = {includeLogo:true, name:'', designation:'', email:'', phone:'', website:'', address:'', additional:''};
 function EmailSignatureBlock({sig, brand}){
@@ -799,11 +799,10 @@ function BrandSignatureSection(props){
 }
 
 /* Digital Letterhead: the company information on the letterhead, with the company logo (Logo);
-   the preview is a page with that header and footer. "Additional info beneath address" reads
-   under the address. */
+   the preview is a page with that header and footer. "Additional info" reads under the address. */
 const LETTERHEAD_FIELDS = [
   {key:'companyName', label:'Company name', placeholder:'e.g. HOF Migration'}, {key:'address', label:'Address', multiline:true},
-  {key:'additional', label:'Additional info beneath address', multiline:true},
+  {key:'additional', label:'Additional info', multiline:true},
   {key:'phone', label:'Phone', placeholder:'+971 4 000 0000'}, {key:'email', label:'Email', placeholder:'info@hofmigration.com'},
   {key:'website', label:'Website', placeholder:'https://hofmigration.com'}, {key:'footer', label:'Footer note', placeholder:'e.g. Licensed immigration consultants'},
 ];
