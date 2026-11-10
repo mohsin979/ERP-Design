@@ -481,7 +481,7 @@ function CustomersModule({data, customers, setCustomers, activities, setActiviti
             const pipeline = pipelineOf(pipelineId) || pipelines[0];
             // The board shows the selected pipeline's customers; the filters and search still apply.
             const onBoard = filtered.map(r => byId.get(r.id)).filter(c => c && recordInPipeline(pipeline, c));
-            return <ContactBoard rows={onBoard} search={search} pipeline={pipeline} searchKeys={['name', 'email']} noun="customer" bulkActions={false}
+            return <ContactBoard rows={onBoard} search={search} pipeline={pipeline} searchKeys={['name', 'email']} noun="customer"
               onChangeStage={(id, stageId)=>{
                 const c0 = customers.find(c => c.id === id);
                 if(c0 && !stageMoveCan('customers', c0)) return hub && hub.toast("You can't move this customer between stages");

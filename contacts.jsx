@@ -2088,9 +2088,11 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
      yet, so no workflow applies and the button stays hidden. */
   const engineCtx = useWorkflowEngineCtx();
   /* Bulk Actions (bulkActions.jsx): edit as updateContact does (owner history too); delete as the
-     contact's Delete does (its activity goes; its deals and customers stay, unlinked). */
-  const {bulkActions:contactBulkActions, bulkModal:contactBulkModal} = useRecordBulk({object:'contacts', data:dealData, records:contacts,
+     contact's Delete does (its activity goes; its deals and customers stay, unlinked); the Board's
+     stage moves in one change, as a card dragged between stages is written. */
+  const {bulkActions:contactBulkActions, board:contactBoardBulk, bulkModal:contactBulkModal} = useRecordBulk({object:'contacts', data:dealData, records:contacts,
     update:(ids, patch) => ids.forEach(id => updateContact(id, patch)),
+    move:(ids, fn) => setContacts(cs => cs.map(c => ids.includes(c.id) ? fn(c) : c)),
     remove:(ids) => {
       setContacts(cs => cs.filter(c => !ids.includes(c.id)));
       setActivities(m => { const n = {...m}; ids.forEach(id => delete n[id]); return n; });
@@ -2132,7 +2134,7 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
         /* Board gets the same filtered rows and the same search box as the table; only the
            grouping and the presentation differ. Dragging a card writes the stage back through
            the pipeline model, which for a property-based pipeline means updating the property. */
-        <ContactBoard rows={filteredContacts} search={search} pipelineId={pipelineId}
+        <ContactBoard rows={filteredContacts} search={search} pipelineId={pipelineId} bulk={contactBoardBulk(pipelineById(pipelineId))}
           onChangeStage={(contactId, stageId)=>{
             // Records → Edit → Move between pipeline stages.
             const c0 = contacts.find(c => c.id === contactId);

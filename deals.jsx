@@ -410,9 +410,11 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
   // The pipelines in view (Violations): the Board's, or those of the listed deals.
   const viewPipelines = (v) => v.mode === 'board' ? [v.pipelineId] : [...new Set(v.rows.map(r => (byId.get(r.id) || {}).pipeline).filter(Boolean))];
   /* Bulk Actions (bulkActions.jsx): edit through setDeals (owner history, workflows); delete as the
-     deal's Delete does (its activity goes; its customers stay, unlinked). */
+     deal's Delete does (its activity goes; its customers stay, unlinked); the Board's stage and
+     pipeline moves in one change, as a card dragged between stages is written. */
   const dealBulk = useRecordBulk({object:'deals', data, records:deals,
     update:(ids, patch) => setDeals(ds => ds.map(d => ids.includes(d.id) ? {...d, ...patch} : d)),
+    move:(ids, fn) => setDeals(ds => ds.map(d => ids.includes(d.id) ? fn(d) : d)),
     remove:(ids) => {
       setDeals(ds => ds.filter(d => !ids.includes(d.id)));
       setActivities(m => { const n = {...m}; ids.forEach(id => delete n[id]); return n; });
@@ -493,7 +495,7 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
             const pipeline = pipelineOf(pipelineId) || pipelines[0];
             // The board shows the selected pipeline's deals; the filters and search still apply.
             const onBoard = filtered.map(r => byId.get(r.id)).filter(d => d && recordInPipeline(pipeline, d));
-            return <ContactBoard rows={onBoard} search={search} pipeline={pipeline} searchKeys={['name']} noun={typeNoun('deals', 'deal')} bulkActions={false}
+            return <ContactBoard rows={onBoard} search={search} pipeline={pipeline} searchKeys={['name']} noun={typeNoun('deals', 'deal')} bulk={dealBulk.board(pipeline)}
               onChangeStage={(id, stageId)=>{
                 const d0 = deals.find(d => d.id === id);
                 if(d0 && !stageMoveCan('deals', d0)) return hub && hub.toast(`You can't move this ${typeNoun('deals', 'deal')} between stages`);

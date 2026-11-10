@@ -1,4 +1,4 @@
-/* HOF Pulse ERP — Bulk actions in tables.
+/* HOF Pulse ERP — Bulk actions in tables and on the Board.
 
    Rows ticked in a table (the grid's selection) get a Bulk Actions dropdown beside the selection
    readout at the bottom of the table. A table offers only what it already does for one row:
@@ -9,13 +9,25 @@
    dropdown while rows are ticked.
 
    Edit Properties: a side panel with the record type's editable properties (not its name, and not
-   Pipeline / Stage — a stage move has its workflow rules, so it stays one record at a time). A
+   Pipeline / Stage — those move with Move to Stage / Move to Pipeline on the Board). A
    property the selected records share shows its value; one they differ on shows "Mixed values".
    Only the properties changed are written — to every selected record the person may edit (the
    others are skipped and counted). Delete: confirmed by typing Delete; records the person may not
    delete are skipped and counted. Enroll in Email Sequence: the sequence's emails are scheduled for
    each record from now (as the workflow action does); records without an email address are skipped.
-   Cc and Bcc typed there go on every email of the sequence, for each record enrolled. */
+   Cc and Bcc typed there go on every email of the sequence, for each record enrolled.
+
+   The Board (Contacts, Deals — board.jsx) uses the same windows for a stage's records (its ⋯
+   menu) and for the cards ticked (its Bulk Actions), through `board(pipeline)`: only what the
+   record type supports is returned. On top of the table's three:
+     Add Workflow      the workflow builder, its context the board's pipeline and the stage.
+     Email             one email written once in the composer, sent to each record (emails.jsx).
+     Move to Stage     a stage of the board's pipeline; records already there stay.
+     Move to Pipeline  another pipeline of the record type (records that reference a pipeline:
+                       Deals), into its first open stage — as the workflow action does.
+   Moves are written in one change through the page's `move` (the workflow engine): a record a
+   Block Entry workflow keeps out stays where it was, and is counted; records the person may not
+   move between stages are skipped and counted. */
 
 // The signed-in person's permission on a record (Settings → Users & Teams); none set up: allowed.
 const recordCan = (object, record, action) => {
@@ -25,17 +37,18 @@ const recordCan = (object, record, action) => {
 };
 const bulkPlural = (n, noun, plural) => `${n} ${n === 1 ? noun : (plural || `${noun}s`)}`;
 
-/* The Bulk Actions dropdown (opens upward: it sits in the table's bottom bar). */
-function BulkActionsMenu({items}){
+/* The Bulk Actions dropdown: the filled button beside the selection count (a table's bottom bar,
+   the Board's selection bar), opening upward. `width` fits the longest action on one line. */
+function BulkActionsMenu({items, width = 220}){
   const [open, setOpen] = React.useState(false);
   return (
     <span style={{position:'relative', display:'inline-flex'}}>
       <button onClick={()=>setOpen(o => !o)} aria-expanded={open}
-        style={{display:'inline-flex', alignItems:'center', gap:6, height:28, padding:'0 10px', borderRadius:8, border:`1px solid ${T.borderStrong}`, background:'#fff',
-          fontSize:13, fontWeight:500, color:T.gray800, cursor:'pointer', fontFamily:'inherit'}}>
-        Bulk Actions<Icon name="chevDown" size={T.chevronSize} color={T.gray600}/>
+        style={{display:'inline-flex', alignItems:'center', gap:6, height:28, padding:'0 10px', borderRadius:8, border:'none', background:T.black,
+          fontSize:13, fontWeight:500, color:'#fff', cursor:'pointer', fontFamily:'inherit'}}>
+        Bulk Actions<Icon name="chevDown" size={T.chevronSize} color="#fff"/>
       </button>
-      <MenuShell open={open} onClose={()=>setOpen(false)} up width={220}>
+      <MenuShell open={open} onClose={()=>setOpen(false)} up width={width}>
         {items.map(it => <MenuItem key={it.label} label={it.label} danger={it.danger} disabled={it.disabled} onClick={()=>{ setOpen(false); it.onClick(); }}/>)}
       </MenuShell>
     </span>
@@ -118,12 +131,29 @@ function BulkEnrollModal({data, records, onEnroll, onCancel}){
     </StModal>, document.body);
 }
 
+/* Move to Pipeline / Move to Stage — choose where; `note(to)`: a line under the choice. */
+function BulkMoveModal({title, label, placeholder, options, primary, note, onMove, onCancel}){
+  const [to, setTo] = React.useState('');
+  const line = note && note(to);
+  return ReactDOM.createPortal(
+    <StModal title={title} primary={primary} canSubmit={!!to} onCancel={onCancel} onSubmit={()=>onMove(to)}>
+      <div style={{display:'flex', flexDirection:'column', gap:12}}>
+        <div><label style={fieldLabel}>{label}</label>
+          <FormSelect value={to} placeholder={placeholder} options={options} onChange={setTo}/></div>
+        {line && <div style={{fontSize:12.5, color:T.attioMuted, lineHeight:1.5}}>{line}</div>}
+      </div>
+    </StModal>, document.body);
+}
+
 /* A record table's bulk actions and their windows. `records`: the table's records; `update(ids,
    patch)` / `remove(ids)`: the table's own edit and delete (each record as it's edited or deleted
-   today: owner history, unlinking, its activity). */
-function useRecordBulk({object, data, records, update, remove}){
+   today: owner history, unlinking, its activity). `move(ids, fn)`: the page's stage write for
+   several records in one change (through the workflow engine) — the Board's moves. */
+function useRecordBulk({object, data, records, update, remove, move}){
   const hub = useRecordHub(), engineCtx = useWorkflowEngineCtx();
-  const [bulk, setBulk] = React.useState(null);   // {kind:'edit'|'delete'|'enroll', ids, clear}
+  // {kind:'edit'|'delete'|'enroll'|'moveStage'|'movePipeline', ids, clear, pipeline?} | {kind:'workflow', workflow}
+  const [bulk, setBulk] = React.useState(null);
+  const [stub, setStub] = React.useState(null);
   const noun = (HUB_NOUN[object] || 'Record').toLowerCase();
   const pick = (ids) => records.filter(r => ids.some(id => String(id) === String(r.id)));
   const bulkActions = (ids, clear) => [
@@ -131,10 +161,48 @@ function useRecordBulk({object, data, records, update, remove}){
     {label:'Edit Properties', onClick:()=>setBulk({kind:'edit', ids, clear})},
     {label:'Delete', danger:true, onClick:()=>setBulk({kind:'delete', ids, clear})},
   ];
+  /* The Board's actions on the pipeline it shows (see the header): each takes the records' ids
+     and `clear` (the selection to empty once done); one the record type doesn't support is null. */
+  const otherPipelines = (pipeline) => recordPipelines(data, object).filter(p => p.id !== pipeline.id);
+  const board = (pipeline) => {
+    const open = (kind) => (ids, clear) => setBulk({kind, ids, clear, pipeline});
+    return {
+      workflow: hub && workflowsAvailableFor(object) && workflowCan('create')
+        ? (stage) => setBulk({kind:'workflow', workflow:newWorkflowDraft({object, pipeline:pipeline.id, stage:stage.id}, {type:'pipelineStage', pipelineId:pipeline.id, stageId:stage.id})}) : null,
+      enroll: open('enroll'),
+      email: hub ? (ids, clear) => hub.composeEmail({recipients:ids.map(id => ({object, id})), onSent:clear}) : null,
+      edit: open('edit'),
+      movePipeline: move && pipeline.source !== 'property' && otherPipelines(pipeline).length ? open('movePipeline') : null,
+      moveStage: move ? open('moveStage') : null,
+      remove: open('delete'),
+    };
+  };
   const toast = (m) => hub && hub.toast && hub.toast(m);
   const done = () => { if(bulk && bulk.clear) bulk.clear(); setBulk(null); };
   let modal = null;
-  if(bulk){
+  if(bulk && bulk.kind === 'workflow') modal = <WorkflowEditorOverlay data={hub.data} setData={hub.setData} workflow={bulk.workflow} onClose={()=>setBulk(null)} onStub={setStub}/>;
+  else if(bulk && (bulk.kind === 'moveStage' || bulk.kind === 'movePipeline')){
+    const pl = bulk.pipeline, toPipeline = bulk.kind === 'movePipeline', chosen = pick(bulk.ids);
+    const may = chosen.filter(r => stageMoveCan(object, r)), skipped = chosen.length - may.length;
+    // The stage every record is already in isn't somewhere to move them.
+    const here = new Set(chosen.map(r => stageIdOf(pl, r)));
+    const entryStage = (p) => p && (p.stages.find(s => !isClosedStage(s)) || p.stages[0]);
+    const destOf = (to) => { const p = toPipeline ? otherPipelines(pl).find(x => x.id === to) : pl; return {p, stage: toPipeline ? entryStage(p) : p.stages.find(s => s.id === to)}; };
+    modal = <BulkMoveModal title={toPipeline ? 'Move to Pipeline' : 'Move to Stage'} label={toPipeline ? 'Pipeline' : 'Stage'} placeholder={toPipeline ? 'Select pipeline' : 'Select stage'}
+      options={toPipeline ? otherPipelines(pl).map(p => ({value:p.id, label:p.label})) : pl.stages.filter(s => !(here.size === 1 && here.has(s.id))).map(s => ({value:s.id, label:s.label}))}
+      primary={`Move ${bulkPlural(may.length, noun)}`} onCancel={()=>setBulk(null)}
+      note={(to) => [toPipeline && to && destOf(to).stage ? `They enter ${destOf(to).stage.label}.` : '', skipped ? `${bulkPlural(skipped, noun)} skipped (no permission).` : ''].filter(Boolean).join(' ')}
+      onMove={(to)=>{
+        const {p, stage} = destOf(to);
+        if(!p || !stage) return setBulk(null);
+        const list = may.filter(r => toPipeline || stageIdOf(pl, r) !== stage.id);
+        const res = list.length ? move(list.map(r => r.id), r => withStage(p, r, stage.id)) : null;
+        const blocked = res && res.blocked ? res.blocked.length : 0;
+        toast(`${bulkPlural(list.length - blocked, noun)} moved to ${toPipeline ? p.label : stage.label}${blocked ? ` · ${blocked} blocked by a workflow` : ''}${skipped ? ` · ${skipped} skipped (no permission)` : ''}`);
+        done();
+      }}/>;
+  }
+  else if(bulk){
     const chosen = pick(bulk.ids);
     if(bulk.kind === 'edit') modal = <BulkEditPanel data={data} object={object} records={chosen} onClose={()=>setBulk(null)}
       onSave={(patch)=>{ const ok = chosen.filter(r => recordCan(object, r, 'edit')), skipped = chosen.length - ok.length;
@@ -149,7 +217,7 @@ function useRecordBulk({object, data, records, update, remove}){
         const seq = emailSequencesOf(data).find(q => q.id === seqId);
         toast(`${bulkPlural(n, noun)} enrolled in ${seq ? seq.name : 'the sequence'}${chosen.length - n ? ` · ${chosen.length - n} skipped` : ''}`); done(); }}/>;
   }
-  return {bulkActions, bulkModal:modal};
+  return {bulkActions, board, bulkModal:<>{modal}{stub && <StubPanel title={stub} onClose={()=>setStub(null)}/>}</>};
 }
 
 /* A non-record table's bulk Delete: `remove(ids)` deletes; `canDelete(row)` (optional) keeps rows
@@ -166,4 +234,4 @@ function useTableBulkDelete({rows, noun, plural, remove, canDelete, skipNote, no
   return {bulkActions, bulkModal};
 }
 
-Object.assign(window, {bulkPlural, recordCan, BulkActionsMenu, BulkDeleteModal, BulkEditPanel, BulkEnrollModal, useRecordBulk, useTableBulkDelete});
+Object.assign(window, {bulkPlural, recordCan, BulkActionsMenu, BulkDeleteModal, BulkEditPanel, BulkEnrollModal, BulkMoveModal, useRecordBulk, useTableBulkDelete});

@@ -248,7 +248,9 @@ function MenuShell({open, onClose, anchorRight, up, width=200, children}){
   );
 }
 
-/* `disabled` is optional: the item stays visible but greyed, with no hover and no action. */
+/* `disabled` is optional: the item stays visible but greyed, with no hover and no action.
+   The label is always one line: a menu is sized for its copy, and a value too long for it (a
+   name, an address) ends in an ellipsis with the full text on hover. */
 function MenuItem({icon, label, onClick, danger, disabled}){
   const [h,setH] = React.useState(false);
   return (
@@ -260,7 +262,7 @@ function MenuItem({icon, label, onClick, danger, disabled}){
         cursor: disabled ? 'default' : 'pointer',
         background: h && !disabled ? T.headerBg : 'transparent',
       }}>
-      {icon}<span>{label}</span>
+      {icon}<span title={typeof label === 'string' ? label : undefined} style={{minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{label}</span>
     </div>
   );
 }

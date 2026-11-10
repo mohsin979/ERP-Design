@@ -7,7 +7,9 @@
    a new email — subject, Email Format and its content (below), with a live preview; Send now, or
    Schedule for a date and time. It's also how Reply and Forward work from an email. Sent and
    scheduled emails appear on the record at once, and its workflows see them (Email Events).
-   Scheduled emails go out when their time comes.
+   Scheduled emails go out when their time comes. For several records at once (the Board's Email
+   All / Email Selected) the email is written once and sent to each record on its own —
+   {{first_name}} filled in for each; a record without an email address is skipped.
 
    Email formats — one model for every email the CRM writes: a template (and so a sequence's
    emails, which use their templates), a workflow's template email and the composer:
@@ -257,9 +259,15 @@ const emailRecipientsLine = (m) => [['to', m.to], ['cc', m.cc], ['bcc', m.bcc]].
 /* The composer — the creation side panel (CreatePanelFrame). `object` / `id`: the record (chosen
    here, under Record Type, when not given). `replyTo` / `forward`: the email it answers or passes
    on. `placement`: 'inline' over the area it's opened from, or 'fixed' at the CRM's right edge.
-   `onClose(result, id, target)`: 'sent' / 'scheduled', the new email's id and its record, or nothing (cancelled). */
-function EmailComposer({object, id, replyTo, forward, onClose, placement = 'inline'}){
+   `onClose(result, id, target)`: 'sent' / 'scheduled', the new email's id and its record, or nothing (cancelled).
+   `recipients` [{object, id}]: several records — one email each, to the record's own address;
+   `onSent()` once they're sent or scheduled. */
+function EmailComposer({object, id, replyTo, forward, recipients, onSent, onClose, placement = 'inline'}){
   const hub = useRecordHub();
+  // Several records: who each one reaches; those without an email address are skipped.
+  const many = recipients && recipients.length ? recipients.map(r => ({...r, person:hubRecordPerson(hub, r.object, r.id)})) : null;
+  const reach = many ? many.filter(r => r.person && EMAIL_ADDRESS.test(String(r.person.email || '').trim())) : [];
+  const manyNoun = many ? (HUB_NOUN[many[0].object] || 'Record').toLowerCase() : '';
   const [target, setTarget] = React.useState(() => object && id != null ? {object, id} : {object:object || hubObjects()[0], id:null});
   const fixed = !!(object && id != null);
   const person = target.id != null ? hubRecordPerson(hub, target.object, target.id) : null;
@@ -280,17 +288,19 @@ function EmailComposer({object, id, replyTo, forward, onClose, placement = 'inli
   const [error, setError] = React.useState('');
   // A record picked here fills in its email.
   React.useEffect(() => { if(!fixed && !forward) setTo((person && person.email) || ''); }, [target.object, target.id]);
-  // A template brings its subject, format and content (its signature as it has it), {{first_name}} filled in.
+  // A template brings its subject, format and content (its signature as it has it), {{first_name}}
+  // filled in — for several records it stays as written until each email is sent.
   const pickTemplate = (tid) => {
     setTemplateId(tid || '');
     const tpl = templates.find(t => t.id === tid);
     if(!tpl) return;
     const c = templateContentOf(tpl);
+    if(many){ setSubject(tpl.subject || tpl.name || ''); return setContent(c); }
     setSubject(fillFirstName(tpl.subject || tpl.name, person));
     setContent({...c, body:fillFirstName(c.body, person), html:fillFirstName(c.html, person)});
   };
   const validTo = EMAIL_ADDRESS.test(to.trim());
-  const ready = target.id != null && validTo && emailListValid(cc) && emailListValid(bcc) && !!subject.trim() && emailContentReady(content);
+  const ready = (many ? reach.length > 0 : target.id != null && validTo) && emailListValid(cc) && emailListValid(bcc) && !!subject.trim() && emailContentReady(content);
   const send = (later) => {
     if(!ready) return;
     let when = null;
@@ -300,24 +310,40 @@ function EmailComposer({object, id, replyTo, forward, onClose, placement = 'inli
     }
     const newIdOf = `email-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const attachments = content.format === 'simple' ? (content.attachments || []) : [];
-    hub.add(target.object, target.id, {id:newIdOf, type:'email', direction:'sent', title:subject.trim(), body:emailTextOf(content), html:emailHtmlOf(content), format:content.format,
-      ...(attachments.length ? {attachments} : {}), to:[to.trim()], ...emailCopiesOf(cc, bcc), source:'you', by:null,
-      status: later ? 'scheduled' : 'sent', ...(later ? {at:when, scheduledFor:when} : {}), ...(templateId ? {templateId} : {}),
-      ...(replyTo ? {replyToId:replyTo.id} : {}), ...(forward ? {forwardOfId:forward.id} : {})});
+    // The email as it goes to one address; `p`: the person {{first_name}} is filled in for.
+    const emailOf = (newId, address, p) => {
+      const named = (v) => p && typeof v === 'string' ? fillFirstName(v, p) : v;
+      const c = {...content, body:named(content.body), html:named(content.html)};
+      return {id:newId, type:'email', direction:'sent', title:named(subject).trim(), body:emailTextOf(c), html:emailHtmlOf(c), format:content.format,
+        ...(attachments.length ? {attachments} : {}), to:[address], ...emailCopiesOf(cc, bcc), source:'you', by:null,
+        status: later ? 'scheduled' : 'sent', ...(later ? {at:when, scheduledFor:when} : {}), ...(templateId ? {templateId} : {}),
+        ...(replyTo ? {replyToId:replyTo.id} : {}), ...(forward ? {forwardOfId:forward.id} : {})};
+    };
+    if(many){
+      reach.forEach((r, i) => hub.add(r.object, r.id, emailOf(`${newIdOf}-${i}`, r.person.email.trim(), r.person)));
+      const skipped = many.length - reach.length;
+      hub.toast(`Email ${later ? 'scheduled for' : 'sent to'} ${bulkPlural(reach.length, manyNoun)}${skipped ? ` · ${skipped} skipped (no email address)` : ''}`);
+      if(onSent) onSent();
+      return onClose(later ? 'scheduled' : 'sent');
+    }
+    hub.add(target.object, target.id, emailOf(newIdOf, to.trim()));
     hub.toast(later ? 'Email scheduled' : 'Email sent');
     onClose(later ? 'scheduled' : 'sent', newIdOf, target);
   };
   return (
-    <CreatePanelFrame title={replyTo ? 'Reply' : forward ? 'Forward' : 'New Email'} onClose={()=>onClose()} placement={placement} width={EMAIL_PANEL_W} flush
-      top={!fixed && <CreateRecordField value={target} onChange={setTarget}/>}
+    <CreatePanelFrame title={many ? `New Email · ${bulkPlural(many.length, manyNoun)}` : replyTo ? 'Reply' : forward ? 'Forward' : 'New Email'} onClose={()=>onClose()} placement={placement} width={EMAIL_PANEL_W} flush
+      top={!fixed && !many && <CreateRecordField value={target} onChange={setTarget}/>}
       actions={<>
         <StSecondary label="Cancel" onClick={()=>onClose()}/>
         <StSecondary label={scheduling ? 'Send now instead' : 'Schedule'} onClick={()=>{ setScheduling(s => !s); setError(''); }}/>
         <StCta label={scheduling ? 'Schedule send' : 'Send'} disabled={!ready} onClick={()=>send(scheduling)}/>
       </>}>
       <EmailSplit form={<>
-        <Field label="To"><input value={to} onChange={e=>setTo(e.target.value)} placeholder="name@email.com" aria-label="To"
-          style={{...fieldText, borderColor: to && !validTo ? T.red : T.borderStrong}}/></Field>
+        <Field label="To">{many
+          ? <div aria-label="To" style={{...fieldText, background:T.pageBg, color:T.gray600, cursor:'default'}}>
+              {bulkPlural(reach.length, manyNoun)}{many.length - reach.length ? ` · ${many.length - reach.length} without an email address skipped` : ''}</div>
+          : <input value={to} onChange={e=>setTo(e.target.value)} placeholder="name@email.com" aria-label="To"
+              style={{...fieldText, borderColor: to && !validTo ? T.red : T.borderStrong}}/>}</Field>
         <Field label="Cc"><EmailListInput label="Cc" value={cc} onChange={setCc}/></Field>
         <Field label="Bcc"><EmailListInput label="Bcc" value={bcc} onChange={setBcc}/></Field>
         <Field label="Template"><FormSelect value={templateId} placeholder="Select email template" options={templates.map(t => ({value:t.id, label:t.name}))} onChange={pickTemplate}/></Field>

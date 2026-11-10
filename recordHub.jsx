@@ -79,7 +79,7 @@ function HubRecordLink({object, id, name}){
 
 /* The provider: the hub plus the overlays every page shares. */
 function RecordHubProvider({value, children}){
-  const [composer, setComposer] = React.useState(null);   // {object, id, replyTo?, initial?}
+  const [composer, setComposer] = React.useState(null);   // {object, id, replyTo?, initial?} | {recipients, onSent?} — several records
   const [call, setCall] = React.useState(null);           // {object, id}
   const [quote, setQuote] = React.useState(null);         // {mode:'new', object, id} | {mode:'edit', id}
   const [toast, setToast] = React.useState(null);

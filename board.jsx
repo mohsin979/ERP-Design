@@ -23,7 +23,20 @@
    that moves a record on a property change ends up calling `withStage`, so it cannot diverge
    from what the Board does by hand. No automation is implemented here.
 
-   Pipeline CRUD is explicitly out of scope — this list is a mock, not an editable store. */
+   Pipeline CRUD is explicitly out of scope — this list is a mock, not an editable store.
+
+   ── Stage actions and bulk selection ──────────────────────────────────────────────────────
+   A page that has bulk actions (Contacts, Deals) passes `bulk` — its record type's actions on
+   this pipeline (useRecordBulk().board, bulkActions.jsx); an action the record type doesn't
+   support isn't there, and isn't shown. A stage's ⋯ menu starts with Select All, then, under a
+   separator, the actions on the records shown in that stage: Add Workflow (the pipeline and
+   stage as its context), Enroll in Email Sequence, Email All, Edit All, Move to Pipeline, Move
+   to Stage, Delete All. Cards ticked (Select All, then each card's checkbox) get the selection
+   bar under the columns for as long as one is ticked: the count, Bulk Actions — Email Selected,
+   Enroll Selected in Email Sequence, Move to Pipeline, Move to Stage, Edit Selected, Delete
+   Selected — on exactly the cards ticked, and Deselect all, which also leaves selection. A
+   finished bulk action clears the selection. Without `bulk` (Customers) a stage's menu is
+   Select All alone. */
 
 const CONTACT_TYPE_STAGES = [
   {id:'subscriber',  label:'Subscriber',               value:'Subscriber'},
@@ -370,11 +383,11 @@ const COLUMN_WIDTH = 320;
 /* Column container fill — a step darker than the page so column bounds read without borders. */
 const COLUMN_BG = '#F3F4F6';
 
-/* Another object's board (Deals) passes `renderCard`, its `searchKeys` and `noun`; `bulkActions`
-   false leaves only Select All in the column menu (bulk actions are Contact actions). */
+/* Another object's board (Deals) passes `renderCard`, its `searchKeys` and `noun`. `bulk`: the
+   record type's stage actions (see the header); without it the column menu is Select All alone. */
 function BoardColumn({stage, contacts, activities, isDropTarget, columnRef, onStub, onCardDragStart, draggingId, actions, onAddToStage, cardSettings, cardProperties,
                       selected, selectionOn, onSelectAll, onDeselectAll, onToggleSelect, onOpenContact,
-                      renderCard, searchKeys = ['name', 'email'], noun = 'contact', bulkActions = true}){
+                      renderCard, searchKeys = ['name', 'email'], noun = 'contact', bulk}){
   const [menuOpen, setMenuOpen] = React.useState(false);
 
   /* Column search — narrows this column only, on top of the page search and filters. Same
@@ -398,9 +411,8 @@ function BoardColumn({stage, contacts, activities, isDropTarget, columnRef, onSt
   const selecting = selectionOn || columnSelected > 0;
   const allSelected = ids.length > 0 && shownSelected === ids.length;
   const someSelected = shownSelected > 0 && !allSelected;
-  const hasSelection = columnSelected > 0;
   const pick = (fn) => () => { setMenuOpen(false); fn(); };
-  const forSelected = (label) => `${label} · ${columnSelected} ${noun}${columnSelected === 1 ? '' : 's'}`;
+  const none = ids.length === 0;   // nothing shown in the stage to act on
 
   return (
     <div ref={columnRef} style={{
@@ -443,24 +455,19 @@ function BoardColumn({stage, contacts, activities, isDropTarget, columnRef, onSt
             <Icon name="moreDots" size={15} color={T.attioMuted}/>
           </button>
           <MenuShell open={menuOpen} onClose={()=>setMenuOpen(false)} anchorRight width={210}>
-            {/* Bulk actions act on the selection when there is one, otherwise on the whole
-                column. None of them is defined yet. */}
-            {!bulkActions ? null : hasSelection ? (
-              <>
-                <MenuItem label="Email Selected"           onClick={pick(()=>onStub(forSelected('Email Selected')))}/>
-                <MenuItem label="Enrich Selected"          onClick={pick(()=>onStub(forSelected('Enrich Selected')))}/>
-                <MenuItem label="Add Selected to Workflow" onClick={pick(()=>onStub(forSelected('Add Selected to Workflow')))}/>
-              </>
-            ) : (
-              <>
-                <MenuItem label="Email All"    onClick={pick(()=>onStub('Email All'))}/>
-                <MenuItem label="Enrich All"   onClick={pick(()=>onStub('Enrich All'))}/>
-                <MenuItem label="Add Workflow" onClick={pick(()=>onStub('Add Workflow'))}/>
-              </>
-            )}
-            {bulkActions && <div style={{height:1, background:T.border, margin:'4px 2px'}}/>}
-            {/* Disabled once every card on screen in the column is already selected. */}
+            {/* Select All first, set apart: disabled once every card on screen in the column is
+                already selected. */}
             <MenuItem label="Select All" disabled={allSelected} onClick={pick(()=>onSelectAll(ids))}/>
+            {bulk && menuDivider}
+            {/* The stage's actions act on every record shown in it — the cards ticked have the
+                selection bar. Add Workflow isn't offered on the unmapped bucket: not a stage. */}
+            {bulk && bulk.workflow && stage.id !== '__unmapped' && <MenuItem label="Add Workflow" onClick={pick(()=>bulk.workflow(stage))}/>}
+            {bulk && <MenuItem label="Enroll in Email Sequence" disabled={none} onClick={pick(()=>bulk.enroll(ids))}/>}
+            {bulk && bulk.email && <MenuItem label="Email All" disabled={none} onClick={pick(()=>bulk.email(ids))}/>}
+            {bulk && <MenuItem label="Edit All" disabled={none} onClick={pick(()=>bulk.edit(ids))}/>}
+            {bulk && bulk.movePipeline && <MenuItem label="Move to Pipeline" disabled={none} onClick={pick(()=>bulk.movePipeline(ids))}/>}
+            {bulk && bulk.moveStage && <MenuItem label="Move to Stage" disabled={none} onClick={pick(()=>bulk.moveStage(ids))}/>}
+            {bulk && <MenuItem label="Delete All" danger disabled={none} onClick={pick(()=>bulk.remove(ids))}/>}
           </MenuShell>
         </div>
       </div>
@@ -501,7 +508,7 @@ function BoardColumn({stage, contacts, activities, isDropTarget, columnRef, onSt
 }
 
 function ContactBoard({rows, search, pipelineId, onChangeStage, actions, onAddToStage, activities, onOpenContact, cardSettings, cardProperties,
-                       pipeline: pipelineProp, renderCard, searchKeys = ['name', 'email'], noun, bulkActions}){
+                       pipeline: pipelineProp, renderCard, searchKeys = ['name', 'email'], noun = 'contact', bulk}){
   const pipeline = pipelineProp || pipelineById(pipelineId);
   const [stub, setStub] = React.useState(null);
   /* Selected contact ids across the Board. Select All in a column adds that column's
@@ -519,6 +526,9 @@ function ContactBoard({rows, search, pipelineId, onChangeStage, actions, onAddTo
     setSelected(s => { const n = new Set(s); ids.forEach(id => n.delete(id)); return n; });
   };
   const toggleSelect = (id) => setSelected(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  /* Deselect all — and leave selection in every column. Another pipeline starts unselected. */
+  const clearSelection = () => { setSelected(s => s.size ? new Set() : s); setSelectingStages(s => s.size ? new Set() : s); };
+  React.useEffect(() => { clearSelection(); }, [pipeline.id]);
 
   /* Card drag between columns. Built on plain mouse events for the same reason the table's
      column reorder is: listeners are attached synchronously on mousedown, so a fast gesture
@@ -584,6 +594,19 @@ function ContactBoard({rows, search, pipelineId, onChangeStage, actions, onAddTo
   const columns = pipeline.stages.map(s => ({stage:s, contacts:buckets.m.get(s.id) || []}));
   if(buckets.orphans.length) columns.push({stage:{id:'__unmapped', label:'No stage'}, contacts:buckets.orphans});
 
+  /* The cards ticked that are on the Board now — what the selection bar counts and acts on (a
+     record deleted, or filtered out of the page, isn't one of them). */
+  const picked = bulk ? searched.filter(r => selected.has(r.id)).map(r => r.id) : [];
+  const forPicked = (fn) => () => fn(picked, clearSelection);
+  const pickedActions = !bulk ? [] : [
+    bulk.email && {label:'Email Selected', onClick:forPicked(bulk.email)},
+    {label:'Enroll Selected in Email Sequence', onClick:forPicked(bulk.enroll)},
+    bulk.movePipeline && {label:'Move to Pipeline', onClick:forPicked(bulk.movePipeline)},
+    bulk.moveStage && {label:'Move to Stage', onClick:forPicked(bulk.moveStage)},
+    {label:'Edit Selected', onClick:forPicked(bulk.edit)},
+    {label:'Delete Selected', danger:true, onClick:forPicked(bulk.remove)},
+  ].filter(Boolean);
+
   return (
     <div style={{flex:1, minHeight:0, display:'flex', flexDirection:'column', overflow:'hidden'}}>
       <div style={{flex:1, minHeight:0, display:'flex', gap:16, alignItems:'stretch', overflowX:'auto', overflowY:'hidden', padding:'20px 24px'}}>
@@ -601,9 +624,18 @@ function ContactBoard({rows, search, pipelineId, onChangeStage, actions, onAddTo
             cardSettings={cardSettings} cardProperties={cardProperties}
             onAddToStage={(stageId)=>onAddToStage(pipeline, stageId)}
             onCardDragStart={beginDrag}
-            renderCard={renderCard} searchKeys={searchKeys} noun={noun} bulkActions={bulkActions}/>
+            renderCard={renderCard} searchKeys={searchKeys} noun={noun} bulk={bulk}/>
         ))}
       </div>
+
+      {/* The selection bar — the table's selection readout and Bulk Actions, under the columns. */}
+      {picked.length > 0 && (
+        <div style={{display:'flex', alignItems:'center', gap:12, padding:'10px 16px', borderTop:`1px solid ${T.border}`, flexShrink:0, fontSize:13, color:T.blue, background:'#fff'}}>
+          {`${picked.length} ${picked.length > 1 ? noun + 's' : noun} selected`}
+          <BulkActionsMenu items={pickedActions} width={260}/>
+          <StTextAction label="Deselect all" onClick={clearSelection}/>
+        </div>
+      )}
 
       {/* Cursor-following label while dragging — cheaper and steadier than cloning the card. */}
       {drag && (
