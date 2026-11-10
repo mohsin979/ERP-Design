@@ -973,8 +973,8 @@ const DEFAULT_EMAIL_TEMPLATES = [
     list:['Your eligibility for the US National Interest Waiver.', 'The evidence we recommend gathering for your petition.', 'The expected timeline from filing to decision.'],
     cta:'Book Your Next Call'})},
 ];
-// Saved templates, else the sample workspace's (another workspace starts with none).
-const emailTemplatesOf = (data) => data.emailTemplates || (ACTIVE_WORKSPACE.sample ? DEFAULT_EMAIL_TEMPLATES : []);
+// Saved templates, else the sample CRM instance's (another instance starts with none).
+const emailTemplatesOf = (data) => data.emailTemplates || (ACTIVE_CRM.sample ? DEFAULT_EMAIL_TEMPLATES : []);
 /* Email Sequences — reusable: an ordered list of {templateId, delay}; no recipients. */
 const DEFAULT_EMAIL_SEQUENCES = [
   {id:'es-onboarding', name:'US NIW Onboarding', emails:[
@@ -987,7 +987,7 @@ const DEFAULT_EMAIL_SEQUENCES = [
     {templateId:'et-payment',  delay:{amount:'1', unit:'Weeks'}},
   ]},
 ];
-const emailSequencesOf = (data) => data.emailSequences || (ACTIVE_WORKSPACE.sample ? DEFAULT_EMAIL_SEQUENCES : []);
+const emailSequencesOf = (data) => data.emailSequences || (ACTIVE_CRM.sample ? DEFAULT_EMAIL_SEQUENCES : []);
 
 /* Side-panel header — the Contact side panel's name row: title (17/600), a muted line under it,
    and the header actions (Close, ⋯) on the right. */

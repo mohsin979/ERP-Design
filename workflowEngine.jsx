@@ -593,8 +593,8 @@ const TRIGGER_MATCHERS = {
 /* ── Saved state (this browser) ── */
 const WF_STORE_KEY = 'hof-erp-workflow-engine-v1';
 // The workflow-only store from before everything was saved together (store.jsx): read once, to start from.
-// The store saved before v2 belongs to HOF Migration (the only workspace then).
-const WF_SAVED = APP_SAVED || !ACTIVE_WORKSPACE.sample ? null : (() => { try { const raw = DB.getItem(WF_STORE_KEY); return raw ? JSON.parse(raw) : null; } catch(e){ return null; } })();
+// The store saved before v2 belongs to Migration (the only CRM then).
+const WF_SAVED = APP_SAVED || !ACTIVE_CRM.sample ? null : (() => { try { const raw = DB.getItem(WF_STORE_KEY); return raw ? JSON.parse(raw) : null; } catch(e){ return null; } })();
 const reviveActivities = (map) => Object.fromEntries(Object.entries(map || {}).map(([k, list]) => [k, (list || []).map(a => ({...a,
   at: a.at ? new Date(a.at) : a.at, due: a.due ? new Date(a.due) : a.due, scheduledFor: a.scheduledFor ? new Date(a.scheduledFor) : a.scheduledFor}))]));
 /* Sample records added after this browser saved its own (new pipelines, deals): the saved list

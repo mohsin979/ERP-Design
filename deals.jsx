@@ -96,7 +96,7 @@ const SAMPLE_DEALS = () => {
    Added to saved activity too (by id, once). */
 const WORKFLOW_SAMPLE_CALL_DAYS = [3, 9, 15, 22];
 function withWorkflowSampleCalls(acts, users){
-  if(!ACTIVE_WORKSPACE.sample) return acts;   // the sample workspace's deal only
+  if(!ACTIVE_CRM.sample) return acts;   // the sample CRM instance's deal only
   const list = acts['deal-11'];
   if(!list || list.some(a => a.id === 'deal-11-wf-na-1')) return acts;
   const by = (users.find(u => u.id === 'hamza-siddiqui') || {}).name || '';

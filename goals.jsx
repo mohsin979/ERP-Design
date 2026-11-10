@@ -105,7 +105,7 @@ function GoalsSettings({data, setData}){
       <div style={{display:'flex', flexDirection:'column', gap:20}}>
         <StField label="Period" width={200}><StSelect value={p} options={GOAL_PERIODS.map(x => ({value:x.id, label:x.label}))} onChange={v=>set({period:v})}/></StField>
         {table('Company', row('company', <>
-          <div role="cell" style={{...cell, fontWeight:500}}>{ACTIVE_WORKSPACE.name}</div>
+          <div role="cell" style={{...cell, fontWeight:500}}>{ACTIVE_CRM.name}</div>
           <div role="cell" style={cell}>{input('company', null, {value:t.company, own:t.company != null}, 'Company target')}</div>
           <div role="cell" style={num}>{allocated(t.users.map(u => u.id), t.company)}</div>
           <div role="cell" style={num}>{progress(t.company)}</div>

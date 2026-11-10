@@ -167,34 +167,45 @@ function CrmNavGroup({group, active, collapsed, setActive, first}){
   );
 }
 
+/* A module sidebar's head: the back arrow to the ERP home, then the open branch and the module —
+   "Migration | CRM", "Pakistan | People" — a switcher for someone with more than one branch
+   (workspaces.jsx CrmSwitcher / PeopleSwitcher) — and the collapse control. */
+function SidebarHead({onBack, collapsed, onCollapse, children}){
+  return (
+    <div style={{display:'flex', alignItems:'center', justifyContent: collapsed ? 'center' : 'space-between', gap:8, marginBottom:16, padding:'0 2px'}}>
+      {!collapsed && (
+        <div style={{display:'flex', alignItems:'center', gap:8, minWidth:0}}>
+          <div onClick={onBack} title="Back to main navigation" style={{display:'flex', cursor:'pointer', flexShrink:0}}><Icon name="arrowLeft" size={14} color={T.gray600}/></div>
+          {children}
+        </div>
+      )}
+      {/* One supplied panel glyph serves both directions (as in Attio): it is asymmetric, so
+          the previous 180° flip would put the rail on the right with its rows upside-down at
+          the bottom. Direction is carried by the tooltip and by the sidebar itself. */}
+      <div onClick={onCollapse} title={collapsed ? 'Expand' : 'Collapse'} style={{cursor:'pointer', display:'flex', flexShrink:0}}>
+        <Icon name="sidebarCollapse" size={18} color={T.gray600}/>
+      </div>
+    </div>
+  );
+}
+const sidebarFrame = (collapsed) => ({width: collapsed ? 56 : 200, height:'100%', background:'#fff', borderRight:`1px solid ${T.border}`, display:'flex', flexDirection:'column', flexShrink:0,
+  padding: collapsed ? '16px 8px' : '16px 12px', transition:'width 160ms ease'});
+const sidebarScroll = (collapsed) => ({flex:1, minHeight:0, overflowY:'auto', margin: collapsed ? '0 -8px' : '0 -12px', padding: collapsed ? '0 8px 8px' : '0 12px 8px'});
+
 function CrmSidebar({active, setActive, onBack, nav, setNav}){
   const [collapsed, setCollapsed] = React.useState(false);
   const [managing, setManaging] = React.useState(null);   // draft while Navigation Management is open
   // Workflows shows only to those with Workflows → View (Edit Permissions).
   const entries = (nav || CRM_NAV_DEFAULT()).filter(e => !e.hidden)
     .map(e => e.group ? {...e, items:e.items.filter(x => x.id !== 'workflows' || workflowCan('view'))} : e);
-  const width = collapsed ? 56 : 200;
 
   return (
-    <div style={{width, height:'100%', background:'#fff', borderRight:`1px solid ${T.border}`, display:'flex', flexDirection:'column', flexShrink:0, padding: collapsed ? '16px 8px' : '16px 12px', transition:'width 160ms ease'}}>
-      <div style={{display:'flex', alignItems:'center', justifyContent: collapsed ? 'center' : 'space-between', marginBottom:16, padding:'0 2px'}}>
-        {!collapsed && (
-          <div onClick={onBack} title="Back to main navigation" style={{display:'flex', alignItems:'center', gap:6, cursor:'pointer'}}>
-            <Icon name="arrowLeft" size={14} color={T.gray600}/>
-            <Logo variant="crm" height={16}/>
-          </div>
-        )}
-        {/* One supplied panel glyph serves both directions (as in Attio): it is asymmetric, so
-            the previous 180° flip would put the rail on the right with its rows upside-down at
-            the bottom. Direction is carried by the tooltip and by the sidebar itself. */}
-        <div onClick={()=>setCollapsed(c=>!c)} title={collapsed ? 'Expand' : 'Collapse'} style={{cursor:'pointer', display:'flex'}}>
-          <Icon name="sidebarCollapse" size={18} color={T.gray600}/>
-        </div>
-      </div>
+    <div style={sidebarFrame(collapsed)}>
+      <SidebarHead onBack={onBack} collapsed={collapsed} onCollapse={()=>setCollapsed(c=>!c)}><CrmSwitcher/></SidebarHead>
 
       {/* The entries scroll on their own when taller than the window; Edit Nav stays in view.
           A standalone entry that follows a group gets the same space above it as a group does. */}
-      <div style={{flex:1, minHeight:0, overflowY:'auto', margin: collapsed ? '0 -8px' : '0 -12px', padding: collapsed ? '0 8px 8px' : '0 12px 8px'}}>
+      <div style={sidebarScroll(collapsed)}>
       {entries.map((e, i) => e.group
         ? <CrmNavGroup key={e.id} group={e} active={active} collapsed={collapsed} setActive={setActive}/>
         : <div key={e.id} style={{marginTop: i > 0 && entries[i-1].group ? (collapsed ? 10 : 18) : 0}}>
@@ -210,6 +221,49 @@ function CrmSidebar({active, setActive, onBack, nav, setNav}){
         <NavManagementModal draft={managing} setDraft={setManaging}
           onClose={()=>setManaging(null)} onApply={()=>{ setNav && setNav(managing); setManaging(null); }}/>
       )}
+    </div>
+  );
+}
+
+/* ── People navigation ── the People module's sidebar (the pages aren't defined yet: every one
+   shows the empty canvas). Static for now — five groups, no Edit Nav. Its head is the CRM's:
+   "← Pakistan | People", the People switcher (workspaces.jsx). */
+const PEOPLE_NAV = [
+  {id:'people.overview', label:'Overview', group:true, items:[
+    {id:'people.dashboard',   label:'Dashboard',   icon:'dashboard'},
+    {id:'people.orientation', label:'Orientation', icon:'overview'},
+  ]},
+  {id:'people.people', label:'People', group:true, items:[
+    {id:'people.users',       label:'Users',       icon:'usersThree'},
+    {id:'people.departments', label:'Departments', icon:'cube'},
+    {id:'people.hrLetters',   label:'HR Letters',  icon:'files'},
+  ]},
+  {id:'people.operations', label:'Operations', group:true, items:[
+    {id:'people.leaves',      label:'Leaves',         icon:'calendar'},
+    {id:'people.foodCommute', label:'Food & Commute', icon:'orders'},
+  ]},
+  {id:'people.talent', label:'Talent', group:true, items:[
+    {id:'people.goals',     label:'Goals',     icon:'target'},
+    {id:'people.oneOnOnes', label:'1:1 Notes', icon:'notepad'},
+  ]},
+  {id:'people.engagement', label:'Engagement', group:true, items:[
+    {id:'people.recognitions', label:'Recognitions', icon:'sparkle'},
+    {id:'people.wallOfFame',   label:'Wall of Fame', icon:'flame'},
+    {id:'people.surveys',      label:'Surveys',      icon:'listBullets'},
+    {id:'people.yourVoice',    label:'Your Voice',   icon:'mic'},
+    {id:'people.splitwise',    label:'Splitwise',    icon:'coins'},
+  ]},
+];
+const PEOPLE_NAV_LABELS = Object.fromEntries(PEOPLE_NAV.flatMap(g => g.items.map(i => [i.id, i.label])));
+const PEOPLE_DEFAULT_PAGE = 'people.dashboard';
+function PeopleSidebar({active, setActive, onBack}){
+  const [collapsed, setCollapsed] = React.useState(false);
+  return (
+    <div style={sidebarFrame(collapsed)}>
+      <SidebarHead onBack={onBack} collapsed={collapsed} onCollapse={()=>setCollapsed(c=>!c)}><PeopleSwitcher/></SidebarHead>
+      <div style={sidebarScroll(collapsed)}>
+        {PEOPLE_NAV.map((g, i) => <CrmNavGroup key={g.id} group={g} active={active} collapsed={collapsed} setActive={setActive} first={i === 0}/>)}
+      </div>
     </div>
   );
 }

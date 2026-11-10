@@ -317,12 +317,10 @@ function toolCan(object, record, tool, action){
    covers them). Creator-owned items aren't reassigned, so their Permission Life doesn't apply. */
 const ACCESS_ON = () => !!(ACCESS.user && ACCESS.perms);
 /* Who created an item — a user's name. Items from before creators were recorded (and the shipped
-   ones, "System") are the workspace creator's: who created the workspace, else its first Super Admin. */
+   ones, "System") are the CRM instance's first Super Admin's. */
 function workspaceCreatorName(){
   const users = ACCESS.users && ACCESS.users.length ? ACCESS.users : USER_DIRECTORY;
-  const ws = typeof workspaceBrand === 'function' ? workspaceBrand() : {};
-  const byEmail = ws.createdBy && users.find(u => String(u.email || '').toLowerCase() === String(ws.createdBy).toLowerCase());
-  return (byEmail || users.find(u => u.preset === SUPER_ADMIN) || {}).name || '';
+  return (users.find(u => u.preset === SUPER_ADMIN) || {}).name || '';
 }
 const creatorOf = (item) => item && item.createdBy && item.createdBy !== 'System' ? (userLabel(item.createdBy) || item.createdBy) : workspaceCreatorName();
 const ownedCan = (p, object, owner, action, life) => {
@@ -492,7 +490,7 @@ function memberFromSession(session, presets, preset = SUPER_ADMIN){
     status:'Activated', lastActive:null, created:new Date().toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'}), teamId:null,
     permissions: p ? JSON.parse(JSON.stringify(p.permissions)) : DEFAULT_CONTACT_PERMISSIONS()};
 }
-// The signed-in person is in `people`'s Users; added (on a free Full Seat) when they aren't.
+// The signed-in person is in `people`'s Users; added (on a free Full Seat) when they aren't — and among the employees, unless already one.
 function withSessionMember(people, session, preset = SUPER_ADMIN){
   if(!session || !session.email) return people;
   const email = session.email.toLowerCase();
@@ -501,7 +499,8 @@ function withSessionMember(people, session, preset = SUPER_ADMIN){
   if(people.users.some(x => x.id === u.id)) u = {...u, id:`${u.id}-${Date.now().toString(36)}`};
   const free = people.seats.findIndex(st => st.type === 'Full Seat' && !st.assigneeId);
   const seats = free >= 0 ? people.seats.map((st, i) => i === free ? {...st, assigneeId:u.id} : st) : [...people.seats, {id:`F${people.seats.length + 1}`, type:'Full Seat', assigneeId:u.id}];
-  return {...people, users:[...people.users, u], seats, people:[...(people.people || []), {id:`p-${u.id}`, name:u.name, email:u.email}]};
+  const employees = people.people || [], employee = employees.some(p => String(p.email || '').toLowerCase() === email) ? employees : [...employees, {id:`p-${u.id}`, name:u.name, email:u.email}];
+  return {...people, users:[...people.users, u], seats, people:employee};
 }
 /* An empty workspace's people: no users, teams or employees yet — only its seats and the
    predefined presets (the signed-in person joins through withSessionMember). */
@@ -845,8 +844,8 @@ function UsersModule({data, setData, onStub, focus}){
       {addingUser && <AddUserModal data={data} onStub={onStub} onClose={()=>setAddingUser(false)}
         onAdd={(u, setPermissions) => {
           setData(d => ({...d, users:[...d.users, u]}));
-          // A CRM user has access to this organization (shared people, workspaces.jsx).
-          joinWorkspaceDirectory(u);
+          // A CRM user is one of the Organization's users, with this CRM instance (workspaces.jsx).
+          joinOrganization(u);
           setAddingUser(false);
           // Save and Set Permission: straight into Edit Permissions for the new user.
           if(setPermissions) setEditing({...u, seat:'', team:teamName(data.teams, u.teamId)});
@@ -859,6 +858,8 @@ function UsersModule({data, setData, onStub, focus}){
         onConfirm={(to) => { const id = deleting.id;
           if(to) ownedBy(id).forEach(r => hub.updateRecord(r.object, r.id, {owner:to}));
           setData(d => ({...d, users:d.users.filter(u => u.id !== id), seats:d.seats.map(st => st.assigneeId === id ? {...st, assigneeId:null} : st)}));
+          // Out of this CRM instance for the Organization too, so it doesn't add them back (workspaces.jsx).
+          leaveCrm(deleting);
           setDeleting(null); }}/>}
       {editing && <EditPermissionsDrawer user={editing} seats={data.seats} presets={data.presets} onStub={onStub} onClose={()=>setEditing(null)}
         onCreatePreset={(p) => setData(d => ({...d, presets:[...d.presets, p]}))}
@@ -887,7 +888,7 @@ function AddUserModal({data, onClose, onAdd, onStub}){
   const results = q ? data.people.filter(p => p.name.toLowerCase().includes(q) || p.email.toLowerCase().includes(q)).slice(0, 6) : [];
   const ok = !!status && !!picked && !isUser(picked.email);
   const add = (setPermissions) => onAdd({
-    id:`u-${Date.now()}`, name:picked.name, email:picked.email, personId:picked.id,
+    id:`u-${Date.now()}`, name:picked.name, email:picked.email, personId:picked.id, peopleId:picked.peopleId,
     status, teamId:teamId || null, preset:'', access:'manual', lastActive:null, created:stToday(), permissions:DEFAULT_CONTACT_PERMISSIONS(),
   }, setPermissions);
   return (
@@ -1626,4 +1627,4 @@ function SavePresetModal({seat, presets, onCancel, onSave}){
   );
 }
 
-Object.assign(window, {UserEditPanel, saveUserProfileIn, nameFromEmail, memberFromSession, withSessionMember, EMPTY_PEOPLE_DATA, RecordAccessCtx, useRecordAccess, normalizePermissions, setAccessContext, accessUser, toolCan, visibleActivities, activityCan, canAdd, PERMISSION_TOOLS, EditPresetDrawer, PermissionMatrixEditor, UsersTeamsSettings, UsersModule, SeatsModule, TeamsModule, PresetsModule, RecordViewsModule, SAMPLE_USERS, SAMPLE_PEOPLE_DATA, EditPermissionsDrawer});
+Object.assign(window, {countLink, iconBtn, UserEditPanel, saveUserProfileIn, nameFromEmail, memberFromSession, withSessionMember, EMPTY_PEOPLE_DATA, RecordAccessCtx, useRecordAccess, normalizePermissions, setAccessContext, accessUser, toolCan, visibleActivities, activityCan, canAdd, PERMISSION_TOOLS, EditPresetDrawer, PermissionMatrixEditor, UsersTeamsSettings, UsersModule, SeatsModule, TeamsModule, PresetsModule, RecordViewsModule, SAMPLE_USERS, SAMPLE_PEOPLE_DATA, EditPermissionsDrawer});

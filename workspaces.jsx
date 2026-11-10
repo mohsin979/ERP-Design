@@ -1,53 +1,70 @@
-/* HOF Pulse ERP — Sign-in, workspaces and brand.
+/* HOF Pulse ERP — Sign-in, the Organization, its instances and brand.
 
    Sign-in (the first screen): Continue with Google, mocked — any address on the HOF Migration
-   or HOF Global domains is accepted, with no real Google account behind it. Signing in opens
-   the last workspace; inside it the person is the user with that email, or joins its Users.
+   or HOF Global domains (and the allow-listed addresses, ALLOWED_EMAIL_ADDRESSES) is accepted,
+   with no real Google account behind it. Signing in opens
+   the ERP home; the person is one of the Organization's users, or joins them (a Member of the
+   first People instance, with the open CRM instance — whose Users they join as anyone signing in
+   always has, usersTeams.jsx withSessionMember).
 
-   Workspaces: the organizations — HOF Global, HOF Migration (Pakistan), HOF Migration Dubai, HOF
-   Pack, HOF Partners (Pakistan) — in the top-left switcher of the ERP header, every one; those
-   the signed-in person has no access to are greyed out ("No access"). Each is a separate account environment — its own records, CRM and CRM roles
-   (its own saved store, store.jsx); only HOF Migration and HOF Partners are defined, the others
-   open empty. People are shared: one identity each, with each organization's access set on its
-   own. Each organization has the modules set in Module Settings; any module's data can be shared
-   between the organizations of one of its linkage groups (moduleLinks.jsx). A workspace can start from a template
-   (WORKSPACE_TEMPLATES: HOF Partners' CRM). Creating a workspace (name and optional logo; it
-   starts empty, its creator Super Admin) is kept but not offered for now (WORKSPACE_CREATION_ENABLED).
+   The Organization (store.jsx ORG_REGISTRY): HOF Global, the one workspace — its lockup top left
+   of the ERP header (its logo, else the HOF mark), nothing to switch. Its modules have branches
+   (instances; "Branches" in the product):
+     CRM     — Migration, Pack, Partners: each its own CRM store — records, settings and Users &
+               Teams (a person's preset, seat and team per branch). The CRM sidebar's head reads
+               "← Migration | CRM" — a switcher for someone with more than one CRM branch (nav.jsx).
+     People  — Pakistan, Dubai: each its own employees (CRM Add User searches every branch's). A
+               person belongs to one; a Super Admin may hold several. The People sidebar's head is
+               the same ("← Pakistan | People", a switcher with more than one); the People module's
+               pages aren't defined yet (nav.jsx PEOPLE_NAV: the navigation only).
+   Everyone with a CRM branch opens the CRM (this browser's last one, else their first); Setting
+   (ERP Settings) is for the Organization's Super Admins.
 
-   ERP Settings (the ERP home's Setting tile; workspace Super Admin and Admin):
-     Workspace       — the open workspace's name and logo (HOF Migration keeps its own mark until a
-                       logo is uploaded).
-     Users           — search, Add user and everyone, one line each; ⋯ Access to Workspaces
-                       (which organizations they can open).
-     Module Settings — two tabs over the modules: Status (each module's availability per
-                       organization — Enable) and Linkage (its linkage groups, moduleLinks.jsx —
-                       Link Modules, Add organizations, Unlink).
+   ERP Settings (the ERP home's Setting tile):
+     Organization — the Organization's name and logo (its own mark — white label).
+     Users        — the CRM's record list and Filters (as CRM → Users & Teams → Users): Add user
+                    (+), Find or Ask, Filters, and everyone (Name, Email, People, CRM) — opened from
+                    a branch's Members link, filtered to that branch; ⋯ Access:
+                    Organization role, People branch (a Super Admin's People branches), CRM
+                    branches — each with the person's role there, read-only (set in that CRM's
+                    Users & Teams).
+     Branches     — its own menu, a second column beside the Settings menu (as CRM → Settings):
+                    "← Branches" (collapses it), then (no group header) one entry per module with branches: CRM, People,
+                    Accounting, Analytics, Academy, Complience (Marketing has none). A module's page: one line of copy with Add on its right
+                    (a name; a new CRM branch starts empty, with the standard record types), then
+                    its branches — name, members (a link: Users showing them), created — with
+                    ⋯ Rename. A new branch goes to everyone for now (else to the one adding it).
+   For now everyone is a Super Admin with every branch (EVERYONE_SUPER_ADMIN): the product is
+   designed from that view; narrower access comes later.
    Design-system pattern (ERP Settings): a settings page carries no title or explanation that
    repeats the menu it's opened from — only its controls (search, actions, the table).
 
-   Brand (CRM → Marketing → Brand): workspace administrators set the workspace logo, brand
-   colours (used on the workspace's mark and its quotations), the company email signature and
-   the digital letterhead. */
+   Brand (CRM → Marketing → Brand): the Organization's — one for every CRM instance — set by CRM
+   administrators: the company logo, brand colours (used on quotations and documents), the company
+   email signature and the digital letterhead. */
 
 const ALLOWED_EMAIL_DOMAINS = ['hofmigration.com', 'hof-global.com'];
+// Addresses on other domains that may sign in (the product designer's Google account).
+const ALLOWED_EMAIL_ADDRESSES = ['mohsin979@gmail.com'];
 const emailDomain = (email) => String(email || '').trim().toLowerCase().split('@')[1] || '';
-const signInAllowed = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim()) && ALLOWED_EMAIL_DOMAINS.includes(emailDomain(email));
-// Administrators of the open workspace (their Permission Preset).
-const WORKSPACE_ADMIN_PRESETS = ['Super Admin', 'Admin'];
-const isWorkspaceAdmin = () => WORKSPACE_ADMIN_PRESETS.includes(CURRENT_USER.role);
+const signInAllowed = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim())
+  && (ALLOWED_EMAIL_DOMAINS.includes(emailDomain(email)) || ALLOWED_EMAIL_ADDRESSES.includes(String(email).trim().toLowerCase()));
+// Administrators of the open CRM instance (their Permission Preset) — Brand.
+const CRM_ADMIN_PRESETS = ['Super Admin', 'Admin'];
+const isCrmAdmin = () => CRM_ADMIN_PRESETS.includes(CURRENT_USER.role);
 function signOut(){ reloadInto({session:null}); }
 
-/* The registry as React state: Brand edits and Create workspace update it, and every mark on
-   screen follows. */
-const WS_EVENT = 'hof-workspaces-changed';
-function useWorkspaces(){
+/* The registry as React state: a change (ERP Settings, Brand, the People switcher) re-renders
+   whatever reads it. */
+const ORG_EVENT = 'hof-org-changed';
+function useOrg(){
   const [, force] = React.useReducer(x => x + 1, 0);
-  React.useEffect(() => { window.addEventListener(WS_EVENT, force); return () => window.removeEventListener(WS_EVENT, force); }, []);
-  const update = (patch) => { saveWorkspaceRegistry(patch); window.dispatchEvent(new Event(WS_EVENT)); };
-  const active = WORKSPACE_REGISTRY.workspaces.find(w => w.id === WORKSPACE_REGISTRY.activeId) || ACTIVE_WORKSPACE;
-  return {workspaces:WORKSPACE_REGISTRY.workspaces, active, update};
+  React.useEffect(() => { window.addEventListener(ORG_EVENT, force); return () => window.removeEventListener(ORG_EVENT, force); }, []);
+  return ORG_REGISTRY;
 }
-const updateWorkspace = (update, id, patch) => update({workspaces:WORKSPACE_REGISTRY.workspaces.map(w => w.id === id ? {...w, ...patch} : w)});
+function setOrg(patch){ saveOrgRegistry(patch); window.dispatchEvent(new Event(ORG_EVENT)); }
+const updateOrg = (patch) => setOrg({org:{...ORG_REGISTRY.org, ...patch}});
+const updateBrand = (patch) => updateOrg({brand:{...(ORG_REGISTRY.org.brand || {}), ...patch}});
 
 /* An image file as a data URL (logos), at most `max` bytes. */
 const LOGO_MAX_BYTES = 400 * 1024;
@@ -60,67 +77,71 @@ const readImageFile = (file, max = LOGO_MAX_BYTES) => new Promise((resolve, reje
   r.readAsDataURL(file);
 });
 
-const wsInitials = (name) => String(name || '').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase() || 'W';
-/* A workspace's square mark: its logo, or its initials on its primary colour. */
-function WorkspaceTile({ws, size = 20}){
-  const box = {width:size, height:size, borderRadius:Math.round(size / 4), flexShrink:0, overflow:'hidden', display:'flex', alignItems:'center', justifyContent:'center'};
-  // HOF Migration keeps its own mark until a logo is uploaded.
-  if(!ws.logo && ws.id === HOF_MIGRATION_WS) return <span style={{...box, background:'#fff', border:`1px solid ${T.attioLine}`}}><Logo variant="mark" height={Math.round(size * .72)}/></span>;
-  if(ws.logo) return <span style={{...box, background:'#fff', border:`1px solid ${T.attioLine}`}}><img src={ws.logo} alt="" style={{width:'100%', height:'100%', objectFit:'contain'}}/></span>;
-  return <span style={{...box, background:(ws.colors || DEFAULT_BRAND()).primary, color:'#fff', fontSize:Math.round(size * .42), fontWeight:700, letterSpacing:.2}}>{wsInitials(ws.name)}</span>;
+/* A square mark: a logo, else the HOF mark — the Organization's own (the ERP header) or the
+   brand's (quotations). */
+function MarkTile({logo, size = 20}){
+  const box = {width:size, height:size, borderRadius:Math.round(size / 4), flexShrink:0, overflow:'hidden', display:'flex', alignItems:'center', justifyContent:'center', background:'#fff', border:`1px solid ${T.attioLine}`};
+  return <span style={box}>{logo ? <img src={logo} alt="" style={{width:'100%', height:'100%', objectFit:'contain'}}/> : <Logo variant="mark" height={Math.round(size * .72)}/>}</span>;
 }
-/* The header lockup: the workspace's tile (its logo; HOF Migration's mark; or initials) and its
-   name — the name each workspace edits in ERP Settings → Workspace. */
-function WorkspaceLockup({ws}){
-  return (
-    <span style={{display:'inline-flex', alignItems:'center', gap:8, minWidth:0}}>
-      <WorkspaceTile ws={ws} size={22}/>
-      <span style={{fontSize:14, fontWeight:600, color:T.attioText, whiteSpace:'nowrap'}}>{ws.name}</span>
-    </span>
-  );
+const lockupName = {fontSize:14, fontWeight:600, color:T.attioText, whiteSpace:'nowrap'};
+// The Organization's lockup (ERP header, top left): its logo or the HOF mark, and its name.
+function OrgLockup(){
+  const {org} = useOrg();
+  return <span style={{display:'inline-flex', alignItems:'center', gap:8, minWidth:0, flexShrink:0}}><MarkTile logo={org.logo} size={22}/><span style={lockupName}>{org.name}</span></span>;
+}
+// The brand's lockup (quotations): the company logo or the HOF mark, and the Organization's name.
+function BrandLockup({brand}){
+  return <span style={{display:'inline-flex', alignItems:'center', gap:8, minWidth:0}}><MarkTile logo={brand.logo} size={22}/><span style={lockupName}>{brand.name}</span></span>;
 }
 
-/* ── Workspace switcher (ERP header, top left) ── */
-function WorkspaceSwitcher(){
-  const {workspaces:allWorkspaces, active, update} = useWorkspaces();
-  // Every organization; those the signed-in person has no access to are greyed out.
-  const workspaces = visibleWorkspaces(), open_ = new Set(switchableWorkspaces().map(w => w.id));
+/* ── Switchers ── the current choice with a chevron; a menu of the choices, a check on the
+   current one (the ERP header's People switcher, the CRM sidebar's CRM switcher). */
+function SwitcherMenu({label, title, icon, options, value, onPick, width = 220}){
   const [open, setOpen] = React.useState(false);
-  const [creating, setCreating] = React.useState(false);
   return (
-    <div style={{position:'relative', flexShrink:0}}>
-      <div onClick={()=>setOpen(v=>!v)} title="Switch workspace" style={{display:'flex', alignItems:'center', gap:6, cursor:'pointer'}}>
-        <WorkspaceLockup ws={active}/>
+    <div style={{position:'relative', flexShrink:0, minWidth:0}}>
+      <div onClick={()=>setOpen(v=>!v)} title={title} style={{display:'flex', alignItems:'center', gap:6, cursor:'pointer', minWidth:0}}>
+        {icon}
+        <span style={{fontSize:13, fontWeight:600, color:T.attioText, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{label}</span>
         <Icon name="chevDown" size={T.chevronSize} color={T.gray600} style={{transform: open ? 'rotate(180deg)' : 'none'}}/>
       </div>
-      <MenuShell open={open} onClose={()=>setOpen(false)} width={260}>
-        {workspaces.map(w => { const can = open_.has(w.id);
-          return (
-          <div key={w.id} aria-disabled={!can} onClick={()=>{ if(!can) return; setOpen(false); if(w.id !== active.id) reloadInto({activeId:w.id}); }}
-            style={{display:'flex', alignItems:'center', gap:10, padding:'7px 10px', borderRadius:6, cursor: can ? 'pointer' : 'default', opacity: can ? 1 : .5,
-              background: w.id === active.id ? T.headerBg : 'transparent'}}
-            onMouseEnter={e=>{ if(can) e.currentTarget.style.background = T.headerBg; }} onMouseLeave={e=>e.currentTarget.style.background = w.id === active.id ? T.headerBg : 'transparent'}>
-            <WorkspaceTile ws={w} size={22}/>
-            <span style={{flex:1, minWidth:0, fontSize:13, color:T.attioText, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{w.name}</span>
-            {w.id === active.id && <Icon name="check" size={12} color={T.blue}/>}
-            {!can && <span style={{fontSize:11.5, color:T.attioMuted, whiteSpace:'nowrap'}}>No access</span>}
+      <MenuShell open={open} onClose={()=>setOpen(false)} width={width}>
+        {options.map(o => o.divider ? <div key={o.id} style={{height:1, background:T.border, margin:'4px 2px'}}/> : (
+          <div key={o.id} onClick={()=>{ setOpen(false); if(o.id !== value) onPick(o.id); }}
+            style={{display:'flex', alignItems:'center', gap:10, padding:'7px 10px', borderRadius:6, cursor:'pointer', background: o.id === value ? T.headerBg : 'transparent'}}
+            onMouseEnter={e=>{ e.currentTarget.style.background = T.headerBg; }} onMouseLeave={e=>e.currentTarget.style.background = o.id === value ? T.headerBg : 'transparent'}>
+            <span style={{flex:1, minWidth:0, fontSize:13, color:T.attioText, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{o.label}</span>
+            {o.id === value && <Icon name="check" size={12} color={T.blue}/>}
           </div>
-        ); })}
-        {WORKSPACE_CREATION_ENABLED && <>
-          <div style={{height:1, background:T.border, margin:'4px 2px'}}/>
-          <MenuItem icon={<Icon name="plus" size={13} color={T.gray600}/>} label="Create workspace" onClick={()=>{ setOpen(false); setCreating(true); }}/>
-        </>}
+        ))}
       </MenuShell>
-      {creating && <CreateWorkspaceModal onClose={()=>setCreating(false)} onCreate={(ws)=>{
-        update({workspaces:[...allWorkspaces, ws]});
-        reloadInto({activeId:ws.id});
-      }}/>}
     </div>
   );
 }
+// A module sidebar's head label: the open branch and the module — "Migration | CRM".
+const branchLabel = (name, module) => <>{name}<span style={{fontWeight:400, color:T.gray600}}> | {module}</span></>;
+const branchPlain = (name, module) => <span style={{display:'block', fontSize:13, fontWeight:600, color:T.attioText, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{branchLabel(name, module)}</span>;
+/* The CRM switcher (the CRM sidebar's head, nav.jsx): someone with more than one CRM branch picks
+   the one to open — the page starts over in its store, in the CRM. One branch: its name alone. */
+function CrmSwitcher(){
+  useOrg();
+  const mine = myCrmInstances();
+  if(mine.length < 2) return branchPlain(ACTIVE_CRM.name, 'CRM');
+  return <SwitcherMenu title="Switch CRM branch" label={branchLabel(ACTIVE_CRM.name, 'CRM')} options={mine.map(c => ({id:c.id, label:c.name}))} value={ACTIVE_CRM.id} onPick={(id)=>reloadInto({crmId:id, openCrm:true})}/>;
+}
+// The open People branch (this browser's choice, else the first of the person's).
+const activePeople = () => { const mine = myPeopleInstances(); return mine.find(p => p.id === ORG_REGISTRY.peopleId) || mine[0] || ORG_REGISTRY.people[0]; };
+/* The People switcher (the People sidebar's head, nav.jsx): the same as the CRM's — someone with
+   more than one People branch picks the one open (no data to load: no reload). One branch: its name alone. */
+function PeopleSwitcher(){
+  useOrg();
+  const mine = myPeopleInstances(), cur = activePeople();
+  if(mine.length < 2) return branchPlain(cur.name, 'People');
+  return <SwitcherMenu title="Switch People branch" label={branchLabel(cur.name, 'People')} options={mine.map(p => ({id:p.id, label:p.name}))} value={cur.id} onPick={(id)=>setOrg({peopleId:id})}/>;
+}
 
 /* A logo field: preview, Upload / Replace and Remove. */
-// `fallback`: what the preview shows without a logo (HOF Migration: its mark).
+// `fallback`: what the preview shows without a logo (the HOF mark).
 function LogoField({value, onChange, disabled, fallback}){
   const input = React.useRef(null);
   const [error, setError] = React.useState('');
@@ -147,129 +168,79 @@ function LogoField({value, onChange, disabled, fallback}){
   );
 }
 
-function CreateWorkspaceModal({onClose, onCreate}){
-  const [name, setName] = React.useState('');
-  const [logo, setLogo] = React.useState(null);
-  const taken = WORKSPACE_REGISTRY.workspaces.some(w => w.name.trim().toLowerCase() === name.trim().toLowerCase());
-  const ok = !!name.trim() && !taken;
-  const create = () => {
-    const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'workspace';
-    onCreate({id:`ws-${slug}-${Date.now().toString(36)}`, name:name.trim(), logo, colors:DEFAULT_BRAND(), sample:false,
-      createdAt:new Date().toISOString().slice(0, 10), createdBy:SESSION && SESSION.email});
-  };
-  return (
-    <StModal title="Create workspace" primary="Create workspace" canSubmit={ok} onSubmit={create} onCancel={onClose}>
-      <div>
-        <label style={fieldLabel}>Workspace name</label>
-        <input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. HOF Canada" style={fieldInput}/>
-        {taken && <div style={{fontSize:12, color:T.red, marginTop:4}}>A workspace with this name already exists.</div>}
-      </div>
-      <div>
-        <label style={fieldLabel}>Logo</label>
-        <LogoField value={logo} onChange={setLogo}/>
-      </div>
-    </StModal>
-  );
-}
-
-/* ── Shared people, access and modules ── one identity per person (the registry's `users`); who
-   can access each organization (`members`); and which organizations have each module (`modules`,
-   Module Settings). Everyone with access to an organization opens the modules it has; Setting (ERP
-   Settings) is for its administrators. Each module has its own linkage groups (moduleLinks.jsx):
-   the organizations in one share that module's data, an unlinked one keeps its own; linking one
-   module never links another. A person's CRM role (seat, team, permissions) is set in that
-   organization's CRM (Users & Teams) — one for a CRM linkage group. */
-const WORKSPACE_CREATION_ENABLED = false;
-const visibleWorkspaces = () => WORKSPACE_REGISTRY.workspaces.filter(w => !w.hidden);
-// An organization's name in organization lists: with its region — "HOF Migration (Pakistan)".
-const orgLabel = (w) => w.region ? `${w.name} (${w.region})` : w.name;
-// The modules Module Settings sets per organization (the ERP tiles but Setting).
-const orgModules = () => MODULE_TILES.filter(t => t.assignable !== false);
-const moduleLabel = (id) => { const t = MODULE_TILES.find(x => x.id === id); return t ? t.label : id; };
-const moduleConfig = (id) => (WORKSPACE_REGISTRY.modules || {})[id] || {orgs:[], groups:[]};
-const moduleEnabled = (id, wsId = ACTIVE_WORKSPACE.id) => (moduleConfig(id).orgs || []).includes(wsId);
-// A shareable module's data is shared by the organization (it has the module and is linked).
-// Whether the organization is in one of the module's linkage groups (moduleLinks.jsx).
-const moduleLinked = (id, wsId = ACTIVE_WORKSPACE.id) => !!moduleGroupOf(id, wsId);
-const directoryUsers = () => WORKSPACE_REGISTRY.users || [];
+/* ── The Organization's users and access ── one identity per person (ORG_REGISTRY.users): their
+   Organization role, People instance(s) and CRM instances. What a person is in a CRM instance
+   (preset, seat, team, permissions) is that instance's Users & Teams — one Users per CRM instance. */
+const orgUsers = () => ORG_REGISTRY.users || [];
 const sameEmail = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
-const directoryUserByEmail = (email) => directoryUsers().find(u => sameEmail(u.email, email)) || null;
-const workspaceMembers = (wsId) => (WORKSPACE_REGISTRY.members || {})[wsId] || null;   // null: not set up yet
-const membershipOf = (wsId, userId) => (workspaceMembers(wsId) || []).find(m => m.userId === userId) || null;
-const signedInUserId = () => { const u = SESSION && directoryUserByEmail(SESSION.email); return u ? u.id : null; };
-// A Super Admin of any organization (`superAdminIn`, kept by syncWorkspacePeople) can open every organization.
-const isSuperAdminUser = (userId) => { const u = directoryUsers().find(x => x.id === userId); return !!(u && (u.superAdminIn || []).length); };
-// Whether a person can open an organization: given access to it, a Super Admin, or it isn't set up yet.
-const canAccess = (wsId, userId) => !userId || !workspaceMembers(wsId) || !!membershipOf(wsId, userId) || isSuperAdminUser(userId);
-// The workspaces the signed-in person can open (the switcher greys the others out).
-const switchableWorkspaces = () => { const me = signedInUserId(); return visibleWorkspaces().filter(w => canAccess(w.id, me)); };
-// The modules the signed-in person opens here: the organization's — when they can access it.
-const myModules = () => {
-  const mods = orgModules().filter(t => moduleEnabled(t.id)).map(t => t.id);
-  return canAccess(ACTIVE_WORKSPACE.id, signedInUserId()) ? mods : [];
-};
-function setRegistry(patch){ saveWorkspaceRegistry(patch); window.dispatchEvent(new Event(WS_EVENT)); }
-// Access to organizations, all at once: [{wsId, userId, member}].
-function setMemberships(changes, users = directoryUsers()){
-  const members = {...WORKSPACE_REGISTRY.members};
-  changes.forEach(({wsId, userId, member}) => {
-    const list = (members[wsId] || []).filter(m => m.userId !== userId);
-    members[wsId] = member ? [...list, {userId}] : list;
+const orgUserByEmail = (email) => orgUsers().find(u => sameEmail(u.email, email)) || null;
+const signedInOrgUser = () => SESSION ? orgUserByEmail(SESSION.email) : null;
+// The Organization's Super Admins: ERP Settings — its users and instances — and several People instances.
+const isOrgAdmin = () => { const u = signedInOrgUser(); return !!u && u.role === 'Super Admin'; };
+const peopleInstance = (id) => ORG_REGISTRY.people.find(p => p.id === id) || null;
+const instanceName = (list, id) => { const x = (list || []).find(i => i.id === id); return x ? x.name : id; };
+// The CRM instances the signed-in person can open (someone not yet a user: the open one, which they join).
+const myCrmInstances = () => { const me = signedInOrgUser(); return ORG_REGISTRY.crm.filter(c => me ? (me.crm || []).includes(c.id) : c.id === ACTIVE_CRM.id); };
+// A person's People instances: their own, and — a Super Admin — the others they hold (`peopleAccess`).
+const peopleInstancesOf = (u) => !u ? [] : ORG_REGISTRY.people.filter(p => p.id === u.peopleId || (u.role === 'Super Admin' && (u.peopleAccess || []).includes(p.id)));
+const myPeopleInstances = () => peopleInstancesOf(signedInOrgUser());
+// Where the signed-in person's CRM opens instead of the open instance (no access to it), or null (none at all: the ERP home only).
+function crmRedirect(){ const mine = myCrmInstances(); return !mine.length || mine.some(c => c.id === ACTIVE_CRM.id) ? null : mine[0].id; }
+const setOrgUsers = (users) => setOrg({users});
+/* For now everyone is a Super Admin with every instance — the product is designed from the Super
+   Admin's view; narrower access comes later (then: off, and each user's role and instances set in
+   ERP Settings → Users). Whoever joins or is added gets it, and a new instance goes to everyone. */
+const EVERYONE_SUPER_ADMIN = true;
+const fullAccess = () => ({role:'Super Admin', peopleAccess:ORG_REGISTRY.people.map(p => p.id), crm:ORG_REGISTRY.crm.map(c => c.id)});
+// Someone new among the Organization's users: a Member of the People instance given (else the first), with CRM instances — or, for now, a Super Admin with every instance.
+const newOrgUser = (person, crmIds = [], peopleId) => ({id:person.id, name:person.name, email:person.email, role:'Member',
+  peopleId: peopleInstance(peopleId) ? peopleId : ORG_REGISTRY.people[0].id, peopleAccess:[], crm:[...new Set(crmIds)], ...(EVERYONE_SUPER_ADMIN ? fullAccess() : {})});
+/* A person into the Organization's users (once, by id or email) with the open CRM instance — CRM's
+   Add User (`peopleId`: their employee's People instance). */
+function joinOrganization(person, crmId = ACTIVE_CRM.id){
+  const known = orgUsers().find(u => u.id === person.id || sameEmail(u.email, person.email));
+  if(!known){ setOrgUsers([...orgUsers(), newOrgUser(person, [crmId], person.peopleId)]); return; }
+  if(!(known.crm || []).includes(crmId)) setOrgUsers(orgUsers().map(u => u === known ? {...u, crm:[...(u.crm || []), crmId]} : u));
+}
+/* The reverse — CRM's Delete user: the person no longer has the open CRM instance (else its Users
+   would take them back when it next opens, crmUsersToAdd). They stay one of the Organization's
+   users, with any other instances. */
+function leaveCrm(person, crmId = ACTIVE_CRM.id){
+  const known = orgUsers().find(u => u.id === person.id || sameEmail(u.email, person.email));
+  if(known && (known.crm || []).includes(crmId)) setOrgUsers(orgUsers().map(u => u === known ? {...u, crm:u.crm.filter(x => x !== crmId)} : u));
+}
+/* Opening a CRM instance (app.jsx): anyone in its Users who isn't one of the Organization's users
+   yet joins them, with this instance (the signed-in person, as anyone signing in always has;
+   Migration's sample users). Someone already there keeps the CRM instances they have: one whose
+   access to this instance was taken away (ERP Settings → Users → Access) stays in its Users — their
+   preset, seat and team kept — but can't open it, and it isn't given back. */
+function syncOrgUsers(users){
+  const crmId = ACTIVE_CRM.id;
+  let dir = orgUsers(), changed = false;
+  users.forEach(u => {
+    if(dir.some(x => x.id === u.id || sameEmail(x.email, u.email))) return;
+    dir = [...dir, newOrgUser(u, [crmId], u.peopleId)]; changed = true;
   });
-  setRegistry({users, members});
+  if(changed) setOrgUsers(dir);
 }
-// A module available in an organization or not (its data and linkage groups are kept either way).
-function setModuleOrg(id, wsId, enabled){
-  const c = moduleConfig(id), orgs = c.orgs || [];
-  setRegistry({modules:{...WORKSPACE_REGISTRY.modules, [id]:{...c, orgs: enabled ? [...new Set([...orgs, wsId])] : orgs.filter(x => x !== wsId)}}});
-}
-// A person into the directory (once) with access to an organization — CRM's Add User.
-function joinWorkspaceDirectory(person, wsId = ACTIVE_WORKSPACE.id){
-  const known = directoryUsers().find(u => u.id === person.id || sameEmail(u.email, person.email));
-  const users = known ? directoryUsers() : [...directoryUsers(), {id:person.id, name:person.name, email:person.email}];
-  setMemberships([{wsId, userId: known ? known.id : person.id, member:true}], users);
-}
-/* Opening a workspace (app.jsx): its Users join the directory; a workspace with no access list
-   yet takes its Users; and the signed-in person, with access nowhere the switcher offers, joins it
-   as anyone signing in always has. */
-function syncWorkspacePeople(users){
-  const wsId = ACTIVE_WORKSPACE.id;
-  let dir = directoryUsers(), changed = false;
-  const members = {...WORKSPACE_REGISTRY.members};
-  users.forEach(u => { if(!dir.some(d => d.id === u.id || sameEmail(d.email, u.email))){ dir = [...dir, {id:u.id, name:u.name, email:u.email}]; changed = true; } });
-  const idOf = (u) => (dir.find(d => d.id === u.id || sameEmail(d.email, u.email)) || u).id;
-  if(!members[wsId]){ members[wsId] = users.map(u => ({userId:idOf(u)})); changed = true; }
-  const me = SESSION && dir.find(d => sameEmail(d.email, SESSION.email));
-  if(me && !members[wsId].some(m => m.userId === me.id) && !visibleWorkspaces().some(w => (members[w.id] || []).some(m => m.userId === me.id))){
-    members[wsId] = [...members[wsId], {userId:me.id}]; changed = true;
-  }
-  // Who is a Super Admin here (their CRM preset), for opening every organization.
-  dir = dir.map(d => {
-    const u = users.find(x => x.id === d.id || sameEmail(x.email, d.email)), was = (d.superAdminIn || []).includes(wsId), is = !!u && u.preset === SUPER_ADMIN;
-    if(was === is) return d;
-    changed = true;
-    return {...d, superAdminIn: is ? [...(d.superAdminIn || []), wsId] : (d.superAdminIn || []).filter(x => x !== wsId)};
-  });
-  if(changed) setRegistry({users:dir, members});
-}
-// The CRM users the open organization still needs (it has CRM): those with access not in its Users yet — as CRM's Add User makes them (no seat, team or preset).
+// The CRM users the open instance still needs: the Organization's users with it who aren't in its Users yet — as CRM's Add User makes them (no seat, team or preset).
 function crmUsersToAdd(users){
-  if(!moduleEnabled('crm')) return [];
   const created = new Date().toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'});
-  return (workspaceMembers(ACTIVE_WORKSPACE.id) || []).map(m => directoryUsers().find(d => d.id === m.userId)).filter(Boolean)
-    .filter(d => !users.some(u => u.id === d.id || sameEmail(u.email, d.email)))
+  return orgUsers().filter(d => (d.crm || []).includes(ACTIVE_CRM.id) && !users.some(u => u.id === d.id || sameEmail(u.email, d.email)))
     .map(d => ({id:d.id, name:d.name, email:d.email, status:'Activated', teamId:null, preset:'', access:'manual', lastActive:null, created,
       permissions:normalizePermissions(DEFAULT_CONTACT_PERMISSIONS(), levelOfPreset(''))}));
 }
-// Where the signed-in person belongs instead of the open workspace (no access to it), or null.
-function workspaceRedirect(){
-  const me = signedInUserId();
-  if(canAccess(ACTIVE_WORKSPACE.id, me)) return null;
-  const other = switchableWorkspaces().find(w => w.id !== ACTIVE_WORKSPACE.id);
-  return other ? other.id : null;
+/* Every People instance's employees, each with its instance (`peopleId`) — CRM Add User's search;
+   saved back each into its instance's store (one without an instance: the first). */
+const allEmployees = () => ORG_REGISTRY.people.flatMap(p => (readStore(peopleStoreKey(p.id)) || []).map(e => ({...e, peopleId:p.id})));
+const hasEmployeeStores = () => ORG_REGISTRY.people.some(p => readStore(peopleStoreKey(p.id)) != null);
+function saveEmployees(list){
+  const first = ORG_REGISTRY.people[0].id;
+  ORG_REGISTRY.people.forEach(p => writeStore(peopleStoreKey(p.id), (list || []).filter(e => e && (e.peopleId || first) === p.id).map(({peopleId, ...e}) => e)));
 }
-/* ── Workspace templates ── a workspace's CRM setup when it starts (store.jsx `template`). HOF
-   Partners' (the template `accounting`, as it was first named): two record types — Leads (the Deals record type, named Leads) and
+
+/* ── CRM templates ── a CRM instance's setup when it starts (store.jsx `template`). Partners' (the
+   template `accounting`, as it was first named): two record types — Leads (the Deals record type, named Leads) and
    Customers — linked Leads → Customers (one-to-many), their properties, the Lead Pipeline and the
    customers' Service pipeline, and the Customer Profile form. No sample records. */
 const typedStages = (list) => list.map(([label, type]) => ({id:label.toLowerCase().replace(/[^a-z0-9]+/g, '-'), label, type}));
@@ -314,131 +285,177 @@ const WORKSPACE_TEMPLATES = {
       ]}],
   },
 };
-const workspaceTemplate = () => (WORKSPACE_TEMPLATE && WORKSPACE_TEMPLATES[WORKSPACE_TEMPLATE]) || null;
+const crmTemplate = () => (CRM_TEMPLATE && WORKSPACE_TEMPLATES[CRM_TEMPLATE]) || null;
 
-/* ── ERP Settings ── the ERP home's Setting tile, for the open workspace's Super Admin and Admin:
-   the CRM settings' look — a Settings menu on the left (back arrow to the ERP home), the page on
-   the right. */
+/* ── ERP Settings ── the ERP home's Setting tile, for the Organization's Super Admins: the CRM
+   settings' look — a Settings menu on the left (back arrow to the ERP home), the page on the right. */
 const ERP_SETTINGS_NAV = {id:'erp.settings', label:'ERP Settings', group:true, items:[
-  {id:'erp.workspace', label:'Workspace', icon:'brand'}, {id:'erp.users', label:'Users', icon:'usersThree'},
-  {id:'erp.modules', label:'Module Settings', icon:'dashboard'}]};
+  {id:'erp.organization', label:'Organization', icon:'brand'}, {id:'erp.users', label:'Users', icon:'usersThree'},
+  {id:'erp.branches', label:'Branches', icon:'dashboard'}]};
+/* Branches has a menu of its own, beside the Settings menu — as the CRM's Settings menu opens
+   beside its main navigation (nav.jsx CrmSettingsNav): Branches stays selected in the Settings
+   menu, and a second column reads "← Branches" (the arrow collapses the column; Branches opens it
+   again), then one entry per module with branches (the ERP home's tiles, app.jsx MODULE_TILES —
+   but Setting, and Marketing, which has none) — each that module's branches. Menu icons from the
+   shared set (the tiles' module artwork is for the home). */
+const BRANCH_NAV_ICONS = {crm:'cube', people:'usersThree', accounting:'coins', analytics:'analytical', academy:'playbook', complience:'shield'};
+const MODULES_WITHOUT_BRANCHES = ['marketing'];
+const BRANCH_PAGE = 'erp.branches.';
+const branchModules = () => MODULE_TILES.filter(t => t.assignable !== false && !MODULES_WITHOUT_BRANCHES.includes(t.id));
+const moduleLabel = (id) => { const t = MODULE_TILES.find(x => x.id === id); return t ? t.label : id; };
+// The modules, listed straight under "← Branches" (no group header).
+const branchesNavItems = () => branchModules().map(t => ({id:BRANCH_PAGE + t.id, label:t.label, icon:BRANCH_NAV_ICONS[t.id] || 'cube'}));
+// A settings menu's head: the back arrow and where you are (the CRM Settings menu's).
+function SettingsMenuHead({label, title, onBack}){
+  return (
+    <div onClick={onBack} title={title} style={{display:'flex', alignItems:'center', gap:8, marginBottom:16, padding:'0 2px', minHeight:18, cursor:'pointer', alignSelf:'flex-start'}}>
+      <Icon name="arrowLeft" size={14} color={T.gray600}/>
+      <span style={{fontSize:13, fontWeight:600, color:T.attioText}}>{label}</span>
+    </div>
+  );
+}
+const settingsMenuScroll = {flex:1, minHeight:0, overflowY:'auto', margin:'0 -12px', padding:'0 12px 8px'};
+const settingsMenuColumn = {width:200, background:'#fff', borderRight:`1px solid ${T.border}`, display:'flex', flexDirection:'column', flexShrink:0, padding:'16px 12px'};
 function ErpSettingsScreen({onBack, data, setData}){
-  const [page, setPage] = React.useState('erp.workspace');
+  const [page, setPage] = React.useState('erp.organization');
+  const [branchesMenuOpen, setBranchesMenuOpen] = React.useState(true);   // the Branches column (its ← collapses it)
+  const [usersFocus, setUsersFocus] = React.useState(null);               // Users opened filtered to a branch's members
+  const branchModule = page.startsWith(BRANCH_PAGE) ? page.slice(BRANCH_PAGE.length) : null;
+  const openSettingsPage = (id) => {
+    if(id === 'erp.branches'){ setBranchesMenuOpen(true); if(!branchModule) setPage(BRANCH_PAGE + branchModules()[0].id); return; }
+    if(id === 'erp.users') setUsersFocus(null);
+    setPage(id);
+  };
+  const showMembers = (module, branch) => { setUsersFocus({...branchMembersFilter(module, branch), nonce:Date.now()}); setPage('erp.users'); };
   return (
     <div style={{flex:1, minHeight:0, display:'flex', background:'#fff', borderTop:`1px solid ${T.border}`}}>
-      <div style={{width:200, background:'#fff', borderRight:`1px solid ${T.border}`, display:'flex', flexDirection:'column', flexShrink:0, padding:'16px 12px'}}>
-        <div onClick={onBack} title="Back to the ERP home" style={{display:'flex', alignItems:'center', gap:8, marginBottom:16, padding:'0 2px', minHeight:18, cursor:'pointer', alignSelf:'flex-start'}}>
-          <Icon name="arrowLeft" size={14} color={T.gray600}/>
-          <span style={{fontSize:13, fontWeight:600, color:T.attioText}}>Settings</span>
-        </div>
-        <CrmNavGroup group={ERP_SETTINGS_NAV} active={page} setActive={setPage} first/>
+      <div style={settingsMenuColumn}>
+        <SettingsMenuHead label="Settings" title="Back to the ERP home" onBack={onBack}/>
+        <div style={settingsMenuScroll}><CrmNavGroup group={ERP_SETTINGS_NAV} active={branchModule ? 'erp.branches' : page} setActive={openSettingsPage} first/></div>
       </div>
+      {branchModule && branchesMenuOpen && (
+        <div style={settingsMenuColumn}>
+          <SettingsMenuHead label="Branches" title="Collapse Branches menu" onBack={()=>setBranchesMenuOpen(false)}/>
+          <div style={settingsMenuScroll}>{branchesNavItems().map(n => <CrmNavItem key={n.id} icon={n.icon} label={n.label} active={page === n.id} onClick={()=>setPage(n.id)}/>)}</div>
+        </div>
+      )}
       <div style={{flex:1, minWidth:0, minHeight:0, display:'flex', flexDirection:'column', position:'relative'}}>
-        {page === 'erp.workspace' ? <WorkspaceSettingsPage/> : page === 'erp.users' ? <ErpUsersPage data={data} setData={setData}/> : <ModuleSettingsPage/>}
+        {branchModule ? <BranchesPage key={branchModule} module={branchModule} onMembers={showMembers}/>
+          : page === 'erp.users' ? <ErpUsersPage data={data} setData={setData} focus={usersFocus}/> : <OrganizationSettingsPage/>}
       </div>
     </div>
   );
 }
 
-// Workspace: the open workspace's name and logo.
-function WorkspaceSettingsPage(){
-  const {active, update} = useWorkspaces();
-  const [name, setName] = React.useState(active.name);
-  const [logo, setLogo] = React.useState(active.logo || null);
+// Organization: its name and logo (its own mark, white label — the ERP header).
+function OrganizationSettingsPage(){
+  const {org} = useOrg();
+  const [name, setName] = React.useState(org.name);
+  const [logo, setLogo] = React.useState(org.logo || null);
   const [saved, setSaved] = React.useState(false);
-  const taken = WORKSPACE_REGISTRY.workspaces.some(w => w.id !== active.id && w.name.trim().toLowerCase() === name.trim().toLowerCase());
-  const dirty = name.trim() !== active.name || (logo || null) !== (active.logo || null);
-  const ok = !!name.trim() && !taken;
-  const save = () => { if(!ok) return; updateWorkspace(update, active.id, {name:name.trim(), logo}); setSaved(true); };
+  const dirty = name.trim() !== org.name || (logo || null) !== (org.logo || null);
+  const ok = !!name.trim();
+  const save = () => { if(!ok) return; updateOrg({name:name.trim(), logo}); setSaved(true); };
   React.useEffect(() => { if(dirty) setSaved(false); }, [dirty]);
   return (
-    <SettingsPage title="Workspace"
-      actions={dirty ? <><StSecondary label="Cancel" onClick={()=>{ setName(active.name); setLogo(active.logo || null); }}/><StCta label="Save changes" disabled={!ok} onClick={save}/></>
+    <SettingsPage
+      actions={dirty ? <><StSecondary label="Cancel" onClick={()=>{ setName(org.name); setLogo(org.logo || null); }}/><StCta label="Save changes" disabled={!ok} onClick={save}/></>
         : saved ? <span style={{fontSize:12.5, color:T.attioMuted}}>Saved</span> : null}>
       <div style={{maxWidth:560, display:'flex', flexDirection:'column', gap:20}}>
         <div>
-          <label style={fieldLabel} htmlFor="ws-name">Workspace name</label>
-          <input id="ws-name" value={name} onChange={e=>setName(e.target.value)} style={{...fieldInput, borderColor: taken ? T.red : undefined}}/>
-          {taken && <div style={{fontSize:12, color:T.red, marginTop:4}}>A workspace with this name already exists.</div>}
+          <label style={fieldLabel} htmlFor="org-name">Organization name</label>
+          <input id="org-name" value={name} onChange={e=>setName(e.target.value)} style={fieldInput}/>
         </div>
         <div>
           <label style={fieldLabel}>Logo</label>
-          <LogoField value={logo} onChange={setLogo} fallback={active.id === HOF_MIGRATION_WS ? <Logo variant="mark" height={34}/> : <WorkspaceTile ws={{...active, name:name || active.name}} size={40}/>}/>
+          <LogoField value={logo} onChange={setLogo} fallback={<Logo variant="mark" height={34}/>}/>
         </div>
       </div>
     </SettingsPage>
   );
 }
 
-/* Users: everyone, one line each, in the record tables' grid (ContactsDataGrid) — Name and Email,
-   sortable and searchable; ⋯ Access to Workspaces. Add user for someone new. A person given access
-   to the open organization joins its CRM Users at once when it has CRM (other organizations: when
-   they're next opened), with no seat, team or preset — set in that CRM's Users & Teams. */
-const ERP_USER_COLUMNS = [{key:'name', label:'Name', width:280}, {key:'email', label:'Email', width:320}];
-function ErpUsersPage({data, setData}){
-  useWorkspaces();   // follows directory and access changes
-  const [query, setQuery] = React.useState('');
-  const [sort, setSort] = React.useState({key:'name', dir:'asc'});
-  const [columnOrder, setColumnOrder] = React.useState(null);
+/* Users: everyone, one line each, in the record tables' grid (ContactsDataGrid) — Name, Email,
+   People and CRM, sortable and searchable; ⋯ Access. Add user for someone new. A person given the
+   open CRM branch joins its Users at once (other branches: when they're next opened), with no
+   seat, team or preset — set in that CRM's Users & Teams. */
+const ERP_USER_COLUMNS = [{key:'name', label:'Name', width:240}, {key:'email', label:'Email', width:280}, {key:'people', label:'People', width:140}, {key:'crm', label:'CRM', width:220}];
+/* Filters — the CRM's (contacts.jsx FilterModal: the same rows, operators and groups as CRM →
+   Users & Teams → Users): Name and Email (text), People (one branch: a select), and each other
+   module with branches (CRM, Accounting, …) as text over the person's branches there — "Contains",
+   as the CRM filters a user's Team. Only Name, Email, People and CRM are columns. */
+const ERP_USER_FILTER_PROPS = () => [{key:'name', label:'Name', type:'text'}, {key:'email', label:'Email', type:'text'}, {key:'people', label:'People', type:'select'},
+  ...branchModules().filter(t => t.id !== 'people').map(t => ({key:t.id, label:t.label, type:'text'}))];
+// A branch's Members link: Users filtered to it — People Is the branch, the other modules Contain it.
+const branchMembersFilter = (module, branch) => ({prop:module, op: module === 'people' ? 'is' : 'contains', value:branch.name});
+// `focus` {prop, op, value, nonce} (a branch's Members link) opens the list with that filter, as an unsaved change (RecordViewsModule).
+function ErpUsersPage({data, setData, focus}){
+  const reg = useOrg();   // follows users and access changes
   const [panel, setPanel] = React.useState(null);   // {userId} — null id adds someone new
-  const rows = directoryUsers().map(u => ({id:u.id, name:u.name, email:u.email}));
+  const names = (u, module) => userBranches(u, module).map(id => instanceName(branchesOf(reg, module), id)).join(', ');
+  const rows = orgUsers().map(u => ({id:u.id, name:u.name, email:u.email, people:instanceName(reg.people, u.peopleId),
+    ...Object.fromEntries(branchModules().filter(t => t.id !== 'people').map(t => [t.id, names(u, t.id)]))}));
   const schema = {
-    properties:ERP_USER_COLUMNS, filterProps:[], selectValues:{}, noun:'user', searchKeys:['name', 'email'], selectable:false, boards:false,
-    fillWidth:true, canCreateProperty:false, pinGutter:false,
+    properties:ERP_USER_COLUMNS, filterProps:ERP_USER_FILTER_PROPS(), selectValues:{people:reg.people.map(p => p.name)}, noun:'user', searchKeys:['name', 'email', 'people', 'crm'],
+    selectable:false, boards:false, fillWidth:true, canCreateProperty:false, pinGutter:false,
     renderCell:(key, r) => key === 'name' ? <span style={{display:'flex', alignItems:'center', gap:8, minWidth:0}}>
         <Avatar name={r.name} size={22}/><span style={{fontWeight:500, color:T.attioText, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{r.name}</span></span>
       : undefined,
-    renderActions:(r) => <RowActionsMenu title="User actions" width={MENU_W} items={[{label:'Access to Workspaces', onClick:()=>setPanel({userId:r.id})}]}/>,
+    renderActions:(r) => <RowActionsMenu title="User actions" width={MENU_W} items={[{label:'Access', onClick:()=>setPanel({userId:r.id})}]}/>,
   };
   const saved = (crmUsers) => { if(crmUsers.length) setData(d => ({...d, users:[...d.users, ...crmUsers.filter(u => !d.users.some(x => x.id === u.id))]})); setPanel(null); };
+  /* The CRM's record list (usersTeams.jsx RecordViewsModule): its toolbar — the view, Add user
+     (the CRM Users' icon-only +), Find or Ask, Filters, Clear all — and grid. No saved views: they
+     would be kept in the open CRM branch's store, and this list is the Organization's. */
   return (
     <SettingsPage fill>
-      <div style={{display:'flex', alignItems:'center', gap:12, marginBottom:12}}>
-        <div style={{position:'relative', width:280}}>
-          <div style={{position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', display:'flex'}}><Icon name="search" size={13} color={T.gray400}/></div>
-          <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search users" aria-label="Search users" style={{...fieldInput, paddingLeft:30}}/>
-        </div>
-        <div style={{flex:1}}/>
-        <StCta label="Add user" onClick={()=>setPanel({userId:null})}/>
-      </div>
-      <div style={{flex:1, minHeight:0, display:'flex', flexDirection:'column', border:`1px solid ${T.attioLine}`, borderRadius:8, overflow:'hidden'}}>
-        <RecordSchema.Provider value={schema}>
-          <ContactsDataGrid rows={rows} columnOrder={columnOrder || ERP_USER_COLUMNS.map(c => c.key)} setColumnOrder={setColumnOrder} sort={sort} setSort={setSort}
-            search={query} frozenLeft={0} frozenRight={0} actionsFrozen={false} rowsPerPage={25} onOpenContact={()=>{}}/>
-        </RecordSchema.Provider>
-      </div>
-      {panel && <WorkspaceAccessPanel userId={panel.userId} onClose={()=>setPanel(null)} onSaved={saved} crmUsers={data.users}/>}
+      <RecordViewsModule flushTop savedViews={false} storeKey="views:erp-users-v1" schema={schema} rows={rows} columns={ERP_USER_COLUMNS.map(c => c.key)}
+        defaultViews={[{id:'erp-users-all', name:'All Users', sort:{key:'name', dir:'asc'}}]} focus={focus}
+        actions={() => <button onClick={()=>setPanel({userId:null})} title="Add user" style={iconBtn}><Icon name="plus" size={14} color={T.gray800}/></button>}/>
+      {panel && <UserAccessPanel userId={panel.userId} onClose={()=>setPanel(null)} onSaved={saved} crmUsers={data.users}/>}
     </SettingsPage>
   );
 }
 
-/* Access to Workspaces — the creation side panel: the organizations as a checkbox list, ticked
-   where the person can open them. Add user (no person yet) asks for their name and email (the
-   sign-in domains) first. Access only — which modules an organization has is Module Settings'. */
-function WorkspaceAccessPanel({userId, onClose, onSaved, crmUsers}){
+/* Access — the side panel from a user's ⋯ (and Add user, for someone new: their name and email,
+   the sign-in domains, first): their Organization role; their People instance; a Super Admin's
+   People instances; the CRM instances they can open, each with their role there — read-only, set in
+   that CRM's Users & Teams. Access to the open CRM instance puts them in its Users now (no seat,
+   team or preset); another instance's when it's next opened. */
+const checkRows = (children) => <div style={{display:'flex', flexDirection:'column', paddingTop:2}}>{children}</div>;
+function UserAccessPanel({userId, onClose, onSaved, crmUsers}){
+  const reg = useOrg();
   const isNew = !userId;
-  const person = isNew ? null : directoryUsers().find(u => u.id === userId);
-  const wss = visibleWorkspaces();
+  const person = isNew ? null : orgUsers().find(u => u.id === userId);
   const [name, setName] = React.useState('');
   const [email, setEmail] = React.useState('');
-  const [access, setAccess] = React.useState(() => wss.filter(w => !isNew && membershipOf(w.id, userId)).map(w => w.id));
-  const superAdmin = !isNew && isSuperAdminUser(userId);   // opens every organization
-  const emailTaken = isNew && !!directoryUserByEmail(email);
+  const start = person || {peopleId:reg.people[0].id, role:'Member', peopleAccess:[], crm:[], ...(EVERYONE_SUPER_ADMIN ? fullAccess() : {})};   // someone new: the defaults
+  const [role, setRole] = React.useState(start.role);
+  const [peopleId, setPeopleId] = React.useState(peopleInstance(start.peopleId) ? start.peopleId : reg.people[0].id);
+  const [peopleAccess, setPeopleAccess] = React.useState(start.peopleAccess || []);
+  const [crm, setCrm] = React.useState(start.crm || []);
+  const emailTaken = isNew && !!orgUserByEmail(email);
   const ok = isNew ? !!name.trim() && signInAllowed(email) && !emailTaken : !!person;
+  // The person's role in a CRM instance: the open one's Users, else that instance's saved store.
+  const roleIn = (crmId) => {
+    if(!person) return undefined;
+    const users = crmId === ACTIVE_CRM.id ? crmUsers : ((((readStore(crmStoreKey(crmId)) || {}).settings || {}).users) || []);
+    const u = users.find(x => x.id === person.id || sameEmail(x.email, person.email));
+    return u ? (u.preset || 'No preset') : undefined;
+  };
+  const toggle = (set) => (id) => set(list => list.includes(id) ? list.filter(x => x !== id) : [...list, id]);
   const save = () => {
     if(!ok) return;
-    let dir = directoryUsers(), target = person;
+    const access = role === 'Super Admin' ? [...new Set([peopleId, ...peopleAccess])] : [];
     if(isNew){
       const base = name.trim().toLowerCase().replace(/[^a-z]+/g, '-').replace(/^-|-$/g, '') || 'user';
-      target = {id: dir.some(u => u.id === base) ? `${base}-${Date.now().toString(36)}` : base, name:name.trim(), email:email.trim().toLowerCase()};
-      dir = [...dir, target];
-    }
-    setMemberships(wss.map(w => ({wsId:w.id, userId:target.id, member:access.includes(w.id)})), dir);
-    // Access to the open organization (with CRM): into its CRM Users now (no seat, team or preset).
-    onSaved(access.includes(ACTIVE_WORKSPACE.id) ? crmUsersToAdd(crmUsers) : []);
+      const id = orgUsers().some(u => u.id === base) ? `${base}-${Date.now().toString(36)}` : base;
+      setOrgUsers([...orgUsers(), {id, name:name.trim(), email:email.trim().toLowerCase(), role, peopleId, peopleAccess:access, crm}]);
+    } else setOrgUsers(orgUsers().map(u => u.id === person.id ? {...u, role, peopleId, peopleAccess:access, crm} : u));
+    onSaved(crm.includes(ACTIVE_CRM.id) ? crmUsersToAdd(crmUsers) : []);
   };
   return (
-    <CreatePanelFrame title={isNew ? 'Add user' : 'Access to Workspaces'} onClose={onClose} more={false} placement="fixed" width={480} actions={<>
+    <CreatePanelFrame title={isNew ? 'Add user' : 'Access'} onClose={onClose} more={false} placement="fixed" width={480} actions={<>
       <StSecondary label="Cancel" onClick={onClose}/>
       <StCta label={isNew ? 'Add user' : 'Save changes'} disabled={!ok} onClick={save}/>
     </>}>
@@ -454,170 +471,97 @@ function WorkspaceAccessPanel({userId, onClose, onSaved, crmUsers}){
             <Avatar name={person.name} size={22}/><span style={{fontWeight:500, whiteSpace:'nowrap'}}>{person.name}</span>
             <span style={{color:T.attioMuted, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{person.email}</span></div></Field>
         )}
-        <Field label="Workspaces">
-          <div style={{display:'flex', flexDirection:'column', paddingTop:2}}>
-            {wss.map(w => (
-              <div key={w.id} style={superAdmin ? {pointerEvents:'none'} : undefined}>
-                <SettingsCheckRow checked={superAdmin || access.includes(w.id)} onToggle={()=>setAccess(a => a.includes(w.id) ? a.filter(x => x !== w.id) : [...a, w.id])}
-                  hint={superAdmin ? 'Super Admin' : undefined}
-                  label={<span style={{display:'inline-flex', alignItems:'center', gap:8}}><WorkspaceTile ws={w} size={18}/>{orgLabel(w)}</span>}/>
-              </div>
-            ))}
-          </div>
+        <Field label="Role"><Select value={role} options={ORG_ROLES.map(r => ({value:r, label:r}))} onChange={v=>v && setRole(v)}/></Field>
+        <Field label="People"><Select value={peopleId} options={reg.people.map(p => ({value:p.id, label:p.name}))} onChange={v=>v && setPeopleId(v)}/></Field>
+        {role === 'Super Admin' && <Field label="People access">
+          {checkRows(reg.people.map(p => (
+            <div key={p.id} style={p.id === peopleId ? {pointerEvents:'none'} : undefined}>
+              <SettingsCheckRow checked={p.id === peopleId || peopleAccess.includes(p.id)} onToggle={()=>toggle(setPeopleAccess)(p.id)} label={p.name}/>
+            </div>
+          )))}
+        </Field>}
+        <Field label="CRM">
+          {checkRows(reg.crm.map(c => (
+            <SettingsCheckRow key={c.id} checked={crm.includes(c.id)} onToggle={()=>toggle(setCrm)(c.id)} label={c.name} hint={crm.includes(c.id) ? roleIn(c.id) : undefined}/>
+          )))}
         </Field>
       </>)}
     </CreatePanelFrame>
   );
 }
 
-/* Module Settings: two tabs over the modules (left, every one, whichever organizations have it) —
-   kept apart, as availability and linkage are (enabling a module never shares its data):
-     Status  — the module in each organization with its Enable switch (availability).
-     Linkage — the module's linkage groups (moduleLinks.jsx): each group's organizations marked as
-               one, ⋯ Unlink per organization, and the group's ⋯ to add organizations or unlink it.
-               Link Modules (top right) opens the side panel for a new group. Moving data asks first.
-   No heading on either (the tab says where you are). */
-const MODULE_SETTINGS_TABS = [{id:'status', name:'Status', icon:'sliders'}, {id:'linkage', name:'Linkage', icon:'arrowsDownUp'}];
-const LINK_TONES = ['#3A5BF9', '#16A34A', '#D97706', '#DB2777', '#7C3AED', '#0D9488'];
+/* Branches: one page per module (the Branches menu): one line of copy with Add (icon) on its
+   right, then a table, the page wide, of the module's branches — name, members (how many of the
+   Organization's users have it: a link to Users showing them), created — with ⋯ Rename, or the
+   empty state while it has none. Add's side panel asks for a name; a new CRM branch starts empty,
+   with the standard record types, when first opened. A new branch goes to everyone for now (else
+   to the one adding it: a CRM branch to open, a People branch among a Super Admin's, another
+   module's among theirs). CRM and People branches are the registry's `crm` and `people` lists
+   (store.jsx); the other modules' are `branches[module]`, and a user's are `branches[module]` on
+   them — a user with no list for a module has every branch of it while everyone is a Super Admin. */
+const branchesOf = (reg, module) => module === 'crm' || module === 'people' ? reg[module] || [] : (reg.branches || {})[module] || [];
+// The user's branches of a module: CRM the ones they can open, People the one they belong to.
+const userBranches = (u, module) => module === 'crm' ? u.crm || [] : module === 'people' ? [u.peopleId]
+  : (u.branches || {})[module] || (EVERYONE_SUPER_ADMIN ? branchesOf(ORG_REGISTRY, module).map(b => b.id) : []);
+const giveBranch = (u, module, id) => module === 'crm' ? {...u, crm:[...new Set([...(u.crm || []), id])]}
+  : module === 'people' ? {...u, peopleAccess:[...new Set([...(u.peopleAccess || []), id])]}
+  : {...u, branches:{...(u.branches || {}), [module]:[...new Set([...userBranches(u, module), id])]}};
 const mtHead = {fontSize:12, fontWeight:500, color:T.attioMuted, whiteSpace:'nowrap'};
 const mtRow = {display:'flex', alignItems:'center', gap:12, padding:'0 12px 0 16px', height:T.attioRowH, borderBottom:`1px solid ${T.attioLine}`, fontSize:13, color:T.attioText};
 const mtTable = {border:`1px solid ${T.attioLine}`, borderRadius:8, overflow:'hidden'};
 const mtHeadRow = {display:'flex', alignItems:'center', gap:12, padding:'0 12px 0 16px', height:36, background:T.headerBg, borderBottom:`1px solid ${T.attioLine}`};
-const orgCell = (mod, w) => (
-  <span style={{flex:1, minWidth:0, display:'flex', alignItems:'center', gap:8}}>
-    <WorkspaceTile ws={w} size={18}/>
-    <span style={{whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{mod.label} <span style={{color:T.attioMuted}}>in</span> {orgLabel(w)}</span>
-  </span>
-);
-function ModuleSettingsPage(){
-  useWorkspaces();   // follows module changes
-  const mods = orgModules();
-  const [tab, setTab] = React.useState('status');
-  const [modId, setModId] = React.useState(mods[0].id);
-  const [panel, setPanel] = React.useState(null);     // {groupId?}: Link Modules
-  const [confirm, setConfirm] = React.useState(null); // {title, primary, body, run, danger}
-  const [error, setError] = React.useState('');
-  const mod = mods.find(m => m.id === modId) || mods[0];
-  const wss = visibleWorkspaces(), byId = Object.fromEntries(wss.map(w => [w.id, w]));
-  const groups = moduleGroups(mod.id);
-  const hasData = !!MODULE_DATA[mod.id];
-  const names = (ids) => ids.map(id => byId[id] ? orgLabel(byId[id]) : id).join(', ');
-  // Linking or unlinking moves the module's data: it asks first.
-  const ask = (c) => hasData ? setConfirm(c) : c.run();
-  const link = (moduleId, orgIds, groupId) => {
-    const m = mods.find(x => x.id === moduleId);
-    const run = () => { const err = linkOrgs(moduleId, orgIds, groupId); setError(err || ''); setPanel(null); setConfirm(null); };
-    if(!MODULE_DATA[moduleId]) return run();
-    setConfirm({title:`Link ${m.label}`, primary:'Link', body:<>{names(orgIds)}</>, run});
+const createdLabel = (iso) => iso ? new Date(`${iso}T00:00:00`).toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'}) : '';
+function BranchesPage({module, onMembers}){
+  const reg = useOrg();
+  const [panel, setPanel] = React.useState(null);   // {branch?}: Add, or Rename
+  const label = moduleLabel(module);
+  const list = branchesOf(reg, module);
+  const members = (br) => orgUsers().filter(u => userBranches(u, module).includes(br.id)).length;
+  const saveList = (next, patch = {}) => setOrg(module === 'crm' || module === 'people' ? {[module]:next, ...patch} : {branches:{...(reg.branches || {}), [module]:next}, ...patch});
+  const save = (name, br) => {
+    if(br){ saveList(list.map(x => x.id === br.id ? {...x, name} : x)); setPanel(null); return; }
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'branch';
+    const id = `${module}-${slug}-${Date.now().toString(36)}`, me = signedInOrgUser();
+    // Who gets the new branch: everyone for now (EVERYONE_SUPER_ADMIN), else the one adding it.
+    const gets = (u) => EVERYONE_SUPER_ADMIN || (me && u.id === me.id);
+    saveList([...list, {id, name, createdAt:new Date().toISOString().slice(0, 10)}], {users:orgUsers().map(u => gets(u) ? giveBranch(u, module, id) : u)});
+    setPanel(null);
   };
-  return (
-    <div style={{flex:1, minHeight:0, display:'flex', flexDirection:'column', background:'#fff'}}>
-      <PrimaryTabs inset="settings" items={MODULE_SETTINGS_TABS} active={tab} onSelect={(id)=>{ setTab(id); setError(''); }}/>
-      <div style={{flex:1, minHeight:0, display:'flex'}}>
-        <div style={{width:200, flexShrink:0, borderRight:`1px solid ${T.border}`, padding:'14px 12px', overflowY:'auto'}}>
-          {mods.map(m => <CrmNavItem key={m.id} icon={null} label={m.label} active={m.id === mod.id} onClick={()=>{ setModId(m.id); setError(''); }}/>)}
-        </div>
-        <div style={{flex:1, minWidth:0, minHeight:0, overflowY:'auto', padding:'12px 16px 24px', display:'flex', flexDirection:'column', gap:16}}>
-          {tab === 'status' && <div style={{...mtTable, maxWidth:720}}>
-            <div style={mtHeadRow}><span style={{...mtHead, flex:1}}>Module</span><span style={{...mtHead, width:96}}>Status</span></div>
-            {wss.map(w => { const on = moduleEnabled(mod.id, w.id);
-              return (
-                <div key={w.id} style={mtRow}>
-                  {orgCell(mod, w)}
-                  <span style={{width:96, display:'flex', alignItems:'center', gap:8}}>
-                    <UtToggle on={on} onChange={(v)=>setModuleOrg(mod.id, w.id, v)}/>
-                    <span style={{fontSize:12.5, color: on ? T.attioText : T.attioMuted}}>{on ? 'Enabled' : 'Disabled'}</span>
-                  </span>
-                </div>
-              ); })}
-          </div>}
-          {tab === 'linkage' && <>
-            <div style={{display:'flex', alignItems:'center', gap:12, minHeight:30, maxWidth:720}}>
-              {error && <span style={{fontSize:12.5, color:T.red}}>{error}</span>}
-              <div style={{flex:1}}/>
-              <StCta label="Link Modules" onClick={()=>setPanel({})}/>
+  return (<>
+    <SettingsPage description={`Each ${label} branch has its own data, users and settings.`}
+      actions={<StCta icon="plus" title={`New ${label} branch`} onClick={()=>setPanel({})}/>}>
+      {list.length ? (
+        <div style={mtTable}>
+          <div style={mtHeadRow}><span style={{...mtHead, flex:1}}>Name</span><span style={{...mtHead, width:96}}>Members</span><span style={{...mtHead, width:120}}>Created</span><span style={{width:28}}/></div>
+          {list.map(br => (
+            <div key={br.id} style={mtRow}>
+              <span style={{flex:1, minWidth:0, fontWeight:500, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{br.name}</span>
+              <span style={{width:96, fontVariantNumeric:'tabular-nums'}}>{countLink(members(br), ()=>onMembers(module, br))}</span>
+              <span style={{width:120, color:T.attioMuted, whiteSpace:'nowrap'}}>{createdLabel(br.createdAt)}</span>
+              <RowActionsMenu title="Branch actions" width={MENU_W} items={[{label:'Rename', onClick:()=>setPanel({branch:br})}]}/>
             </div>
-            {groups.length > 0 ? (
-              <div style={{...mtTable, maxWidth:720}}>
-                <div style={mtHeadRow}><span style={{...mtHead, flex:1}}>Linked</span><span style={{width:28}}/></div>
-                {groups.map((g, i) => { const tone = LINK_TONES[i % LINK_TONES.length];
-                  return (
-                    <div key={g.id} style={{position:'relative'}}>
-                      {/* One group: a coloured bar down its rows. */}
-                      <span aria-hidden="true" style={{position:'absolute', left:0, top:0, bottom:0, width:3, background:tone}}/>
-                      <div style={{...mtRow, background:T.pageBg}}>
-                        <span style={{flex:1, minWidth:0, display:'flex', alignItems:'center', gap:8, fontWeight:500}}>
-                          <span style={{width:8, height:8, borderRadius:9999, background:tone, flexShrink:0}}/>Linkage {i + 1}
-                          <span style={{fontWeight:400, color:T.attioMuted}}>· {g.orgs.length}</span>
-                        </span>
-                        <RowActionsMenu title="Linkage actions" width={MENU_W} items={[
-                          {label:'Add organizations', onClick:()=>setPanel({groupId:g.id})},
-                          {label:'Unlink all', danger:true, onClick:()=>ask({title:`Unlink ${mod.label}`, primary:'Unlink', danger:true, body:<>{names(g.orgs)}</>,
-                            run:()=>{ setConfirm(null); unlinkGroup(mod.id, g.id); }})}]}/>
-                      </div>
-                      {g.orgs.map(id => byId[id] && (
-                        <div key={id} style={{...mtRow, paddingLeft:32}}>
-                          {orgCell(mod, byId[id])}
-                          <RowActionsMenu title="Organization actions" width={MENU_W} items={[
-                            {label:'Unlink', danger:true, onClick:()=>ask({title:`Unlink ${mod.label} in ${orgLabel(byId[id])}`, primary:'Unlink', danger:true, body:null,
-                              run:()=>{ setConfirm(null); unlinkOrg(mod.id, g.id, id); }})}]}/>
-                        </div>
-                      ))}
-                    </div>
-                  ); })}
-              </div>
-            ) : <div style={{maxWidth:720}}><StEmpty title="No linkages yet"/></div>}
-          </>}
+          ))}
         </div>
-      </div>
-      {panel && <LinkModulesPanel moduleId={mod.id} groupId={panel.groupId} onClose={()=>setPanel(null)} onLink={link}/>}
-      {confirm && <StModal title={confirm.title} primary={confirm.primary} danger={confirm.danger} onCancel={()=>setConfirm(null)} onSubmit={confirm.run}>
-        {confirm.body && <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>{confirm.body}</div>}
-      </StModal>}
-    </div>
-  );
+      ) : <StEmpty title={`No ${label} branches yet`}/>}
+    </SettingsPage>
+    {panel && <BranchPanel label={label} module={module} branch={panel.branch} others={list} onClose={()=>setPanel(null)} onSave={save}/>}
+  </>);
 }
-
-/* Link Modules — the side panel: the module being linked, a search, and the organizations as a
-   checkbox list (several at once; one already in another group of this module can't be picked).
-   From a group's ⋯ Add organizations: that group's organizations come ticked. */
-function LinkModulesPanel({moduleId, groupId, onClose, onLink}){
-  const mods = orgModules();
-  const [mid, setMid] = React.useState(moduleId);
-  const [q, setQ] = React.useState('');
-  const groups = moduleGroups(mid), g = groupId ? groups.find(x => x.id === groupId) : null;
-  const [picked, setPicked] = React.useState(() => g ? [...g.orgs] : []);
-  React.useEffect(() => { if(!g) setPicked([]); }, [mid]);
-  const linkedElsewhere = (id) => groups.some(x => x.id !== groupId && x.orgs.includes(id));
-  const qq = q.trim().toLowerCase();
-  const wss = visibleWorkspaces().filter(w => !qq || orgLabel(w).toLowerCase().includes(qq));
-  const ok = g ? picked.length > g.orgs.length : picked.length >= 2;
-  const toggle = (id) => setPicked(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
-  const modLabel = (mods.find(m => m.id === mid) || {}).label;
+// Add / Rename: the branch's name (unique within its module).
+const BRANCH_NAME_HINTS = {crm:'e.g. Canada', people:'e.g. Karachi'};
+function BranchPanel({label, module, branch, others, onClose, onSave}){
+  const [name, setName] = React.useState(branch ? branch.name : '');
+  const taken = others.some(x => (!branch || x.id !== branch.id) && x.name.trim().toLowerCase() === name.trim().toLowerCase());
+  const ok = !!name.trim() && !taken && (!branch || name.trim() !== branch.name);
   return (
-    <CreatePanelFrame title={g ? `Link ${modLabel}` : 'Link Modules'} onClose={onClose} more={false} placement="fixed" width={460} actions={<>
+    <CreatePanelFrame title={branch ? `Rename ${label} branch` : `New ${label} branch`} onClose={onClose} more={false} placement="fixed" width={480} actions={<>
       <StSecondary label="Cancel" onClick={onClose}/>
-      <StCta label="Link" disabled={!ok} onClick={()=>onLink(mid, g ? picked.filter(id => !g.orgs.includes(id)) : picked, groupId)}/>
+      <StCta label={branch ? 'Save changes' : 'Add branch'} disabled={!ok} onClick={()=>onSave(name.trim(), branch)}/>
     </>}>
-      {stack(<>
-        <Field label="Module">{g ? <ReadValue>{modLabel}</ReadValue>
-          : <Select value={mid} options={mods.map(m => ({value:m.id, label:m.label}))} onChange={v=>v && setMid(v)}/>}</Field>
-        <Field label="Organizations">
-          <div style={{display:'flex', flexDirection:'column', gap:6}}>
-            <div style={{position:'relative'}}>
-              <div style={{position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', display:'flex'}}><Icon name="search" size={13} color={T.gray400}/></div>
-              <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search organizations" aria-label="Search organizations" style={{...fieldText, paddingLeft:30}}/>
-            </div>
-            {wss.map(w => { const fixed = (g && g.orgs.includes(w.id)) || linkedElsewhere(w.id);
-              return (
-                <div key={w.id} style={{opacity: linkedElsewhere(w.id) ? .5 : 1, pointerEvents: fixed ? 'none' : 'auto'}}>
-                  <SettingsCheckRow checked={picked.includes(w.id)} onToggle={()=>toggle(w.id)} hint={linkedElsewhere(w.id) ? 'Linked' : undefined}
-                    label={<span style={{display:'inline-flex', alignItems:'center', gap:8}}><WorkspaceTile ws={w} size={18}/>{orgLabel(w)}</span>}/>
-                </div>
-              ); })}
-          </div>
-        </Field>
-      </>)}
+      {stack(<Field label="Name">
+        <input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder={BRANCH_NAME_HINTS[module] || 'e.g. Dubai'} style={{...fieldText, borderColor: taken ? T.red : undefined}}/>
+        {taken && <div style={{fontSize:12, color:T.red, marginTop:4}}>A branch with this name already exists.</div>}
+      </Field>)}
     </CreatePanelFrame>
   );
 }
@@ -628,7 +572,7 @@ function LoginScreen(){
   const [step, setStep] = React.useState('start');   // start | google
   const [email, setEmail] = React.useState('');
   const [error, setError] = React.useState('');
-  const known = (WORKSPACE_REGISTRY.accounts || []).filter(signInAllowed);
+  const known = (ORG_REGISTRY.accounts || []).filter(signInAllowed);
   const signIn = (address) => {
     const a = String(address || '').trim().toLowerCase();
     if(!signInAllowed(a)){ setError('Use your hofmigration.com or hof-global.com account.'); return; }
@@ -674,7 +618,7 @@ function LoginScreen(){
 
 /* ── Brand (CRM → Marketing → Brand) ── four sections, switched with the Settings tabs (as in
    Users & Teams): Logo, Color System, Email Signature, Digital Letterhead. Each is saved on the
-   workspace; administrators edit, everyone else sees them. */
+   Organization's brand (every CRM instance's); CRM administrators edit, everyone else sees them. */
 const BRAND_SECTIONS = [
   // Color System (BrandColorsSection) is hidden for now; its saved colours still apply.
   {id:'logo', label:'Logo', icon:'profile'},
@@ -693,10 +637,10 @@ const BrandActions = ({admin, dirty, valid = true, onCancel, onSave}) => !admin 
   <><StSecondary label="Cancel" disabled={!dirty} onClick={onCancel}/><StCta label="Save" disabled={!dirty || !valid} onClick={onSave}/></>
 );
 
-/* Logo: the uploaded logo, or HOF Migration's own lockup until one is uploaded; Upload /
-   Replace and Remove (back to the lockup). */
-function BrandLogoSection({active, update, admin, toast, setActions}){
-  const saved = active.logo || null;
+/* Logo: the uploaded company logo, or the HOF lockup until one is uploaded; Replace and Remove
+   (back to the lockup). */
+function BrandLogoSection({brand, admin, toast, setActions}){
+  const saved = brand.logo || null;
   const [draft, setDraft] = React.useState(saved);
   const [error, setError] = React.useState('');
   const input = React.useRef(null);
@@ -704,17 +648,15 @@ function BrandLogoSection({active, update, admin, toast, setActions}){
   const pick = (e) => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if(!f) return;
     readImageFile(f).then(url => { setError(''); setDraft(url); }).catch(err => setError(err.message)); };
   React.useEffect(() => setActions(<BrandActions admin={admin} dirty={dirty} onCancel={()=>setDraft(saved)}
-    onSave={()=>{ updateWorkspace(update, active.id, {logo:draft}); toast('Logo saved'); }}/>), [draft, saved, admin]);
+    onSave={()=>{ updateBrand({logo:draft}); toast('Logo saved'); }}/>), [draft, saved, admin]);
   return brandRow('Company logo', (
     <div style={{display:'flex', flexDirection:'column', gap:10}}>
       <div style={{width:260, height:104, borderRadius:10, border:`1px dashed ${T.borderStrong}`, background:'#fff', display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden', padding:12}}>
-        {draft ? <img src={draft} alt="Company logo" style={{maxWidth:'100%', maxHeight:'100%', objectFit:'contain'}}/>
-          : active.id === HOF_MIGRATION_WS ? <Logo variant="main" height={30}/>
-          : <Icon name="brand" size={22} color={T.gray400}/>}
+        {draft ? <img src={draft} alt="Company logo" style={{maxWidth:'100%', maxHeight:'100%', objectFit:'contain'}}/> : <Logo variant="main" height={30}/>}
       </div>
       {admin && <div style={{display:'flex', alignItems:'center', gap:10}}>
         <input ref={input} type="file" accept="image/*" onChange={pick} style={{display:'none'}}/>
-        <StSecondary label={draft || active.id === HOF_MIGRATION_WS ? 'Replace' : 'Upload logo'} onClick={()=>input.current && input.current.click()}/>
+        <StSecondary label="Replace" onClick={()=>input.current && input.current.click()}/>
         {draft && <StTextAction label="Remove" onClick={()=>setDraft(null)}/>}
       </div>}
       {error && <div style={{fontSize:12, color:T.red}}>{error}</div>}
@@ -724,24 +666,24 @@ function BrandLogoSection({active, update, admin, toast, setActions}){
 
 /* Color System: any number of named brand colours — Add Color, rename, recolour, delete. The
    first two also stand in for the primary and secondary colours the rest of the ERP reads
-   (the workspace mark, quotations), so those keep working. */
-const brandPalette = (ws) => Array.isArray(ws.palette) ? ws.palette : (() => {
-  const c = {...DEFAULT_BRAND(), ...(ws.colors || {})};
+   (the brand's mark, quotations), so those keep working. */
+const brandPalette = (brand) => Array.isArray(brand.palette) ? brand.palette : (() => {
+  const c = {...DEFAULT_BRAND(), ...(brand.colors || {})};
   return [{id:'bc-primary', name:'Primary', value:c.primary}, {id:'bc-secondary', name:'Secondary', value:c.secondary}];
 })();
 const colorsFromPalette = (palette) => {
   const d = DEFAULT_BRAND(), ok = palette.filter(c => validHex(c.value));
   return {primary: ok[0] ? ok[0].value : d.primary, secondary: (ok[1] || ok[0] || {}).value || d.secondary};
 };
-function BrandColorsSection({active, update, admin, toast, setActions}){
-  const saved = brandPalette(active);
+function BrandColorsSection({brand, admin, toast, setActions}){
+  const saved = brandPalette(brand);
   const [draft, setDraft] = React.useState(saved);
   const dirty = JSON.stringify(draft) !== JSON.stringify(saved);
   const valid = draft.every(c => c.name.trim() && validHex(c.value));
   const set = (id, p) => setDraft(list => list.map(c => c.id === id ? {...c, ...p} : c));
   const add = () => setDraft(list => [...list, {id:`bc-${Date.now().toString(36)}`, name:'', value:'#000000'}]);
   React.useEffect(() => setActions(<BrandActions admin={admin} dirty={dirty} valid={valid} onCancel={()=>setDraft(saved)}
-    onSave={()=>{ const palette = draft.map(c => ({...c, name:c.name.trim()})); updateWorkspace(update, active.id, {palette, colors:colorsFromPalette(palette)}); toast('Colors saved'); }}/>),
+    onSave={()=>{ const palette = draft.map(c => ({...c, name:c.name.trim()})); updateBrand({palette, colors:colorsFromPalette(palette)}); toast('Colors saved'); }}/>),
     [JSON.stringify(draft), JSON.stringify(saved), admin]);
   const mono = {fontFamily:'ui-monospace, SFMono-Regular, Menlo, monospace'};
   return (
@@ -767,11 +709,10 @@ function BrandColorsSection({active, update, admin, toast, setActions}){
   );
 }
 
-/* The company logo, as set in Logo: the uploaded one, HOF Migration's lockup, or the initials. */
-function BrandLogoMark({ws, height = 28}){
-  if(ws.logo) return <img src={ws.logo} alt="" style={{display:'block', height, maxWidth:height * 5, objectFit:'contain'}}/>;
-  if(ws.id === HOF_MIGRATION_WS) return <Logo variant="main" height={height * .7}/>;
-  return <WorkspaceTile ws={ws} size={height}/>;
+/* The company logo, as set in Logo: the uploaded one, else the HOF lockup. */
+function BrandLogoMark({brand, height = 28}){
+  if(brand.logo) return <img src={brand.logo} alt="" style={{display:'block', height, maxWidth:height * 5, objectFit:'contain'}}/>;
+  return <Logo variant="main" height={height * .7}/>;
 }
 /* Email Signature and Digital Letterhead share the call interface's split: the form on the
    left, a second pane on the right (here, the live preview) behind a divider. */
@@ -792,12 +733,12 @@ const brandTextField = (value, onChange, placeholder, opts = {}) => opts.multili
       style={{...fieldText, borderColor: opts.invalid ? T.red : undefined}}/>;
 const brandEmailOk = (v) => !v || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
 // A section's saved configuration vs. its draft, with Cancel / Save in the tab row.
-function useBrandDraft({active, update, admin, toast, setActions, key, blank, label, valid = () => true}){
-  const saved = {...blank, ...(active[key] && !active[key].dataUrl ? active[key] : {})};
+function useBrandDraft({brand, admin, toast, setActions, key, blank, label, valid = () => true}){
+  const saved = {...blank, ...(brand[key] && !brand[key].dataUrl ? brand[key] : {})};
   const [draft, setDraft] = React.useState(saved);
   const dirty = JSON.stringify(draft) !== JSON.stringify(saved);
   React.useEffect(() => setActions(<BrandActions admin={admin} dirty={dirty} valid={valid(draft)} onCancel={()=>setDraft(saved)}
-    onSave={()=>{ updateWorkspace(update, active.id, {[key]:Object.fromEntries(Object.entries(draft).map(([k, v]) => [k, typeof v === 'string' ? v.trim() : v]))}); toast(`${label} saved`); }}/>),
+    onSave={()=>{ updateBrand({[key]:Object.fromEntries(Object.entries(draft).map(([k, v]) => [k, typeof v === 'string' ? v.trim() : v]))}); toast(`${label} saved`); }}/>),
     [JSON.stringify(draft), JSON.stringify(saved), admin]);
   return [draft, (k, v) => setDraft(d => ({...d, [k]:v}))];
 }
@@ -810,13 +751,13 @@ const SIGNATURE_FIELDS = [
   {key:'website', label:'Website', placeholder:'https://hofmigration.com'}, {key:'address', label:'Company address', multiline:true},
 ];
 const SIGNATURE_BLANK = {includeLogo:true, name:'', designation:'', email:'', phone:'', website:'', address:''};
-function EmailSignatureBlock({sig, ws}){
+function EmailSignatureBlock({sig, brand}){
   const line = {fontSize:13, color:T.attioText, lineHeight:1.5};
   const contact = [sig.email, sig.phone, sig.website].filter(Boolean);
   const logo = sig.includeLogo;
   return (
     <div style={{display:'flex', gap:16, alignItems:'center'}}>
-      {logo && <div style={{flexShrink:0}}><BrandLogoMark ws={ws} height={40}/></div>}
+      {logo && <div style={{flexShrink:0}}><BrandLogoMark brand={brand} height={40}/></div>}
       <div style={{minWidth:0, paddingLeft: logo ? 16 : 0, borderLeft: logo ? `2px solid ${T.attioLine}` : 'none'}}>
         <div style={{...line, fontWeight:600, color: sig.name ? T.attioText : T.attioFaint}}>{sig.name || 'Name'}</div>
         {sig.designation && <div style={{...line, color:T.attioMuted}}>{sig.designation}</div>}
@@ -827,7 +768,7 @@ function EmailSignatureBlock({sig, ws}){
   );
 }
 function BrandSignatureSection(props){
-  const {active, admin} = props;
+  const {brand, admin} = props;
   const [sig, set] = useBrandDraft({...props, key:'signature', blank:SIGNATURE_BLANK, label:'Email signature', valid:(d) => !!d.name.trim() && brandEmailOk(d.email)});
   return (
     <BrandSplit
@@ -844,7 +785,7 @@ function BrandSignatureSection(props){
       preview={
         <div style={{background:'#fff', border:`1px solid ${T.attioLine}`, borderRadius:10, padding:'18px 20px', maxWidth:560}}>
           <div style={{fontSize:13, color:T.attioMuted, lineHeight:1.6, marginBottom:16}}>Kind regards,</div>
-          <EmailSignatureBlock sig={sig} ws={active}/>
+          <EmailSignatureBlock sig={sig} brand={brand}/>
         </div>
       }/>
   );
@@ -858,10 +799,10 @@ const LETTERHEAD_FIELDS = [
   {key:'website', label:'Website', placeholder:'https://hofmigration.com'}, {key:'footer', label:'Footer note', placeholder:'e.g. Licensed immigration consultants'},
 ];
 function BrandLetterheadSection(props){
-  const {active, admin} = props;
-  const [lh, set] = useBrandDraft({...props, key:'letterhead', blank:{companyName:active.name, address:'', phone:'', email:'', website:'', footer:''}, label:'Letterhead',
+  const {brand, admin} = props;
+  const [lh, set] = useBrandDraft({...props, key:'letterhead', blank:{companyName:brand.name, address:'', phone:'', email:'', website:'', footer:''}, label:'Letterhead',
     valid:(d) => !!d.companyName.trim() && brandEmailOk(d.email)});
-  const accent = colorsFromPalette(brandPalette(active)).primary;
+  const accent = colorsFromPalette(brandPalette(brand)).primary;
   const small = {fontSize:10.5, color:T.gray600, lineHeight:1.5};
   const contact = [lh.phone, lh.email, lh.website].filter(Boolean);
   return (
@@ -873,7 +814,7 @@ function BrandLetterheadSection(props){
         <div style={{background:'#fff', border:`1px solid ${T.attioLine}`, borderRadius:4, width:'100%', maxWidth:460, aspectRatio:'1 / 1.414', alignSelf:'center',
           boxShadow:'0 4px 16px rgba(16,24,40,.08)', display:'flex', flexDirection:'column', padding:'26px 28px'}}>
           <div style={{display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:16}}>
-            <BrandLogoMark ws={active} height={32}/>
+            <BrandLogoMark brand={brand} height={32}/>
             <div style={{textAlign:'right', minWidth:0}}>
               <div style={{fontSize:12, fontWeight:600, color:T.attioText}}>{lh.companyName || 'Company name'}</div>
               {lh.address && <div style={{...small, whiteSpace:'pre-line'}}>{lh.address}</div>}
@@ -894,8 +835,9 @@ function BrandLetterheadSection(props){
 }
 
 function BrandPage(){
-  const {active, update} = useWorkspaces();
-  const admin = isWorkspaceAdmin();
+  useOrg();
+  const brand = orgBrand();
+  const admin = isCrmAdmin();
   const [section, setSection] = React.useState('logo');
   const [actions, setActions] = React.useState(null);
   const [message, setMessage] = React.useState(null);
@@ -909,19 +851,15 @@ function BrandPage(){
         {actions && <div style={{display:'flex', alignItems:'center', gap:8, paddingBottom:8}}>{actions}</div>}
       </div>
       <div style={{maxWidth: section === 'signature' || section === 'letterhead' ? 'none' : 820, marginTop:4}}>
-        <Section key={`${section}-${active.id}`} active={active} update={update} admin={admin} toast={toast} setActions={setActions}/>
-        {!admin && <div style={{...stTextB, marginTop:12}}>Only workspace administrators can change the brand.</div>}
+        <Section key={section} brand={brand} admin={admin} toast={toast} setActions={setActions}/>
+        {!admin && <div style={{...stTextB, marginTop:12}}>Only CRM administrators can change the brand.</div>}
       </div>
       <CopyToast message={message}/>
     </SettingsPage>
   );
 }
 
-// The open workspace's brand (quotations, documents).
-const workspaceBrand = () => { const w = WORKSPACE_REGISTRY.workspaces.find(x => x.id === WORKSPACE_REGISTRY.activeId) || ACTIVE_WORKSPACE; return {...w, colors:{...DEFAULT_BRAND(), ...(w.colors || {})}}; };
-
-Object.assign(window, {WORKSPACE_CREATION_ENABLED, visibleWorkspaces, directoryUsers, workspaceMembers, membershipOf, signedInUserId, switchableWorkspaces,
-  myModules, setMemberships, joinWorkspaceDirectory, syncWorkspacePeople, crmUsersToAdd, workspaceRedirect, WORKSPACE_TEMPLATES, workspaceTemplate, LEAD_OUTCOMES,
-  orgLabel, orgModules, moduleEnabled, moduleLinked, setModuleOrg, canAccess, isSuperAdminUser,
-  ErpSettingsScreen, WorkspaceSettingsPage, ErpUsersPage, WorkspaceAccessPanel, ModuleSettingsPage, LinkModulesPanel, ALLOWED_EMAIL_DOMAINS, signInAllowed, isWorkspaceAdmin, signOut, useWorkspaces, WorkspaceTile, WorkspaceLockup, WorkspaceSwitcher,
-  CreateWorkspaceModal, LoginScreen, BrandPage, LogoField, readImageFile, workspaceBrand});
+Object.assign(window, {useOrg, setOrg, updateOrg, updateBrand, orgUsers, orgUserByEmail, signedInOrgUser, isOrgAdmin, isCrmAdmin, instanceName, peopleInstance,
+  myCrmInstances, myPeopleInstances, peopleInstancesOf, activePeople, crmRedirect, setOrgUsers, joinOrganization, leaveCrm, syncOrgUsers, crmUsersToAdd, allEmployees, hasEmployeeStores, saveEmployees,
+  WORKSPACE_TEMPLATES, crmTemplate, LEAD_OUTCOMES, ErpSettingsScreen, OrganizationSettingsPage, ErpUsersPage, UserAccessPanel, BranchesPage, BranchPanel,
+  ALLOWED_EMAIL_DOMAINS, signInAllowed, signOut, MarkTile, OrgLockup, BrandLockup, SwitcherMenu, PeopleSwitcher, CrmSwitcher, LoginScreen, BrandPage, LogoField, readImageFile});

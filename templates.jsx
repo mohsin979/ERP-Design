@@ -25,9 +25,9 @@ const TEMPLATE_TABS = [{id:'templates', label:'Email Templates', icon:'envelope'
   {id:'services', label:'Services', icon:'services', kind:'services'}];
 const SEQUENCE_UNITS = ['Hours', 'Days', 'Weeks'];
 const escHtml = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-/* A template's message as its email: the workspace's mark, then the paragraphs. */
+/* A template's message as its email: the Organization's brand colour, then the paragraphs. */
 const templateHtmlOf = (body) => {
-  const brand = workspaceBrand();
+  const brand = orgBrand();
   const paras = String(body || '').split(/\n{2,}/).map(p => p.trim()).filter(Boolean)
     .map(p => `<p style="margin:0 0 14px;font-size:15px;line-height:1.65;color:#2B2B2E">${escHtml(p).replace(/\n/g, '<br/>')}</p>`).join('');
   return `<div style="font-family:'DM Sans',Arial,sans-serif;background:#fff;color:#2B2B2E"><div style="height:4px;background:${brand.colors.primary}"></div>`

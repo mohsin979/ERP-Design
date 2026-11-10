@@ -1,13 +1,12 @@
 /* HOF Pulse ERP — app shell only (Header + Main Screen). No module content yet —
    module requirements will be provided separately. */
 
-/* The ERP's modules. Each organization has those set in ERP Settings → Module Settings
-   (workspaces.jsx), and everyone with access to it opens them — except Setting, the ERP Settings,
-   for its Super Admin and Admin (`assignable:false`). People's data can be shared between
-   organizations (`shareable`: linked ones share it); CRM is each organization's own. */
+/* The ERP's modules — the Organization's (workspaces.jsx). CRM and People have instances; CRM
+   opens for anyone with a CRM instance, Setting (the ERP Settings) for the Organization's Super
+   Admins (`assignable:false`); the rest aren't built yet. */
 const MODULE_TILES = [
   {id:'crm', label:'CRM', icon:'crm', color:'#1869EC'},
-  {id:'people', label:'People', icon:'people', color:'#7C3AED', shareable:true},
+  {id:'people', label:'People', icon:'people', color:'#7C3AED'},
   {id:'marketing', label:'Marketing', icon:'marketing', color:'#EC4899'},
   {id:'accounting', label:'Accounting', icon:'accounting', color:'#16A34A'},
   {id:'analytics', label:'Analytics', icon:'analytics', color:'#F59E0B'},
@@ -15,6 +14,7 @@ const MODULE_TILES = [
   {id:'complience', label:'Complience', icon:'complience', color:'#DC2626'},
   {id:'setting', label:'Setting', icon:'setting', color:'#64748B', assignable:false},
 ];
+Object.assign(window, {MODULE_TILES});   // ERP Settings → Branches lists the modules (workspaces.jsx)
 
 /* ── Header (ERP and CRM) ─────────────────────────────────────────────────────────────────
    One header pattern in both contexts; only the relevant controls change:
@@ -24,14 +24,14 @@ const MODULE_TILES = [
    The profile and work-session state belong to the app, so both headers show the same. */
 
 /* The signed-in person (mocked Google sign-in, workspaces.jsx): the session's email; their name
-   and role come from the open workspace's Users once it has loaded (App). */
+   and role come from the open CRM instance's Users once it has loaded (App). */
 const CURRENT_USER = {
   name:'Waleed bin Zaman', email:'waleed.binzaman@hof-global.com',
   orgRole:'CEO', role:'Super Admin', clockIn:'9:00 AM', shift:'9:00 AM–5:00 PM',
 };
-const SESSION = WORKSPACE_REGISTRY.session;
-// Sample data only in the workspace that has it (HOF Migration); every other workspace starts empty.
-const SEED = !!ACTIVE_WORKSPACE.sample;
+const SESSION = ORG_REGISTRY.session;
+// Sample data only in the CRM instance that has it (Migration); every other instance starts empty.
+const SEED = !!ACTIVE_CRM.sample;
 const seedList = (f) => SEED ? f() : [];
 /* Work session (Time Clock) — a chronological trail of events; the status and the worked time
    are derived from it, so new event kinds slot in without reshaping the widget.
@@ -406,8 +406,7 @@ function HeaderRightIcons({context, session, setSession}){
   );
 }
 
-/* ERP header — the workspace switcher (the open workspace's lockup; workspaces.jsx), then the
-   global Find or Ask search. */
+/* ERP header — the Organization's lockup (workspaces.jsx), then the global Find or Ask search. */
 function Header({session, setSession}){
   return (
     <div style={{
@@ -418,16 +417,16 @@ function Header({session, setSession}){
       display:'flex', alignItems:'center', gap:24,
       padding:'0 16px', flexShrink:0,
     }}>
-      <WorkspaceSwitcher/>
+      <OrgLockup/>
       <HeaderSearch/>
       <HeaderRightIcons context="erp" session={session} setSession={setSession}/>
     </div>
   );
 }
 
-/* CRM header — scoped to the right-hand content pane only (the CRM nav on the left has its
-   own "CRM" label + collapse toggle, so this header carries no CRM logo/title). */
-function CrmHeader({session, setSession}){
+/* Module header (CRM, People) — scoped to the right-hand content pane only (the module's sidebar on
+   the left names the open branch and module, so this header carries no logo or title). */
+function CrmHeader({session, setSession, context = 'crm'}){
   return (
     <div style={{
       // Its own stacking layer above the page (the contact side panel is z70) and below modals (z90+),
@@ -438,7 +437,7 @@ function CrmHeader({session, setSession}){
       padding:'0 16px', flexShrink:0,
     }}>
       <HeaderSearch/>
-      <HeaderRightIcons context="crm" session={session} setSession={setSession}/>
+      <HeaderRightIcons context={context} session={session} setSession={setSession}/>
     </div>
   );
 }
@@ -473,16 +472,15 @@ function ModuleTile({tile, onClick}){
   );
 }
 
-/* Main Screen — greeting, module tiles, AI command bar. The tiles are the modules this organization
-   has (ERP Settings → Module Settings), for those with access to it, plus Setting for its administrators. CRM
-   opens the CRM, Setting the ERP Settings; every other tile just surfaces a lightweight "not built
-   yet" note instead of navigating anywhere or inventing module behavior. */
-function MainScreen({onOpenCrm, onOpenSettings}){
+/* Main Screen — greeting, module tiles, AI command bar. The tiles are the Organization's modules:
+   CRM for anyone with a CRM branch, Setting for its Super Admins (workspaces.jsx). CRM opens the
+   CRM (the open branch), People the People module (its navigation; pages not defined yet), Setting
+   the ERP Settings; every other tile just surfaces a lightweight "not built yet" note instead of
+   navigating anywhere or inventing module behavior. */
+function MainScreen({onOpenCrm, onOpenPeople, onOpenSettings}){
   const [notice, setNotice] = React.useState(null);
-  useWorkspaces();   // follows module access changes
-  // The modules the signed-in person opens in this workspace; Setting for its administrators.
-  const mine = myModules();
-  const tiles = MODULE_TILES.filter(t => t.assignable === false ? isWorkspaceAdmin() : mine.includes(t.id));
+  useOrg();   // follows access changes
+  const tiles = MODULE_TILES.filter(t => t.assignable === false ? isOrgAdmin() : t.id !== 'crm' || myCrmInstances().length > 0);
 
   return (
     <div style={{flex:1, overflow:'auto', background:T.pageBg, display:'flex', alignItems:'center', justifyContent:'center'}}>
@@ -494,7 +492,7 @@ function MainScreen({onOpenCrm, onOpenSettings}){
             ever wrapping to a second row at this container width. */}
         <div style={{display:'flex', gap:16, flexWrap:'nowrap', marginBottom:12}}>
           {tiles.map(t => (
-            <ModuleTile key={t.id} tile={t} onClick={(tile)=> tile.id==='crm' ? onOpenCrm() : tile.id === 'setting' ? onOpenSettings()
+            <ModuleTile key={t.id} tile={t} onClick={(tile)=> tile.id==='crm' ? onOpenCrm() : tile.id === 'people' ? onOpenPeople() : tile.id === 'setting' ? onOpenSettings()
               : setNotice(`${tile.label} hasn't been built yet — module requirements haven't been provided.`)}/>
           ))}
         </div>
@@ -563,8 +561,11 @@ const withSampleValues = (list, samples, keys) => {
 };
 
 function App(){
-  const [screen, setScreen] = React.useState('main'); // 'main' | 'crm' | 'erpSettings'
+  // Starts in the CRM after a switch of CRM instance from inside it (workspaces.jsx CrmSwitcher), else on the ERP home.
+  const [screen, setScreen] = React.useState(() => { if(!ORG_REGISTRY.openCrm) return 'main'; saveOrgRegistry({openCrm:false}); return 'crm'; }); // 'main' | 'crm' | 'people' | 'erpSettings'
   const [crmActive, setCrmActive] = React.useState(null);
+  // The People module's open page (nav.jsx PEOPLE_NAV) — every page is the empty canvas for now.
+  const [peopleActive, setPeopleActive] = React.useState(PEOPLE_DEFAULT_PAGE);
   // CRM navigation setup (Edit Nav) — kept here so it survives leaving and re-entering CRM, and saved.
   const [crmNav, setCrmNav] = usePersistedState('crmNav', CRM_NAV_DEFAULT);
   /* Settings opens its menu beside the main nav. The menu's back arrow collapses it (Settings stays
@@ -584,29 +585,29 @@ function App(){
      and profiles, navigation, views. A browser that saved only the workflow store before
      (hof-erp-workflow-engine-v1: workflows, pipelines, templates, deals) starts from that once. */
   const [settingsData, setSettingsData] = React.useState(() => {
-    // A workspace made from a template (Accounting) starts from its CRM setup (workspaces.jsx).
-    const tpl = workspaceTemplate();
+    // A CRM instance made from a template (Partners) starts from its CRM setup (workspaces.jsx).
+    const tpl = crmTemplate();
     const d = {...DEFAULT_SETTINGS_DATA(), ...(tpl ? tpl.settings() : {})}, v2 = savedSlice('settings');
     const saved = v2 || WF_SAVED || {};
     // Sample pipelines and deals are added once; deleted ones stay deleted.
     // Contacts → Deals is One-to-many (decided); settings saved before say Many-to-many.
     const associations = ((v2 && v2.associations) || d.associations).map(a => a.id === 'as-contacts-deals' && a.type === 'Many-to-many' ? {...a, type:'One-to-many'} : a);
-    // A new empty workspace: no people, workflows or email templates yet.
+    // A new empty CRM instance: no users, workflows or email templates yet.
     const empty = !SEED && !v2 ? {...EMPTY_PEOPLE_DATA(), emailTemplates:[], emailSequences:[]} : {};
     const loaded = {...d, ...empty, ...(v2 || {})};
     /* Permissions saved in an earlier shape (Contacts only; Records only) are completed: per-Object
        permissions, then the other categories by the holder's preset (levelOfPreset). */
     const base = {...loaded, users:(loaded.users || []).map(u => ({...u, permissions:normalizePermissions(u.permissions, levelOfPreset(u.preset))})),
       presets:(loaded.presets || []).map(x => ({...x, permissions:normalizePermissions(x.permissions, levelOfPreset(x.name))}))};
-    // The signed-in person is one of the workspace's users (added when they aren't yet).
-    // One identity per person across workspaces: the signed-in person joins under their shared name.
-    const shared = SESSION && directoryUsers().find(u => String(u.email || '').toLowerCase() === String(SESSION.email).toLowerCase());
-    // People (the People module): this organization's own, or its People group's (moduleLinks.jsx).
-    const people = readSpace(peopleSpaceKey(ACTIVE_WORKSPACE.id)) || base.people;
+    // The signed-in person is one of this CRM's users (added when they aren't yet).
+    // One identity per person across the Organization: the signed-in person joins under their shared name.
+    const shared = signedInOrgUser();
+    // The employees (People): every People instance's, each with its instance; none saved yet — this CRM's (the sample ones), into the first instance.
+    const people = hasEmployeeStores() ? allEmployees() : base.people;
     const withMember0 = withSessionMember({users:base.users, seats:base.seats, presets:base.presets, people}, SESSION && {...SESSION, ...(shared ? {name:shared.name} : {})});
-    // Members given CRM here (ERP Settings → Users) who aren't in its Users yet join them; everyone keeps their shared name.
+    // The Organization's users given this CRM instance (ERP Settings → Users) who aren't in its Users yet join them; everyone keeps their shared name.
     const withMember = {...withMember0, users:[...withMember0.users, ...crmUsersToAdd(withMember0.users)].map(u => {
-      const d = directoryUsers().find(x => String(x.email || '').toLowerCase() === String(u.email || '').toLowerCase());
+      const d = orgUserByEmail(u.email);
       return d && d.name !== u.name ? {...u, name:d.name} : u; })};
     return migrateDataModel({...base, ...withMember, associations,
       // Workflows were cleared once (WORKFLOWS_CLEARED): what's saved since is kept.
@@ -616,15 +617,13 @@ function App(){
       ...(!v2 && saved.emailTemplates ? {emailTemplates:saved.emailTemplates} : {})});
   });
   React.useEffect(() => { persistSlice('settings', settingsData); }, [settingsData]);
-  // Shared people: this workspace's Users in the directory, its members set up (workspaces.jsx).
-  React.useEffect(() => { syncWorkspacePeople(settingsData.users); }, [settingsData.users]);
-  /* People changes go to its People space — its own, or its group's when linked (each person with
-     the organization they came from). Linking and unlinking move the data and reload (moduleLinks.jsx). */
-  useWorkspaces();   // Module Settings changes (availability) apply at once
-  React.useEffect(() => { try { writeSpace(peopleSpaceKey(ACTIVE_WORKSPACE.id), stampOrg(settingsData.people || [], ACTIVE_WORKSPACE.id)); }
-    catch(e){ console.warn('HOF ERP: could not save People', e); } }, [settingsData.people]);
+  // One identity per person: this CRM's Users among the Organization's users, each with this instance (workspaces.jsx).
+  React.useEffect(() => { syncOrgUsers(settingsData.users); }, [settingsData.users]);
+  // The employees go back to their People instances' stores (workspaces.jsx).
+  useOrg();   // ERP Settings changes apply at once
+  React.useEffect(() => { try { saveEmployees(settingsData.people || []); } catch(e){ console.warn('HOF ERP: could not save People', e); } }, [settingsData.people]);
   setUserDirectory(settingsData.users);   // user IDs on records read as names
-  // Who's signed in: the user with the session's email in this workspace.
+  // Who's signed in: the user with the session's email in this CRM instance.
   const sessionUser = SESSION && settingsData.users.find(u => String(u.email || '').toLowerCase() === String(SESSION.email).toLowerCase());
   if(sessionUser) Object.assign(CURRENT_USER, {name:sessionUser.name, email:sessionUser.email, role:sessionUser.preset || CURRENT_USER.role});
   const prevSettings = savedSlice('settings') || WF_SAVED || {};
@@ -895,9 +894,19 @@ function App(){
   const main = (screen === 'main' || screen === 'erpSettings') && (
     <div style={{display:'flex', flexDirection:'column', height:'100vh', width:'100vw', overflow:'hidden', background:T.pageBg}}>
       <Header session={session} setSession={setSession}/>
-      {screen === 'erpSettings' && isWorkspaceAdmin()
+      {screen === 'erpSettings' && isOrgAdmin()
         ? <ErpSettingsScreen onBack={()=>setScreen('main')} data={settingsData} setData={setSettingsData}/>
-        : <MainScreen onOpenCrm={()=>{ setCrmActive(a => a || crmDefaultPage(crmNavWithObjects)); setScreen('crm'); }} onOpenSettings={()=>setScreen('erpSettings')}/>}
+        : <MainScreen onOpenCrm={()=>{ setCrmActive(a => a || crmDefaultPage(crmNavWithObjects)); setScreen('crm'); }} onOpenPeople={()=>setScreen('people')} onOpenSettings={()=>setScreen('erpSettings')}/>}
+    </div>
+  );
+  // The People module: its sidebar (the open People branch, the navigation) and header; every page is the empty canvas until it's defined.
+  const people = screen === 'people' && (
+    <div style={{display:'flex', height:'100vh', width:'100vw', overflow:'hidden', background:T.pageBg}}>
+      <PeopleSidebar active={peopleActive} setActive={setPeopleActive} onBack={()=>setScreen('main')}/>
+      <div style={{flex:1, display:'flex', flexDirection:'column', minWidth:0, minHeight:0}}>
+        <CrmHeader context="people" session={session} setSession={setSession}/>
+        <EmptyCrmCanvas activeId={peopleActive} label={PEOPLE_NAV_LABELS[peopleActive]}/>
+      </div>
     </div>
   );
   React.useEffect(() => { setEventAway(false); }, [engine.event, engine.openPromptId]);
@@ -933,13 +942,14 @@ function App(){
       {engine.event && <AutomaticActionModal key={engine.event.id} event={engine.event} onClose={engine.closeEvent} hidden={eventAway}/>}
     </WorkflowEngineCtx.Provider>
   );
-  if(screen !== 'crm' && !crmOpened) return withEngine(main);
+  if(screen !== 'crm' && !crmOpened) return withEngine(<>{main}{people}</>);
 
   // CRM screen: the nav spans the full viewport height on the left; the header belongs only
   // to the right-hand content pane (not the sidebar), so it never duplicates the sidebar's
-  // own "CRM" label. Hidden (still mounted) while the ERP home is shown.
+  // own branch label. Hidden (still mounted) while the ERP home or People is shown.
   return withEngine(<>
     {main}
+    {people}
     <PageVisibleCtx.Provider value={screen === 'crm'}>
     <div style={{display: screen === 'crm' ? 'flex' : 'none', height:'100vh', width:'100vw', overflow:'hidden', background:T.pageBg}}>
       <CrmSidebar active={inSettings ? 'settings' : crmActive} setActive={selectCrm} onBack={()=>setScreen('main')} nav={crmNavWithObjects} setNav={setCrmNav}/>
@@ -996,16 +1006,16 @@ function App(){
   </>);
 }
 
-/* A form's public link (#f~<workspace>~<form>, forms.jsx) opens the form alone, signed in or not.
-   Otherwise — signed out: the sign-in screen first (workspaces.jsx); signed in: the open workspace.
-   Moving onto, off or between form links starts the page over. */
+/* A form's public link (#f~<CRM instance>~<form>, forms.jsx) opens the form alone, signed in or not.
+   Otherwise — signed out: the sign-in screen first (workspaces.jsx); signed in: the ERP home, with
+   the open CRM instance. Moving onto, off or between form links starts the page over. */
 const PUBLIC_FORM_ROUTE = formPublicRoute(window.location.hash);
 window.addEventListener('hashchange', () => { if(JSON.stringify(formPublicRoute(window.location.hash)) !== JSON.stringify(PUBLIC_FORM_ROUTE)) window.location.reload(); });
-/* Signed in to a workspace they aren't a member of (the last one opened in this browser): the
-   first workspace they belong to opens instead (workspaces.jsx). */
-function WorkspaceGate(){
-  const to = React.useMemo(workspaceRedirect, []);
-  React.useEffect(() => { if(to) reloadInto({activeId:to}); }, []);
+/* Signed in with a CRM instance open that isn't theirs (the last one opened in this browser): the
+   first instance they have opens instead (workspaces.jsx). */
+function CrmGate(){
+  const to = React.useMemo(crmRedirect, []);
+  React.useEffect(() => { if(to) reloadInto({crmId:to}); }, []);
   return to ? null : <App/>;
 }
-ReactDOM.createRoot(document.getElementById('root')).render(PUBLIC_FORM_ROUTE ? <PublicFormPage route={PUBLIC_FORM_ROUTE}/> : SESSION ? <WorkspaceGate/> : <LoginScreen/>);
+ReactDOM.createRoot(document.getElementById('root')).render(PUBLIC_FORM_ROUTE ? <PublicFormPage route={PUBLIC_FORM_ROUTE}/> : SESSION ? <CrmGate/> : <LoginScreen/>);

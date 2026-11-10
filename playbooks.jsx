@@ -20,8 +20,8 @@ const SAMPLE_PLAYBOOKS = () => [
     {id:'pb-f-2', header:'Explain the payment terms', text:'Walk through the installments and when each one is due. Ask whether the customer is willing to pay, and when.'},
   ]},
 ];
-// Saved playbooks, else the sample workspace's samples (another workspace starts with none).
-const playbooksOf = (data) => (data && data.playbooks) || (ACTIVE_WORKSPACE.sample ? SAMPLE_PLAYBOOKS() : []);
+// Saved playbooks, else the sample CRM instance's samples (another instance starts with none).
+const playbooksOf = (data) => (data && data.playbooks) || (ACTIVE_CRM.sample ? SAMPLE_PLAYBOOKS() : []);
 
 /* A playbook's sections as they read: header, then its text (line breaks kept). */
 function PlaybookSections({playbook, empty = 'No sections yet.'}){

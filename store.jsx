@@ -1,11 +1,11 @@
-/* HOF Pulse ERP — Saved state, record IDs and the user directory.
+/* HOF Pulse ERP — Saved state, the Organization and its instances, record IDs and the user directory.
 
-   One store for everything that should survive a reload: records (contacts, deals, their
-   activity, Customer Profiles), everything in Settings, the CRM navigation, saved views and
-   layout settings (card / panel settings) and the workflow engine's state. Each owner keeps its
-   own slice (persistSlice / usePersistedState); every change rewrites the whole store at once
-   (one key, one JSON), so slices saved together always belong together. Where it's saved: DB
-   below — SQLite through serve.py on localhost, else the browser's localStorage.
+   One store per CRM instance for everything that should survive a reload: records (contacts,
+   deals, their activity, Customer Profiles), everything in Settings, the CRM navigation, saved
+   views and layout settings (card / panel settings) and the workflow engine's state. Each owner
+   keeps its own slice (persistSlice / usePersistedState); every change rewrites the whole store
+   at once (one key, one JSON), so slices saved together always belong together. Where it's saved:
+   DB below — SQLite through serve.py on localhost, else the browser's localStorage.
 
    Record IDs come from a counter per object that only goes up and is saved with the store, so an
    ID is never handed out twice — not after a delete, not after a reload.
@@ -60,103 +60,129 @@ const DB = (() => {
   };
 })();
 
-/* ── Workspaces ── each workspace is one of the organizations, its own account environment: its
-   own saved store (records, CRM settings and its users' CRM roles — everything below). The
-   registry (its own key) is what they share: the workspaces — name, `region` (shown in
-   organization lists: "HOF Migration (Pakistan)"), logo, brand colours, `template`, `hidden` —
-   and (which one is open and who is signed in — mocked Google sign-in, workspaces.jsx — are
-   this browser's own: BROWSER_KEY below):
-     users    — one identity per person ({id, name, email}), whichever workspaces they belong to;
-     members  — per workspace, who can access it ({[workspaceId]: [{userId}]}); a workspace with no
-                list yet takes its own Users once (app.jsx);
-     modules  — per ERP module, the organizations that have it (`orgs`) and its linkage groups
-                (`groups`: [{id, orgs}] — the organizations in a group share that module's data;
-                any number of groups per module, an organization in at most one) — ERP Settings
-                → Module Settings. Availability, linkage and access are independent.
-   A module's data for an organization lives in its own space or its group's (moduleLinks.jsx):
-   CRM — this whole store (APP_STORE_KEY: the organization's own, or its CRM group's).
-   HOF Migration keeps the store it always had and starts with the sample data; a workspace made
-   from a template (WORKSPACE_TEMPLATES, workspaces.jsx) starts with that template's setup; any
-   other starts empty. Hidden workspaces keep their data but aren't offered. */
-const WORKSPACES_KEY = 'hof-erp-workspaces-v1';
-/* Which workspace is open, who's signed in and the accounts offered at sign-in belong to this
-   browser, not to the shared data: they're read from the browser's own storage (localStorage).
-   With SQLite every browser and tab on localhost reads one registry — read from there, switching
-   workspace or signing out in one would have done it in all. The registry keeps the last ones
-   too: where a browser starts the first time (they were saved only there before). */
+/* ── The Organization ── one Organization (HOF Global) with module instances: the CRM instances
+   (Migration, Partners, Pack — each with a CRM store of its own, everything below) and the People
+   instances (Pakistan, Dubai — each with its own employees). The registry (ORG_KEY) is what they share:
+     org     — its name and logo (the ERP's own mark — white label) and its brand (CRM → Marketing →
+               Brand: the company logo, colours, email signature and letterhead — one for every CRM
+               instance: quotations, documents, emails);
+     crm     — the CRM branches (instances) [{id, name, sample, template, createdAt}]: `sample` the one with
+               the sample data (Migration), `template` a CRM setup to start from (Partners:
+               WORKSPACE_TEMPLATES, workspaces.jsx); any other starts empty, with the standard
+               record types;
+     people  — the People branches [{id, name, createdAt}];
+     branches — the other modules' branches, by module id ({accounting:[{id, name, createdAt}], …}):
+               Accounting, Analytics and Complience start with one (HOF Global), Academy with the
+               CRM's three (DEFAULT_MODULE_BRANCHES — a module with nothing saved takes its default);
+               nothing reads them yet but ERP Settings → Branches;
+     users   — one identity per person: {id, name, email, role, peopleId, peopleAccess, crm,
+               branches} — their
+               Organization role (ORG_ROLES: Super Admin — ERP Settings, users and instances — or
+               Member), the one People instance they belong to, a Super Admin's People instances,
+               the CRM instances they can open, and their branches of the other modules (by
+               module id). What they are in a CRM instance (preset, seat, team, permissions) is in
+               that instance's store: its Users & Teams.
+   Which CRM and People branches are open, who is signed in (mocked Google sign-in,
+   workspaces.jsx) and the accounts offered at sign-in are this browser's own (BROWSER_KEY,
+   localStorage — with SQLite every browser and tab reads one registry). */
+const ORG_KEY = 'hof-erp-org-v1';
 const BROWSER_KEY = 'hof-erp-browser-v1';
-const BROWSER_FIELDS = ['activeId', 'session', 'accounts'];
+const BROWSER_FIELDS = ['crmId', 'peopleId', 'openCrm', 'session', 'accounts'];   // `openCrm`: the page starts in the CRM (a switch from inside it)
 const browserState = (() => { try { return JSON.parse(window.localStorage.getItem(BROWSER_KEY) || 'null'); } catch(e){ return null; } })();
-const HOF_MIGRATION_WS = 'ws-hof-migration';
 const DEFAULT_BRAND = () => ({primary:'#15141B', secondary:'#FF0004'});
-// HOF Migration's brand: black primary, blue secondary.
-const HOF_MIGRATION_BRAND = () => ({primary:'#000000', secondary:'#1869EC'});
-/* The organizations, in this order. HOF Migration (Pakistan) and HOF Partners (Pakistan — the
-   former Accounting workspace, its id kept) are defined; HOF Global, HOF Migration Dubai and HOF
-   Pack open empty until they're defined. */
-const HOF_PARTNERS_WS = 'ws-accounting';
-const DEFAULT_WORKSPACES = () => [
-  {id:'ws-hof-global',          name:'HOF Global',          logo:null, colors:DEFAULT_BRAND(), sample:false, createdAt:'2026-10-16'},
-  {id:HOF_MIGRATION_WS,         name:'HOF Migration',       region:'Pakistan', logo:null, colors:HOF_MIGRATION_BRAND(), sample:true, createdAt:'2026-08-01'},
-  {id:'ws-hof-migration-dubai', name:'HOF Migration Dubai', logo:null, colors:DEFAULT_BRAND(), sample:false, createdAt:'2026-11-06'},
-  {id:'ws-hof-pack',            name:'HOF Pack',            logo:null, colors:DEFAULT_BRAND(), sample:false, createdAt:'2026-11-06'},
-  {id:HOF_PARTNERS_WS,          name:'HOF Partners',        region:'Pakistan', logo:null, colors:DEFAULT_BRAND(), sample:false, createdAt:'2026-11-06', template:'accounting'},
+// HOF's brand colours: black primary, blue secondary.
+const HOF_BRAND = () => ({primary:'#000000', secondary:'#1869EC'});
+const CRM_MIGRATION = 'crm-migration', CRM_PARTNERS = 'crm-partners', CRM_PACK = 'crm-pack';
+const PEOPLE_PAKISTAN = 'people-pakistan', PEOPLE_DUBAI = 'people-dubai';
+const ORG_ROLES = ['Super Admin', 'Member'];
+const DEFAULT_ORG = () => ({id:'hof-global', name:'HOF Global', logo:null, brand:{logo:null, colors:HOF_BRAND()}});
+const DEFAULT_CRM_INSTANCES = () => [
+  {id:CRM_MIGRATION, name:'Migration', sample:true, createdAt:'2026-08-01'},
+  {id:CRM_PACK,      name:'Pack',      createdAt:'2026-11-09'},
+  {id:CRM_PARTNERS,  name:'Partners',  template:'accounting', createdAt:'2026-11-06'},
 ];
-// Who can access an organization at first: the Super Admin (HOF Migration takes its own Users, app.jsx).
-const DEFAULT_MEMBERS = () => Object.fromEntries(DEFAULT_WORKSPACES().filter(w => w.id !== HOF_MIGRATION_WS).map(w => [w.id, [{userId:'waleed-bin-zaman'}]]));
-/* Which organizations have each module at first: HOF Migration every one; HOF Partners CRM and
-   People; People linked between the two (one group). The undefined ones none. */
-const DEFAULT_MODULES = () => ({
-  crm:{orgs:[HOF_MIGRATION_WS, HOF_PARTNERS_WS], groups:[]},
-  people:{orgs:[HOF_MIGRATION_WS, HOF_PARTNERS_WS], groups:[{id:'g-people-1', orgs:[HOF_MIGRATION_WS, HOF_PARTNERS_WS]}]},
-  ...Object.fromEntries(['marketing', 'accounting', 'analytics', 'academy', 'complience'].map(id => [id, {orgs:[HOF_MIGRATION_WS], groups:[]}])),
+const DEFAULT_PEOPLE_INSTANCES = () => [{id:PEOPLE_PAKISTAN, name:'Pakistan', createdAt:'2026-11-09'}, {id:PEOPLE_DUBAI, name:'Dubai', createdAt:'2026-11-09'}];
+/* The other modules' branches at first: one company-wide branch each, named after the
+   Organization (confirmed 2026-11-10), Academy the CRM's three. */
+const DEFAULT_MODULE_BRANCHES = () => ({
+  accounting:[{id:'accounting-hof-global', name:'HOF Global', createdAt:'2026-11-10'}],
+  analytics: [{id:'analytics-hof-global',  name:'HOF Global', createdAt:'2026-11-10'}],
+  academy:   [{id:'academy-migration', name:'Migration', createdAt:'2026-11-10'}, {id:'academy-pack', name:'Pack', createdAt:'2026-11-10'}, {id:'academy-partners', name:'Partners', createdAt:'2026-11-10'}],
+  complience:[{id:'complience-hof-global', name:'HOF Global', createdAt:'2026-11-10'}],
 });
-// Modules saved with one `linked` list (before groups) have it as their one group.
-const normalizeModules = (mods) => Object.fromEntries(Object.entries(mods || {}).map(([id, m]) => {
-  const {linked, ...rest} = m || {};
-  const groups = m && Array.isArray(m.groups) ? m.groups : linked && linked.length > 1 ? [{id:`g-${id}-1`, orgs:linked}] : [];
-  return [id, {orgs:(m && m.orgs) || [], ...rest, groups}];
-}));
-/* Registry layout 2: Accounting added; HOF Global and created workspaces hidden from the switcher
-   (data kept). Layout 3: the five organizations — HOF Global shown again, HOF Migration Dubai and
-   HOF Pack added, Accounting renamed HOF Partners; regions. */
-const REGISTRY_LAYOUT = 3;
-const WORKSPACE_REGISTRY = (() => {
-  let r = null;
-  try { const raw = DB.getItem(WORKSPACES_KEY); r = raw ? JSON.parse(raw) : null; } catch(e){}
-  let workspaces = r && Array.isArray(r.workspaces) && r.workspaces.length ? r.workspaces : DEFAULT_WORKSPACES();
-  // HOF Migration saved before it had its own colours (still the untouched default) takes them.
-  const old = DEFAULT_BRAND();
-  workspaces = workspaces.map(w => w.id === HOF_MIGRATION_WS && (!w.colors || (w.colors.primary === old.primary && w.colors.secondary === old.secondary)) ? {...w, colors:HOF_MIGRATION_BRAND()} : w);
-  if(!r || (r.layout || 0) < REGISTRY_LAYOUT){
-    const defs = DEFAULT_WORKSPACES(), orgIds = defs.map(w => w.id);
-    // The organizations in their order (each keeps what was saved for it), then any other — hidden.
-    const org = (d) => { const w = workspaces.find(x => x.id === d.id); if(!w) return d;
-      const {hidden, ...rest} = w; return {...rest, region:w.region || d.region, ...(w.id === HOF_PARTNERS_WS && w.name === 'Accounting' ? {name:d.name} : {})}; };
-    workspaces = [...defs.map(org), ...workspaces.filter(w => !orgIds.includes(w.id)).map(w => ({...w, hidden:true}))];
-  }
-  const shown = workspaces.filter(w => !w.hidden), b = browserState || r || {};
-  const activeId = shown.some(w => w.id === b.activeId) ? b.activeId : shown[0].id;
-  return {workspaces, activeId, session:b.session || null, accounts:b.accounts || [], layout:REGISTRY_LAYOUT,
-    users:(r && r.users) || [], members:{...DEFAULT_MEMBERS(), ...((r && r.members) || {})}, modules:normalizeModules((r && r.modules) || DEFAULT_MODULES())};
-})();
-const ACTIVE_WORKSPACE = WORKSPACE_REGISTRY.workspaces.find(w => w.id === WORKSPACE_REGISTRY.activeId);
-// The open workspace's template (its CRM setup when it starts), if it was made from one.
-const WORKSPACE_TEMPLATE = ACTIVE_WORKSPACE.template || null;
-function saveWorkspaceRegistry(patch){
-  Object.assign(WORKSPACE_REGISTRY, patch);
-  try { window.localStorage.setItem(BROWSER_KEY, JSON.stringify(Object.fromEntries(BROWSER_FIELDS.map(k => [k, WORKSPACE_REGISTRY[k]])))); }
-  catch(e){ console.warn('HOF ERP: could not save this browser’s workspace', e); }
-  try { DB.setItem(WORKSPACES_KEY, JSON.stringify(WORKSPACE_REGISTRY)); } catch(e){ console.warn('HOF ERP: could not save workspaces', e); }
+// Who is there at first: the Super Admin, in Pakistan with both People branches and every CRM (Migration's sample users join when its CRM first opens — syncOrgUsers, workspaces.jsx).
+const DEFAULT_ORG_USERS = () => [{id:'waleed-bin-zaman', name:'Waleed bin Zaman', email:'waleed.binzaman@hof-global.com', role:'Super Admin',
+  peopleId:PEOPLE_PAKISTAN, peopleAccess:[PEOPLE_PAKISTAN, PEOPLE_DUBAI], crm:[CRM_MIGRATION, CRM_PACK, CRM_PARTNERS]}];
+// A CRM branch's store, and a People branch's employees.
+const crmStoreKey = (crmId) => `hof-erp-crm:${crmId}`;
+const peopleStoreKey = (peopleId) => `hof-erp-people:${peopleId}`;
+// A saved JSON value (other instances' stores, People), and saving one.
+const readStore = (key) => { try { const raw = DB.getItem(key); return raw ? JSON.parse(raw) : null; } catch(e){ return null; } };
+const writeStore = (key, value) => DB.setItem(key, JSON.stringify(value));
+
+/* Saved before the Organization (hof-erp-workspaces-v1: five organizations — HOF Global, HOF
+   Migration, HOF Migration Dubai, HOF Pack, HOF Partners — and module linkage groups sharing a
+   module's data between them): HOF Migration's CRM (its group's store when linked) becomes the
+   Migration branch's, HOF Partners' the Partners branch's; HOF Migration's People become
+   Pakistan's (each person once); every user starts in Pakistan as the Organization's Super Admin
+   with both People branches and every CRM branch (for now everyone is — workspaces.jsx
+   EVERYONE_SUPER_ADMIN); HOF Migration's brand becomes the Organization's. The other
+   organizations' stores (empty) and the old keys go. The browser's open organization becomes its
+   CRM instance (LEGACY_CRM_OF — public form links from before open the same way, forms.jsx). */
+const LEGACY_WORKSPACES_KEY = 'hof-erp-workspaces-v1';
+const LEGACY_CRM_OF = {'ws-hof-migration':CRM_MIGRATION, 'ws-hof-migration-dubai':CRM_MIGRATION, 'ws-hof-global':CRM_MIGRATION, 'ws-accounting':CRM_PARTNERS, 'ws-hof-pack':CRM_PACK};
+function migrateWorkspacesToOrg(){
+  const old = readStore(LEGACY_WORKSPACES_KEY);
+  if(!old) return null;
+  const groupOf = (mod, ws) => ((((old.modules || {})[mod] || {}).groups) || []).find(g => (g.orgs || []).includes(ws)) || null;
+  const ownKey = (ws) => ws === 'ws-hof-migration' ? 'hof-erp-store-v2' : `hof-erp-store-v2:${ws}`;
+  const crmKey = (ws) => { const g = groupOf('crm', ws); return g ? `hof-erp-space:crm:${g.id}` : ownKey(ws); };
+  // Each store moves (not copied: the browser's storage may not hold two of the largest).
+  const move = (from, to) => { const v = DB.getItem(from); if(v == null) return; DB.removeItem(from); DB.setItem(to, v); };
+  move(crmKey('ws-hof-migration'), crmStoreKey(CRM_MIGRATION));
+  move(crmKey('ws-accounting'), crmStoreKey(CRM_PARTNERS));
+  const pg = groupOf('people', 'ws-hof-migration');
+  const peopleRaw = readStore(pg ? `hof-erp-space:people:${pg.id}` : 'hof-erp-space:people:org:ws-hof-migration') || (((readStore(ownKey('ws-hof-migration')) || {}).settings || {}).people) || [];
+  const seen = new Set(), people = [];
+  peopleRaw.forEach(p => { const em = String(p.email || '').toLowerCase(); if(!p || seen.has(em)) return; seen.add(em); const {org, ...x} = p; people.push({...x, id:String(x.id).split('--')[0], peopleId:PEOPLE_PAKISTAN}); });
+  writeStore(peopleStoreKey(PEOPLE_PAKISTAN), people);
+  const users = (old.users || []).map(u => ({id:u.id, name:u.name, email:u.email, role:'Super Admin', peopleId:PEOPLE_PAKISTAN, peopleAccess:[PEOPLE_PAKISTAN, PEOPLE_DUBAI], crm:[CRM_MIGRATION, CRM_PACK, CRM_PARTNERS]}));
+  const mig = (old.workspaces || []).find(w => w.id === 'ws-hof-migration') || {};
+  const brand = {logo:mig.logo || null, colors:mig.colors || HOF_BRAND(), ...Object.fromEntries(['palette', 'signature', 'letterhead'].filter(k => mig[k]).map(k => [k, mig[k]]))};
+  // Responses left for an organization's forms go to its CRM instance's inbox (forms.jsx).
+  Object.entries(LEGACY_CRM_OF).forEach(([ws, crmId]) => { const k = `hof-erp-form-inbox:${ws}`, v = readStore(k); if(v == null) return;
+    writeStore(`hof-erp-form-inbox:${crmId}`, [...(readStore(`hof-erp-form-inbox:${crmId}`) || []), ...(Array.isArray(v) ? v : [])]); DB.removeItem(k); });
+  DB.keys().filter(k => k === LEGACY_WORKSPACES_KEY || /^hof-erp-store-v2(:|$)|^hof-erp-space:|^hof-erp-people-shared-v1$/.test(k)).forEach(k => DB.removeItem(k));
+  return {org:{...DEFAULT_ORG(), brand}, crm:DEFAULT_CRM_INSTANCES(), people:DEFAULT_PEOPLE_INSTANCES(), users, browser:{activeId:old.activeId, session:old.session, accounts:old.accounts}};
 }
-// Opening another workspace (or signing in or out) loads its own store: the page starts over.
-function reloadInto(patch){ if(appStoreTimer) writeAppStore(); saveWorkspaceRegistry(patch); DB.flush(); window.location.reload(); }
-// A module's linkage group holding an organization, if any.
-const moduleGroupOf = (moduleId, wsId) => ((((WORKSPACE_REGISTRY.modules || {})[moduleId] || {}).groups) || []).find(g => (g.orgs || []).includes(wsId)) || null;
-// An organization's own store, and the store its CRM uses — its CRM group's when linked.
-const ownStoreKey = (wsId) => wsId === HOF_MIGRATION_WS ? 'hof-erp-store-v2' : `hof-erp-store-v2:${wsId}`;
-const crmStoreKey = (wsId) => { const g = moduleGroupOf('crm', wsId); return g ? `hof-erp-space:crm:${g.id}` : ownStoreKey(wsId); };
-const APP_STORE_KEY = crmStoreKey(ACTIVE_WORKSPACE.id);
+const ORG_LAYOUT = 1;
+const ORG_REGISTRY = (() => {
+  let r = readStore(ORG_KEY), legacy = null;
+  if(!r){ const m = migrateWorkspacesToOrg(); if(m){ ({browser:legacy, ...r} = m); } }
+  const reg = {org:{...DEFAULT_ORG(), ...((r && r.org) || {})}, crm: r && Array.isArray(r.crm) && r.crm.length ? r.crm : DEFAULT_CRM_INSTANCES(),
+    people: r && Array.isArray(r.people) && r.people.length ? r.people : DEFAULT_PEOPLE_INSTANCES(), branches:{...DEFAULT_MODULE_BRANCHES(), ...((r && r.branches) || {})}, users:(r && r.users) || DEFAULT_ORG_USERS(), layout:ORG_LAYOUT};
+  const b = browserState || legacy || {}, crmOf = (id) => reg.crm.some(c => c.id === id) ? id : reg.crm.some(c => c.id === LEGACY_CRM_OF[id]) ? LEGACY_CRM_OF[id] : null;
+  const crmId = crmOf(b.crmId) || crmOf(b.activeId) || reg.crm[0].id;
+  const peopleId = reg.people.some(p => p.id === b.peopleId) ? b.peopleId : reg.people[0].id;   // the open People branch
+  const out = {...reg, crmId, peopleId, openCrm:!!b.openCrm, session:b.session || null, accounts:b.accounts || []};
+  // Migrated (or nothing saved yet): saved now, so every browser and tab reads the same.
+  if(!readStore(ORG_KEY)){ try { DB.setItem(ORG_KEY, JSON.stringify(Object.fromEntries(Object.entries(out).filter(([k]) => !BROWSER_FIELDS.includes(k))))); DB.flush(); } catch(e){ console.warn('HOF ERP: could not save the organization', e); } }
+  return out;
+})();
+const ACTIVE_CRM = ORG_REGISTRY.crm.find(c => c.id === ORG_REGISTRY.crmId) || ORG_REGISTRY.crm[0];
+// The open CRM branch's template (its CRM setup when it starts), if it was made from one.
+const CRM_TEMPLATE = ACTIVE_CRM.template || null;
+function saveOrgRegistry(patch){
+  Object.assign(ORG_REGISTRY, patch);
+  try { window.localStorage.setItem(BROWSER_KEY, JSON.stringify(Object.fromEntries(BROWSER_FIELDS.map(k => [k, ORG_REGISTRY[k]])))); }
+  catch(e){ console.warn('HOF ERP: could not save this browser’s choices', e); }
+  try { DB.setItem(ORG_KEY, JSON.stringify(Object.fromEntries(Object.entries(ORG_REGISTRY).filter(([k]) => !BROWSER_FIELDS.includes(k))))); } catch(e){ console.warn('HOF ERP: could not save the organization', e); }
+}
+// Opening another CRM branch (or signing in or out) loads its own store: the page starts over.
+function reloadInto(patch){ if(appStoreTimer) writeAppStore(); saveOrgRegistry(patch); DB.flush(); window.location.reload(); }
+// The Organization's brand (CRM → Marketing → Brand), its colours filled in — quotations, documents, emails.
+const orgBrand = () => { const b = ORG_REGISTRY.org.brand || {}; return {...b, name:ORG_REGISTRY.org.name, colors:{...DEFAULT_BRAND(), ...(b.colors || {})}}; };
+const APP_STORE_KEY = crmStoreKey(ACTIVE_CRM.id);
 // Dates are saved as ISO strings (JSON) and come back as Dates.
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
 const APP_SAVED = (() => {
@@ -167,19 +193,10 @@ const APP_SAVED = (() => {
 })();
 const appStore = {...(APP_SAVED || {})};
 let appStoreTimer = null, appStoreCleared = false;
-/* Saved with each record and configuration item its organization (`org`) — the one open when it
-   was saved without one — so a linked module's data can go back with its organization. */
-const stampOrg = (list, org) => Array.isArray(list) ? list.map(x => x && typeof x === 'object' && !x.org ? {...x, org} : x) : list;
-function stampStoreOrigins(s, org){
-  const st = s.settings;
-  return {...s, contacts:stampOrg(s.contacts, org), deals:stampOrg(s.deals, org), customers:stampOrg(s.customers, org), services:stampOrg(s.services, org), forms:stampOrg(s.forms, org),
-    ...(st ? {settings:{...st, pipelines:stampOrg(st.pipelines, org), workflows:stampOrg(st.workflows, org), profileForms:stampOrg(st.profileForms, org),
-      properties:Array.isArray(st.properties) ? st.properties.map(p => p && !p.system && !p.org ? {...p, org} : p) : st.properties}} : {})};
-}
 function writeAppStore(){
   clearTimeout(appStoreTimer); appStoreTimer = null;
   if(appStoreCleared) return;
-  try { DB.setItem(APP_STORE_KEY, JSON.stringify({...stampStoreOrigins(appStore, ACTIVE_WORKSPACE.id), version:2, savedAt:Date.now()})); }
+  try { DB.setItem(APP_STORE_KEY, JSON.stringify({...appStore, version:2, savedAt:Date.now()})); }
   catch(e){ console.warn('HOF ERP: could not save', e); }
 }
 function persistSlice(name, value){
@@ -188,10 +205,10 @@ function persistSlice(name, value){
 }
 // Anything not yet written goes out before the page closes.
 window.addEventListener('beforeunload', () => { if(appStoreTimer) writeAppStore(); });
-// Stop saving (the page reloads into a store a link or unlink just rewrote — moduleLinks.jsx).
+// Stop saving (before the page reloads into a store rewritten outside the app).
 function freezeAppStore(){ if(appStoreTimer) writeAppStore(); appStoreCleared = true; DB.flush(); }
 // Start over with the sample data (testing): forget the saved store, and don't save it back.
-function resetAppStore(){ appStoreCleared = true; try { DB.removeItem(APP_STORE_KEY); if(ACTIVE_WORKSPACE.sample) DB.removeItem('hof-erp-workflow-engine-v1'); } catch(e){} }
+function resetAppStore(){ appStoreCleared = true; try { DB.removeItem(APP_STORE_KEY); if(ACTIVE_CRM.sample) DB.removeItem('hof-erp-workflow-engine-v1'); } catch(e){} }
 const savedSlice = (name) => APP_SAVED && Object.prototype.hasOwnProperty.call(APP_SAVED, name) ? APP_SAVED[name] : undefined;
 /* useState that's saved: starts from the saved slice when there is one (else `init`), and saves
    every change. `name` is the slice — one per piece of state. */
@@ -232,4 +249,5 @@ const userLabel = (v) => { if(!v) return ''; const u = USER_DIRECTORY.find(x => 
 // A user reference as an ID: an ID stays, a name is looked up, anything else is no user.
 const userIdOf = (v, users = USER_DIRECTORY) => { if(!v) return ''; if(users.some(u => u.id === v)) return v; const u = users.find(x => x.name === v); return u ? u.id : ''; };
 
-Object.assign(window, {DB, moduleGroupOf, ownStoreKey, crmStoreKey, APP_STORE_KEY, stampStoreOrigins, stampOrg, freezeAppStore, WORKSPACE_TEMPLATE, HOF_PARTNERS_WS, WORKSPACE_REGISTRY, ACTIVE_WORKSPACE, HOF_MIGRATION_WS, DEFAULT_BRAND, saveWorkspaceRegistry, reloadInto, APP_SAVED, persistSlice, usePersistedState, savedSlice, resetAppStore, newRecordId, ensureIdFloor, idFloorOf, setUserDirectory, userLabel, userIdOf, writeAppStore});
+Object.assign(window, {DB, crmStoreKey, peopleStoreKey, readStore, writeStore, APP_STORE_KEY, freezeAppStore, CRM_TEMPLATE, ORG_REGISTRY, ACTIVE_CRM, ORG_ROLES, CRM_MIGRATION, CRM_PARTNERS, CRM_PACK, PEOPLE_PAKISTAN, PEOPLE_DUBAI, LEGACY_CRM_OF,
+  DEFAULT_BRAND, HOF_BRAND, saveOrgRegistry, reloadInto, orgBrand, APP_SAVED, persistSlice, usePersistedState, savedSlice, resetAppStore, newRecordId, ensureIdFloor, idFloorOf, setUserDirectory, userLabel, userIdOf, writeAppStore});

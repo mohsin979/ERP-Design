@@ -328,10 +328,10 @@ function FormEditorPanel({form, onCancel, onSave}){
 }
 
 /* ── Connections (mocked): Meta and Website RFQ ── */
-/* The form's shareable link: this app's address with the form's public route (#f~<workspace>~<form>)
+/* The form's shareable link: this app's address with the form's public route (#f~<CRM instance>~<form>)
    — the public form page (no sign-in). A prototype has no server: it works in a browser that holds
-   the workspace's data (formPublicRoute, PublicFormPage). */
-const formLink = (form) => `${window.location.origin}${window.location.pathname}#f~${ACTIVE_WORKSPACE.id}~${form.id}`;
+   the CRM instance's data (formPublicRoute, PublicFormPage). */
+const formLink = (form) => `${window.location.origin}${window.location.pathname}#f~${ACTIVE_CRM.id}~${form.id}`;
 function LinkMark({size = 18, color = T.attioText}){
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -582,25 +582,26 @@ function FormsPage(){
   );
 }
 
-/* ── The public form (no sign-in) ── #f~<workspace>~<form>: the form alone, for anyone with its
-   link. A prototype has no real backend, so a response is left in that workspace's form inbox where
-   the prototype saves its data (store.jsx DB: SQLite on localhost, else localStorage); the
-   workspace's app takes it in — while it's open (the storage event, or a check every few seconds
-   with SQLite), else when it next opens — through the same submission path (submitFormValues). */
-const FORM_INBOX_KEY = (wsId) => `hof-erp-form-inbox:${wsId}`;
-const formPublicRoute = (hash) => { const m = /^#f~([A-Za-z0-9._-]+)~([A-Za-z0-9._-]+)$/.exec(hash || ''); return m ? {wsId:m[1], formId:m[2]} : null; };
-const readFormInbox = (wsId) => { try { return JSON.parse(DB.fresh(FORM_INBOX_KEY(wsId)) || '[]', (k, v) => typeof v === 'string' && ISO_DATE_RE.test(v) ? new Date(v) : v) || []; } catch(e){ return []; } };
-const writeFormInbox = (wsId, list) => { try { DB.setItem(FORM_INBOX_KEY(wsId), JSON.stringify(list)); DB.flush(); return true; } catch(e){ return false; } };
-// The workspace's forms as last saved — in the store its CRM uses, its group's when linked (the sample workspace before it saved any: its sample forms).
-function publicWorkspaceForms(wsId){
-  const ws = WORKSPACE_REGISTRY.workspaces.find(w => w.id === wsId);
-  if(!ws) return null;
-  try { const raw = DB.getItem(crmStoreKey(wsId)), saved = raw ? JSON.parse(raw) : null;
-    if(saved && Array.isArray(saved.forms)) return {ws, forms:saved.forms}; } catch(e){}
-  return {ws, forms: ws.sample ? SAMPLE_FORMS() : []};
+/* ── The public form (no sign-in) ── #f~<CRM instance>~<form>: the form alone, for anyone with its
+   link. A prototype has no real backend, so a response is left in that CRM instance's form inbox
+   where the prototype saves its data (store.jsx DB: SQLite on localhost, else localStorage); the
+   instance's app takes it in — while it's open (the storage event, or a check every few seconds
+   with SQLite), else when it next opens — through the same submission path (submitFormValues). A
+   link from before the Organization names its organization: its CRM instance opens (LEGACY_CRM_OF). */
+const FORM_INBOX_KEY = (crmId) => `hof-erp-form-inbox:${crmId}`;
+const formPublicRoute = (hash) => { const m = /^#f~([A-Za-z0-9._-]+)~([A-Za-z0-9._-]+)$/.exec(hash || ''); return m ? {crmId:LEGACY_CRM_OF[m[1]] || m[1], formId:m[2]} : null; };
+const readFormInbox = (crmId) => { try { return JSON.parse(DB.fresh(FORM_INBOX_KEY(crmId)) || '[]', (k, v) => typeof v === 'string' && ISO_DATE_RE.test(v) ? new Date(v) : v) || []; } catch(e){ return []; } };
+const writeFormInbox = (crmId, list) => { try { DB.setItem(FORM_INBOX_KEY(crmId), JSON.stringify(list)); DB.flush(); return true; } catch(e){ return false; } };
+// The CRM instance's forms as last saved in its store (the sample instance before it saved any: its sample forms).
+function publicCrmForms(crmId){
+  const crm = ORG_REGISTRY.crm.find(c => c.id === crmId);
+  if(!crm) return null;
+  try { const raw = DB.getItem(crmStoreKey(crmId)), saved = raw ? JSON.parse(raw) : null;
+    if(saved && Array.isArray(saved.forms)) return {crm, forms:saved.forms}; } catch(e){}
+  return {crm, forms: crm.sample ? SAMPLE_FORMS() : []};
 }
 function PublicFormPage({route}){
-  const found = publicWorkspaceForms(route.wsId), form = found && found.forms.find(f => f.id === route.formId);
+  const found = publicCrmForms(route.crmId), form = found && found.forms.find(f => f.id === route.formId);
   const [values, setValues] = React.useState({});
   const [tried, setTried] = React.useState(false);
   const [done, setDone] = React.useState(false);
@@ -610,7 +611,7 @@ function PublicFormPage({route}){
   const submit = () => {
     setTried(true);
     if(missing) return;
-    const ok = writeFormInbox(route.wsId, [...readFormInbox(route.wsId), {id:`in-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`, formId:form.id, values, at:new Date()}]);
+    const ok = writeFormInbox(route.crmId, [...readFormInbox(route.crmId), {id:`in-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`, formId:form.id, values, at:new Date()}]);
     if(ok) setDone(true); else setFailed(true);
   };
   const message = (title, text) => (
@@ -622,7 +623,7 @@ function PublicFormPage({route}){
   return (
     <div style={{minHeight:'100%', background:T.headerBg, padding:'40px 16px', boxSizing:'border-box', overflowY:'auto'}}>
       <div style={{maxWidth:560, margin:'0 auto', display:'flex', flexDirection:'column', gap:12}}>
-        {found && <div style={{fontSize:12.5, fontWeight:600, color:T.attioMuted, letterSpacing:.2}}>{found.ws.name}</div>}
+        {found && <div style={{fontSize:12.5, fontWeight:600, color:T.attioMuted, letterSpacing:.2}}>{ORG_REGISTRY.org.name}</div>}
         <div style={{background:'#fff', border:`1px solid ${T.border}`, borderRadius:12, padding:'24px 24px 20px', display:'flex', flexDirection:'column', gap:20}}>
           {!form ? message('This form isn’t available', 'The link may be wrong, or the form was deleted.')
             : !open ? message(form.name, 'This form isn’t accepting responses right now.')
@@ -638,16 +639,16 @@ function PublicFormPage({route}){
   );
 }
 /* The app's side of the inbox: responses left from the public link are taken in (once each) —
-   mounted with the record hub, for the open workspace. */
+   mounted with the record hub, for the open CRM instance. */
 function PublicFormInbox(){
   const hub = useRecordHub(), engineCtx = useWorkflowEngineCtx();
   const live = React.useRef({hub, engineCtx}); live.current = {hub, engineCtx};
   React.useEffect(() => {
-    const wsId = ACTIVE_WORKSPACE.id;
+    const crmId = ACTIVE_CRM.id;
     const take = () => {
-      const pending = readFormInbox(wsId);
+      const pending = readFormInbox(crmId);
       if(!pending.length) return;
-      writeFormInbox(wsId, []);   // taken: each response once
+      writeFormInbox(crmId, []);   // taken: each response once
       const {hub, engineCtx} = live.current;
       pending.forEach(r => { const form = (hub.forms || []).find(f => f.id === r.formId);
         if(!form) return;
@@ -655,7 +656,7 @@ function PublicFormInbox(){
         if(hub.toast) hub.toast(`New response · ${form.name} · ${formNoun(form.target)} created${vals.name ? ` · ${vals.name}` : ''}`); });
     };
     take();
-    const onStorage = (e) => { if(e.key === FORM_INBOX_KEY(wsId)) take(); };
+    const onStorage = (e) => { if(e.key === FORM_INBOX_KEY(crmId)) take(); };
     window.addEventListener('storage', onStorage);
     // Saved in SQLite (store.jsx DB) there's no storage event between tabs: the inbox is checked every few seconds.
     const poll = DB.sqlite ? setInterval(take, 4000) : null;

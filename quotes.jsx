@@ -109,13 +109,13 @@ const SAMPLE_QUOTES = (services) => {
 
 function QuoteStatusPill({status}){ return <StatusPill status={status} map={QUOTE_STATUS}/>; }
 
-/* The quotation as the customer sees it — in the workspace's brand (logo, primary and secondary
+/* The quotation as the customer sees it — in the Organization's brand (logo, primary and secondary
    colours from Marketing → Brand): who it's for, the services and their milestones, the money
    (subtotal, discount, VAT, total), the payment terms, the terms and conditions, and — when an
    e-signature is required — the customer's signature section. */
 function QuoteDocument({quote}){
   const hub = useRecordHub();
-  const brand = workspaceBrand();
+  const brand = orgBrand();
   const record = hubRecord(hub, quote.object, quote.recordId);
   const t = quoteTotals(quote);
   const muted = {fontSize:12, color:T.attioMuted};
@@ -131,7 +131,7 @@ function QuoteDocument({quote}){
     <div style={{border:`1px solid ${T.border}`, borderRadius:12, overflow:'hidden', background:'#fff'}}>
       <div style={{height:4, background:brand.colors.primary}}/>
       <div style={{padding:'22px 24px', display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:16, borderBottom:`1px solid ${T.attioLine}`, flexWrap:'wrap'}}>
-        <div style={{display:'flex', alignItems:'center', gap:10, minWidth:0}}><WorkspaceLockup ws={brand}/></div>
+        <div style={{display:'flex', alignItems:'center', gap:10, minWidth:0}}><BrandLockup brand={brand}/></div>
         <div style={{textAlign:'right'}}>
           <div style={{fontSize:11, fontWeight:600, letterSpacing:.6, textTransform:'uppercase', color:brand.colors.secondary}}>Quotation</div>
           <div style={{fontSize:15, fontWeight:600, color:T.attioText, fontVariantNumeric:'tabular-nums'}}>{quote.number}</div>
@@ -414,7 +414,7 @@ function QuoteBuilder({mode, id, object, onClose, placement = 'fixed'}){
   };
   const section = QUOTE_SECTION;
   const preview = {...draft(), number: existing ? existing.number : quoteNumber(hub.quotes), createdAt: existing ? existing.createdAt : new Date(), status:'draft'};
-  const brand = workspaceBrand();
+  const brand = orgBrand();
   const last = QUOTE_STEPS.length - 1;
   return (
     <CreatePanelFrame title={existing ? `Edit Quote ${existing.number}` : 'New Quote'} onClose={()=>onClose()} placement={placement} width={QUOTE_PANEL_W} flush
@@ -475,10 +475,10 @@ function QuoteBuilder({mode, id, object, onClose, placement = 'fixed'}){
             {q.eSignature && <div style={{opacity:.95}}><QuoteSignaturePreview name={q.recipient.name}/></div>}
           </>}
 
-          {/* 6 · Branding — the quotation in the workspace's brand. */}
+          {/* 6 · Branding — the quotation in the Organization's brand. */}
           {step === 5 && <>
             <div style={{display:'flex', alignItems:'center', gap:12, padding:'10px 12px', border:`1px solid ${T.attioLine}`, borderRadius:10}}>
-              <WorkspaceLockup ws={brand}/>
+              <BrandLockup brand={brand}/>
               <div style={{flex:1}}/>
               {[brand.colors.primary, brand.colors.secondary].map((c, i) => <span key={i} title={i ? 'Secondary colour' : 'Primary colour'} style={{width:18, height:18, borderRadius:9999, background:c, border:`1px solid ${T.attioLine}`}}/>)}
               <button type="button" onClick={()=>setExpanded(true)} style={btnSecondarySm}><Icon name="expand" size={13} color={T.gray600}/> Expand</button>
@@ -608,7 +608,7 @@ function InstallmentsEditor({rows, onChange, total, newId, title = 'Installments
 }
 // The signature section as it appears on the quotation (E-Signature step).
 function QuoteSignaturePreview({name}){
-  const brand = workspaceBrand();
+  const brand = orgBrand();
   return (
     <div style={{border:`1.5px dashed ${brand.colors.primary}`, borderRadius:10, padding:'16px 18px', display:'flex', flexDirection:'column', gap:14}}>
       <div style={{display:'flex', alignItems:'center', gap:8}}>
