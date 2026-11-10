@@ -23,7 +23,7 @@ Object.assign(window, {MODULE_TILES});   // ERP Settings → Branches lists the 
      CRM — Find or Ask, Spring (the AI assistant lives in CRM), Notifications, Profile ▾.
    The profile and work-session state belong to the app, so both headers show the same. */
 
-/* The signed-in person (mocked Google sign-in, workspaces.jsx): the session's email; their name
+/* The signed-in person (mocked email sign-in, workspaces.jsx): the session's email; their name
    and role come from the open CRM instance's Users once it has loaded (App). */
 const CURRENT_USER = {
   name:'Waleed bin Zaman', email:'waleed.binzaman@hof-global.com',

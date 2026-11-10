@@ -479,7 +479,7 @@ const SAMPLE_PEOPLE_DATA = () => {
   return {users, seats, teams:SAMPLE_TEAMS.map(({members, ...t}) => t), presets, people};
 };
 
-/* ── Workspace members (mocked Google sign-in, workspaces.jsx) ── the person signed in, as a user
+/* ── Workspace members (mocked email sign-in, workspaces.jsx) ── the person signed in, as a user
    of the open workspace. Someone not yet in its Users joins as an activated user on a Full Seat;
    `preset` is their Permission Preset (Super Admin for whoever starts a workspace). */
 const nameFromEmail = (email) => String(email || '').split('@')[0].split(/[._-]+/).filter(Boolean).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');

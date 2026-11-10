@@ -82,7 +82,7 @@ const DB = (() => {
                the CRM instances they can open, and their branches of the other modules (by
                module id). What they are in a CRM instance (preset, seat, team, permissions) is in
                that instance's store: its Users & Teams.
-   Which CRM and People branches are open, who is signed in (mocked Google sign-in,
+   Which CRM and People branches are open, who is signed in (mocked email sign-in,
    workspaces.jsx) and the accounts offered at sign-in are this browser's own (BROWSER_KEY,
    localStorage — with SQLite every browser and tab reads one registry). */
 const ORG_KEY = 'hof-erp-org-v1';
@@ -172,11 +172,25 @@ const ORG_REGISTRY = (() => {
 const ACTIVE_CRM = ORG_REGISTRY.crm.find(c => c.id === ORG_REGISTRY.crmId) || ORG_REGISTRY.crm[0];
 // The open CRM branch's template (its CRM setup when it starts), if it was made from one.
 const CRM_TEMPLATE = ACTIVE_CRM.template || null;
+/* This browser's choices (BROWSER_KEY) in its localStorage; false when they couldn't be saved.
+   With SQLite (localhost), what the browser kept in localStorage before (brought into SQLite once,
+   never read again) can leave no room: when a save fails it's cleared and the save tried again.
+   Elsewhere (the hosted copy) localStorage is where the data lives, so it's left as it is. */
+function saveBrowserState(){
+  const ls = window.localStorage, value = JSON.stringify(Object.fromEntries(BROWSER_FIELDS.map(k => [k, ORG_REGISTRY[k]])));
+  try { ls.setItem(BROWSER_KEY, value); return true; }
+  catch(e){
+    if(DB.sqlite){ try { Object.keys(ls).filter(k => /^hof-erp/.test(k) && k !== BROWSER_KEY).forEach(k => ls.removeItem(k)); ls.setItem(BROWSER_KEY, value); return true; } catch(e2){} }
+    console.warn('HOF ERP: could not save this browser’s choices', e);
+    return false;
+  }
+}
+// Returns whether this browser's choices were saved (sign-in checks it).
 function saveOrgRegistry(patch){
   Object.assign(ORG_REGISTRY, patch);
-  try { window.localStorage.setItem(BROWSER_KEY, JSON.stringify(Object.fromEntries(BROWSER_FIELDS.map(k => [k, ORG_REGISTRY[k]])))); }
-  catch(e){ console.warn('HOF ERP: could not save this browser’s choices', e); }
+  const saved = saveBrowserState();
   try { DB.setItem(ORG_KEY, JSON.stringify(Object.fromEntries(Object.entries(ORG_REGISTRY).filter(([k]) => !BROWSER_FIELDS.includes(k))))); } catch(e){ console.warn('HOF ERP: could not save the organization', e); }
+  return saved;
 }
 // Opening another CRM branch (or signing in or out) loads its own store: the page starts over.
 function reloadInto(patch){ if(appStoreTimer) writeAppStore(); saveOrgRegistry(patch); DB.flush(); window.location.reload(); }

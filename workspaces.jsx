@@ -1,8 +1,8 @@
 /* HOF Pulse ERP — Sign-in, the Organization, its instances and brand.
 
-   Sign-in (the first screen): Continue with Google, mocked — any address on the HOF Migration
+   Sign-in (the first screen): Continue with email, mocked — any address on the HOF Migration
    or HOF Global domains (and the allow-listed addresses, ALLOWED_EMAIL_ADDRESSES) is accepted,
-   with no real Google account behind it. Signing in opens
+   with no real account behind it. Signing in opens
    the ERP home; the person is one of the Organization's users, or joins them (a Member of the
    first People instance, with the open CRM instance — whose Users they join as anyone signing in
    always has, usersTeams.jsx withSessionMember).
@@ -12,10 +12,11 @@
    (instances; "Branches" in the product):
      CRM     — Migration, Pack, Partners: each its own CRM store — records, settings and Users &
                Teams (a person's preset, seat and team per branch). The CRM sidebar's head reads
-               "← Migration | CRM" — a switcher for someone with more than one CRM branch (nav.jsx).
+               "← Migration | CRM" — a switcher for someone with more than one CRM branch; with one
+               branch just "← CRM" (nav.jsx).
      People  — Pakistan, Dubai: each its own employees (CRM Add User searches every branch's). A
                person belongs to one; a Super Admin may hold several. The People sidebar's head is
-               the same ("← Pakistan | People", a switcher with more than one); the People module's
+               the same ("← Pakistan | People", a switcher with more than one, else "← People"); the People module's
                pages aren't defined yet (nav.jsx PEOPLE_NAV: the navigation only).
    Everyone with a CRM branch opens the CRM (this browser's last one, else their first); Setting
    (ERP Settings) is for the Organization's Super Admins.
@@ -44,8 +45,8 @@
    email signature and the digital letterhead. */
 
 const ALLOWED_EMAIL_DOMAINS = ['hofmigration.com', 'hof-global.com'];
-// Addresses on other domains that may sign in (the product designer's Google account).
-const ALLOWED_EMAIL_ADDRESSES = ['mohsin979@gmail.com'];
+// Addresses on other domains that may sign in (none now: mohsin979@gmail.com was removed 2026-11-10).
+const ALLOWED_EMAIL_ADDRESSES = [];
 const emailDomain = (email) => String(email || '').trim().toLowerCase().split('@')[1] || '';
 const signInAllowed = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim())
   && (ALLOWED_EMAIL_DOMAINS.includes(emailDomain(email)) || ALLOWED_EMAIL_ADDRESSES.includes(String(email).trim().toLowerCase()));
@@ -120,23 +121,24 @@ function SwitcherMenu({label, title, icon, options, value, onPick, width = 220})
 }
 // A module sidebar's head label: the open branch and the module — "Migration | CRM".
 const branchLabel = (name, module) => <>{name}<span style={{fontWeight:400, color:T.gray600}}> | {module}</span></>;
-const branchPlain = (name, module) => <span style={{display:'block', fontSize:13, fontWeight:600, color:T.attioText, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{branchLabel(name, module)}</span>;
+// Someone with one branch of a module: the module's name alone ("CRM", "People"), no branch.
+const moduleTitle = (module) => <span style={{display:'block', fontSize:13, fontWeight:600, color:T.attioText, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{module}</span>;
 /* The CRM switcher (the CRM sidebar's head, nav.jsx): someone with more than one CRM branch picks
-   the one to open — the page starts over in its store, in the CRM. One branch: its name alone. */
+   the one to open — the page starts over in its store, in the CRM. One branch: "CRM" alone. */
 function CrmSwitcher(){
   useOrg();
   const mine = myCrmInstances();
-  if(mine.length < 2) return branchPlain(ACTIVE_CRM.name, 'CRM');
+  if(mine.length < 2) return moduleTitle('CRM');
   return <SwitcherMenu title="Switch CRM branch" label={branchLabel(ACTIVE_CRM.name, 'CRM')} options={mine.map(c => ({id:c.id, label:c.name}))} value={ACTIVE_CRM.id} onPick={(id)=>reloadInto({crmId:id, openCrm:true})}/>;
 }
 // The open People branch (this browser's choice, else the first of the person's).
 const activePeople = () => { const mine = myPeopleInstances(); return mine.find(p => p.id === ORG_REGISTRY.peopleId) || mine[0] || ORG_REGISTRY.people[0]; };
 /* The People switcher (the People sidebar's head, nav.jsx): the same as the CRM's — someone with
-   more than one People branch picks the one open (no data to load: no reload). One branch: its name alone. */
+   more than one People branch picks the one open (no data to load: no reload). One branch: "People" alone. */
 function PeopleSwitcher(){
   useOrg();
   const mine = myPeopleInstances(), cur = activePeople();
-  if(mine.length < 2) return branchPlain(cur.name, 'People');
+  if(mine.length < 2) return moduleTitle('People');
   return <SwitcherMenu title="Switch People branch" label={branchLabel(cur.name, 'People')} options={mine.map(p => ({id:p.id, label:p.name}))} value={cur.id} onPick={(id)=>setOrg({peopleId:id})}/>;
 }
 
@@ -566,37 +568,37 @@ function BranchPanel({label, module, branch, others, onClose, onSave}){
   );
 }
 
-/* ── Sign-in ── the first screen, on the workflow canvas's dotted ground. */
-const GOOGLE_COLORS = ['#4285F4', '#EA4335', '#FBBC05', '#34A853'];
+/* ── Sign-in ── the first screen, on the workflow canvas's dotted ground: a square card with the
+   Pulse logo, then Continue with email → the email (or one of this browser's recent accounts) and
+   Sign in. If this browser can't keep the sign-in, it says so rather than starting over. */
 function LoginScreen(){
-  const [step, setStep] = React.useState('start');   // start | google
+  const [step, setStep] = React.useState('start');   // start | email
   const [email, setEmail] = React.useState('');
   const [error, setError] = React.useState('');
   const known = (ORG_REGISTRY.accounts || []).filter(signInAllowed);
   const signIn = (address) => {
     const a = String(address || '').trim().toLowerCase();
     if(!signInAllowed(a)){ setError('Use your hofmigration.com or hof-global.com account.'); return; }
-    reloadInto({session:{email:a, signedInAt:Date.now()}, accounts:[a, ...known.filter(x => x !== a)].slice(0, 5)});
+    const patch = {session:{email:a, signedInAt:Date.now()}, accounts:[a, ...known.filter(x => x !== a)].slice(0, 5)};
+    if(!saveOrgRegistry(patch)){ setError('This browser couldn’t save your sign-in. Allow this site to store data, then try again.'); return; }
+    reloadInto(patch);
   };
-  const card = {width:380, maxWidth:'100%', background:'#fff', border:`1px solid ${T.border}`, borderRadius:14, boxShadow:'0 12px 32px rgba(16,24,40,.08)',
-    padding:'32px 28px', display:'flex', flexDirection:'column', gap:20};
-  const googleBtn = {display:'flex', alignItems:'center', justifyContent:'center', gap:10, height:42, borderRadius:10, border:`1px solid ${T.borderStrong}`,
+  const card = {width:380, maxWidth:'100%', background:'#fff', border:`1px solid ${T.border}`, borderRadius:0, boxShadow:'0 12px 32px rgba(16,24,40,.08)',
+    padding:'32px 28px', display:'flex', flexDirection:'column', gap:24};
+  const outlineBtn = {display:'flex', alignItems:'center', justifyContent:'center', gap:10, height:42, borderRadius:10, border:`1px solid ${T.borderStrong}`,
     background:'#fff', fontSize:14, fontWeight:500, color:T.attioText, cursor:'pointer', fontFamily:'inherit', width:'100%'};
   return (
     <div style={{...WORKFLOW_CANVAS, minHeight:'100%', display:'flex', alignItems:'center', justifyContent:'center', padding:'24px 16px', boxSizing:'border-box'}}>
       <div style={card}>
-        <div style={{display:'flex', flexDirection:'column', alignItems:'center', gap:14}}>
-          <img src="assets/brand/pulse-logo.svg" alt="Pulse" height={28} style={{display:'block', height:28}}/>
-          <div style={{fontSize:18, fontWeight:600, color:T.attioText}}>{step === 'start' ? 'Sign in to Pulse' : 'Sign in with Google'}</div>
-        </div>
+        <img src="assets/brand/pulse-logo.svg" alt="Pulse" height={40} style={{display:'block', height:40, alignSelf:'center'}}/>
         {step === 'start' ? (
-          <button onClick={()=>{ setStep('google'); setError(''); }} style={googleBtn}>
-            <Icon name="googleLogo" size={16} color={GOOGLE_COLORS[0]}/> Continue with Google
+          <button onClick={()=>{ setStep('email'); setError(''); }} style={outlineBtn}>
+            <Icon name="envelope" size={16} color={T.gray600}/> Continue with email
           </button>
         ) : (
           <div style={{display:'flex', flexDirection:'column', gap:12}}>
             {known.map(a => (
-              <button key={a} onClick={()=>signIn(a)} style={{...googleBtn, justifyContent:'flex-start', padding:'0 12px', fontWeight:400}}>
+              <button key={a} onClick={()=>signIn(a)} style={{...outlineBtn, justifyContent:'flex-start', padding:'0 12px', fontWeight:400}}>
                 <span style={{width:24, height:24, borderRadius:9999, background:T.attioText, color:'#fff', fontSize:11, fontWeight:600, display:'flex', alignItems:'center', justifyContent:'center'}}>{a[0].toUpperCase()}</span>
                 <span style={{minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{a}</span>
               </button>
@@ -606,7 +608,7 @@ function LoginScreen(){
                 style={{...fieldInput, height:42, borderColor: error ? T.red : T.borderStrong}}/>
               {error && <div style={{fontSize:12.5, color:T.red}}>{error}</div>}
               <button type="submit" disabled={!email.trim()} style={{height:42, borderRadius:10, border:'none', background: email.trim() ? T.black : T.gray400, color:'#fff',
-                fontSize:14, fontWeight:500, cursor: email.trim() ? 'pointer' : 'default', fontFamily:'inherit'}}>Next</button>
+                fontSize:14, fontWeight:500, cursor: email.trim() ? 'pointer' : 'default', fontFamily:'inherit'}}>Sign in</button>
             </form>
             <button onClick={()=>{ setStep('start'); setError(''); }} style={{alignSelf:'center', border:'none', background:'transparent', fontSize:13, color:T.gray600, cursor:'pointer', fontFamily:'inherit'}}>Back</button>
           </div>

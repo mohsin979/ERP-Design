@@ -167,8 +167,9 @@ function CrmNavGroup({group, active, collapsed, setActive, first}){
   );
 }
 
-/* A module sidebar's head: the back arrow to the ERP home, then the open branch and the module —
-   "Migration | CRM", "Pakistan | People" — a switcher for someone with more than one branch
+/* A module sidebar's head: the back arrow to the ERP home, then — for someone with more than one
+   branch of the module — the open branch and the module, a switcher ("Migration | CRM ▾",
+   "Pakistan | People ▾"); with one branch only the module's name ("CRM", "People")
    (workspaces.jsx CrmSwitcher / PeopleSwitcher) — and the collapse control. */
 function SidebarHead({onBack, collapsed, onCollapse, children}){
   return (
@@ -227,7 +228,7 @@ function CrmSidebar({active, setActive, onBack, nav, setNav}){
 
 /* ── People navigation ── the People module's sidebar (the pages aren't defined yet: every one
    shows the empty canvas). Static for now — five groups, no Edit Nav. Its head is the CRM's:
-   "← Pakistan | People", the People switcher (workspaces.jsx). */
+   "← Pakistan | People", the People switcher (workspaces.jsx), or "← People" with one branch. */
 const PEOPLE_NAV = [
   {id:'people.overview', label:'Overview', group:true, items:[
     {id:'people.dashboard',   label:'Dashboard',   icon:'dashboard'},
