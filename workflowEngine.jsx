@@ -1283,9 +1283,14 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
       const now = !!e.immediate || sendAt.getTime() <= Date.now();
       const to = (e.recipients || []).map(r => r === 'recordEmail' ? 'Customer' : userName(data, resolvePerson(data, deal, r))).filter(Boolean);
       const subject = (e.email && e.email.subject) || tpl.subject || tpl.name;
-      // The HTML is kept as written (shown in its frame); `body` is its text (lists, search).
-      const act = {id:wfNewId('we'), ...recordKey(deal.id), type:'email', at: now ? new Date() : sendAt, direction:'sent', title:subject, body:htmlText((e.email && e.email.html) || tpl.html),
-        html:(e.email && e.email.html) || tpl.html || null,
+      /* The HTML is kept as written (shown in its frame); `body` is its text (lists, search). A
+         template (and so a sequence's email) goes as the template is — its format, content and
+         signature (emails.jsx emailHtmlOf), with a Simple Text Body's attachments. */
+      const content = tpl.id ? templateContentOf(tpl) : null;
+      const html = (e.email && e.email.html) || (content ? emailHtmlOf(content) : '');
+      const attachments = content && content.format === 'simple' ? content.attachments : [];
+      const act = {id:wfNewId('we'), ...recordKey(deal.id), type:'email', at: now ? new Date() : sendAt, direction:'sent', title:subject, body:htmlText(html),
+        html:html || null, ...(attachments.length ? {attachments} : {}),
         templateId:e.templateId, sequenceId:e.sequenceId || null, to, status: now ? 'sent' : 'scheduled', scheduledFor:sendAt, source:'team', by:owner, viaWorkflow:workflowId};
       addActivity(deal.id, act);
       if(now){ sent++; emit({type:'emailSent', recordId:deal.id, pipelineId:deal.pipeline, attrs:{activityId:act.id, templateId:e.templateId}}, childChain(run)); }

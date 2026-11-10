@@ -746,13 +746,17 @@ function useBrandDraft({brand, admin, toast, setActions, key, blank, label, vali
 }
 
 /* Email Signature: the company's reusable signature — the form, and the signature as it will
-   read at the end of an email. The logo is the company logo (Logo), shown or not. */
+   read at the end of an email. The logo is the company logo (Logo), shown or not. "Additional info
+   beneath company address" reads under the address. Emails use it as configured (emails.jsx:
+   beneath a Simple Text Body, at the end of the Default HTML Template, added to a custom HTML
+   email when asked). */
 const SIGNATURE_FIELDS = [
   {key:'name', label:'Name', placeholder:'e.g. Asim Ali'}, {key:'designation', label:'Designation', placeholder:'e.g. Senior Migration Consultant'},
   {key:'email', label:'Email', placeholder:'name@hofmigration.com'}, {key:'phone', label:'Phone', placeholder:'+971 4 000 0000'},
   {key:'website', label:'Website', placeholder:'https://hofmigration.com'}, {key:'address', label:'Company address', multiline:true},
+  {key:'additional', label:'Additional info beneath company address', multiline:true},
 ];
-const SIGNATURE_BLANK = {includeLogo:true, name:'', designation:'', email:'', phone:'', website:'', address:''};
+const SIGNATURE_BLANK = {includeLogo:true, name:'', designation:'', email:'', phone:'', website:'', address:'', additional:''};
 function EmailSignatureBlock({sig, brand}){
   const line = {fontSize:13, color:T.attioText, lineHeight:1.5};
   const contact = [sig.email, sig.phone, sig.website].filter(Boolean);
@@ -765,6 +769,7 @@ function EmailSignatureBlock({sig, brand}){
         {sig.designation && <div style={{...line, color:T.attioMuted}}>{sig.designation}</div>}
         {contact.length > 0 && <div style={{...line, marginTop:6}}>{contact.join('  ·  ')}</div>}
         {sig.address && <div style={{...line, color:T.attioMuted, whiteSpace:'pre-line'}}>{sig.address}</div>}
+        {sig.additional && <div style={{...line, color:T.attioMuted, whiteSpace:'pre-line'}}>{sig.additional}</div>}
       </div>
     </div>
   );
@@ -794,15 +799,17 @@ function BrandSignatureSection(props){
 }
 
 /* Digital Letterhead: the company information on the letterhead, with the company logo (Logo);
-   the preview is a page with that header and footer. */
+   the preview is a page with that header and footer. "Additional info beneath address" reads
+   under the address. */
 const LETTERHEAD_FIELDS = [
   {key:'companyName', label:'Company name', placeholder:'e.g. HOF Migration'}, {key:'address', label:'Address', multiline:true},
+  {key:'additional', label:'Additional info beneath address', multiline:true},
   {key:'phone', label:'Phone', placeholder:'+971 4 000 0000'}, {key:'email', label:'Email', placeholder:'info@hofmigration.com'},
   {key:'website', label:'Website', placeholder:'https://hofmigration.com'}, {key:'footer', label:'Footer note', placeholder:'e.g. Licensed immigration consultants'},
 ];
 function BrandLetterheadSection(props){
   const {brand, admin} = props;
-  const [lh, set] = useBrandDraft({...props, key:'letterhead', blank:{companyName:brand.name, address:'', phone:'', email:'', website:'', footer:''}, label:'Letterhead',
+  const [lh, set] = useBrandDraft({...props, key:'letterhead', blank:{companyName:brand.name, address:'', additional:'', phone:'', email:'', website:'', footer:''}, label:'Letterhead',
     valid:(d) => !!d.companyName.trim() && brandEmailOk(d.email)});
   const accent = colorsFromPalette(brandPalette(brand)).primary;
   const small = {fontSize:10.5, color:T.gray600, lineHeight:1.5};
@@ -820,6 +827,7 @@ function BrandLetterheadSection(props){
             <div style={{textAlign:'right', minWidth:0}}>
               <div style={{fontSize:12, fontWeight:600, color:T.attioText}}>{lh.companyName || 'Company name'}</div>
               {lh.address && <div style={{...small, whiteSpace:'pre-line'}}>{lh.address}</div>}
+              {lh.additional && <div style={{...small, whiteSpace:'pre-line'}}>{lh.additional}</div>}
               {contact.map(x => <div key={x} style={small}>{x}</div>)}
             </div>
           </div>

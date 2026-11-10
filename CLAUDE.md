@@ -475,7 +475,7 @@ Do not make product decisions that the product designer has not made. Technical 
 24.4 Modules
 * CRM navigation: nav.jsx (Dashboard; Marketing, Pre-Sales, Sales, Tools, Automation; Settings; Edit Nav).
 * Records: contacts.jsx, deals.jsx + dealDetail.jsx, customers.jsx; contactActions.jsx; contactOverview.jsx + overviewSettings.jsx.
-* Activity: activities.jsx, activityCards.jsx, activityViews.jsx, files.jsx, emails.jsx, callPanel.jsx (real mic + Web Speech transcription, simulated telephony), tools.jsx (Tools → Calls/Tasks/Emails/Meetings/Notes).
+* Activity: activities.jsx, activityCards.jsx, activityViews.jsx, files.jsx, emails.jsx (the composer and the email formats — Simple Text Body, Default HTML Template, Custom HTML Template — with the Brand signature, the renderer `emailHtmlOf` and the live preview; templates, sequences and workflow emails all use it), callPanel.jsx (real mic + Web Speech transcription, simulated telephony), tools.jsx (Tools → Calls/Tasks/Emails/Meetings/Notes).
 * Sales: services.jsx (catalog), quotes.jsx (6-step builder; quotes keep their own copy of services), accounting.jsx (payment structures per record, from a quote or manual).
 * Customer Profile: customerProfile.jsx, profileEngine.jsx (fact library), profileExtractor.jsx (in-browser stand-in for AI extraction).
 * Automation: workflows.jsx (builder: context, triggers, actions), workflowEngine.jsx (triggers, conditions, actions, execution), workflowsPage.jsx, pipelinePanel.jsx.

@@ -55,4 +55,13 @@ function Logo({variant='main', height=20, color=T.black, style={}, onClick, titl
   );
 }
 
-Object.assign(window, {Logo});
+/* The same artwork as an SVG string, for where React doesn't draw it — an email's HTML
+   (emails.jsx emailLogoImg). */
+const logoSvgString = (variant = 'main', height = 20, color = '#000') => {
+  const v = LOGO_VARIANTS[variant] || LOGO_VARIANTS.main;
+  return `<svg xmlns="http://www.w3.org/2000/svg" height="${height}" width="${(height * v.width / LOGO_INK.height).toFixed(1)}" viewBox="${LOGO_INK.x} ${LOGO_INK.y} ${v.width} ${LOGO_INK.height}" fill="none">`
+    + `<path d="${HOF_MARK_PATHS[0]}" fill="${color}"/><path d="${HOF_MARK_PATHS[1]}" fill="${color}" stroke="${color}" stroke-width="0.443999"/>`
+    + (v.wordmark ? `<g transform="translate(0 ${v.wordmarkDy})"><path d="${v.wordmark}" fill="${color}"/></g>` : '') + `</svg>`;
+};
+
+Object.assign(window, {Logo, logoSvgString});

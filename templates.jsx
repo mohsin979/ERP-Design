@@ -3,10 +3,13 @@
    CRM navigation).
 
    Foundational for now (to be refined later):
-     Email Templates — reusable emails: a name, a subject and a message ({{first_name}} is filled
-       in for the recipient). Used by the email composer (emails.jsx) and by workflows.
+     Email Templates — reusable emails: Email Template Name, Subject and Email Format — Simple
+       Text Body, Default HTML Template or Custom HTML Template (emails.jsx: the formats, the
+       signature, the preview) — with a live preview beside the fields ({{first_name}} is filled
+       in for the recipient). Used by the email composer (emails.jsx), sequences and workflows.
      Email Sequences — a named, ordered list of templates, each sent a set time after the one
-       before. Used by workflows' Enroll in Email Sequence ("Choose email sequence template").
+       before, as its template is (subject, format, content, signature). Used by workflows'
+       Enroll in Email Sequence ("Choose email sequence template").
      Quote Templates — a configured quote (quotes.jsx): its services and milestones, payment
        terms, discount and VAT, and terms; each has a code (QT-001…). Created here (the quote
        builder's Services and Payment Terms fields) or from a quote (Save as template); listed,
@@ -24,46 +27,28 @@ const TEMPLATE_TABS = [{id:'templates', label:'Email Templates', icon:'envelope'
   {id:'quoteTemplates', label:'Quote Templates', icon:'quote', kind:'quoteTemplates'}, {id:'playbooks', label:'Playbooks', icon:'playbook', kind:'playbooks'},
   {id:'services', label:'Services', icon:'services', kind:'services'}];
 const SEQUENCE_UNITS = ['Hours', 'Days', 'Weeks'];
-const escHtml = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-/* A template's message as its email: the Organization's brand colour, then the paragraphs. */
-const templateHtmlOf = (body) => {
-  const brand = orgBrand();
-  const paras = String(body || '').split(/\n{2,}/).map(p => p.trim()).filter(Boolean)
-    .map(p => `<p style="margin:0 0 14px;font-size:15px;line-height:1.65;color:#2B2B2E">${escHtml(p).replace(/\n/g, '<br/>')}</p>`).join('');
-  return `<div style="font-family:'DM Sans',Arial,sans-serif;background:#fff;color:#2B2B2E"><div style="height:4px;background:${brand.colors.primary}"></div>`
-    + `<div style="padding:26px 40px 12px">${paras}</div></div>`;
-};
-/* The message a template's email reads as ({{first_name}} kept as it is): its paragraphs, list
-   items as bullets — without the branded footer (address, unsubscribe). */
-const templateBodyOf = (t) => {
-  if(t.body != null) return t.body;
-  const el = document.createElement('div');
-  el.innerHTML = String(t.html || '').replace(/<div style="padding:22px 40px 26px;background:#F6F6F7">[\s\S]*$/, '');
-  el.querySelectorAll('li').forEach(li => { li.textContent = `• ${li.textContent}`; });
-  return Array.from(el.querySelectorAll('h1, p, li, a')).map(n => n.textContent.trim()).filter(Boolean)
-    .reduce((out, line, i, all) => out + line + (i < all.length - 1 ? (/^•/.test(all[i + 1]) && /^•/.test(line) ? '\n' : '\n\n') : ''), '');
-};
 // Where a template or sequence is used: workflows (any of their settings) and, for templates, sequences.
 const usedInWorkflows = (data, id) => (data.workflows || []).filter(w => JSON.stringify(w).includes(`"${id}"`));
 
 // The creation panels' Cancel / Save pair.
 const panelActions = (onCancel, label, ok, onSave) => <><StSecondary label="Cancel" onClick={onCancel}/><StCta label={label} disabled={!ok} onClick={()=>ok && onSave()}/></>;
 
+/* New / Edit Email Template: Email Template Name, Subject, Email Format and its content on the
+   left, the preview on the right (emails.jsx EmailSplit). */
 function TemplateFormPanel({initial, onCancel, onSave}){
-  const [t, setT] = React.useState(() => ({name:(initial && initial.name) || '', subject:(initial && initial.subject) || '', body: initial ? templateBodyOf(initial) : ''}));
-  const set = (p) => setT(x => ({...x, ...p}));
-  const ok = !!t.name.trim() && !!t.subject.trim() && !!t.body.trim();
-  const save = () => onSave({name:t.name.trim(), subject:t.subject.trim(), body:t.body.trim()});
+  const [name, setName] = React.useState((initial && initial.name) || '');
+  const [subject, setSubject] = React.useState((initial && initial.subject) || '');
+  const [content, setContent] = React.useState(() => initial ? templateContentOf(initial) : newEmailContent());
+  const ok = !!name.trim() && !!subject.trim() && emailContentReady(content);
+  const save = () => onSave({name:name.trim(), subject:subject.trim(), ...emailContentToSave(content)});
   return (
-    <CreatePanelFrame title={initial ? 'Edit Email Template' : 'New Email Template'} onClose={onCancel} actions={panelActions(onCancel, initial ? 'Save changes' : 'Create template', ok, save)}>
-      {stack(<>
-        <Field label="Name"><input autoFocus value={t.name} onChange={e=>set({name:e.target.value})} placeholder="e.g. Document request" style={fieldText}/></Field>
-        <Field label="Subject"><input value={t.subject} onChange={e=>set({subject:e.target.value})} style={fieldText}/></Field>
-        <Field label="Message">
-          <textarea value={t.body} onChange={e=>set({body:e.target.value})} rows={12} placeholder={'Hi {{first_name}},\n\n…'} style={{...fieldText, resize:'vertical', lineHeight:1.55}}/>
-          <div style={{fontSize:12, color:T.attioMuted, marginTop:6}}>{'{{first_name}}'} is replaced with the recipient's first name.</div>
-        </Field>
-      </>)}
+    <CreatePanelFrame title={initial ? 'Edit Email Template' : 'New Email Template'} onClose={onCancel} width={EMAIL_PANEL_W} flush
+      actions={panelActions(onCancel, initial ? 'Save changes' : 'Create template', ok, save)}>
+      <EmailSplit form={<>
+        <Field label="Email Template Name"><input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Document request" style={fieldText}/></Field>
+        <Field label="Subject"><input value={subject} onChange={e=>setSubject(e.target.value)} style={fieldText}/></Field>
+        <EmailContentFields value={content} setValue={setContent}/>
+      </>} preview={<EmailPreview content={content} subject={subject}/>}/>
     </CreatePanelFrame>
   );
 }
@@ -91,6 +76,9 @@ function SequenceFormPanel({initial, templates, onCancel, onSave}){
               {iconBtn('trash', 'Remove email', ()=>setS(x => ({...x, emails:x.emails.filter((_, j) => j !== i)})), s.emails.length === 1)}
             </div>
             <FormSelect value={e.templateId} placeholder="Select email template" options={templates.map(t => ({value:t.id, label:t.name}))} onChange={(v)=>setEmail(i, {templateId:v})}/>
+            {/* Sent as the template is: its subject, format, content and signature. */}
+            {(() => { const tpl = templates.find(t => t.id === e.templateId); return tpl && (
+              <div style={{fontSize:12, color:T.attioMuted, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{emailFormatLabel(templateContentOf(tpl).format)} · {tpl.subject}</div>); })()}
             <div style={{display:'flex', alignItems:'center', gap:8}}>
               <span style={{fontSize:12.5, color:T.gray600, whiteSpace:'nowrap'}}>{i === 0 ? 'Send after' : 'Then after'}</span>
               <input value={e.delay.amount} onChange={ev=>setEmail(i, {delay:{...e.delay, amount:ev.target.value.replace(/[^0-9]/g, '')}})} inputMode="numeric" aria-label={`Email ${i + 1} delay`}
@@ -260,8 +248,7 @@ function TemplatesSettings({data, setData}){
   const save = (vals) => {
     const editing = form.initial;
     if(form.kind === 'templates'){
-      const unchanged = editing && templateBodyOf(editing) === vals.body;
-      const t = {...vals, html: unchanged ? editing.html : templateHtmlOf(vals.body)};
+      const t = vals;
       if(editing) setTemplates(ts => ts.map(x => x.id === editing.id ? {...x, ...t} : x));
       else setTemplates(ts => [...ts, {id:`et-${Date.now().toString(36)}`, createdBy:CURRENT_USER.name, ...t}]);
     } else {
@@ -290,10 +277,11 @@ function TemplatesSettings({data, setData}){
             overlay={form ? (form.kind === 'templates'
                 ? <TemplateFormPanel key={form.initial ? form.initial.id : 'new'} initial={form.initial} onCancel={()=>setForm(null)} onSave={save}/>
                 : <SequenceFormPanel key={form.initial ? form.initial.id : 'new'} initial={form.initial} templates={templates} onCancel={()=>setForm(null)} onSave={save}/>)
-              : open && <DetailPanel width={isT ? 620 : 480} title={open.name} onClose={()=>setOpenId(null)}
+              : open && <DetailPanel width={isT ? 680 : 480} title={open.name} onClose={()=>setOpenId(null)}
               menuItems={[...(can('edit', open) ? [{label:`Edit ${noun}`, onClick:()=>setForm({kind:tab, initial:open})}] : []), ...(can('delete', open) ? [{label:`Delete ${noun}`, danger:true, onClick:()=>setDeleting({kind:tab, item:open})}] : [])]}
-              fields={[isT ? ['Subject', open.subject] : ['Emails', String(open.emails.length)], ['Used by', usage(tab, open.id).length ? usage(tab, open.id).join(', ') : 'Not used'], ['Created by', creatorOf(open)]]}>
-                {isT ? <div style={{border:`1px solid ${T.border}`, borderRadius:10, overflow:'hidden'}} dangerouslySetInnerHTML={{__html:open.html || ''}}/>
+              fields={[...(isT ? [['Subject', open.subject], ['Email Format', emailFormatLabel(templateContentOf(open).format)]] : [['Emails', String(open.emails.length)]]), ['Used by', usage(tab, open.id).length ? usage(tab, open.id).join(', ') : 'Not used'], ['Created by', creatorOf(open)]]}>
+                {isT ? <div style={{display:'flex', flexDirection:'column', gap:8}}><EmailHtmlFrame html={emailHtmlOf(templateContentOf(open))}/>
+                    {templateContentOf(open).format === 'simple' && <EmailAttachmentList list={templateContentOf(open).attachments}/>}</div>
                   : <ol style={{margin:0, padding:0, listStyle:'none', display:'flex', flexDirection:'column', gap:10}}>
                       {open.emails.map((e, i) => (
                         <li key={i} style={{display:'flex', gap:10, alignItems:'baseline'}}>
@@ -318,4 +306,4 @@ function TemplatesSettings({data, setData}){
 }
 SETTINGS_PAGES['settings.templates'] = TemplatesSettings;
 
-Object.assign(window, {TemplatesSettings, templateHtmlOf});
+Object.assign(window, {TemplatesSettings});
