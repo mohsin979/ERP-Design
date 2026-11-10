@@ -2,7 +2,8 @@
 
    Emails are record activity (type 'email'): sent from a Contact, Deal or Customer, received
    from them, or scheduled to go later. The composer writes one against any record: the record,
-   who it goes to (the record's email, editable), an existing template (Settings → Templates) or
+   who it goes to (the record's email, editable; Cc and Bcc — addresses typed in, separated by
+   commas), an existing template (Settings → Templates) or
    a new email — subject, Email Format and its content (below), with a live preview; Send now, or
    Schedule for a date and time. It's also how Reply and Forward work from an email. Sent and
    scheduled emails appear on the record at once, and its workflows see them (Email Events).
@@ -238,6 +239,21 @@ function EmailSplit({form, preview}){
   );
 }
 
+/* ── Cc / Bcc ── addresses typed in, separated by commas (spaces and semicolons too). An email keeps
+   them as `cc` / `bcc` lists, each only when filled (emailCopiesOf takes them as typed or as lists).
+   The composer, Enroll in Email Sequence (bulkActions.jsx) and the workflow email actions
+   (workflows.jsx: Enroll in Email Sequence, Create Email Activity) share the input and its check. */
+const EMAIL_ADDRESS = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const emailListOf = (s) => String(s || '').split(/[\s,;]+/).filter(Boolean);
+const emailListValid = (s) => emailListOf(s).every(x => EMAIL_ADDRESS.test(x));
+const emailCopiesOf = (cc, bcc) => ({...(emailListOf(cc).length ? {cc:emailListOf(cc)} : {}), ...(emailListOf(bcc).length ? {bcc:emailListOf(bcc)} : {})});
+function EmailListInput({label, value, onChange, style}){
+  return <input value={value} onChange={e=>onChange(e.target.value)} placeholder="name@email.com, name@email.com" aria-label={label}
+    style={{...fieldText, ...style, borderColor: emailListValid(value) ? T.borderStrong : T.red}}/>;
+}
+// Who an email went to, on one line: "to a@x.com · cc b@x.com · bcc c@x.com".
+const emailRecipientsLine = (m) => [['to', m.to], ['cc', m.cc], ['bcc', m.bcc]].filter(([, l]) => l && l.length).map(([k, l]) => `${k} ${l.join(', ')}`).join(' · ');
+
 /* The composer — the creation side panel (CreatePanelFrame). `object` / `id`: the record (chosen
    here, under Record Type, when not given). `replyTo` / `forward`: the email it answers or passes
    on. `placement`: 'inline' over the area it's opened from, or 'fixed' at the CRM's right edge.
@@ -250,6 +266,7 @@ function EmailComposer({object, id, replyTo, forward, onClose, placement = 'inli
   const templates = emailTemplatesOf(hub.data);
   const base = replyTo || forward;
   const [to, setTo] = React.useState(() => forward ? '' : (person && person.email) || '');
+  const [cc, setCc] = React.useState(''), [bcc, setBcc] = React.useState('');
   const [templateId, setTemplateId] = React.useState('');
   const [subject, setSubject] = React.useState(() => base ? `${forward ? 'Fwd' : 'Re'}: ${String(base.title || '').replace(/^(Re|Fwd):\s*/i, '')}` : '');
   // A new email (Simple Text Body, the signature beneath); a forward carries the message under it.
@@ -272,8 +289,8 @@ function EmailComposer({object, id, replyTo, forward, onClose, placement = 'inli
     setSubject(fillFirstName(tpl.subject || tpl.name, person));
     setContent({...c, body:fillFirstName(c.body, person), html:fillFirstName(c.html, person)});
   };
-  const validTo = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to.trim());
-  const ready = target.id != null && validTo && !!subject.trim() && emailContentReady(content);
+  const validTo = EMAIL_ADDRESS.test(to.trim());
+  const ready = target.id != null && validTo && emailListValid(cc) && emailListValid(bcc) && !!subject.trim() && emailContentReady(content);
   const send = (later) => {
     if(!ready) return;
     let when = null;
@@ -284,7 +301,7 @@ function EmailComposer({object, id, replyTo, forward, onClose, placement = 'inli
     const newIdOf = `email-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const attachments = content.format === 'simple' ? (content.attachments || []) : [];
     hub.add(target.object, target.id, {id:newIdOf, type:'email', direction:'sent', title:subject.trim(), body:emailTextOf(content), html:emailHtmlOf(content), format:content.format,
-      ...(attachments.length ? {attachments} : {}), to:[to.trim()], source:'you', by:null,
+      ...(attachments.length ? {attachments} : {}), to:[to.trim()], ...emailCopiesOf(cc, bcc), source:'you', by:null,
       status: later ? 'scheduled' : 'sent', ...(later ? {at:when, scheduledFor:when} : {}), ...(templateId ? {templateId} : {}),
       ...(replyTo ? {replyToId:replyTo.id} : {}), ...(forward ? {forwardOfId:forward.id} : {})});
     hub.toast(later ? 'Email scheduled' : 'Email sent');
@@ -301,6 +318,8 @@ function EmailComposer({object, id, replyTo, forward, onClose, placement = 'inli
       <EmailSplit form={<>
         <Field label="To"><input value={to} onChange={e=>setTo(e.target.value)} placeholder="name@email.com" aria-label="To"
           style={{...fieldText, borderColor: to && !validTo ? T.red : T.borderStrong}}/></Field>
+        <Field label="Cc"><EmailListInput label="Cc" value={cc} onChange={setCc}/></Field>
+        <Field label="Bcc"><EmailListInput label="Bcc" value={bcc} onChange={setBcc}/></Field>
         <Field label="Template"><FormSelect value={templateId} placeholder="Select email template" options={templates.map(t => ({value:t.id, label:t.name}))} onChange={pickTemplate}/></Field>
         <Field label="Subject"><input value={subject} onChange={e=>setSubject(e.target.value)} aria-label="Subject" style={fieldText}/></Field>
         <EmailContentFields value={content} setValue={setContent}/>
@@ -378,7 +397,7 @@ function EmailThreadView({thread, open: openId, contact}){
               style={{width:'100%', display:'flex', alignItems:'baseline', gap:8, padding:'10px 12px', border:'none', background: on ? '#fff' : T.headerBg, cursor:'pointer', fontFamily:'inherit', textAlign:'left'}}>
               <span style={{fontSize:13, fontWeight:600, color:T.attioText, flexShrink:0}}>{who || (m.direction === 'received' ? 'Received' : 'Sent')}</span>
               <span style={{flex:1, minWidth:0, fontSize:12.5, color:T.attioMuted, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>
-                {on ? (m.to && m.to.length ? `to ${m.to.join(', ')}` : '') : (m.html ? m.title : String(m.body || '').replace(/\s+/g, ' '))}
+                {on ? emailRecipientsLine(m) : (m.html ? m.title : String(m.body || '').replace(/\s+/g, ' '))}
               </span>
               <span style={{fontSize:12, color:T.attioMuted, flexShrink:0}}>{m.status === 'scheduled' ? `Scheduled · ${fmtActStamp(new Date(m.scheduledFor || m.at))}` : fmtActStamp(new Date(m.at))}</span>
             </button>
@@ -390,5 +409,5 @@ function EmailThreadView({thread, open: openId, contact}){
   );
 }
 
-Object.assign(window, {EmailComposer, fillFirstName, EMAIL_FORMATS, emailFormatLabel, emailSignatureOf, signatureEmailHtml, emailHtmlOf, emailTextOf, newEmailContent,
+Object.assign(window, {EmailComposer, emailListValid, emailCopiesOf, EmailListInput, fillFirstName, EMAIL_FORMATS, emailFormatLabel, emailSignatureOf, signatureEmailHtml, emailHtmlOf, emailTextOf, newEmailContent,
   switchEmailFormat, emailContentReady, emailContentToSave, templateContentOf, EmailAttachmentList, EmailContentFields, EmailPreview, EmailSplit, EMAIL_PANEL_W, emailFirstName, emailSubjectKey, emailThreadsOf, emailThreadOf, threadedEmailRows, EmailHtmlFrame, EmailBody, EmailThreadView});

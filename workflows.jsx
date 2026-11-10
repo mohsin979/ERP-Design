@@ -569,6 +569,8 @@ const actionIssue = (data, a, context, typeKey) => {
   if(a.type === 'updateAssociatedRecord' && !c.object) return {message:'Choose the associated record to update.', explained:true};
   if(a.type === 'classifyRecord' && !c.property) return {message:'Choose the property to classify.', explained:true};
   if(a.type === 'assignOwner' && !assignOwnerReady(c)) return {message:'Finish choosing how the owner is assigned.', explained:true};
+  // An email's Cc and Bcc are email addresses (the field shows which isn't, as in the composer).
+  if(actionEmails(a).some(e => !emailListValid(e.cc) || !emailListValid(e.bcc))) return {message:'Enter valid Cc and Bcc email addresses.', explained:true};
   if(PROPERTY_ACTIONS.includes(a.type) || a.type === 'createAssociatedObject'){
     if(!ctx.object) return {message:'Needs a Record in the context.', explained:true};   // the action's panel says so
     if(PROPERTY_ACTIONS.includes(a.type)){
@@ -1190,8 +1192,16 @@ const assigneeOptions = (data) => [
 const assigneeLabel = (data, v) => (RECORD_PEOPLE.find(p => p.key === v) || {}).label || ((data.users || []).find(u => u.id === v) || {}).name || '';
 
 /* ── Email ── recipients, and the email as a compact row (View Email) or "Choose email template";
-   Enroll in Email Sequence gives each email a Schedule and can fill its emails from a sequence. */
+   Enroll in Email Sequence gives each email a Schedule and can fill its emails from a sequence.
+   Under the recipients, Cc and Bcc: addresses typed in, as in the email composer (emails.jsx
+   EmailListInput) — kept on the email as typed and listed on it when it is sent. */
 const EMAIL_RECIPIENTS = [{key:'recordEmail', label:'Record Email'}, ...RECORD_PEOPLE];
+const emailCopyFields = (e, set) => (<>
+  {cfgField('Cc', <EmailListInput label="Cc" value={e.cc || ''} onChange={(v)=>set({...e, cc:v})} style={fieldInput}/>)}
+  {cfgField('Bcc', <EmailListInput label="Bcc" value={e.bcc || ''} onChange={(v)=>set({...e, bcc:v})} style={fieldInput}/>)}
+</>);
+// The emails an action sends: Enroll in Email Sequence's entries, Create Email Activity's one.
+const actionEmails = (a) => { const c = a.config || {}; return a.type === 'scheduleEmail' ? (c.emails || []) : a.type === 'createEmailActivity' && c.email ? [c.email] : []; };
 
 /* A sequence's span: from its first email to its last (months as 30 days, weeks as 7), rounded
    to the largest whole unit — "5 emails | 3 months". */
@@ -1308,7 +1318,7 @@ function EmailChoice({entry, setEntry, data, onStub}){
 }
 
 /* ── Enroll in Email Sequence ── Email 1, Email 2… each in sections: Schedule (or Send Immediately) →
-   Recipients → Email. "Choose email sequence
+   Recipients (with Cc and Bcc) → Email. "Choose email sequence
    template" fills the emails from a sequence (templates and schedules). */
 const newScheduledEmail = () => ({id:newEntryId('se'), immediate:false, recipients:[], templateId:'', email:null, schedule:newSchedule()});
 const scheduledEmailsOf = (config) => entriesOf(config, 'emails', newScheduledEmail);
@@ -1335,7 +1345,7 @@ function ScheduleEmailConfig({config, setConfig, data, onStub}){
               Send Immediately<UtToggle on={!!e.immediate} onChange={(v)=>set({...e, immediate:v})}/>
             </label>
           ))}
-          {cfgPart('Recipients', <CheckList options={EMAIL_RECIPIENTS} value={e.recipients} onChange={(r)=>set({...e, recipients:r})}/>)}
+          {cfgPart('Recipients', <><CheckList options={EMAIL_RECIPIENTS} value={e.recipients} onChange={(r)=>set({...e, recipients:r})}/>{emailCopyFields(e, set)}</>)}
           {cfgPart('Email', <EmailChoice entry={e} setEntry={set} data={data} onStub={onStub}/>)}
         </>)}/>
       {behaviorField('scheduleEmail', config, setConfig)}
@@ -1597,12 +1607,12 @@ function MoveToPipelineConfig({config, setConfig, data, context}){
     {behaviorField('moveToPipeline', c, setConfig)}
   </>);
 }
-/* Create Email Activity — one email now (the established email: its template and recipients). */
+/* Create Email Activity — one email now (the established email: its template and recipients, with Cc and Bcc). */
 function CreateEmailActivityConfig({config, setConfig, data, onStub}){
   const c = config || {}, e = c.email || {recipients:['recordEmail'], templateId:'', email:null};
   const set = (x) => setConfig({...c, email:x});
   return cfgPad(<>
-    {cfgPart('Recipients', <CheckList options={EMAIL_RECIPIENTS} value={e.recipients || []} onChange={(r)=>set({...e, recipients:r})}/>)}
+    {cfgPart('Recipients', <><CheckList options={EMAIL_RECIPIENTS} value={e.recipients || []} onChange={(r)=>set({...e, recipients:r})}/>{emailCopyFields(e, set)}</>)}
     {cfgPart('Email', <EmailChoice entry={e} setEntry={set} data={data} onStub={onStub}/>)}
     {behaviorField('createEmailActivity', c, setConfig)}
   </>);

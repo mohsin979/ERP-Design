@@ -466,6 +466,8 @@ function EmailDetail({a, contact, acts, onStub, onUpdate, across}){
         {recordFirst(across)}
         {a.status === 'scheduled' && <Field label="Scheduled"><ReadValue>{fmtActStamp(new Date(a.scheduledFor || a.at))}</ReadValue></Field>}
         {thread.length < 2 && a.to && a.to.length > 0 && <Field label="To"><ReadValue>{a.to.join(', ')}</ReadValue></Field>}
+        {thread.length < 2 && a.cc && a.cc.length > 0 && <Field label="Cc"><ReadValue>{a.cc.join(', ')}</ReadValue></Field>}
+        {thread.length < 2 && a.bcc && a.bcc.length > 0 && <Field label="Bcc"><ReadValue>{a.bcc.join(', ')}</ReadValue></Field>}
         <Field label="Subject"><ReadValue>{a.title}</ReadValue></Field>
         {thread.length > 1
           ? <Field label={`Thread · ${thread.length} emails`}><EmailThreadView key={a.id} thread={thread} open={a.id} contact={contact}/></Field>

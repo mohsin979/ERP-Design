@@ -1291,7 +1291,9 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
       const attachments = content && content.format === 'simple' ? content.attachments : [];
       const act = {id:wfNewId('we'), ...recordKey(deal.id), type:'email', at: now ? new Date() : sendAt, direction:'sent', title:subject, body:htmlText(html),
         html:html || null, ...(attachments.length ? {attachments} : {}),
-        templateId:e.templateId, sequenceId:e.sequenceId || null, to, status: now ? 'sent' : 'scheduled', scheduledFor:sendAt, source:'team', by:owner, viaWorkflow:workflowId};
+        // Cc / Bcc: typed on the workflow's email (its action) or when enrolling by hand — kept as lists, only when filled.
+        templateId:e.templateId, sequenceId:e.sequenceId || null, to, ...emailCopiesOf(e.cc, e.bcc),
+        status: now ? 'sent' : 'scheduled', scheduledFor:sendAt, source:'team', by:owner, viaWorkflow:workflowId};
       addActivity(deal.id, act);
       if(now){ sent++; emit({type:'emailSent', recordId:deal.id, pipelineId:deal.pipeline, attrs:{activityId:act.id, templateId:e.templateId}}, childChain(run)); }
       else { scheduled++; emit({type:'emailScheduled', recordId:deal.id, pipelineId:deal.pipeline, attrs:{activityId:act.id, templateId:e.templateId}}, childChain(run)); }
@@ -2313,12 +2315,13 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
     // A form submission that created (or matched) a record: Form Submitted.
     /* Enroll in Email Sequence outside a workflow (a table's Bulk Actions): the sequence's emails
        scheduled for the record from now — as the workflow action does (same emails, same sequence,
-       so Exit Email Sequence ends them). False without the record, the sequence or an email address. */
-    enrollInSequence: (recordId, sequenceId) => {
+       so Exit Email Sequence ends them). `copies` {cc, bcc}: addresses copied on every email of it
+       (typed when enrolling). False without the record, the sequence or an email address. */
+    enrollInSequence: (recordId, sequenceId, copies) => {
       const deal = getDeal(recordId), seq = emailSequencesOf(dataRef.current).find(q => q.id === sequenceId);
       if(!deal || !seq || !String(deal.email || '').trim()) return false;
       const emails = seq.emails.map((e, i) => ({id:`se-${i}`, immediate:!(Number((e.delay || {}).amount) > 0), recipients:['recordEmail'], templateId:e.templateId, email:null,
-        sequenceId:seq.id, schedule:{amount:'', unit:'Days', time:'', ...(e.delay || {})}}));
+        cc:(copies || {}).cc, bcc:(copies || {}).bcc, sequenceId:seq.id, schedule:{amount:'', unit:'Days', time:'', ...(e.delay || {})}}));
       sendEmails(deal, emails, {chain:{id:wfNewId('ch'), depth:0, visited:[]}}, null);
       return true;
     },

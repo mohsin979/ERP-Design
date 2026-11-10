@@ -14,7 +14,8 @@
    Only the properties changed are written — to every selected record the person may edit (the
    others are skipped and counted). Delete: confirmed by typing Delete; records the person may not
    delete are skipped and counted. Enroll in Email Sequence: the sequence's emails are scheduled for
-   each record from now (as the workflow action does); records without an email address are skipped. */
+   each record from now (as the workflow action does); records without an email address are skipped.
+   Cc and Bcc typed there go on every email of the sequence, for each record enrolled. */
 
 // The signed-in person's permission on a record (Settings → Users & Teams); none set up: allowed.
 const recordCan = (object, record, action) => {
@@ -96,16 +97,20 @@ function BulkEditPanel({data, object, records, onSave, onClose}){
   );
 }
 
-/* Enroll in Email Sequence — choose the sequence; the records with an email address are enrolled. */
+/* Enroll in Email Sequence — choose the sequence; the records with an email address are enrolled.
+   Cc / Bcc (emails.jsx): copied on every email of the sequence. */
 function BulkEnrollModal({data, records, onEnroll, onCancel}){
   const sequences = emailSequencesOf(data);
   const [seq, setSeq] = React.useState('');
+  const [cc, setCc] = React.useState(''), [bcc, setBcc] = React.useState('');
   const withEmail = records.filter(r => String(r.email || '').trim()).length, without = records.length - withEmail;
   return ReactDOM.createPortal(
-    <StModal title="Enroll in Email Sequence" primary={`Enroll ${bulkPlural(withEmail, 'record')}`} canSubmit={!!seq && withEmail > 0} onCancel={onCancel} onSubmit={()=>onEnroll(seq)}>
+    <StModal title="Enroll in Email Sequence" primary={`Enroll ${bulkPlural(withEmail, 'record')}`} canSubmit={!!seq && withEmail > 0 && emailListValid(cc) && emailListValid(bcc)} onCancel={onCancel} onSubmit={()=>onEnroll(seq, emailCopiesOf(cc, bcc))}>
       <div style={{display:'flex', flexDirection:'column', gap:12}}>
         <div><label style={fieldLabel}>Email sequence</label>
           <FormSelect value={seq} placeholder="Select sequence" options={sequences.map(q => ({value:q.id, label:`${q.name} · ${bulkPlural(q.emails.length, 'email')}`}))} onChange={setSeq}/></div>
+        <div><label style={fieldLabel}>Cc</label><EmailListInput label="Cc" value={cc} onChange={setCc} style={fieldInput}/></div>
+        <div><label style={fieldLabel}>Bcc</label><EmailListInput label="Bcc" value={bcc} onChange={setBcc} style={fieldInput}/></div>
         <div style={{fontSize:12.5, color:T.attioMuted, lineHeight:1.5}}>
           The sequence’s emails are scheduled for each record from now.{without ? ` ${bulkPlural(without, 'record')} without an email address will be skipped.` : ''}
         </div>
@@ -139,8 +144,8 @@ function useRecordBulk({object, data, records, update, remove}){
       modal = <BulkDeleteModal count={ok.length} noun={noun} skipped={chosen.length - ok.length} onCancel={()=>setBulk(null)}
         onConfirm={()=>{ if(ok.length) remove(ok.map(r => r.id)); toast(`${bulkPlural(ok.length, noun)} deleted${chosen.length - ok.length ? ` · ${chosen.length - ok.length} skipped (no permission)` : ''}`); done(); }}/>; }
     if(bulk.kind === 'enroll') modal = <BulkEnrollModal data={data} records={chosen} onCancel={()=>setBulk(null)}
-      onEnroll={(seqId)=>{ const withEmail = chosen.filter(r => String(r.email || '').trim());
-        const n = engineCtx ? withEmail.filter(r => engineCtx.api.enrollInSequence(object === 'contacts' ? String(r.id) : r.id, seqId)).length : 0;
+      onEnroll={(seqId, copies)=>{ const withEmail = chosen.filter(r => String(r.email || '').trim());
+        const n = engineCtx ? withEmail.filter(r => engineCtx.api.enrollInSequence(object === 'contacts' ? String(r.id) : r.id, seqId, copies)).length : 0;
         const seq = emailSequencesOf(data).find(q => q.id === seqId);
         toast(`${bulkPlural(n, noun)} enrolled in ${seq ? seq.name : 'the sequence'}${chosen.length - n ? ` · ${chosen.length - n} skipped` : ''}`); done(); }}/>;
   }
