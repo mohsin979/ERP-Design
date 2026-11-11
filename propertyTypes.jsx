@@ -344,24 +344,29 @@ function MultiSelectMenu({value, options, onChange, invalid, placeholder = 'Sele
 }
 /* Phone Number: the country code and the number; the code is kept while the number is still
    empty (the value is "+<code> <number>" once there's a number). */
-function PhoneNumberInput({prop, value, onChange, invalid, base}){
+function PhoneNumberInput({prop, value, onChange, invalid, base, stacked}){
   const p = ptPhone(value);
   const [dial, setDial] = React.useState(p.dial);
   React.useEffect(() => { if(p.dial && p.dial !== dial) setDial(p.dial); }, [p.dial]);
   const set = (d, number) => onChange(number.trim() ? (d ? `+${d} ${number.trim()}` : number) : '');
   return (
-    <div style={{display:'flex', gap:6}}>
-      <div style={{width:128, flexShrink:0}}><FormSelect value={dial} placeholder="Select code" options={dialOptions()} onChange={(d)=>{ setDial(d); set(d, p.number); }} invalid={invalid}/></div>
+    // `stacked`: the code on one row, the number under it.
+    <div style={{display:'flex', flexDirection: stacked ? 'column' : 'row', gap:6}}>
+      <div style={stacked ? {minWidth:0} : {width:128, flexShrink:0}}><FormSelect value={dial} placeholder="Select code" options={dialOptions()} onChange={(d)=>{ setDial(d); set(d, p.number); }} invalid={invalid}/></div>
       <input type="tel" value={p.number} onChange={e=>set(dial, e.target.value)} placeholder={prop.placeholder || '300 0000000'} style={{...base, flex:1, minWidth:0}}/>
     </div>
   );
 }
 /* The control a property's type generates. `value` is in the type's input shape (load);
    `options`: a choice property's options when they come from elsewhere (users, pipelines). */
-/* `label`: a Boolean shows its toggle, then this label (as the creation-form toggles do); no True / False text. */
-function TypedPropertyInput({prop, value, onChange, options, invalid, autoFocus, label}){
+/* `label`: a Boolean shows its toggle, then this label (as the creation-form toggles do); no True / False text.
+   `stacked` (a side panel's inline edit): each part of a two-part input (code and number, currency
+   and amount, date and time, a range's ends, an address) on its own full-width row, and radio
+   options one per row. */
+function TypedPropertyInput({prop, value, onChange, options, invalid, autoFocus, label, stacked}){
   const type = propertyTypeId(prop.type), base = ptInputStyle(invalid), d = defOf(prop);
   const opts = options && options.length ? options : d.options ? d.options(prop) : (prop.options || []);
+  const dash = !stacked && <span style={{color:T.gray400}}>–</span>, pair = {display:'flex', flexDirection: stacked ? 'column' : 'row', alignItems: stacked ? 'stretch' : 'center', gap:6};
   const radio = (checked, onPick, label) => (
     <label key={label} style={{display:'flex', alignItems:'center', gap:8, fontSize:13, color:T.attioText, cursor:'pointer'}}>
       <input type="radio" checked={checked} onChange={onPick} style={{margin:0, width:15, height:15, accentColor:T.black}}/>{label}
@@ -373,14 +378,14 @@ function TypedPropertyInput({prop, value, onChange, options, invalid, autoFocus,
     case 'Number': return <input type="number" value={ptText(value)} onChange={e=>onChange(e.target.value)} style={base}/>;
     case 'Email': return <input type="email" autoFocus={autoFocus} value={ptText(value)} onChange={e=>onChange(e.target.value)} placeholder={prop.placeholder || 'name@company.com'} style={base}/>;
     case 'URL': return <input type="url" autoFocus={autoFocus} value={ptText(value)} onChange={e=>onChange(e.target.value)} placeholder={prop.placeholder || 'https://'} style={base}/>;
-    case 'Phone Number': return <PhoneNumberInput prop={prop} value={value} onChange={onChange} invalid={invalid} base={base}/>;
+    case 'Phone Number': return <PhoneNumberInput prop={prop} value={value} onChange={onChange} invalid={invalid} base={base} stacked={stacked}/>;
     case 'Currency': {
       if(prop.currencyOnly) return select(ptText(value), onChange, 'Select currency');
       // The currency starts at the default one (Settings → Defaults); any can be chosen.
       const m0 = ptMoney(value), m = {...m0, currency:m0.currency || defaultCurrency()};
       return (
-        // The currency up to 168px wide; in a narrow column (a side panel) it gives way so the amount keeps 80px.
-        <div style={{display:'grid', gridTemplateColumns:'minmax(0, 168px) minmax(80px, 1fr)', gap:6}}>
+        // The currency up to 168px wide; in a narrow column it gives way so the amount keeps 80px.
+        <div style={{display:'grid', gridTemplateColumns: stacked ? 'minmax(0, 1fr)' : 'minmax(0, 168px) minmax(80px, 1fr)', gap:6}}>
           <div style={{minWidth:0}}><FormSelect value={m.currency} placeholder="Select currency" options={currencyOptions()} onChange={(c)=>onChange({...m, currency:c})} invalid={invalid}/></div>
           <input type="number" value={ptText(m.amount)} onChange={e=>onChange({...m, amount:e.target.value})} placeholder="Amount" style={{...base, minWidth:0}}/>
         </div>
@@ -390,7 +395,7 @@ function TypedPropertyInput({prop, value, onChange, options, invalid, autoFocus,
       const l = ptLocation(value), set = (k, v) => onChange({...l, [k]:v});
       return (
         // Two per row where there's room (forms), one per row in narrow columns (side panels).
-        <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(170px, 1fr))', gap:6}}>
+        <div style={{display:'grid', gridTemplateColumns: stacked ? 'minmax(0, 1fr)' : 'repeat(auto-fit, minmax(170px, 1fr))', gap:6}}>
           <div><FormSelect value={l.country} placeholder="Select country" options={countryOptions()} onChange={(v)=>set('country', v)} invalid={invalid}/></div>
           <input value={l.street} onChange={e=>set('street', e.target.value)} placeholder="Street Address" aria-label="Street Address" style={base}/>
           <input value={l.city} onChange={e=>set('city', e.target.value)} placeholder="City" aria-label="City" style={base}/>
@@ -404,13 +409,13 @@ function TypedPropertyInput({prop, value, onChange, options, invalid, autoFocus,
       </span>
     );
     case 'Date': return <DateField value={value} onChange={onChange} inputStyle={base} ariaLabel={prop.label}/>;
-    case 'Timestamp': return <DateTimeField value={value} onChange={onChange} inputStyle={base} ariaLabel={prop.label}/>;
+    case 'Timestamp': return <DateTimeField value={value} onChange={onChange} inputStyle={base} ariaLabel={prop.label} stacked={stacked}/>;
     case 'Date Range': {
       const r = ptDateRange(value);
       return (
-        <div style={{display:'flex', alignItems:'center', gap:6}}>
+        <div style={pair}>
           <div style={{flex:1, minWidth:0}}><DateField value={r.start} onChange={(v)=>onChange({...r, start:v})} inputStyle={base} ariaLabel={`${prop.label} start`} placeholder="Start date"/></div>
-          <span style={{color:T.gray400}}>–</span>
+          {dash}
           <div style={{flex:1, minWidth:0}}><DateField value={r.end} onChange={(v)=>onChange({...r, end:v})} inputStyle={base} ariaLabel={`${prop.label} end`} placeholder="End date"/></div>
         </div>
       );
@@ -418,16 +423,16 @@ function TypedPropertyInput({prop, value, onChange, options, invalid, autoFocus,
     case 'Custom Range': {
       const r = ptCustomRange(value), cfg = prop.range || {};
       return (
-        <div style={{display:'flex', alignItems:'center', gap:6}}>
+        <div style={pair}>
           {cfg.label && <span style={{fontSize:13, color:T.attioMuted, whiteSpace:'nowrap'}}>{cfg.label}</span>}
           <input type="number" value={ptText(r.min)} min={cfg.min} max={cfg.max} onChange={e=>onChange({...r, min:e.target.value})} aria-label={`${prop.label} from`} placeholder="From" style={{...base, flex:1, minWidth:0}}/>
-          <span style={{color:T.gray400}}>–</span>
+          {dash}
           <input type="number" value={ptText(r.max)} min={cfg.min} max={cfg.max} onChange={e=>onChange({...r, max:e.target.value})} aria-label={`${prop.label} to`} placeholder="To" style={{...base, flex:1, minWidth:0}}/>
         </div>
       );
     }
     case 'Single Selection': return opts.length < 3
-      ? <div style={{display:'flex', flexWrap:'wrap', gap:'8px 16px', paddingTop:6}}>{opts.map(o => { const v = typeof o === 'string' ? o : o.value, l = typeof o === 'string' ? o : o.label; return radio(value === v, ()=>onChange(v), l); })}</div>
+      ? <div style={stacked ? {display:'flex', flexDirection:'column', gap:10, paddingTop:4} : {display:'flex', flexWrap:'wrap', gap:'8px 16px', paddingTop:6}}>{opts.map(o => { const v = typeof o === 'string' ? o : o.value, l = typeof o === 'string' ? o : o.label; return radio(value === v, ()=>onChange(v), l); })}</div>
       : select(value, onChange, prop.placeholder || `Select ${String(prop.label || '').toLowerCase()}`);
     case 'Multi-Selection': return <MultiSelectMenu value={value} options={opts} onChange={onChange} invalid={invalid}/>;
     case 'File Upload': return (

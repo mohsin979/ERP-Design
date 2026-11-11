@@ -636,13 +636,16 @@ function App(){
   React.useEffect(() => { if(biz) setSettingsData(s => ({...s, seededBusiness:biz.version})); }, []);
   // Deal records — kept here so they survive leaving the Deals page (they read users / pipelines from Settings).
   const [deals, setDealsRaw] = React.useState(() => {
-    const v2 = savedSlice('deals');
+    const v2 = savedSlice('deals'), DAY_TIME = /, \d{1,2}:\d{2}\s?[AP]M$/;
+    const closeDay = (settingsData.properties || []).some(p => p.objectId === 'deals' && p.key === 'closeDate' && propertyTypeId(p.type) === 'Date');
     const legacy = !v2 && WF_SAVED && WF_SAVED.deals ? WF_SAVED.deals.map(d => linkSavedDeal(SPLIT_AC_PIPELINES.includes(d.pipeline) ? {...d, pipeline:'australia-canada'} : d)) : null;
     // A deal's contact is optional (null: none); its owner is a user ID.
     return withBiz(withSampleValues(withStageEntry(withSeeded(v2 || legacy, seedList(SAMPLE_DEALS), prevSettings.seededDeals)), SAMPLE_DEALS(), ['email', 'phone', 'dealType', 'source', 'actualCloseDate']), 'deals')
       .map(x => ({...x, contactId:x.contactId ?? null, owner:userIdOf(x.owner, settingsData.users)}))
       // Postponed became an open stage (2026-11-11): deals saved in it lose the Actual Close Date it gave them, once.
-      .map(x => savedSlice('postponedOpen') || x.stage !== 'postponed' || !x.actualCloseDate ? x : {...x, actualCloseDate:''});
+      .map(x => savedSlice('postponedOpen') || x.stage !== 'postponed' || !x.actualCloseDate ? x : {...x, actualCloseDate:''})
+      // Expected Close Date is a date (2026-11-11): one saved with a time keeps only its day.
+      .map(x => closeDay && DAY_TIME.test(x.closeDate || '') ? {...x, closeDate:x.closeDate.replace(DAY_TIME, '')} : x);
   });
   React.useEffect(() => { persistSlice('postponedOpen', true); }, []);
   // Each deal's activity history (keyed by deal id), as Contacts keep theirs; sample deals added since get theirs.

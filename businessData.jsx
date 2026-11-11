@@ -99,6 +99,7 @@ function generateBusinessData({users, services, now = new Date(), takenNames = [
   const ymd = (t) => { const d = new Date(t); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
   const dayLabel = (t) => new Date(t).toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'});
   const stamp = (t) => storePropertyValue('Date & time', new Date(t));
+  const day = (t) => { const x = new Date(t); return storePropertyValue('Date', `${x.getFullYear()}-${x.getMonth() + 1}-${x.getDate()}`); };
   const SALES = ['Waleed bin Zaman', 'Hamza Siddiqui', 'Ali Noor', 'Anaya Malik', 'Arwa Zafar', 'Asim Ali'];
   const owners = (users || []).filter(u => SALES.includes(u.name) && u.status !== 'Deactivated');
   const ownerPool = owners.length ? owners : (users || []).slice(0, 4);
@@ -200,7 +201,7 @@ function generateBusinessData({users, services, now = new Date(), takenNames = [
 
     const deal = {id:dealId, name, contactId:id, email:contact.email, phone:contact.phone, pipeline, stage, dealType: chance(.12) ? 'Existing Business' : 'New Business',
       owner:owner.id, amount, currency:DEAL_CURRENCY, health: lost ? 'At Risk' : chance(.2) ? 'Needs Attention' : 'Healthy', created:stamp(dealAt), createdAt:dealAt,
-      source:contact.source, closeDate:stamp(Math.max(closeDate, dealAt + BIZ_DAY)), actualCloseDate: closedAt ? stamp(closedAt) : '', stageEnteredAt, pipelineEnteredAt:dealAt};
+      source:contact.source, closeDate:day(Math.max(closeDate, dealAt + BIZ_DAY)), actualCloseDate: closedAt ? stamp(closedAt) : '', stageEnteredAt, pipelineEnteredAt:dealAt};
     deals.push(deal);
     contact.contactType = won ? (chance(.12) ? 'Evangelist' : 'Customer') : lost ? 'Others' : stage === 'postponed' ? 'Subscriber' : 'Opportunity';
     contact.leadStatus = 'Qualified';

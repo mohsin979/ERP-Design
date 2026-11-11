@@ -50,7 +50,7 @@ const SAMPLE_DEALS = () => {
     const expected = new Date(created); expected.setDate(expected.getDate() + 35);
     return {id:`deal-${id}`, name:contact, contactId:c ? c.id : null, email:c ? c.email : '', phone:c ? c.phone : '',
       pipeline, stage, dealType:DEAL_TYPES[id % 3 === 0 ? 1 : 0], owner, amount, currency:DEAL_CURRENCY, health, created,
-      source:c ? c.source : 'Manual', closeDate:dealStamp(expected), actualCloseDate:closed};
+      source:c ? c.source : 'Manual', closeDate:storePropertyValue('Date', `${expected.getFullYear()}-${expected.getMonth() + 1}-${expected.getDate()}`), actualCloseDate:closed};
   };
   const ac = (id, contact, stage, owner, amount, health, created, closeDate = '') => deal(id, contact, stage, owner, amount, health, created, closeDate, 'australia-canada');
   return [

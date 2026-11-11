@@ -705,8 +705,9 @@ function DateOption({label, on, today, onPick}){
   );
 }
 /* Date & time — the date field and the time field side by side. The value is "YYYY-MM-DDTHH:MM",
-   like a native date-time input: it's set once both parts are (until then, empty). */
-function DateTimeField({value, onChange, inputStyle, required, ariaLabel}){
+   like a native date-time input: it's set once both parts are (until then, empty). `stacked`: the
+   time on its own row under the date (a side panel's inline edit). */
+function DateTimeField({value, onChange, inputStyle, required, ariaLabel, stacked}){
   const split = (v) => { const [d, t] = String(v || '').split('T'); return {date:d || '', time:(t || '').slice(0, 5)}; };
   const [parts, setParts] = React.useState(() => split(value));
   React.useEffect(() => { if(value) setParts(split(value)); }, [value]);
@@ -718,9 +719,9 @@ function DateTimeField({value, onChange, inputStyle, required, ariaLabel}){
   };
   return (
     // Side by side; in a narrow slot (a half-width form field) the time wraps under the date.
-    <div style={{display:'flex', flexWrap:'wrap', gap:8, minWidth:0}}>
-      <div style={{flex:'1.4 1 150px', minWidth:0, display:'flex'}}><DateField value={parts.date} onChange={(d)=>set({date:d})} inputStyle={inputStyle} required={required} ariaLabel={ariaLabel ? `${ariaLabel} date` : 'Date'}/></div>
-      <div style={{flex:'1 1 110px', minWidth:0, display:'flex'}}><TimeField value={parts.time} onChange={(t)=>set({time:t})} inputStyle={inputStyle} required={required && !!parts.time} ariaLabel={ariaLabel ? `${ariaLabel} time` : 'Time'}/></div>
+    <div style={stacked ? {display:'flex', flexDirection:'column', gap:6, minWidth:0} : {display:'flex', flexWrap:'wrap', gap:8, minWidth:0}}>
+      <div style={{flex: stacked ? 'none' : '1.4 1 150px', minWidth:0, display:'flex'}}><DateField value={parts.date} onChange={(d)=>set({date:d})} inputStyle={inputStyle} required={required} ariaLabel={ariaLabel ? `${ariaLabel} date` : 'Date'}/></div>
+      <div style={{flex: stacked ? 'none' : '1 1 110px', minWidth:0, display:'flex'}}><TimeField value={parts.time} onChange={(t)=>set({time:t})} inputStyle={inputStyle} required={required && !!parts.time} ariaLabel={ariaLabel ? `${ariaLabel} time` : 'Time'}/></div>
     </div>
   );
 }

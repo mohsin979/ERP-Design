@@ -101,7 +101,7 @@ const DEAL_PROPERTY_SETUP = [
   {key:'dealType',  label:'Deal Type',     type:'Single Selection', options:DEAL_TYPES, width:160},
   {key:'owner',     label:'Deal Owner',    type:'User',             onCreate:true, mandatory:true, locked:true, width:190},
   {key:'source',    label:'Deal Source',   type:'Single Selection', options:CONTACT_SOURCES, locked:true, auto:true, width:150},
-  {key:'closeDate', label:'Expected Close Date', type:'Timestamp',  onCreate:true, half:true, width:200},
+  {key:'closeDate', label:'Expected Close Date', type:'Date',       onCreate:true, half:true, width:200},
   {key:'actualCloseDate', label:'Actual Close Date', type:'Timestamp', locked:true, auto:true, width:200},
   {key:'created',   label:'Created Date',  type:'Timestamp',        locked:true, auto:true, width:200},
   {key:'lastActivity', label:'Last Activity Date', type:'Date',     locked:true, auto:true, derived:true, width:170},
@@ -188,7 +188,9 @@ const migrateDataModel = (d) => {
     // Placeholders read "Select <thing>" (Types of Contact's was "No stage").
     .map(p => p.placeholder === 'No stage' ? {...p, placeholder:'Select contact type'} : p)
     // Owner Assignment Date is one name across Contacts, Deals and Customers (was Contact Owner / Deal / Customer Assignment Date).
-    .map(p => p.key === 'ownerAssigned' && ['Contact Owner Assignment Date', 'Deal Assignment Date', 'Customer Assignment Date'].includes(p.label) ? {...p, label:'Owner Assignment Date'} : p);
+    .map(p => p.key === 'ownerAssigned' && ['Contact Owner Assignment Date', 'Deal Assignment Date', 'Customer Assignment Date'].includes(p.label) ? {...p, label:'Owner Assignment Date'} : p)
+    // Expected Close Date is a date, no time (2026-11-11), once: saved as Date & Time it becomes a Date.
+    .map(p => d.closeDateDay || p.objectId !== 'deals' || p.key !== 'closeDate' || propertyTypeId(p.type) !== 'Timestamp' ? p : {...p, type:'Date'});
   /* Once, for settings saved before the defined Contact, Deal and Customer properties: each record
      type's defined properties in their order — a saved one keeps its values and settings but takes
      its defined name, and becomes system-generated or archived where defined — then any custom
@@ -238,7 +240,7 @@ const migrateDataModel = (d) => {
   // Settings → Defaults' currency is a code (was "AED — UAE Dirham"); the earlier default, PKR, is AED (decided 2026-11-11).
   const cur = d.defaults && d.defaults.currency;
   if(cur && !/^[A-Z]{3}$/.test(cur)) rest.defaults = {...d.defaults, currency:/^PKR/.test(cur) ? 'AED' : cur.slice(0, 3)};
-  return {...rest, objects, associations, properties, pipelines, profileForms, postponedOpen:true, propertySet:PROPERTY_SET_VERSION, propertiesObjectId: has(d.propertiesObjectId) ? d.propertiesObjectId : null};
+  return {...rest, objects, associations, properties, pipelines, profileForms, postponedOpen:true, closeDateDay:true, propertySet:PROPERTY_SET_VERSION, propertiesObjectId: has(d.propertiesObjectId) ? d.propertiesObjectId : null};
 };
 
 /* Pipelines — one store for every Object's pipelines. Contacts' Types of Contact is the existing
