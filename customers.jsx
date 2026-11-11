@@ -16,7 +16,7 @@
    contact. The Add / Edit form picks the contact and deals from existing records.
 
    Customer Owner is a user (stored by ID); each change is recorded as an owner-change activity
-   (App). Not defined yet (placeholder): Export, Enrich, calling, email and meetings, what Smart
+   (App). Export downloads the current view as CSV. Not defined yet (placeholder): Enrich, calling, email and meetings, what Smart
    Actions recommend. */
 
 /* ── Sample customers ── people (and one company) a sale turned into customers, each in the
@@ -54,7 +54,7 @@ const SAMPLE_CUSTOMERS = () => {
 // Sample activity per customer, from the same mock generator as Contacts and Deals.
 const SAMPLE_CUSTOMER_ACTIVITIES = (customers, users) => {
   const nameOf = (id) => (users.find(u => u.id === id) || {}).name || '';
-  const day = (d) => d.toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'});
+  const day = (d) => d.toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric', timeZone:LOCAL_TZ});
   const seeds = customers.map((c, i) => {
     const created = new Date(c.created), touch = new Date(Math.min(new Date(2026, 9, 7), created.getTime() + (4 + (i * 3) % 12) * 86400000));
     return {id:900 + i, created:day(created), lastContacted:day(touch), owner:nameOf(c.owner)};
@@ -492,8 +492,8 @@ function CustomersModule({data, customers, setCustomers, activities, setActiviti
               onAddToStage={(pl, stageId)=>setForm({mode:'add', initial:withStage(pl, {}, stageId)})}
               renderCard={(c, ui) => card(c, cardSettings, ui)}/>;
           }} : undefined}
-        actions={(btn) => <>
-          <button onClick={()=>setStub('Export')} style={btn}><Icon name="export" size={13} color={T.gray600}/> Export</button>
+        actions={(btn, view) => <>
+          <button onClick={view.exportCsv} style={btn}><Icon name="export" size={13} color={T.gray600}/> Export</button>
           <button onClick={()=>setForm({mode:'add', initial:null})} title="Add customer" style={toolbarIconButton}><Icon name="plus" size={14} color={T.gray800}/></button>
         </>}
         filterControls={(v) => <ViolationsButton object="customers" pipelines={viewPipelines(v)} active={violationMode} onClick={()=>setViolationMode(!violationMode)}/>}

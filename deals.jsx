@@ -20,17 +20,16 @@
 
    Deal Owner is a user (Users & Teams), stored by id and changeable on its own (Change Deal
    Owner); each change is recorded as an owner-change activity, as for Contacts, which is also
-   where Deal Assignment Date comes from. Every deal is in AED (DEAL_CURRENCY), set by the
-   system; Currency stays a property so multi-currency can come later.
+   where Deal Assignment Date comes from. Deal Amount is entered with its currency (the default
+   one to start with — Settings → Defaults); the sample deals are in AED (DEAL_CURRENCY).
    A deal opens its record (DealDetail, dealDetail.jsx — the Contact Detail experience) and is
    linked to the contact it was created from (`contactId`); Contact → Deal is CreateDealModal.
    Deals ↔ Customers is Many-to-many: Create Customer makes a customer linked to the deal; deleting a
-   deal keeps its customers, unlinked. Not defined yet (placeholder): Export, Enrich, calling,
+   deal keeps its customers, unlinked. Export downloads the current view as CSV. Not defined yet (placeholder): Enrich, calling,
    email and meetings from a deal, what Smart Actions recommend, how Deal Health and Deal Score are calculated (sample
    values only). */
 
 const DEAL_CURRENCY = 'AED';
-const currencyCode = (c) => String(c || '').split(' ')[0];
 const formatAmount = (n) => (n === '' || n == null || isNaN(n)) ? '' : Number(n).toLocaleString('en-US', {maximumFractionDigits:2});
 const dealStamp = (d) => storePropertyValue('Date & time', d);
 
@@ -111,7 +110,7 @@ function withWorkflowSampleCalls(acts, users){
 const SAMPLE_DEAL_ACTIVITIES = (deals, users) => {
   const nameOf = (id) => (users.find(u => u.id === id) || {}).name || '';
   const today = new Date(2026, 9, 7);
-  const day = (d) => d.toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'});
+  const day = (d) => d.toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric', timeZone:LOCAL_TZ});
   const seeds = deals.map((d, i) => {
     const created = new Date(d.created);
     const touch = d.closeDate ? new Date(d.closeDate) : new Date(Math.min(today, created.getTime() + (6 + (i * 5) % 20) * 86400000));
@@ -133,7 +132,7 @@ function dealSchema(props, pipelines, users){
       pipeline:pipelines.filter(p => p.source !== 'property').map(p => p.label),
       stage:[...new Set(pipelines.filter(p => p.source !== 'property').flatMap(p => p.stages.map(s => s.label)))],
       owner:users.map(u => u.name),
-      currency:CURRENCIES.map(currencyCode),
+      currency:CURRENCY_LIST.map(c => c.code),
       ...Object.fromEntries(props.filter(p => p.options).map(p => [p.key, p.options])),
     },
     noun:typeNoun('deals', 'deal'), searchKeys:['name', 'owner'],
@@ -425,7 +424,7 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
     // The name with the deal's workflow violations beside it.
     renderCell: (key, r) => key === 'name' ? <span data-deal-id={r.id} style={{display:'inline-flex', alignItems:'center', gap:8, minWidth:0, maxWidth:'100%'}}>
         <ContactName name={r.name} onOpen={()=>openDeal(r)} style={{fontSize:'inherit', fontWeight:500}}/><DealPromptMarker dealId={r.id}/></span>
-      : key === 'amount' ? formatAmount(r.amount) : undefined,
+      : key === 'amount' ? moneyText(r.amount, r.currency) : undefined,
     renderActions: (r) => dealMenu(r),
     bulkActions: dealBulk.bulkActions,
   };
@@ -449,7 +448,7 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
       const linkedCustomer = custLink && custLink.existingId ? customers.find(c => c.id === custLink.existingId) : null;
       const contactId = !assoc ? (linkedCustomer ? linkedCustomer.contactId ?? null : null)
         : assoc.existingId != null && assoc.existingId !== '' ? assoc.existingId : onCreateContact ? onCreateContact(assoc.values) : null;
-      setDeals(ds => [...ds, {id, contactId, ...vals, amount, currency:DEAL_CURRENCY, created:dealStamp(new Date())}]);
+      setDeals(ds => [...ds, {id, contactId, ...vals, amount, currency:vals.currency || defaultCurrency(), created:dealStamp(new Date())}]);
       setActivities(m => ({...m, [id]: []}));
       // An existing customer without a deal: its deal (a customer has one deal).
       if(custLink && custLink.existingId && onLinkCustomer) onLinkCustomer(custLink.existingId, {dealIds:[id]});
@@ -506,8 +505,8 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
               onAddToStage={(pl, stageId)=>setForm({mode:'add', initial:withStage(pl, {}, stageId)})}
               renderCard={(d, ui) => card(d, cardSettings, ui)}/>;
           }}}
-        actions={(btn) => <>
-          <button onClick={()=>setStub('Export')} style={btn}><Icon name="export" size={13} color={T.gray600}/> Export</button>
+        actions={(btn, view) => <>
+          <button onClick={view.exportCsv} style={btn}><Icon name="export" size={13} color={T.gray600}/> Export</button>
           <button onClick={()=>setForm({mode:'add', initial:null})} title={`Add ${typeNoun('deals', 'deal')}`} style={toolbarIconButton}><Icon name="plus" size={14} color={T.gray800}/></button>
         </>}
         filterControls={(v) => <ViolationsButton object="deals" pipelines={viewPipelines(v)} active={violationMode} onClick={()=>setViolationMode(!violationMode)}/>}

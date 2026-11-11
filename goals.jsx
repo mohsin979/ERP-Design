@@ -65,13 +65,14 @@ function goalKpi(ctx){
 
 /* ── Settings → Goals ── the period, then the company's target, each team's with its users'. */
 const goalInput = {...stInput, width:160, textAlign:'right', fontVariantNumeric:'tabular-nums'};
-/* A target's AED field. What's typed shows as typed while the field has focus (so "2500." can
+/* A target's field, in the default currency (Settings → Defaults) — Cash Received counts every
+   payment converted to it. What's typed shows as typed while the field has focus (so "2500." can
    become 2500.50); the target is stored as a number. */
 function GoalTargetInput({target, ariaLabel, onChange}){
   const [text, setText] = React.useState(null);
   return (
     <div style={{position:'relative', width:160}}>
-      <span style={{position:'absolute', left:12, top:'50%', transform:'translateY(-50%)', fontSize:12, color:T.gray400, pointerEvents:'none'}}>{DEAL_CURRENCY}</span>
+      <span style={{position:'absolute', left:12, top:'50%', transform:'translateY(-50%)', fontSize:12, color:T.gray400, pointerEvents:'none'}}>{defaultCurrency()}</span>
       <input value={text != null ? text : target.own ? target.value : ''} placeholder={target.value == null ? '0' : formatAmount(target.value)} inputMode="decimal" aria-label={ariaLabel}
         onFocus={()=>setText(target.own ? String(target.value) : '')} onBlur={()=>setText(null)}
         onChange={e=>{ const v = e.target.value.replace(/[^0-9.]/g, ''); setText(v); if(v === '' || Number.isFinite(Number(v))) onChange(v); }} style={{...goalInput, paddingLeft:44}}/>

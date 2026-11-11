@@ -463,8 +463,8 @@ Do not make product decisions that the product designer has not made. Technical 
 * recordHub.jsx (`hub`): the single read/write path for records and their activity across workspace-wide pages (Tools, emails, files, quotes). Deal/Customer activity goes through the workflow engine so workflows see it.
 
 24.3 Shared foundations (reuse these, do not re-implement)
-* shared.jsx — design tokens (`T`), icons, primitives. Visual source: Figma "HOF CRM Redesign" → Claude Feeder.
-* propertyTypes.jsx — the single definition of every property type: input, stored value, display, validation.
+* shared.jsx — design tokens (`T`), icons, primitives. Visual source: Figma "HOF CRM Redesign" → Claude Feeder. Also the time zone: moments show in the person's zone (profile menu, else Settings → Defaults; `zonedParts` / `zonedDate`), calendar days ("YYYY-MM-DD") stay their day (`LOCAL_TZ`).
+* propertyTypes.jsx — the single definition of every property type: input, stored value, display, validation. Also money: the default currency and exchange rates (Settings → Defaults), `toDefaultCurrency` for totals, `moneyText`.
 * dataModel.jsx — Objects (Contacts, Deals, Customers), Associations, Properties (Settings → Data Management).
 * contacts.jsx — the record views system (views, Save View, search, Filters, Table Settings, ContactsDataGrid / RecordSchema) used by every list in the app.
 * board.jsx — Board view and pipeline model (`source:'property'` vs `source:'record'`).

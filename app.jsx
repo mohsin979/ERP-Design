@@ -65,7 +65,7 @@ function workedMs(trail, now){
   return Math.max(0, total);
 }
 const tcClock = (d) => d.toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit'});
-const fmtHour = (d) => d.getMinutes() ? tcClock(d) : d.toLocaleTimeString('en-US', {hour:'numeric'});   // "2 PM", "3:14 PM"
+const fmtHour = (d) => zonedParts(d).mi ? tcClock(d) : d.toLocaleTimeString('en-US', {hour:'numeric'});   // "2 PM", "3:14 PM"
 const fmtHMS = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return `${Math.floor(s / 3600)}h ${Math.floor(s % 3600 / 60)}m ${s % 60}s`; };
 const fmtMS = (ms) => { const s = Math.max(0, Math.floor(ms / 1000));   // never negative (a break can start a moment after the last tick)
   const h = Math.floor(s / 3600); return h ? `${h}h ${Math.floor(s % 3600 / 60)}m ${s % 60}s` : `${Math.floor(s / 60)}m ${s % 60}s`; };
@@ -317,10 +317,11 @@ function HeaderSearch(){
 }
 
 /* Profile ▾ — shortened name in the header, full details inside. Three clear sections: the
-   profile (name, email, Organization / Role), then the menu. ⋯ → Go to Profile leads to the
+   profile (name, email, Organization / Role, the Time Zone the CRM shows times in), then the menu. ⋯ → Go to Profile leads to the
    person's ERP / HRMS profile (the header is ERP-scoped; not defined yet). The entries are not
    defined yet and open the standard placeholder. (The Time Clock lives in the header.) */
-function ProfileMenu({onStub}){
+// `inCrm`: opened from the CRM's header — a time zone change reloads back into the CRM.
+function ProfileMenu({onStub, inCrm}){
   const [open, setOpen] = React.useState(false);
   const [moreOpen, setMoreOpen] = React.useState(false);
   const u = CURRENT_USER;
@@ -368,7 +369,12 @@ function ProfileMenu({onStub}){
           </div>
           <div style={{marginTop:10}}>
             {prop('Organization', u.orgRole)}
-            {prop('Role', u.role, true)}
+            {prop('Role', u.role)}
+            {/* The time zone the CRM shows times in for this person (Settings → Defaults' until changed). */}
+            <div style={{display:'flex', alignItems:'center', gap:12, padding:'8px 0 0'}}>
+              <span style={{width:96, flexShrink:0, fontSize:12.5, color:T.attioMuted}}>Time Zone</span>
+              <div style={{flex:1, minWidth:0}}><FormSelect value={myTimeZone()} options={TIME_ZONES.map(z => ({value:z, label:z}))} onChange={(z)=>z && chooseTimeZone(z, inCrm)}/></div>
+            </div>
           </div>
         </div>
         <div style={{height:1, background:T.border, margin:'0 2px 4px'}}/>
@@ -399,7 +405,7 @@ function HeaderRightIcons({context, session, setSession}){
         <TimeClockControl session={session} setSession={setSession}/>
         {/* The signed-in user's workflow violations and notifications (workflowEngine.jsx). */}
         <WorkflowBell/>
-        <ProfileMenu onStub={setStub}/>
+        <ProfileMenu onStub={setStub} inCrm={context === 'crm'}/>
       </div>
       {stub && <StubPanel title={stub} zIndex={130} onClose={()=>setStub(null)}/>}
     </>
@@ -616,16 +622,19 @@ function App(){
       seededDeals:SAMPLE_DEALS().map(x => x.id), seededContacts:SAMPLE_CONTACTS.map(c => c.id), seededCustomers:SAMPLE_CUSTOMERS().map(c => c.id),
       ...(!v2 && saved.emailTemplates ? {emailTemplates:saved.emailTemplates} : {})});
   });
+  // Times show in the signed-in person's time zone (theirs, else Settings → Defaults') — before anything is formatted.
+  applyTimeZone(settingsData.defaults);
   React.useEffect(() => { persistSlice('settings', settingsData); }, [settingsData]);
   // One identity per person: this CRM's Users among the Organization's users, each with this instance (workspaces.jsx).
   React.useEffect(() => { syncOrgUsers(settingsData.users); }, [settingsData.users]);
   // The employees go back to their People instances' stores (workspaces.jsx).
   useOrg();   // ERP Settings changes apply at once
   React.useEffect(() => { try { saveEmployees(settingsData.people || []); } catch(e){ console.warn('HOF ERP: could not save People', e); } }, [settingsData.people]);
-  setUserDirectory(settingsData.users);   // user IDs on records read as names
+  setUserDirectory([...settingsData.users, ...(settingsData.deletedUsers || []).filter(x => !settingsData.users.some(u => u.id === x.id)).map(x => ({...x, deleted:true}))]);   // user IDs on records read as names — a deleted user's too, in their history
   // Who's signed in: the user with the session's email in this CRM instance.
   const sessionUser = SESSION && settingsData.users.find(u => String(u.email || '').toLowerCase() === String(SESSION.email).toLowerCase());
-  if(sessionUser) Object.assign(CURRENT_USER, {name:sessionUser.name, email:sessionUser.email, role:sessionUser.preset || CURRENT_USER.role});
+  // Their role is their Permission Preset here — none set is no role (not an administrator).
+  if(sessionUser) Object.assign(CURRENT_USER, {name:sessionUser.name, email:sessionUser.email, role:sessionUser.preset || ''});
   const prevSettings = savedSlice('settings') || WF_SAVED || {};
   /* The business data (businessData.jsx, ≈1,000 contacts with their deals, customers, CCLs,
      payment terms and history) — added once to the sample workspace's records, by id: never over a
@@ -700,21 +709,30 @@ function App(){
   setProfileFormsLive(settingsData.profileForms);
   const [profileFormData, setProfileFormData] = usePersistedState('profileFormData', {});
   setProfileHolders(profileFormData);   // whose profile a record shows (board.jsx profileHolderId)
-  const saveProfileForm = (contactId, formId, {values, meta}) => setProfileFormData(m => ({...m, [contactId]:{...(m[contactId] || {}), [formId]:{values, meta, updatedAt:new Date().toISOString()}}}));
+  /* Customer Profile is off for a person until templates are enabled for them (`_enabled`, in the
+     order enabled — the first is what their profile shows to start with); `_type`: the one shown.
+     Saved before this: the one chosen, then those with answers. Filling a template in enables it. */
+  const formIds = (settingsData.profileForms || []).map(f => f.id);
+  const enabledIn = (mine) => [...new Set(Array.isArray(mine._enabled) ? mine._enabled : [mine._type, ...formIds.filter(id => mine[id])].filter(Boolean))].filter(id => formIds.includes(id));
+  const withEnabled = (mine, ids) => ({...mine, _enabled:[...new Set([...enabledIn(mine), ...ids])]});
+  const saveProfileForm = (contactId, formId, {values, meta}) => setProfileFormData(m => ({...m, [contactId]:{...withEnabled(m[contactId] || {}, [formId]), [formId]:{values, meta, updatedAt:new Date().toISOString()}}}));
   // One answer edited in place (its source: Manual).
   const saveProfileField = (contactId, formId, fieldId, value) => setProfileFormData(m => {
-    const mine = m[contactId] || {}, cur = mine[formId] || {values:{}, meta:{}};
+    const mine = withEnabled(m[contactId] || {}, [formId]), cur = mine[formId] || {values:{}, meta:{}};
     const values = {...cur.values}, meta = {...(cur.meta || {})};
     if(value === '' || value == null){ delete values[fieldId]; delete meta[fieldId]; } else { values[fieldId] = value; meta[fieldId] = {source:'manual', at:new Date().toISOString()}; }
     return {...m, [contactId]:{...mine, [formId]:{values, meta, updatedAt:new Date().toISOString()}}};
   });
-  // Customer Profile Type: which template the person's profile uses (the first one until chosen).
-  const profileTypeOf = (cid) => { const own = (profileFormData[cid] || {})._type, list = settingsData.profileForms || [];
-    return list.some(f => f.id === own) ? own : (list[0] || {}).id; };
-  const setProfileType = (cid, formId) => setProfileFormData(m => ({...m, [cid]:{...(m[cid] || {}), _type:formId}}));
+  // Customer Profile Type: the enabled template the person's profile shows (none while it's off).
+  const profileEnabledOf = (cid) => enabledIn(profileFormData[cid] || {});
+  const profileTypeOf = (cid) => { const on = profileEnabledOf(cid), own = (profileFormData[cid] || {})._type; return on.includes(own) ? own : on[0] || null; };
+  // Showing a template enables it; enabling more shows the first of them when none was shown.
+  const setProfileType = (cid, formId) => setProfileFormData(m => ({...m, [cid]:{...withEnabled(m[cid] || {}, [formId]), _type:formId}}));
+  const enableProfiles = (cid, ids) => setProfileFormData(m => { const mine = m[cid] || {}, was = enabledIn(mine);
+    return {...m, [cid]:{...withEnabled(mine, ids), _type: was.includes(mine._type) ? mine._type : was[0] || ids[0]}}; });
   // Sample profiles for a few sample people (added once).
   React.useEffect(() => { if(SEED) setProfileFormData(m => withSampleProfileData(m, contacts)); }, []);
-  const profileFormsStore = {forms:settingsData.profileForms || [], data:profileFormData, save:saveProfileForm, saveField:saveProfileField, typeOf:profileTypeOf, setType:setProfileType,
+  const profileFormsStore = {forms:settingsData.profileForms || [], data:profileFormData, save:saveProfileForm, saveField:saveProfileField, typeOf:profileTypeOf, setType:setProfileType, enabledOf:profileEnabledOf, enable:enableProfiles,
     // The profile holder's activity: a contact's — a lead's or customer's own where it holds the profile (HOF Partners).
     // What the person said anywhere: a contact's own activity and its deals' and customers' (a lead's or customer's own, without Contacts).
     activitiesOf:(cid) => contactActivities[cid] ? [...contactActivities[cid], ...deals.filter(d => d.contactId === cid).flatMap(d => dealActivities[d.id] || []),
@@ -723,8 +741,10 @@ function App(){
   const profileStore = {profiles:profileFormData, facts:profileFacts};
   /* Permissions apply to the signed-in user. Registered for every permission check (usersTeams.jsx)
      with the users (teams) and each record's owner history. */
-  const signedInUser = settingsData.users.find(u => u.name === CURRENT_USER.name) || null;
+  // Found by email (two people can share a name).
+  const signedInUser = (sessionUser && settingsData.users.find(u => u.id === sessionUser.id)) || settingsData.users.find(u => sameEmail(u.email, CURRENT_USER.email)) || null;
   // Task pipelines (Settings → Tasks), for every task's stage (activities.jsx).
+  setMoneyDefaults(settingsData.defaults);   // the default currency and exchange rates (Settings → Defaults)
   setTaskPipelines(taskPipelinesOf(settingsData));
   setContactPipelines(objectPipelines(settingsData, 'contacts'));
   setStagePipelines(settingsData.pipelines);
@@ -747,12 +767,14 @@ function App(){
     const missing = [...contacts.map(r => ['contacts', r]), ...deals.map(r => ['deals', r]), ...customers.map(r => ['customers', r])].filter(([o, r]) => !has.has(key(o, r.id)));
     if(missing.length) setAccounting(list => { const h = new Set(list.map(s => key(s.object, s.recordId)));
       return [...list, ...missing.filter(([o, r]) => !h.has(key(o, r.id))).map(([o, r]) => defaultPaymentTerms(o, r))]; });
-    /* A deal's default terms total the deal's amount: while they're untouched (never edited or paid),
-       they follow it when the amount changes. */
+    /* A deal's default terms total the deal's amount, in its currency: while they're untouched
+       (never edited or paid), they follow it when the amount or currency changes. */
     const amountOf = new Map(deals.map(d => [String(d.id), Math.round((Number(d.amount) || 0) * 100) / 100]));
-    const untouched = (s) => JSON.stringify(s) === JSON.stringify(defaultTermsOf(s.id, s.object, s.recordId, s.total, s.startDate, s.createdAt));
-    const follow = (s) => s.isDefault && s.object === 'deals' && amountOf.has(String(s.recordId)) && amountOf.get(String(s.recordId)) !== s.total && untouched(s);
-    if(accounting.some(follow)) setAccounting(list => list.map(s => follow(s) ? defaultTermsOf(s.id, s.object, s.recordId, amountOf.get(String(s.recordId)), s.startDate, s.createdAt) : s));
+    const currencyOf = new Map(deals.map(d => [String(d.id), d.currency || undefined]));
+    const untouched = (s) => JSON.stringify(s) === JSON.stringify(defaultTermsOf(s.id, s.object, s.recordId, s.total, s.startDate, s.createdAt, s.currency));
+    const follow = (s) => s.isDefault && s.object === 'deals' && amountOf.has(String(s.recordId)) && untouched(s)
+      && (amountOf.get(String(s.recordId)) !== s.total || scheduleCurrency(s) !== (currencyOf.get(String(s.recordId)) || LEGACY_CURRENCY));
+    if(accounting.some(follow)) setAccounting(list => list.map(s => follow(s) ? defaultTermsOf(s.id, s.object, s.recordId, amountOf.get(String(s.recordId)), s.startDate, s.createdAt, currencyOf.get(String(s.recordId))) : s));
   }, [contacts, deals, customers, accounting]);
   /* Last Contacted (a Contact's): its latest real touch — a connected call, a sent email or a held
      meeting, on the contact or on its deals and customers (activities.jsx isRealTouch) — kept in
@@ -812,7 +834,7 @@ function App(){
   // Create Deal from a contact: the deal is linked to the contact and starts with no activity.
   const createDeal = (contact, vals) => {
     const amount = vals.amount === '' || vals.amount == null ? '' : Number(vals.amount);
-    const deal = {id:newRecordId('deals'), contactId:contact.id, ...vals, amount, currency:DEAL_CURRENCY, created:dealStamp(new Date())};
+    const deal = {id:newRecordId('deals'), contactId:contact.id, ...vals, amount, currency:vals.currency || defaultCurrency(), created:dealStamp(new Date())};
     setDealActivities(m => ({...m, [deal.id]: []}));
     setDeals(ds => [...ds, deal]);
     return deal;

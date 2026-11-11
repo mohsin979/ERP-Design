@@ -4,13 +4,14 @@
    Building one is six steps (QuoteBuilder):
      1. Basics — the record (when not started from one), the recipient's name and email, the
         quote's title, a description (rich text) and how long it's valid;
-     2. Services — a saved quote template, or services added one by one from the catalog
+     2. Services — the quote's currency (the default one to start with; another restates every
+        price at Settings' exchange rates), a saved quote template, or services added one by one from the catalog
         (Settings → Templates → Services), or a new one made here (New service: the Services
         panel, the service then ready to add): each with its name, description and milestones
         (name, description, price — the price editable for this quote), or, without milestones,
         its price; the services subtotal;
      3. Payment Terms — installments (a description and a share of the total), then the discount
-        on the services subtotal (a percentage or an AED amount) and 5% VAT on the discounted
+        on the services subtotal (a percentage or an amount) and 5% VAT on the discounted
         subtotal, down to the total;
      4. Terms & Conditions — rich text;
      5. E-Signature — Require e-signature adds a signature section for the customer;
@@ -56,6 +57,12 @@ const BrandLogo = ({brand, height = 28}) => brand.logo
 const QUOTE_VAT_RATE = 5;   // the default VAT (%), on the discounted subtotal
 const qid = (p) => `${p}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+/* A quote's currency: the default one when it's made, changeable on the Services step (its prices
+   restated at Settings' exchange rates). A quote saved before currencies could be chosen is AED. */
+const quoteCurrency = (q) => (q && q.currency) || LEGACY_CURRENCY;
+const itemsIn = (items, from, to) => (items || []).map(it => ({...it, price:convertAmount(it.price, from, to),
+  milestones:(it.milestones || []).map(m => ({...m, price: m.price === '' || m.price == null ? m.price : convertAmount(m.price, from, to)}))}));
+const discountIn = (d, from, to) => d && d.type === 'amount' && d.value !== '' && d.value != null ? {...d, value:String(convertAmount(d.value, from, to))} : d;
 // A service's total in a quote: its milestones' prices (a quote saved before them: its price).
 const quoteItemTotal = (it) => (it.milestones || []).some(m => m.price != null && m.price !== '')
   ? it.milestones.reduce((s, m) => s + (Number(m.price) || 0), 0) : Number(it.price) || 0;
@@ -105,7 +112,9 @@ const quoteNumber = (quotes, preview) => {
   const n = preview ? Math.max(peekRecordId('quotes'), quoteSeqFloor(quotes)) : newRecordId('quotes');
   return `Q-${new Date().getFullYear()}-${String(n).padStart(4, '0')}`;
 };
-const fmtQuoteDate = (v) => { if(!v) return ''; const d = typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? new Date(`${v}T00:00:00`) : new Date(v); return d.toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'}); };
+// A "YYYY-MM-DD" day stays that day; a moment shows in the app's time zone.
+const fmtQuoteDate = (v) => { if(!v) return ''; const day = typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v), d = day ? new Date(`${v}T00:00:00`) : new Date(v);
+  return d.toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric', ...(day ? {timeZone:LOCAL_TZ} : {})}); };
 // A service as quoted: its name, description and milestones with their prices — or, without milestones, its price.
 const quoteItemOf = (s) => { const svc = withMilestonePrices(s);
   return {id:qid('qi'), serviceId:s.id, name:s.name, description:s.description || '', price:Number(s.price) || 0, milestones:(svc.milestones || []).map(m => ({...m, id:qid('qm'), price:Number(m.price) || 0}))}; };
@@ -156,7 +165,7 @@ function QuoteDocument({quote}){
   const hub = useRecordHub();
   const brand = quoteBrand(quote);
   const record = hubRecord(hub, quote.object, quote.recordId);
-  const t = quoteTotals(quote);
+  const t = quoteTotals(quote), cur = quoteCurrency(quote);
   const muted = {fontSize:12, color:T.attioMuted};
   const section = {fontSize:11, fontWeight:700, letterSpacing:.6, textTransform:'uppercase', color:brand.colors.secondary, marginBottom:10};
   const money = {fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap'};
@@ -200,7 +209,7 @@ function QuoteDocument({quote}){
                   <div style={{fontSize:14, fontWeight:600, color:T.attioText}}>{it.name}</div>
                   <RichTextView html={it.description} style={{fontSize:12.5, color:T.attioMuted, marginTop:4}}/>
                 </div>
-                {!(it.milestones || []).length && <span style={{...money, fontSize:13, color:T.attioText}}>{fmtMoney(quoteItemTotal(it))}</span>}
+                {!(it.milestones || []).length && <span style={{...money, fontSize:13, color:T.attioText}}>{fmtMoney(quoteItemTotal(it), cur)}</span>}
               </div>
               {(it.milestones || []).map((m, i) => (
                 <div key={m.id || i} style={{display:'flex', gap:12, alignItems:'baseline', paddingLeft:12, borderLeft:`2px solid ${T.attioLine}`}}>
@@ -208,7 +217,7 @@ function QuoteDocument({quote}){
                     <div style={{fontSize:13, fontWeight:500, color:T.attioText}}>{m.name}</div>
                     {m.description && <div style={{fontSize:12.5, color:T.attioMuted, lineHeight:1.5}}>{m.description}</div>}
                   </div>
-                  <span style={{...money, fontSize:13, color:T.attioText}}>{fmtMoney(m.price)}</span>
+                  <span style={{...money, fontSize:13, color:T.attioText}}>{fmtMoney(m.price, cur)}</span>
                 </div>
               ))}
             </div>
@@ -218,13 +227,13 @@ function QuoteDocument({quote}){
 
         {/* The money: subtotal, discount, discounted subtotal, VAT, total. */}
         <div style={{marginLeft:'auto', width:'100%', maxWidth:340}}>
-          {sumRow('Services subtotal', fmtMoney(t.subtotal))}
+          {sumRow('Services subtotal', fmtMoney(t.subtotal, cur))}
           {t.discount > 0 && <>
-            {sumRow(`Discount${quote.discount && quote.discount.type === 'percent' ? ` (${Number(quote.discount.value)}%)` : ''}`, `− ${fmtMoney(t.discount)}`)}
-            {sumRow('Discounted subtotal', fmtMoney(t.discounted))}
+            {sumRow(`Discount${quote.discount && quote.discount.type === 'percent' ? ` (${Number(quote.discount.value)}%)` : ''}`, `− ${fmtMoney(t.discount, cur)}`)}
+            {sumRow('Discounted subtotal', fmtMoney(t.discounted, cur))}
           </>}
-          {quote.vatRate != null && sumRow(`VAT (${t.vatRate}%)`, fmtMoney(t.vat))}
-          <div style={{borderTop:`2px solid ${brand.colors.primary}`, marginTop:6, paddingTop:6}}>{sumRow('Total', fmtMoney(t.total), true)}</div>
+          {quote.vatRate != null && sumRow(`VAT (${t.vatRate}%)`, fmtMoney(t.vat, cur))}
+          <div style={{borderTop:`2px solid ${brand.colors.primary}`, marginTop:6, paddingTop:6}}>{sumRow('Total', fmtMoney(t.total, cur), true)}</div>
         </div>
 
         {installments.length > 0 && (
@@ -240,7 +249,7 @@ function QuoteDocument({quote}){
                 <span style={{flex:1, minWidth:0}}>{inst.description}</span>
                 <span style={{...money, color:T.attioMuted, width:52, textAlign:'right'}}>{round2(inst.percent)}%</span>
                 <span style={{...money, color:T.attioMuted, width:110, textAlign:'right'}}>{fmtTentative(inst.due) || '—'}</span>
-                <span style={{...money, width:120, textAlign:'right'}}>{fmtMoney(installmentAmount(quote, inst))}</span>
+                <span style={{...money, width:120, textAlign:'right'}}>{fmtMoney(installmentAmount(quote, inst), cur)}</span>
               </div>
             ))}
           </div>
@@ -263,17 +272,17 @@ function QuoteDocument({quote}){
 /* Sending a quote: Sent, and the quote and its email on the record's activity. */
 function sendQuoteVia(hub, q){
   const sentAt = new Date();
-  const t = quoteTotals(q);
+  const t = quoteTotals(q), cur = quoteCurrency(q);
   const brandId = keepQuoteBrand();
   hub.setQuotes(qs => qs.map(x => x.id === q.id ? {...x, status:'sent', sentAt, brandId} : x));
   hub.add(q.object, q.recordId, {type:'quote', status:'sent', title:`${q.number} · ${q.title}`, quoteId:q.id, total:t.total, source:'you', by:null});
   hub.add(q.object, q.recordId, {type:'email', direction:'sent', status:'sent', to:[q.recipient.email].filter(Boolean), source:'you', by:null, quoteId:q.id,
     title:`Quotation ${q.number}: ${q.title}`,
     body:`Hi ${emailFirstName(q.recipient.name) || 'there'},\n\nPlease find your quotation ${q.number} for ${q.title} below.\n\n`
-      + (q.items || []).map(it => `${it.name} — ${fmtMoney(quoteItemTotal(it))}`).join('\n')
-      + `\n\nSubtotal: ${fmtMoney(t.subtotal)}` + (t.discount ? `\nDiscount: − ${fmtMoney(t.discount)}` : '') + (q.vatRate != null ? `\nVAT (${t.vatRate}%): ${fmtMoney(t.vat)}` : '')
-      + `\nTotal: ${fmtMoney(t.total)}` + (q.validUntil ? `\nValid until ${fmtQuoteDate(q.validUntil)}.` : '')
-      + ((q.installments || []).length ? `\n\nPayment terms:\n` + q.installments.map((x, i) => `${i + 1}. ${x.description} — ${round2(x.percent)}% — ${fmtMoney(installmentAmount(q, x))}${fmtTentative(x.due) ? ` — ${fmtTentative(x.due)}` : ''}`).join('\n') : '')
+      + (q.items || []).map(it => `${it.name} — ${fmtMoney(quoteItemTotal(it), cur)}`).join('\n')
+      + `\n\nSubtotal: ${fmtMoney(t.subtotal, cur)}` + (t.discount ? `\nDiscount: − ${fmtMoney(t.discount, cur)}` : '') + (q.vatRate != null ? `\nVAT (${t.vatRate}%): ${fmtMoney(t.vat, cur)}` : '')
+      + `\nTotal: ${fmtMoney(t.total, cur)}` + (q.validUntil ? `\nValid until ${fmtQuoteDate(q.validUntil)}.` : '')
+      + ((q.installments || []).length ? `\n\nPayment terms:\n` + q.installments.map((x, i) => `${i + 1}. ${x.description} — ${round2(x.percent)}% — ${fmtMoney(installmentAmount(q, x), cur)}${fmtTentative(x.due) ? ` — ${fmtTentative(x.due)}` : ''}`).join('\n') : '')
       + (q.eSignature ? `\n\nPlease review and sign the quotation.` : '') + `\n\nKind regards,\n${CURRENT_USER.name}`});
   hub.toast(`Quote ${q.number} sent`);
 }
@@ -309,23 +318,27 @@ const quoteSumRow = (l, v, strong) => <div style={{display:'flex', justifyConten
    is then selected, ready to add); each service added with its milestone prices (or its price)
    editable here; the services subtotal. */
 function QuoteServicesFields({q, set, checks, templates, onUseTemplate}){
-  const hub = useRecordHub();
+  const hub = useRecordHub(), cur = quoteCurrency(q);
+  // Another currency restates every price (and an amount discount) in it.
+  const setCurrency = (c) => c && c !== cur && set({currency:c, items:itemsIn(q.items, cur, c), discount:discountIn(q.discount, cur, c)});
   const [pick, setPick] = React.useState('');
   const [creating, setCreating] = React.useState(false);
   const catalog = hub.services.filter(s => !q.items.some(it => it.serviceId === s.id));
   const label = {fontSize:12.5, color:T.gray600, marginBottom:6, display:'block'};
   const setMilestone = (iid, mid, p) => set({items:q.items.map(it => it.id !== iid ? it : {...it, milestones:it.milestones.map(m => m.id === mid ? {...m, ...p} : m)})});
   const setItem = (iid, p) => set({items:q.items.map(it => it.id !== iid ? it : {...it, ...p})});
-  const addService = (id) => { const s = hub.services.find(x => x.id === id); if(s){ set({items:[...q.items, quoteItemOf(s)], ...(q.title === '' ? {title:s.name} : {})}); setPick(''); } };
+  // A service in another currency comes in at Settings' exchange rate.
+  const addService = (id) => { const s = hub.services.find(x => x.id === id); if(s){ set({items:[...q.items, ...itemsIn([quoteItemOf(s)], s.currency, cur)], ...(q.title === '' ? {title:s.name} : {})}); setPick(''); } };
   const priceInput = (value, onChange, ariaLabel) => (
     <div style={{width:150, flexShrink:0, position:'relative'}}>
-      <span style={{position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', fontSize:12, color:T.attioMuted, pointerEvents:'none'}}>{DEAL_CURRENCY}</span>
+      <span style={{position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', fontSize:12, color:T.attioMuted, pointerEvents:'none'}}>{cur}</span>
       <input value={value} onChange={e=>onChange(e.target.value.replace(/[^0-9.]/g, ''))} inputMode="decimal" aria-label={ariaLabel}
         style={{...fieldText, paddingLeft:44, textAlign:'right', fontVariantNumeric:'tabular-nums', borderColor: priceOk(value) ? T.borderStrong : T.red}}/>
     </div>
   );
   return (<>
-    <div style={{display:'grid', gridTemplateColumns: templates ? 'minmax(0, 1fr) minmax(0, 1fr)' : 'minmax(0, 1fr)', gap:12, alignItems:'end'}}>
+    <div style={{display:'grid', gridTemplateColumns: templates ? '200px minmax(0, 1fr) minmax(0, 1fr)' : '200px minmax(0, 1fr)', gap:12, alignItems:'end'}}>
+      <div style={{minWidth:0}}><label style={label}>Currency</label><FormSelect value={cur} options={currencyOptions()} onChange={setCurrency}/></div>
       {templates && <div style={{minWidth:0}}><label style={label}>Quote template</label>
         <FormSelect value={q.templateId || ''} placeholder={templates.length ? 'Select a quote template' : 'No quote templates yet'}
           options={templates.map(t => ({value:t.id, label:`${t.code} · ${t.name}`}))} onChange={onUseTemplate}/></div>}
@@ -360,12 +373,12 @@ function QuoteServicesFields({q, set, checks, templates, onUseTemplate}){
           </div>
         ))}
         {it.milestones.length > 0 && <div style={{display:'flex', justifyContent:'flex-end', gap:12, fontSize:12.5, color:T.attioMuted}}>
-          <span>Service total</span><span style={{...QUOTE_MONEY, color:T.attioText, fontWeight:500}}>{fmtMoney(quoteItemTotal(it))}</span>
+          <span>Service total</span><span style={{...QUOTE_MONEY, color:T.attioText, fontWeight:500}}>{fmtMoney(quoteItemTotal(it), cur)}</span>
         </div>}
       </div>
     ))}
     {!q.items.length && <div style={{fontSize:13, color:T.attioMuted}}>{templates ? 'Add the services this quote is for, or start from a quote template.' : 'Add the services this template is for.'}</div>}
-    {q.items.length > 0 && <div style={{borderTop:`1px solid ${T.border}`, paddingTop:8}}>{quoteSumRow('Services subtotal', fmtMoney(checks.totals.subtotal), true)}</div>}
+    {q.items.length > 0 && <div style={{borderTop:`1px solid ${T.border}`, paddingTop:8}}>{quoteSumRow('Services subtotal', fmtMoney(checks.totals.subtotal, cur), true)}</div>}
     {creating && <ServiceFormPanel zIndex={90} onCancel={()=>setCreating(false)}
       onSave={(vals)=>{ const rec = newServiceRecord(vals); hub.setServices(ss => [...ss, rec]); setPick(rec.id); setCreating(false); hub.toast('Service created'); }}/>}
   </>);
@@ -373,17 +386,17 @@ function QuoteServicesFields({q, set, checks, templates, onUseTemplate}){
 /* Payment Terms — installments, then the discount on the services subtotal (a percentage or an
    amount) and VAT on the discounted subtotal, down to the total. */
 function QuotePaymentFields({q, set, checks}){
-  const {totals, discountOk} = checks;
+  const {totals, discountOk} = checks, cur = quoteCurrency(q);
   return (<>
-    <InstallmentsEditor rows={q.installments} onChange={(rows)=>set({installments:rows})} total={totals.total} newId={()=>qid('in')}/>
+    <InstallmentsEditor rows={q.installments} onChange={(rows)=>set({installments:rows})} total={totals.total} currency={cur} newId={()=>qid('in')}/>
     <div style={{borderTop:`1px solid ${T.border}`, margin:'4px -20px 0'}}/>
     <span style={QUOTE_SECTION}>Discount & tax</span>
     <div style={{maxWidth:420, width:'100%', alignSelf:'flex-end'}}>
-      {quoteSumRow('Services subtotal', fmtMoney(totals.subtotal))}
+      {quoteSumRow('Services subtotal', fmtMoney(totals.subtotal, cur))}
       <div style={{display:'flex', alignItems:'center', gap:10, padding:'6px 0'}}>
         <span style={{flex:1, fontSize:13, color:T.attioText}}>Discount</span>
         <div role="radiogroup" aria-label="Discount type" style={{display:'inline-flex', border:`1px solid ${T.borderStrong}`, borderRadius:8, overflow:'hidden'}}>
-          {[['percent', '%'], ['amount', DEAL_CURRENCY]].map(([k, l]) => (
+          {[['percent', '%'], ['amount', cur]].map(([k, l]) => (
             <button key={k} type="button" role="radio" aria-checked={q.discount.type === k} onClick={()=>set({discount:{...q.discount, type:k}})}
               style={{border:'none', cursor:'pointer', padding:'5px 10px', fontSize:12.5, fontWeight:500, fontFamily:'inherit', background: q.discount.type === k ? T.black : 'transparent', color: q.discount.type === k ? '#fff' : T.gray600}}>{l}</button>
           ))}
@@ -391,10 +404,10 @@ function QuotePaymentFields({q, set, checks}){
         <input value={q.discount.value} onChange={e=>set({discount:{...q.discount, value:e.target.value.replace(/[^0-9.]/g, '')}})} inputMode="decimal" placeholder="0" aria-label="Discount"
           style={{...fieldText, width:110, textAlign:'right', fontVariantNumeric:'tabular-nums', borderColor: discountOk ? T.borderStrong : T.red}}/>
       </div>
-      {quoteSumRow('Discount amount', `− ${fmtMoney(totals.discount)}`)}
-      {quoteSumRow('Discounted subtotal', fmtMoney(totals.discounted))}
-      {quoteSumRow(`VAT (${totals.vatRate}% of the discounted subtotal)`, fmtMoney(totals.vat))}
-      <div style={{borderTop:`2px solid ${T.attioText}`, marginTop:6, paddingTop:4}}>{quoteSumRow('Total', fmtMoney(totals.total), true)}</div>
+      {quoteSumRow('Discount amount', `− ${fmtMoney(totals.discount, cur)}`)}
+      {quoteSumRow('Discounted subtotal', fmtMoney(totals.discounted, cur))}
+      {quoteSumRow(`VAT (${totals.vatRate}% of the discounted subtotal)`, fmtMoney(totals.vat, cur))}
+      <div style={{borderTop:`2px solid ${T.attioText}`, marginTop:6, paddingTop:4}}>{quoteSumRow('Total', fmtMoney(totals.total, cur), true)}</div>
     </div>
   </>);
 }
@@ -412,9 +425,9 @@ function QuoteBuilder({mode, id, object, onClose, placement = 'fixed'}){
   const person0 = target.id != null ? hubRecordPerson(hub, target.object, target.id) : null;
   const [q, setQ] = React.useState(() => existing ? {...JSON.parse(JSON.stringify(existing)), description:existing.description || richHtmlOf(existing.notes || ''), notes:undefined,
       items:(existing.items || []).map(withItemMilestonePrices), installments:(existing.installments || []).map((x, i) => ({...x, due:x.due || (i === 0 ? DUE_DAY0() : {type:'days', days:''})})), discount:existing.discount || {type:'percent', value:''},
-      vatRate:existing.vatRate ?? QUOTE_VAT_RATE, terms:existing.terms || '', eSignature:!!existing.eSignature} : {
+      vatRate:existing.vatRate ?? QUOTE_VAT_RATE, terms:existing.terms || '', eSignature:!!existing.eSignature, currency:quoteCurrency(existing)} : {
     title:'', recipient:{name:(person0 && person0.name) || '', email:(person0 && person0.email) || ''}, description:'', items:[], installments:[],
-    discount:{type:'percent', value:''}, vatRate:QUOTE_VAT_RATE, terms:'', eSignature:false, templateId:null,
+    discount:{type:'percent', value:''}, vatRate:QUOTE_VAT_RATE, terms:'', eSignature:false, templateId:null, currency:defaultCurrency(),
     validUntil:ymdOf(new Date(Date.now() + 30 * 86400000))});
   const set = (p) => setQ(x => ({...x, ...p}));
   // A record picked here fills in its person.
@@ -442,12 +455,15 @@ function QuoteBuilder({mode, id, object, onClose, placement = 'fixed'}){
   // A saved template fills in the services and milestones, payment terms, discount and VAT, and terms.
   const useTemplate = (tid) => {
     const t = templates.find(x => x.id === tid); if(!t) return;
-    set({templateId:t.id, items:copyItems(t.items), installments:(t.installments || []).map((x, i) => ({...x, id:qid('in'), due:x.due || (i === 0 ? DUE_DAY0() : {type:'days', days:''})})), discount:{type:(t.discount || {}).type || 'percent', value:(t.discount || {}).value || ''},
+    // Its prices in the quote's currency (Settings' exchange rates).
+    const from = quoteCurrency(t), to = quoteCurrency(q);
+    set({templateId:t.id, items:itemsIn(copyItems(t.items), from, to), installments:(t.installments || []).map((x, i) => ({...x, id:qid('in'), due:x.due || (i === 0 ? DUE_DAY0() : {type:'days', days:''})})),
+      discount:discountIn({type:(t.discount || {}).type || 'percent', value:(t.discount || {}).value || ''}, from, to),
       vatRate:t.vatRate ?? QUOTE_VAT_RATE, terms:t.terms || '', title:q.title || t.name});
   };
   const saveTemplate = (name) => {
     const d = draft();
-    const t = {id:`qt-${Date.now().toString(36)}`, code:nextTemplateCode(templates), name, items:d.items, installments:d.installments, discount:d.discount, vatRate:d.vatRate, terms:d.terms,
+    const t = {id:`qt-${Date.now().toString(36)}`, code:nextTemplateCode(templates), name, items:d.items, installments:d.installments, discount:d.discount, vatRate:d.vatRate, terms:d.terms, currency:quoteCurrency(d),
       createdBy:CURRENT_USER.name, createdAt:new Date()};
     hub.setData(x => ({...x, quoteTemplates:[...quoteTemplatesOf(x), t]}));
     setTemplating(null); hub.toast(`Template ${t.code} saved`);
@@ -552,7 +568,7 @@ const INST_COLS = '22px 200px 200px 200px 200px minmax(28px, 1fr)';
    typed) and shown to 4 decimals at most. */
 const pctShown = (p) => /\.\d{5,}$/.test(String(p)) ? String(Math.round(Number(p) * 10000) / 10000) : String(p ?? '');
 // `shown`: the amount to show when it differs from total × percent (the last installment's cents).
-function PercentAmountField({percent, total, onPercent, index, label = 'percentage', amountLabel = 'amount', shown}){
+function PercentAmountField({percent, total, onPercent, index, label = 'percentage', amountLabel = 'amount', shown, currency = defaultCurrency()}){
   const [amountText, setAmountText] = React.useState(null);   // while the amount is being typed
   const [percentText, setPercentText] = React.useState(null); // while the percentage is being typed
   const amount = shown != null ? shown : (Number(total) || 0) * (Number(percent) || 0) / 100;
@@ -568,7 +584,7 @@ function PercentAmountField({percent, total, onPercent, index, label = 'percenta
       </div>
       <span style={{width:1, background:T.borderStrong, margin:'6px 0'}}/>
       <div style={{display:'flex', alignItems:'center', gap:4, padding:'0 10px', flex:'1 1 0', minWidth:0}}>
-        <span style={unit}>{DEAL_CURRENCY}</span>
+        <span style={unit}>{currency}</span>
         {/* The amount needs the total it's a share of; until there's one, it says so. */}
         <input value={amountText != null ? amountText : (Number(total) > 0 ? String(Math.round(amount * 100) / 100) : '')} inputMode="decimal"
           placeholder={Number(total) > 0 ? '0' : 'Set total'} title={Number(total) > 0 ? undefined : 'Enter the total first'} aria-label={`Installment ${index + 1} ${amountLabel}`}
@@ -614,7 +630,7 @@ function TentativeValueField({value, onChange, index, total}){
     </div>
   );
 }
-function InstallmentsEditor({rows, onChange, total, newId, title = 'Installments'}){
+function InstallmentsEditor({rows, onChange, total, newId, title = 'Installments', currency}){
   // Checked unrounded, as the panels check it; shown to 4 decimals so a near miss doesn't read as 100%.
   const raw = rows.reduce((s, x) => s + (Number(x.percent) || 0), 0), sum = Math.round(raw * 10000) / 10000;
   const ok = rows.length > 0 && Math.abs(raw - 100) < 0.001;
@@ -639,7 +655,7 @@ function InstallmentsEditor({rows, onChange, total, newId, title = 'Installments
         <div key={x.id} style={{display:'grid', gridTemplateColumns:INST_COLS, gap:12, alignItems:'center'}}>
           <span style={{fontSize:12, color:T.attioMuted, fontVariantNumeric:'tabular-nums'}}>{i + 1}.</span>
           <input value={x.description} onChange={e=>setRow(x.id, {description:e.target.value})} placeholder="Installment description" aria-label={`Installment ${i + 1} description`} style={fieldText}/>
-          <PercentAmountField percent={x.percent} total={total} shown={amounts[i]} onPercent={(pc)=>setRow(x.id, {percent:pc})} index={i}/>
+          <PercentAmountField percent={x.percent} total={total} shown={amounts[i]} currency={currency} onPercent={(pc)=>setRow(x.id, {percent:pc})} index={i}/>
           <TentativeTypeField value={x.due} onChange={(due)=>setRow(x.id, {due})} index={i}/>
           <TentativeValueField value={x.due} onChange={(due)=>setRow(x.id, {due})} index={i} total={total}/>
           <button type="button" title="Remove installment" onClick={()=>onChange(rows.filter(y => y.id !== x.id))}
@@ -760,7 +776,7 @@ function QuoteNavItem({q, selected, onSelect}){
       </div>
       <div style={{display:'flex', alignItems:'baseline', gap:8}}>
         <span style={{flex:1, minWidth:0, fontSize:13, fontWeight:500, color:T.attioText, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{q.title}</span>
-        <span style={{fontSize:12.5, color:T.attioText, fontVariantNumeric:'tabular-nums'}}>{fmtMoney(quoteTotal(q))}</span>
+        <span style={{fontSize:12.5, color:T.attioText, fontVariantNumeric:'tabular-nums'}}>{fmtMoney(quoteTotal(q), quoteCurrency(q))}</span>
       </div>
     </div>
   );
@@ -835,7 +851,7 @@ function QuotesPage(){
   const [deleting, setDeleting] = React.useState(null);
   const [newService, setNewService] = React.useState(false);   // New service: the Services panel
   const rows = hub.quotes.map(q => { const r = hubRecord(hub, q.object, q.recordId); return {...q, recordName:r ? r.name : '—', objectLabel:HUB_NOUN[q.object],
-    recipientName:q.recipient.name, total:quoteTotal(q), totalText:fmtMoney(quoteTotal(q)), statusLabel:QUOTE_STATUS[quoteStatusOf(q)].label, createdText:fmtQuoteDate(q.createdAt)}; });
+    recipientName:q.recipient.name, total:toDefaultCurrency(quoteTotal(q), quoteCurrency(q)), totalText:fmtMoney(quoteTotal(q), quoteCurrency(q)), statusLabel:QUOTE_STATUS[quoteStatusOf(q)].label, createdText:fmtQuoteDate(q.createdAt)}; });
   const open = hub.quotes.find(q => q.id === openId) || null;
   const edit = (qid) => { setOpenId(null); setBuilder({mode:'edit', id:qid}); };
   // Bulk Actions: Delete (as a quote's Delete).
@@ -863,7 +879,7 @@ function QuotesPage(){
         </>}
         overlay={newService ? <ServiceFormPanel onCancel={()=>setNewService(false)} onSave={(vals)=>{ hub.setServices(ss => [...ss, newServiceRecord(vals)]); setNewService(false); hub.toast('Service created'); }}/>
           : builder ? <QuoteBuilder key={builder.id || 'new'} {...builder} onClose={(saved)=>{ setBuilder(null); if(saved) setOpenId(saved.id); }}/>
-          : open && <PageSidePanel width={560} title={`${open.number} · ${open.title}`} subtitle={`${QUOTE_STATUS[quoteStatusOf(open)].label} · ${fmtMoney(quoteTotal(open))}`}
+          : open && <PageSidePanel width={560} title={`${open.number} · ${open.title}`} subtitle={`${QUOTE_STATUS[quoteStatusOf(open)].label} · ${fmtMoney(quoteTotal(open), quoteCurrency(open))}`}
           onClose={()=>setOpenId(null)} menuItems={quoteActions(hub, open, {onDelete:setDeleting, onEdit:edit, onSign:setSigning})}>
           <div style={{flex:1, overflowY:'auto', padding:'4px 20px 24px'}}><QuoteDocument quote={open}/></div>
         </PageSidePanel>}/>

@@ -11,11 +11,12 @@
 
    Ownership (product decision):
      Tools (Email, Calls, Meetings, Calendar, Tasks) — personal: each user connects and manages
-       their own accounts, numbers and task defaults; the signed-in user only sees their own.
+       their own accounts, numbers and task defaults (`personal[<user id>]`); the signed-in user
+       only sees their own. Their Tasks defaults prefill the due date and time of a new task.
      Defaults (time zone, language, currency) — company-wide.
    Connecting is simulated (no real Google / Microsoft sign-in in the prototype): pick the
    provider, enter the account, Connect. A connected item's only action is Disconnect (row ⋯,
-   with a confirmation). Forms save through Cancel / Save, Save disabled until something changes.
+   with a confirmation; several at once from Bulk Actions). Forms save through Cancel / Save, Save disabled until something changes.
 
    Not defined yet — placeholder pages: Notifications, Objects, Properties,
    Pipelines, Customer Profile, Templates, Import & Export. */
@@ -57,19 +58,64 @@ const TIME_ZONES = [
   '(GMT−05:00) Canada — Toronto', '(GMT−08:00) Canada — Vancouver', '(GMT−05:00) US — New York',
   '(GMT−08:00) US — Los Angeles', '(GMT+10:00) Australia — Sydney', '(GMT+08:00) Australia — Perth',
 ];
+// Each time zone's IANA name (what the browser formats times in).
+const TIME_ZONE_IDS = {
+  '(GMT+05:00) Pakistan — Karachi':'Asia/Karachi', '(GMT+04:00) UAE — Dubai':'Asia/Dubai', '(GMT+03:00) Saudi Arabia — Riyadh':'Asia/Riyadh',
+  '(GMT+05:30) India — Kolkata':'Asia/Kolkata', '(GMT+00:00) United Kingdom — London':'Europe/London', '(GMT+01:00) Central Europe — Berlin':'Europe/Berlin',
+  '(GMT−05:00) Canada — Toronto':'America/Toronto', '(GMT−08:00) Canada — Vancouver':'America/Vancouver', '(GMT−05:00) US — New York':'America/New_York',
+  '(GMT−08:00) US — Los Angeles':'America/Los_Angeles', '(GMT+10:00) Australia — Sydney':'Australia/Sydney', '(GMT+08:00) Australia — Perth':'Australia/Perth',
+};
+/* The time zone a person works in (shared.jsx): their pick in the profile menu (kept in this
+   browser, by email), else Settings → Defaults'. Picking the Settings one clears the pick, so it
+   follows Settings again. */
+let DEFAULT_TIME_ZONE = TIME_ZONES[0];
+const myTimeZoneKey = () => String((ORG_REGISTRY.session && ORG_REGISTRY.session.email) || '').toLowerCase();
+const myTimeZone = () => (ORG_REGISTRY.timeZones || {})[myTimeZoneKey()] || DEFAULT_TIME_ZONE;
+function applyTimeZone(defaults){
+  DEFAULT_TIME_ZONE = (defaults && TIME_ZONE_IDS[defaults.timeZone]) ? defaults.timeZone : TIME_ZONES[0];
+  setAppTimeZone(TIME_ZONE_IDS[myTimeZone()]);
+}
+function chooseTimeZone(label, inCrm){
+  if(label === myTimeZone()) return;
+  const zones = {...(ORG_REGISTRY.timeZones || {})};
+  if(label === DEFAULT_TIME_ZONE) delete zones[myTimeZoneKey()]; else zones[myTimeZoneKey()] = label;
+  reloadInto({timeZones:zones, openCrm:!!inCrm});   // every time on the page is shown again in it (where the person was)
+}
 const LANGUAGES  = ['English'];
-const CURRENCIES = [
-  'PKR — Pakistani Rupee', 'USD — US Dollar', 'AED — UAE Dirham', 'GBP — British Pound',
-  'CAD — Canadian Dollar', 'EUR — Euro', 'AUD — Australian Dollar',
-];
 
 const DEFAULT_SETTINGS_DATA = () => ({
-  emails: [], phones: [], meetings: [], calendars: [],
-  tasks: {dueDate:'tomorrow', dueTime:'09:00', reminder:'1h', customAmount:1, customUnit:'Hours'},
-  defaults: {timeZone:TIME_ZONES[0], language:LANGUAGES[0], currency:CURRENCIES[0]},
+  defaults: {timeZone:TIME_ZONES[0], language:LANGUAGES[0], currency:'AED'},
   ...SAMPLE_PEOPLE_DATA(),   // users, seats, teams, presets (usersTeams.jsx)
   ...DEFAULT_DATA_MODEL(),   // objects, associations, properties (dataModel.jsx)
 });
+
+/* Tools settings are personal: each user's own accounts, numbers and task defaults, kept under
+   `personal[<user id>]`. Nothing saved yet: none connected, the standard task defaults. */
+const PERSONAL_SETTING_KEYS = ['emails', 'phones', 'meetings', 'calendars', 'tasks'];
+const PERSONAL_DEFAULTS = () => ({emails:[], phones:[], meetings:[], calendars:[],
+  tasks:{dueDate:'tomorrow', dueTime:'09:00', reminder:'1h', customAmount:1, customUnit:'Hours'}});
+const personalSettingsOf = (data, userId) => ({...PERSONAL_DEFAULTS(), ...(((data && data.personal) || {})[userId] || {})});
+const mySettingsId = () => (accessUser() || {}).id || 'me';
+/* A new task's due date and time from the signed-in user's Tasks defaults ('' when No due date). */
+const TASK_DUE_DAYS = {today:0, tomorrow:1, '2d':2, '3d':3, '1w':7, '2w':14};
+function taskDueDefaults(data){
+  const t = personalSettingsOf(data, mySettingsId()).tasks, days = TASK_DUE_DAYS[t.dueDate];
+  if(days == null) return {dueDate:'', dueTimeOfDay:''};
+  const d = new Date(); d.setDate(d.getDate() + days);
+  return {dueDate:ymdOf(d), dueTimeOfDay:t.dueTime || ''};
+}
+/* A personal page sees the signed-in user's own settings in place of the shared ones; what it
+   saves to them goes back under their id, everything else (Task Pipelines) to the CRM's. */
+const personalPage = (Page) => function PersonalSettingsPage({data, setData, ...props}){
+  const uid = mySettingsId();
+  const mine = {...data, ...personalSettingsOf(data, uid)};
+  const setMine = (f) => setData(d => {
+    const next = typeof f === 'function' ? f({...d, ...personalSettingsOf(d, uid)}) : f;
+    const out = {...next, personal:{...(d.personal || {}), [uid]:Object.fromEntries(PERSONAL_SETTING_KEYS.map(k => [k, next[k]]))}};
+    PERSONAL_SETTING_KEYS.forEach(k => { if(k in d) out[k] = d[k]; else delete out[k]; });
+    return out; });
+  return <Page {...props} data={mine} setData={setMine}/>;
+};
 
 const stToday = () => new Date().toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'});
 const stId = (p) => `${p}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -359,10 +405,12 @@ function ConnectAccountModal({provider, onCancel, onConnect}){
   );
 }
 
-function DisconnectModal({what, onCancel, onConfirm}){
+// `many`: several at once (Bulk Actions).
+function DisconnectModal({what, many, onCancel, onConfirm}){
   return (
     <StModal title={`Disconnect ${what}?`} primary="Disconnect" danger onCancel={onCancel} onSubmit={onConfirm}>
-      <div style={{fontSize:13, color:T.gray600, lineHeight:1.5}}>It will no longer be connected to your CRM. You can connect it again at any time.</div>
+      <div style={{fontSize:13, color:T.gray600, lineHeight:1.5}}>{many ? 'They will no longer be connected to your CRM. You can connect them again at any time.'
+        : 'It will no longer be connected to your CRM. You can connect it again at any time.'}</div>
     </StModal>
   );
 }
@@ -379,9 +427,11 @@ function ConnectedAccountsPage({title, description, providers, connectLabel, lis
   const can = toolSettingCan(TOOL_SETTING_OF[listKey]);
   const [connecting, setConnecting] = React.useState(null);
   const [removing, setRemoving] = React.useState(null);
+  const [bulk, setBulk] = React.useState(null);   // Bulk Actions → Disconnect: {ids, clear}
   const rows = data[listKey];
   const schema = {
-    noun, searchKeys:['email'],
+    noun, searchKeys:['email'], selectable:can,
+    bulkActions:(ids, clear) => [{label:'Disconnect', danger:true, onClick:()=>setBulk({ids, clear})}],
     properties:[
       {key:'email', label:'Account', width:280}, {key:'provider', label:'Provider', width:200},
       {key:'status', label:'Status', width:150}, {key:'connected', label:'Connected on', width:170},
@@ -402,6 +452,8 @@ function ConnectedAccountsPage({title, description, providers, connectLabel, lis
         }}/>}
       {removing && <DisconnectModal what={removing.email} onCancel={()=>setRemoving(null)}
         onConfirm={()=>{ setData(d => ({...d, [listKey]:d[listKey].filter(x => x.id !== removing.id)})); setRemoving(null); }}/>}
+      {bulk && <DisconnectModal what={bulkPlural(bulk.ids.length, noun)} many={bulk.ids.length > 1} onCancel={()=>setBulk(null)}
+        onConfirm={()=>{ setData(d => ({...d, [listKey]:d[listKey].filter(x => !bulk.ids.includes(x.id))})); bulk.clear(); setBulk(null); }}/>}
     </SettingsPage>
   );
 }
@@ -438,9 +490,11 @@ function CallsSettings({data, setData}){
   const can = toolSettingCan('calls');
   const [adding, setAdding] = React.useState(false);
   const [removing, setRemoving] = React.useState(null);
+  const [bulk, setBulk] = React.useState(null);   // Bulk Actions → Disconnect: {ids, clear}
   const rows = data.phones;
   const schema = {
-    noun:'number', searchKeys:['number', 'label'],
+    noun:'number', searchKeys:['number', 'label'], selectable:can,
+    bulkActions:(ids, clear) => [{label:'Disconnect', danger:true, onClick:()=>setBulk({ids, clear})}],
     properties:[
       {key:'number', label:'Number', width:220}, {key:'label', label:'Label', width:200},
       {key:'status', label:'Status', width:150}, {key:'added', label:'Connected on', width:170},
@@ -455,19 +509,22 @@ function CallsSettings({data, setData}){
         onAdd={({number, label}) => { setData(d => ({...d, phones:[...d.phones, {id:stId('phone'), number, label, status:'Connected', added:stToday()}]})); setAdding(false); }}/>}
       {removing && <DisconnectModal what={removing.number} onCancel={()=>setRemoving(null)}
         onConfirm={()=>{ setData(d => ({...d, phones:d.phones.filter(x => x.id !== removing.id)})); setRemoving(null); }}/>}
+      {bulk && <DisconnectModal what={bulkPlural(bulk.ids.length, 'number')} many={bulk.ids.length > 1} onCancel={()=>setBulk(null)}
+        onConfirm={()=>{ setData(d => ({...d, phones:d.phones.filter(x => !bulk.ids.includes(x.id))})); bulk.clear(); setBulk(null); }}/>}
     </SettingsPage>
   );
 }
 
 /* ── Forms (Tasks, Defaults): Cancel / Save in the page header ──────────────────────────── */
 
-function useSettingsForm(value, onSave){
+// `valid(draft)`: whether the draft can be saved (Save stays disabled while it can't).
+function useSettingsForm(value, onSave, valid){
   const [draft, setDraft] = React.useState(value);
   const dirty = JSON.stringify(draft) !== JSON.stringify(value);
   const set = (p) => setDraft(d => ({...d, ...p}));
   const actions = <>
     {dirty && <StSecondary label="Cancel" onClick={()=>setDraft(value)}/>}
-    <StCta label="Save" disabled={!dirty} onClick={()=>onSave(draft)}/>
+    <StCta label="Save" disabled={!dirty || (valid && !valid(draft))} onClick={()=>onSave(draft)}/>
   </>;
   return {draft, set, actions};
 }
@@ -586,16 +643,41 @@ function TasksSettings({data, setData}){
   );
 }
 
+/* Currency: the default for every amount (any amount can be in another); totals are in it.
+   Exchange Rates: what one unit of each other currency is worth in the default one — totals
+   convert at these. They start at sample rates; changing the default currency restates them in
+   the new one. */
+const ratesOf = (d) => ({...sampleRatesIn(d.currency), ...(d.rates || {})});
 function DefaultsSettings({data, setData}){
   const can = defaultsCan();
-  const {draft:d, set, actions} = useSettingsForm(data.defaults, v => setData(x => ({...x, defaults:v})));
+  const ratesOk = (x) => CURRENCY_LIST.every(c => c.code === x.currency || Number(ratesOf(x)[c.code]) > 0);
+  const {draft:d, set, actions} = useSettingsForm(data.defaults, v => setData(x => ({...x, defaults:{...v, rates:Object.fromEntries(Object.entries(ratesOf(v)).map(([k, r]) => [k, Number(r)]))}})), ratesOk);
+  const rates = ratesOf(d);
+  const setCurrency = (cur) => { if(cur === d.currency) return; const per = Number(rates[cur]) || 1;
+    set({currency:cur, rates:Object.fromEntries(CURRENCY_LIST.map(c => [c.code, c.code === cur ? 1 : Number(((Number(rates[c.code]) || 0) / per).toPrecision(6))]))}); };
   return (
-    <SettingsPage description="Company-wide preferences for everyone in the CRM." actions={can && actions}>
+    <SettingsPage description="Company-wide preferences for everyone in the CRM."
+      actions={can && actions}>
       <ReadOnlySettings on={can}>
       <div style={{display:'flex', flexDirection:'column', gap:20}}>
         <StField label="Time Zone"><StSelect value={d.timeZone} options={TIME_ZONES} onChange={v=>set({timeZone:v})}/></StField>
         <StField label="Language"><StSelect value={d.language} options={LANGUAGES} onChange={v=>set({language:v})}/></StField>
-        <StField label="Currency"><StSelect value={d.currency} options={CURRENCIES} onChange={v=>set({currency:v})}/></StField>
+        <StField label="Currency"><StSelect value={d.currency} options={currencyOptions()} onChange={setCurrency}/></StField>
+      </div>
+      <div style={{display:'flex', flexDirection:'column', gap:12, marginTop:32, paddingTop:24, borderTop:`1px solid ${T.border}`}}>
+        <div style={{fontSize:14, fontWeight:600, color:T.attioText}}>Exchange Rates</div>
+        <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(230px, 1fr))', gap:'10px 24px'}}>
+          {CURRENCY_LIST.filter(c => c.code !== d.currency).map(c => { const bad = !(Number(rates[c.code]) > 0);
+            return (
+              <label key={c.code} style={{display:'flex', alignItems:'center', gap:8, ...stTextB, color:T.attioText}}>
+                <span style={{width:58, flexShrink:0, whiteSpace:'nowrap'}}>1 {c.code} =</span>
+                <input type="number" min="0" step="any" value={rates[c.code]} aria-label={`${c.code} in ${d.currency}`}
+                  onChange={e=>set({rates:{...rates, [c.code]:e.target.value}})}
+                  style={{...stInput, height:30, flex:1, minWidth:0, ...(bad ? {border:`1px solid ${T.red}`} : {})}}/>
+                <span style={{width:32, flexShrink:0, color:T.gray600}}>{d.currency}</span>
+              </label>
+            ); })}
+        </div>
       </div>
       </ReadOnlySettings>
     </SettingsPage>
@@ -605,11 +687,11 @@ function DefaultsSettings({data, setData}){
 /* ── Router ────────────────────────────────────────────────────────────────────────────── */
 
 const SETTINGS_PAGES = {
-  'settings.email':      EmailSettings,
-  'settings.calls':      CallsSettings,
-  'settings.meetings':   MeetingsSettings,
-  'settings.calendar':   CalendarSettings,
-  'settings.tasks':      TasksSettings,
+  'settings.email':      personalPage(EmailSettings),
+  'settings.calls':      personalPage(CallsSettings),
+  'settings.meetings':   personalPage(MeetingsSettings),
+  'settings.calendar':   personalPage(CalendarSettings),
+  'settings.tasks':      personalPage(TasksSettings),
   'settings.defaults':   DefaultsSettings,
   'settings.usersTeams': UsersTeamsSettings,
   'settings.navigation': NavigationSettings,
@@ -631,5 +713,5 @@ function CrmSettingsPage({pageId, data, setData, navigate, records, updateRecord
     target={target && target.page === pageId ? target : null} onTargetDone={onTargetDone}/>;
 }
 
-Object.assign(window, {SearchableSelect, SETTINGS_PAGES, CrmSettingsPage, DEFAULT_SETTINGS_DATA, SettingsPage, StCta, StSecondary, StTextAction,
+Object.assign(window, {TIME_ZONES, applyTimeZone, myTimeZone, chooseTimeZone, taskDueDefaults, personalSettingsOf, SearchableSelect, SETTINGS_PAGES, CrmSettingsPage, DEFAULT_SETTINGS_DATA, SettingsPage, StCta, StSecondary, StTextAction,
   StField, StSelect, StRadioCard, StModal, stTextB, stControl});

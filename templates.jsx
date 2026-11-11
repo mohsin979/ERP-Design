@@ -101,11 +101,11 @@ function SequenceFormPanel({initial, templates, onCancel, onSave}){
 /* New quote template: a name (and its code), then the quote builder's Services and Payment Terms
    fields and the terms — in one panel, the builder's width. */
 function QuoteTemplateFormPanel({templates, onCancel, onSave}){
-  const [t, setT] = React.useState({name:'', title:'', items:[], installments:[], discount:{type:'percent', value:''}, vatRate:QUOTE_VAT_RATE, terms:''});
+  const [t, setT] = React.useState({name:'', title:'', items:[], installments:[], discount:{type:'percent', value:''}, vatRate:QUOTE_VAT_RATE, terms:'', currency:defaultCurrency()});
   const set = (p) => setT(x => ({...x, ...p}));
   const checks = quoteConfigChecks(t);
   const ok = !!t.name.trim() && checks.itemsOk && checks.discountOk && checks.installmentsOk;
-  const save = () => onSave({name:t.name.trim(), ...normalizeQuoteConfig(t), vatRate:t.vatRate, terms:t.terms});
+  const save = () => onSave({name:t.name.trim(), ...normalizeQuoteConfig(t), vatRate:t.vatRate, terms:t.terms, currency:t.currency});
   const divider = <div style={{borderTop:`1px solid ${T.border}`, margin:'4px -20px 0'}}/>;
   return (
     <CreatePanelFrame title="New Quote Template" width={QUOTE_PANEL_W} onClose={onCancel} actions={panelActions(onCancel, 'Create template', ok, save)}>
@@ -144,8 +144,11 @@ function QuoteTemplatesTab({data, setData, say}){
     createdBy:creatorOf(t), created:fmtQuoteDate(t.createdAt)}));
   const actions = (t) => [{label:'View template', onClick:()=>setOpenId(t.id)}, ...(can('edit', t) ? [{label:'Rename template', onClick:()=>setRenaming({id:t.id, name:t.name})}] : []),
     ...(can('delete', t) ? [{label:'Delete template', danger:true, onClick:()=>setDeleting(t)}] : [])];
+  // Bulk Actions → Delete, as the row's (the ones the person may delete).
+  const qtBulk = useTableBulkDelete({rows, noun:'template', canDelete:(r) => can('delete', list.find(t => t.id === r.id)), skipNote:'not yours to delete',
+    remove:(ids) => { setList(ts => ts.filter(t => !ids.includes(t.id))); if(ids.includes(openId)) setOpenId(null); }, onDone:(n) => say(`${bulkPlural(n, 'template')} deleted`)});
   const schema = {
-    properties:cols, noun:'template', searchKeys:['code', 'name', 'services'], canCreateProperty:false, boards:false, selectable:false,
+    properties:cols, noun:'template', searchKeys:['code', 'name', 'services'], canCreateProperty:false, boards:false, bulkActions:qtBulk.bulkActions,
     filterProps:[{key:'name', label:'Name', type:'text'}, {key:'createdBy', label:'Created By', type:'select'}], selectValues:{createdBy:[...new Set(list.map(t => t.createdBy).filter(Boolean))]},
     renderCell:(key, r) => key === 'name' ? <ContactName name={r.name} onOpen={()=>setOpenId(r.id)} style={{fontSize:'inherit', fontWeight:500}}/>
       : key === 'installments' ? <span style={{fontVariantNumeric:'tabular-nums'}}>{r.installments}</span> : undefined,
@@ -165,15 +168,15 @@ function QuoteTemplatesTab({data, setData, say}){
         actions={() => can('create') && <StCta icon="plus" title="New quote template" onClick={()=>{ setOpenId(null); setCreating(true); }}/>}
         overlay={creating ? <QuoteTemplateFormPanel templates={all} onCancel={()=>setCreating(false)} onSave={create}/>
           : open && <DetailPanel width={560} title={open.name} onClose={()=>setOpenId(null)} menuItems={actions(open).filter(it => !/^View/.test(it.label))}
-          fields={[['Code', open.code], ['Services', String((open.items || []).length)], ['Total', fmtMoney(totals.total)], ['Created', fmtQuoteDate(open.createdAt)], ['Created by', creatorOf(open)]]}>
+          fields={[['Code', open.code], ['Services', String((open.items || []).length)], ['Total', fmtMoney(totals.total, quoteCurrency(open))], ['Created', fmtQuoteDate(open.createdAt)], ['Created by', creatorOf(open)]]}>
             <div>
               <div style={section}>Services</div>
               {(open.items || []).map(it => (
                 <div key={it.id} style={{padding:'8px 0', borderTop:`1px solid ${T.attioLine}`}}>
                   <div style={{display:'flex', justifyContent:'space-between', gap:12}}><span style={{fontSize:13.5, fontWeight:600, color:T.attioText}}>{it.name}</span>
-                    <span style={{fontSize:13, fontVariantNumeric:'tabular-nums'}}>{fmtMoney(quoteItemTotal(it))}</span></div>
+                    <span style={{fontSize:13, fontVariantNumeric:'tabular-nums'}}>{fmtMoney(quoteItemTotal(it), quoteCurrency(open))}</span></div>
                   {(it.milestones || []).map(m => <div key={m.id} style={{display:'flex', justifyContent:'space-between', gap:12, fontSize:12.5, color:T.attioMuted, padding:'3px 0 0 12px'}}>
-                    <span>{m.name}</span><span style={{fontVariantNumeric:'tabular-nums'}}>{fmtMoney(m.price)}</span></div>)}
+                    <span>{m.name}</span><span style={{fontVariantNumeric:'tabular-nums'}}>{fmtMoney(m.price, quoteCurrency(open))}</span></div>)}
                 </div>
               ))}
             </div>
@@ -184,10 +187,10 @@ function QuoteTemplatesTab({data, setData, say}){
             </div>
             <div>
               <div style={section}>Discount & tax</div>
-              {row('Services subtotal', fmtMoney(totals.subtotal))}
-              {row(`Discount${open.discount && open.discount.type === 'percent' ? ` (${open.discount.value}%)` : ''}`, `− ${fmtMoney(totals.discount)}`)}
-              {row(`VAT (${totals.vatRate}%)`, fmtMoney(totals.vat))}
-              <div style={{borderTop:`1px solid ${T.attioText}`, marginTop:4}}>{row('Total', fmtMoney(totals.total))}</div>
+              {row('Services subtotal', fmtMoney(totals.subtotal, quoteCurrency(open)))}
+              {row(`Discount${open.discount && open.discount.type === 'percent' ? ` (${open.discount.value}%)` : ''}`, `− ${fmtMoney(totals.discount, quoteCurrency(open))}`)}
+              {row(`VAT (${totals.vatRate}%)`, fmtMoney(totals.vat, quoteCurrency(open)))}
+              <div style={{borderTop:`1px solid ${T.attioText}`, marginTop:4}}>{row('Total', fmtMoney(totals.total, quoteCurrency(open)))}</div>
             </div>
             <div>
               <div style={section}>Terms & conditions</div>
@@ -198,6 +201,7 @@ function QuoteTemplatesTab({data, setData, say}){
         onSubmit={()=>{ setList(ts => ts.map(t => t.id === renaming.id ? {...t, name:renaming.name.trim()} : t)); setRenaming(null); say('Saved'); }}>
         <div><label style={fieldLabel}>Template name</label><input autoFocus value={renaming.name} onChange={e=>setRenaming(r => ({...r, name:e.target.value}))} style={fieldInput}/></div>
       </StModal>}
+      {qtBulk.bulkModal}
       {deleting && <StModal title="Delete template" primary="Delete" danger onCancel={()=>setDeleting(null)}
         onSubmit={()=>{ setList(ts => ts.filter(t => t.id !== deleting.id)); if(openId === deleting.id) setOpenId(null); setDeleting(null); say('Deleted'); }}>
         <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>{deleting.code} · {deleting.name} will be deleted. Quotes made from it keep what they were given.</div>

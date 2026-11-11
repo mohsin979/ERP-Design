@@ -43,6 +43,32 @@ const LANGUAGE_LIST = ['Arabic', 'Bengali', 'Chinese (Mandarin)', 'Dutch', 'Engl
   'Turkish', 'Urdu', 'Vietnamese'];
 const countryOptions = () => COUNTRY_LIST.map(c => ({value:c.name, label:`${c.flag} ${c.name}`}));
 const currencyOptions = () => CURRENCY_LIST.map(c => ({value:c.code, label:`${c.flag} ${c.code} — ${c.name}`}));
+/* Money. An amount is entered in any currency, starting at the default one (Settings → Defaults,
+   AED until changed); totals convert to the default at Settings' exchange rates. `rates[code]`:
+   what one unit of `code` is worth in the default currency. An amount saved without a currency is
+   AED (every amount was, before currencies could be chosen). The starting rates are sample values,
+   changed in Settings → Defaults. */
+const LEGACY_CURRENCY = 'AED';
+const SAMPLE_RATES_AED = {AED:1, USD:3.6725, EUR:4, GBP:4.65, CAD:2.65, AUD:2.4, PKR:0.0131, INR:0.0418, SAR:0.979, QAR:1.0089,
+  OMR:9.55, KWD:11.95, BHD:9.74, BDT:0.0301, CNY:0.505, JPY:0.0242, CHF:4.15, NZD:2.17, SGD:2.78, MYR:0.82,
+  TRY:0.089, EGP:0.0745, ZAR:0.2, HKD:0.472, LKR:0.0122, NPR:0.0262, MAD:0.37, SEK:0.35, NOK:0.34, DKK:0.536};
+// The sample rates against another default currency (each rounded to 6 significant digits).
+const sampleRatesIn = (cur) => Object.fromEntries(CURRENCY_LIST.map(c => [c.code, Number((SAMPLE_RATES_AED[c.code] / (SAMPLE_RATES_AED[cur] || 1)).toPrecision(6))]));
+let MONEY = {currency:LEGACY_CURRENCY, rates:null};
+const setMoneyDefaults = (defaults) => { MONEY = {currency:(defaults && defaults.currency) || LEGACY_CURRENCY, rates:(defaults && defaults.rates) || null}; };
+const defaultCurrency = () => MONEY.currency;
+const currencyRate = (code) => { const c = code || LEGACY_CURRENCY; if(c === MONEY.currency) return 1;
+  const r = Number((MONEY.rates || {})[c]); return r > 0 ? r : sampleRatesIn(MONEY.currency)[c] || 1; };
+// An amount in the default currency (a total adds these up).
+const toDefaultCurrency = (amount, code) => Math.round((Number(amount) || 0) * currencyRate(code) * 100) / 100;
+// One currency's amount in another (a service priced in USD, added to a quote in AED).
+const convertAmount = (amount, from, to) => (from || LEGACY_CURRENCY) === (to || LEGACY_CURRENCY) ? Number(amount) || 0
+  : Math.round((Number(amount) || 0) * currencyRate(from) / currencyRate(to) * 100) / 100;
+const moneyText = (amount, code) => amount === '' || amount == null || isNaN(amount) ? ''
+  : `${code || LEGACY_CURRENCY} ${Number(amount).toLocaleString('en-US', {maximumFractionDigits:2})}`;
+/* A Number property entered with its currency, stored on its own (Deal Amount → the deal's
+   Currency): the form shows the two together, as a Currency property's input. */
+const amountCurrencyKey = (p) => p && (p.currencyKey || (p.objectId === 'deals' && p.key === 'amount' ? 'currency' : null));
 const dialOptions = () => [...new Map(COUNTRY_LIST.map(c => [c.dial, c])).values()].sort((a, b) => Number(a.dial) - Number(b.dial))
   .map(c => ({value:c.dial, label:`${c.flag} +${c.dial}`}));
 
@@ -72,7 +98,7 @@ const ptDay = (v) => {
   return isNaN(d.getTime()) ? null : d.getFullYear() * 10000 + d.getMonth() * 100 + d.getDate();
 };
 const ptFmtDay = (iso) => { const d = ptDay(iso); if(d === null) return ''; const y = Math.floor(d / 10000), m = Math.floor(d / 100) % 100, dd = d % 100;
-  return new Date(y, m, dd).toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'}); };
+  return new Date(y, m, dd).toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric', timeZone:LOCAL_TZ}); };
 const ptMoneyText = (m) => ptBlank(m.amount) ? (m.currency || '') : `${m.currency ? m.currency + ' ' : ''}${Number(m.amount).toLocaleString('en-US')}`;
 
 /* ── Operators — one catalogue; each type offers its own (in the document's order) ── */
@@ -135,11 +161,13 @@ const PROPERTY_TYPE_DEFS = [
     store:(v) => ptBool(v) === true, load:(v) => ptBool(v) === true, format:(v) => ptBool(v) === null ? '' : ptBool(v) ? 'True' : 'False'}),
   // Date and Timestamp keep the record's readable form ("Oct 6, 2026", "Oct 6, 2026, 3:00 PM").
   PT({id:'Date', compare:'date', ops:DATE_OPS, empty:ptBlank,
-    store:(v) => { if(ptBlank(v)) return ''; const [y, m, d] = String(v).split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'}); },
+    store:(v) => { if(ptBlank(v)) return ''; const [y, m, d] = String(v).split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric', timeZone:LOCAL_TZ}); },
     load:(v) => { const d = ptDay(v); if(d === null) return ''; return `${Math.floor(d / 10000)}-${String(Math.floor(d / 100) % 100 + 1).padStart(2, '0')}-${String(d % 100).padStart(2, '0')}`; },
     validate:(v) => ptBlank(v) || ptDay(v) !== null ? null : 'Enter a valid date'}),
   PT({id:'Timestamp', compare:'date', ops:DATE_OPS, empty:ptBlank,
-    store:(v) => { if(ptBlank(v)) return ''; const d = new Date(v); return `${d.toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'})}, ${d.toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit'})}`; },
+    // Kept as the wall clock: one typed in ("YYYY-MM-DDTHH:mm") as typed; a moment (a Date) in the app's time zone.
+    store:(v) => { if(ptBlank(v)) return ''; const d = new Date(v), tz = typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(v) ? {timeZone:LOCAL_TZ} : {};
+      return `${d.toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric', ...tz})}, ${d.toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit', ...tz})}`; },
     load:(v) => { if(ptBlank(v)) return ''; const d = new Date(String(v).replace(/, (\d{1,2}:\d{2} [AP]M)$/, ' $1')); if(isNaN(d)) return '';
       const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; },
     validate:(v) => ptBlank(v) || !isNaN(new Date(v).getTime()) ? null : 'Enter a valid date and time'}),
@@ -236,7 +264,7 @@ function convertPropertyValue(fromP, toP, v){
     case 'Boolean': return ptBool(text) === null ? {value:'', cleared:true} : {value:ptBool(text), cleared:false};
     case 'Multi-Selection': { const all = opts(defOf(to)), list = ptList(fromType === 'Multi-Selection' ? v : text).filter(x => all.includes(x)); return keep(list.length ? list : null); }
     case 'Single Selection': case 'Country': case 'Language': return keep(pick(opts(defOf(to))) || null);
-    case 'User': { const u = (typeof USER_DIRECTORY !== 'undefined' ? USER_DIRECTORY : []).find(x => x.id === v || x.name.toLowerCase() === text.toLowerCase()); return keep(u ? u.id : null); }
+    case 'User': { const u = (typeof USER_DIRECTORY !== 'undefined' ? USER_DIRECTORY : []).find(x => !x.deleted && (x.id === v || x.name.toLowerCase() === text.toLowerCase())); return keep(u ? u.id : null); }
     case 'Location': case 'Date Range': case 'Custom Range': case 'File Upload': return {value:'', cleared:true};
     default: return keep(text);   // the text types (Single- / Multi-Line Text, Email, URL, Phone Number) — if valid
   }
@@ -339,11 +367,13 @@ function TypedPropertyInput({prop, value, onChange, options, invalid, autoFocus,
     case 'Phone Number': return <PhoneNumberInput prop={prop} value={value} onChange={onChange} invalid={invalid} base={base}/>;
     case 'Currency': {
       if(prop.currencyOnly) return select(ptText(value), onChange, 'Select currency');
-      const m = ptMoney(value);
+      // The currency starts at the default one (Settings → Defaults); any can be chosen.
+      const m0 = ptMoney(value), m = {...m0, currency:m0.currency || defaultCurrency()};
       return (
-        <div style={{display:'flex', gap:6}}>
-          <div style={{width:168, flexShrink:0}}><FormSelect value={m.currency} placeholder="Currency" options={currencyOptions()} onChange={(c)=>onChange({...m, currency:c})} invalid={invalid}/></div>
-          <input type="number" value={ptText(m.amount)} onChange={e=>onChange({...m, amount:e.target.value})} placeholder="Amount" style={{...base, flex:1, minWidth:0}}/>
+        // The currency up to 168px wide; in a narrow column (a side panel) it gives way so the amount keeps 80px.
+        <div style={{display:'grid', gridTemplateColumns:'minmax(0, 168px) minmax(80px, 1fr)', gap:6}}>
+          <div style={{minWidth:0}}><FormSelect value={m.currency} placeholder="Currency" options={currencyOptions()} onChange={(c)=>onChange({...m, currency:c})} invalid={invalid}/></div>
+          <input type="number" value={ptText(m.amount)} onChange={e=>onChange({...m, amount:e.target.value})} placeholder="Amount" style={{...base, minWidth:0}}/>
         </div>
       );
     }
@@ -415,7 +445,7 @@ function ConditionValueInput({prop, op, value, onChange, options, compact}){
   return <input type="text" value={ptText(value)} onChange={e=>onChange(e.target.value)} placeholder="Value" style={style}/>;
 }
 
-Object.assign(window, {COUNTRY_LIST, CURRENCY_LIST, LANGUAGE_LIST, countryOptions, currencyOptions, dialOptions, flagOf, LOCATION_FIELDS,
+Object.assign(window, {LEGACY_CURRENCY, sampleRatesIn, setMoneyDefaults, defaultCurrency, currencyRate, toDefaultCurrency, convertAmount, moneyText, amountCurrencyKey, COUNTRY_LIST, CURRENCY_LIST, LANGUAGE_LIST, countryOptions, currencyOptions, dialOptions, flagOf, LOCATION_FIELDS,
   PT_OPS, PROPERTY_TYPE_DEFS, LEGACY_PROPERTY_TYPES, CREATABLE_PROPERTY_TYPES, propertyTypeId, propertyTypeDef, propertyOperators, propertyCompare, propertyIsEmpty,
   storePropertyValueOf, loadPropertyValueOf, formatPropertyValueOf, validatePropertyValue, propertyValueError, samePropertyValue, formatValue, propertyValueMatches,
   MultiSelectMenu, TypedPropertyInput, ConditionValueInput, convertPropertyValue, ptList, ptBool, ptMoney, ptPhone, ptDay});

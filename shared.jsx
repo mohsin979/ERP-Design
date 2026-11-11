@@ -445,6 +445,34 @@ function TimeOption({label, on, onPick}){
    calendar in the panel under the field (‹ › months, Today, Clear). The value is "YYYY-MM-DD",
    like a native date input. Portalled and fixed, with data-hof-floating, like TimeField.
    `compact`: no calendar icon, for narrow slots (a filter's date range). */
+/* Time zone. The CRM shows times in the signed-in person's time zone: the one they picked in the
+   profile menu, else Settings → Defaults' (setAppTimeZone, App). Every moment is formatted in it —
+   toLocaleString / toLocaleDateString / toLocaleTimeString take it unless they're given a time
+   zone — and a date and time typed in (a task's due time, a meeting's start) is read in it
+   (zonedDate). A date on its own ("YYYY-MM-DD": a payment date, a Date property) is a calendar
+   day and stays that day: it's formatted in the browser's zone (LOCAL_TZ). Day boundaries
+   ("today", overdue by date) stay the browser's. */
+const LOCAL_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
+let APP_TZ = LOCAL_TZ;
+const setAppTimeZone = (tz) => { APP_TZ = tz || LOCAL_TZ; };
+['toLocaleString', 'toLocaleDateString', 'toLocaleTimeString'].forEach(fn => {
+  const own = Date.prototype[fn];
+  Date.prototype[fn] = function(locales, options){ return own.call(this, locales, options && options.timeZone ? options : {...(options || {}), timeZone:APP_TZ}); };
+});
+const ZONED_FORMATS = {};
+// A moment's wall clock in the app's time zone: {y, m (0–11), d, h, mi}.
+const zonedParts = (date) => {
+  const f = ZONED_FORMATS[APP_TZ] || (ZONED_FORMATS[APP_TZ] = new Intl.DateTimeFormat('en-US', {timeZone:APP_TZ, hourCycle:'h23',
+    year:'numeric', month:'numeric', day:'numeric', hour:'numeric', minute:'numeric', second:'numeric'}));
+  const p = Object.fromEntries(f.formatToParts(new Date(date)).map(x => [x.type, x.value]));
+  return {y:+p.year, m:+p.month - 1, d:+p.day, h:+p.hour % 24, mi:+p.minute};
+};
+// A wall-clock date and time in the app's time zone → the moment (twice, for a daylight-saving change).
+const zonedDate = (y, m, d, h = 0, mi = 0) => {
+  const want = Date.UTC(y, m, d, h, mi); let t = want;
+  for(let i = 0; i < 2; i++){ const p = zonedParts(t); t += want - Date.UTC(p.y, p.m, p.d, p.h, p.mi); }
+  return new Date(t);
+};
 const DATE_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const DATE_WEEKDAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 const pad2d = (n) => String(n).padStart(2, '0');
@@ -547,7 +575,7 @@ function DateField({value, onChange, placeholder = 'Select date', inputStyle, re
           fontFamily:"'DM Sans', sans-serif", boxSizing:'border-box'}}>
           <div style={{display:'flex', alignItems:'center', gap:4}}>
             {navBtn(-1)}
-            <span style={{flex:1, textAlign:'center', fontSize:13, fontWeight:600, color:T.attioText}}>{month.toLocaleDateString('en-US', {month:'long', year:'numeric'})}</span>
+            <span style={{flex:1, textAlign:'center', fontSize:13, fontWeight:600, color:T.attioText}}>{month.toLocaleDateString('en-US', {month:'long', year:'numeric', timeZone:LOCAL_TZ})}</span>
             {navBtn(1)}
           </div>
           <div style={{display:'grid', gridTemplateColumns:'repeat(7, 1fr)', gap:2, fontSize:12, color:T.attioMuted, textAlign:'center', padding:'2px 0 4px', borderBottom:`1px solid ${T.border}`}}>
@@ -612,4 +640,4 @@ function StubPanel({title, onClose, zIndex=90}){
   );
 }
 
-Object.assign(window, {useFloatZ, DateField, DateTimeField, parseDate, dateLabel, TimeField, parseTime, timeLabel, ActionsMenu, menuDivider, ViewSettingsButton, T, Icon, Avatar, RowCheckbox, MenuShell, MenuItem, StubPanel});
+Object.assign(window, {LOCAL_TZ, setAppTimeZone, zonedParts, zonedDate, useFloatZ, DateField, DateTimeField, parseDate, dateLabel, TimeField, parseTime, timeLabel, ActionsMenu, menuDivider, ViewSettingsButton, T, Icon, Avatar, RowCheckbox, MenuShell, MenuItem, StubPanel});

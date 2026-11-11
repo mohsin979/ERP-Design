@@ -122,8 +122,11 @@ function PlaybooksTab({data, setData, say}){
   const rows = shown.map(p => ({id:p.id, createdBy:creatorOf(p), name:p.name, sections:p.sections.map(s => s.header).join(' · '), created:p.createdAt ? fmtQuoteDate(p.createdAt) : ''}));
   const actions = (p) => [{label:'View playbook', onClick:()=>setOpenId(p.id)}, ...(can('edit', p) ? [{label:'Edit playbook', onClick:()=>setEditing({playbook:p})}] : []),
     ...(can('delete', p) ? [{label:'Delete playbook', danger:true, onClick:()=>setDeleting(p)}] : [])];
+  // Bulk Actions → Delete, as the row's (the ones the person may delete).
+  const pbBulk = useTableBulkDelete({rows, noun:'playbook', canDelete:(r) => can('delete', list.find(p => p.id === r.id)), skipNote:'not yours to delete',
+    remove:(ids) => { setList(ps => ps.filter(p => !ids.includes(p.id))); if(ids.includes(openId)) setOpenId(null); }, onDone:(n) => say(`${bulkPlural(n, 'playbook')} deleted`)});
   const schema = {
-    properties:cols, noun:'playbook', searchKeys:['name', 'sections'], canCreateProperty:false, boards:false, selectable:false,
+    properties:cols, noun:'playbook', searchKeys:['name', 'sections'], canCreateProperty:false, boards:false, bulkActions:pbBulk.bulkActions,
     filterProps:[{key:'name', label:'Name', type:'text'}], selectValues:{},
     renderCell:(key, r) => key === 'name' ? <ContactName name={r.name} onOpen={()=>setOpenId(r.id)} style={{fontSize:'inherit', fontWeight:500}}/> : undefined,
     renderActions:(r) => <RowActionsMenu title="Actions" width={MENU_W} items={actions(list.find(p => p.id === r.id))}/>,
@@ -145,6 +148,7 @@ function PlaybooksTab({data, setData, say}){
           <PlaybookSections playbook={open}/>
         </DetailPanel>}/>
       {editing && <PlaybookEditorPanel playbook={editing.playbook} onCancel={()=>setEditing(null)} onSave={save}/>}
+      {pbBulk.bulkModal}
       {deleting && <StModal title="Delete playbook" primary="Delete" danger onCancel={()=>setDeleting(null)}
         onSubmit={()=>{ setList(ps => ps.filter(p => p.id !== deleting.id)); if(openId === deleting.id) setOpenId(null); setDeleting(null); say('Deleted'); }}>
         <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>{deleting.name} will be deleted. It won't be offered on calls any more.</div>

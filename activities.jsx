@@ -276,12 +276,13 @@ const taskState = (t) => !isTaskOpen(t) ? 'completed' : isPastDue(t) ? 'overdue'
 const taskStateLabel = (t) => (TASK_STATES.find(s => s.key === taskState(t)) || {}).label || '';
 const ymdOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 // The task form's values (date 'YYYY-MM-DD', time 'HH:MM') ⇄ the task's `due` / `dueTime`.
-const taskDueParts = (a) => { if(!a || !a.due) return {date:'', time:''}; const d = new Date(a.due); return {date:ymdOf(d), time: a.dueTime ? `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` : ''}; };
+// Read and written in the app's time zone (shared.jsx): a due "Nov 12, 09:00" is 09:00 there.
+const taskDueParts = (a) => { if(!a || !a.due) return {date:'', time:''}; const z = zonedParts(a.due), p = (n) => String(n).padStart(2, '0');
+  return {date:`${z.y}-${p(z.m + 1)}-${p(z.d)}`, time: a.dueTime ? `${p(z.h)}:${p(z.mi)}` : ''}; };
 const taskDueValue = (date, time) => {
   if(!date) return {due:null, dueTime:false};
-  const [y, m, dd] = date.split('-').map(Number), d = new Date(y, m - 1, dd);
-  if(time){ const [h, mi] = time.split(':').map(Number); d.setHours(h, mi, 0, 0); }
-  return {due:d, dueTime:!!time};
+  const [y, m, dd] = date.split('-').map(Number), [h, mi] = time ? time.split(':').map(Number) : [0, 0];
+  return {due:zonedDate(y, m - 1, dd, h, mi), dueTime:!!time};
 };
 
 const fmtActDate = (d) => {

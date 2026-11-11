@@ -12,9 +12,10 @@
    with nothing to set up: a field is filled when its label names a fact the system recognises in
    conversation (profileEngine.jsx PROFILE_FIELD_NAMES — "Highest completed education"), or when a
    source has a "Label: value" line for it ("Date of birth: 14 March 1994"). The user reviews,
-   corrects and completes; each answer keeps where it came from. Every template (Canada CRS Score,
-   Australia Points System, US NIW, Customer Strength…) is chosen on its own: the tab's dropdown is
-   the person's Customer Profile Type. */
+   corrects and completes; each answer keeps where it came from. A person's Customer Profile is off
+   until templates (Canada CRS Score, Australia Points System, US NIW, Customer Strength…) are
+   enabled for them — one or more, more later (Enable More); the tab moves between the enabled
+   ones, the one shown being the person's Customer Profile Type. */
 
 /* ── Store ─────────────────────────────────────────────────────────────────────────────────── */
 const ProfileFormsCtx = React.createContext(null);
@@ -575,7 +576,8 @@ const pfSaveParts = (store, cid, parts, {values, meta}) => parts.forEach(p => {
 });
 function ProfileRunWizard({contact, form: startForm, call, onCancel, onSave}){
   const store = useProfileForms();
-  const profiles = store.forms;
+  // The person's enabled templates (all of them while their Customer Profile is off: the one run is enabled).
+  const on = store.enabledOf(contact.id), profiles = on.length ? store.forms.filter(f => on.includes(f.id)) : store.forms;
   const [profileId, setProfileId] = React.useState(startForm ? startForm.id : store.typeOf(contact.id));
   const profile = store.forms.find(f => f.id === profileId) || profiles[0];
   const {parts, form} = React.useMemo(() => pfWithAlways(store, profile), [profile && profile.id, store.forms]);
@@ -715,7 +717,7 @@ function ProfileByHand({contact, startForm, onCancel, onSave, editing}){
   const {parts, form} = pfWithAlways(store, profile);
   return <ProfileFormFillPanel key={profile.id} contact={contact} form={form} current={pfCurrentOf(store, contact.id, parts)} onCancel={onCancel}
     title={editing ? `Edit customer profile · ${profile.name}` : 'Create customer profile'} primary={editing ? 'Save changes' : 'Create'} search={editing}
-    top={!editing && profiles.length > 1 ? <Field label="Profile"><Select value={profile.id} options={profiles.map(f => ({value:f.id, label:f.name}))} onChange={(v)=>v && setProfileId(v)}/></Field> : null}
+    top={!editing && !startForm && profiles.length > 1 ? <Field label="Profile"><Select value={profile.id} options={profiles.map(f => ({value:f.id, label:f.name}))} onChange={(v)=>v && setProfileId(v)}/></Field> : null}
     onSave={(out)=>{ pfSaveParts(store, contact.id, parts, out); store.setType(contact.id, profile.id); onSave && onSave(); }}/>;
 }
 
@@ -743,47 +745,79 @@ function PfRows({contact, form, current}){
     </div>
   );
 }
+/* Enable Customer Profile: the templates not enabled for the person yet — one or more ticked. */
+function EnableProfilesModal({forms, onCancel, onEnable}){
+  const [picked, setPicked] = React.useState([]);
+  const toggle = (id) => setPicked(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
+  return (
+    <StModal title="Enable Customer Profile" primary="Enable" canSubmit={picked.length > 0} onCancel={onCancel}
+      onSubmit={()=>picked.length && onEnable(forms.filter(f => picked.includes(f.id)).map(f => f.id))}>
+      <div style={{display:'flex', flexDirection:'column'}}>
+        {forms.map(f => (
+          <div key={f.id} role="checkbox" aria-checked={picked.includes(f.id)} onClick={()=>toggle(f.id)}
+            style={{display:'flex', alignItems:'center', gap:10, padding:'8px 2px', cursor:'pointer', fontSize:13, color:T.attioText}}>
+            <RowCheckbox checked={picked.includes(f.id)} onChange={()=>toggle(f.id)}/>{f.name}
+          </div>
+        ))}
+      </div>
+    </StModal>
+  );
+}
+/* A person's Customer Profile: off until templates are enabled for them (Enable Customer Profile:
+   one or more). Their enabled templates are pills to move between — the first enabled shows to
+   start with — and Enable More adds others. Each template is filled in on its own (Create by Hand,
+   Run Customer Profile). */
 function CustomerProfileTab({contact}){
   const store = useProfileForms();
   const [mode, setMode] = React.useState(null);   // 'run' | 'hand' (create) | 'edit'
+  const [enabling, setEnabling] = React.useState(false);
   if(!store) return null;
-  const profiles = store.forms;
-  const form = profiles.find(f => f.id === store.typeOf(contact.id)) || profiles[0];
-  const mine = store.data[contact.id] || {};
-  // A customer profile exists once any of its templates has been filled in.
-  const exists = store.forms.some(f => mine[f.id]);
-  const current = form && mine[form.id];
+  const enabled = store.enabledOf(contact.id).map(id => store.forms.find(f => f.id === id)).filter(Boolean);
+  const rest = store.forms.filter(f => !enabled.includes(f));
+  const form = enabled.find(f => f.id === store.typeOf(contact.id)) || enabled[0] || null;
+  const current = form && (store.data[contact.id] || {})[form.id];
   /* Customer Profile Properties (on every record): filling in or editing needs at least one
      editable property; Run Customer Profile fills in any of them, so it needs All Properties. */
   const can = (action) => action === 'run' ? profilePropsAll() : profileEditAny();
   const panel = mode === 'run' ? <ProfileRunWizard contact={contact} form={form} onCancel={()=>setMode(null)} onSave={()=>setMode(null)}/>
     : mode === 'hand' || mode === 'edit' ? <ProfileByHand contact={contact} startForm={form} editing={mode === 'edit'} onCancel={()=>setMode(null)} onSave={()=>setMode(null)}/> : null;
-  if(!exists || !form) return (
+  const enableModal = enabling && <EnableProfilesModal forms={rest} onCancel={()=>setEnabling(false)} onEnable={(ids)=>{ store.enable(contact.id, ids); setEnabling(false); }}/>;
+  if(!form) return (
     <div style={{padding:'20px 24px 32px'}}>
-      <EmptyState illustration="profile" title="No customer profile yet" action={form && can('create') && (
-        <div style={{display:'flex', alignItems:'center', gap:8}}>
-          <StSecondary label="Create by Hand" onClick={()=>setMode('hand')}/>
-          {can('run') && <StCta label="Run Customer Profile" onClick={()=>setMode('run')}/>}
-        </div>
-      )}/>
-      {panel}
+      <EmptyState illustration="profile" title="Customer Profile is off" action={rest.length > 0 && can('create') && <StCta label="Enable Customer Profile" onClick={()=>setEnabling(true)}/>}/>
+      {enableModal}
     </div>
   );
   return (
     <div style={{padding:'20px 24px 32px', display:'flex', flexDirection:'column', gap:12}}>
-      <div style={{display:'flex', alignItems:'center', gap:12, flexWrap:'wrap'}}>
-        {/* Customer Profile Type: which template this person's profile uses. */}
-        <div style={{width:240}}>{can('edit') ? <Select value={form.id} options={profiles.map(f => ({value:f.id, label:f.name}))} onChange={(v)=>v && store.setType(contact.id, v)}/>
-          : <span style={{fontSize:13, color:T.attioText}}>{form.name}</span>}</div>
+      <div style={{display:'flex', alignItems:'center', gap:8, flexWrap:'wrap'}}>
+        {/* The enabled templates (Customer Profile Type: the one shown). */}
+        <div role="tablist" style={{display:'flex', flexWrap:'wrap', gap:6}}>
+          {enabled.map(f => { const on = f.id === form.id;
+            return <button key={f.id} role="tab" aria-selected={on} onClick={()=>store.setType(contact.id, f.id)}
+              style={{height:26, padding:'0 10px', borderRadius:9999, border:`1px solid ${on ? T.black : T.borderStrong}`, background: on ? T.black : '#fff',
+                color: on ? '#fff' : T.gray800, fontSize:12.5, fontWeight:500, cursor:'pointer', fontFamily:'inherit'}}>{f.name}</button>; })}
+        </div>
+        {rest.length > 0 && can('create') && <StSecondary label="Enable More" onClick={()=>setEnabling(true)}/>}
         <span style={{flex:1}}/>
-        {can('edit') && <button onClick={()=>setMode('edit')} title="Edit customer profile" aria-label="Edit customer profile" style={toolbarIconButton}><Icon name="edit" size={14} color={T.gray800}/></button>}
-        {can('run') && <StCta label="Run Customer Profile" onClick={()=>setMode('run')}/>}
+        {current && can('edit') && <button onClick={()=>setMode('edit')} title="Edit customer profile" aria-label="Edit customer profile" style={toolbarIconButton}><Icon name="edit" size={14} color={T.gray800}/></button>}
+        {current && can('run') && <StCta label="Run Customer Profile" onClick={()=>setMode('run')}/>}
       </div>
-      <div>
-        <PfRows contact={contact} form={form} current={current}/>
-        {current && <div style={{fontSize:12, color:T.attioMuted, paddingTop:10, borderTop:`1px solid ${T.attioLine}`}}>Updated {pfDay(current.updatedAt)}</div>}
-      </div>
+      {current ? (
+        <div>
+          <PfRows contact={contact} form={form} current={current}/>
+          <div style={{fontSize:12, color:T.attioMuted, paddingTop:10, borderTop:`1px solid ${T.attioLine}`}}>Updated {pfDay(current.updatedAt)}</div>
+        </div>
+      ) : (
+        <EmptyState illustration="profile" title={`No ${form.name} yet`} action={can('create') && (
+          <div style={{display:'flex', alignItems:'center', gap:8}}>
+            <StSecondary label="Create by Hand" onClick={()=>setMode('hand')}/>
+            {can('run') && <StCta label="Run Customer Profile" onClick={()=>setMode('run')}/>}
+          </div>
+        )}/>
+      )}
       {panel}
+      {enableModal}
     </div>
   );
 }
@@ -793,6 +827,7 @@ function CustomerProfileTab({contact}){
 function ProfileTypeValue({contactId}){
   const store = useProfileForms();
   if(!store || contactId == null) return <span style={{fontSize:13, color:T.attioFaint}}>—</span>;
+  // None while the person's Customer Profile is off; picking a template shows (and enables) it.
   const list = store.forms, id = store.typeOf(contactId), cur = list.find(f => f.id === id);
   if(!profileEditAny()) return <span style={{fontSize:13, color: cur ? T.attioText : T.attioFaint}}>{cur ? cur.name : '—'}</span>;
   return <OwnerEditableValue prop={{key:'profileType', label:'Customer Profile Type', type:'Single Selection', options:list.map(f => f.id)}} value={id || ''}

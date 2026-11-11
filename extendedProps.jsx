@@ -62,14 +62,16 @@ function extendedValue(key, record){
   const v = ((((WF_LIVE.profiles || {})[cid] || {})[formId] || {}).values || {})[fieldId];
   return v == null ? '' : v;
 }
-// As shown: money in AED, dates as dates, profile answers as the Customer Profile shows them.
+// As shown: money in its payment terms' currency, dates as dates, profile answers as the Customer Profile shows them.
 function extendedValueText(key, record){
   const v = extendedValue(key, record);
   if(v === '' || v == null) return '';
   if(key.startsWith('acc:')){
     const f = ACCOUNTING_TRIGGER_FIELDS.find(a => a.key === key.slice(4)) || {};
-    if(f.kind === 'number') return fmtMoney(Number(v));
-    if(f.kind === 'date') return /^\d{4}-\d{2}-\d{2}$/.test(String(v)) ? pfDay(`${v}T00:00:00`) : String(v);
+    if(f.kind === 'number'){ const object = recordObjectOf(record.id), h = termsHolderOf(object, record);
+      const terms = primaryTermsOf((WF_LIVE.accounting || []).filter(s => s.object === h.object && String(s.recordId) === String(h.id)));
+      return fmtMoney(Number(v), scheduleCurrency(terms)); }
+    if(f.kind === 'date') return /^\d{4}-\d{2}-\d{2}$/.test(String(v)) ? ptFmtDay(v) : String(v);
     return String(v);
   }
   const field = extendedFormField(key);

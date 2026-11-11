@@ -437,7 +437,9 @@ function UserAccessPanel({userId, onClose, onSaved, crmUsers}){
   const [peopleAccess, setPeopleAccess] = React.useState(start.peopleAccess || []);
   const [crm, setCrm] = React.useState(start.crm || []);
   const emailTaken = isNew && !!orgUserByEmail(email);
-  const ok = isNew ? !!name.trim() && signInAllowed(email) && !emailTaken : !!person;
+  // The Organization keeps a Super Admin: the last one can't be made a Member.
+  const lastSuperAdmin = !isNew && !!person && person.role === 'Super Admin' && role !== 'Super Admin' && orgUsers().filter(u => u.role === 'Super Admin').length <= 1;
+  const ok = isNew ? !!name.trim() && signInAllowed(email) && !emailTaken : !!person && !lastSuperAdmin;
   // The person's role in a CRM instance: the open one's Users, else that instance's saved store.
   const roleIn = (crmId) => {
     if(!person) return undefined;
@@ -473,7 +475,8 @@ function UserAccessPanel({userId, onClose, onSaved, crmUsers}){
             <Avatar name={person.name} size={22}/><span style={{fontWeight:500, whiteSpace:'nowrap'}}>{person.name}</span>
             <span style={{color:T.attioMuted, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{person.email}</span></div></Field>
         )}
-        <Field label="Role"><Select value={role} options={ORG_ROLES.map(r => ({value:r, label:r}))} onChange={v=>v && setRole(v)}/></Field>
+        <Field label="Role"><Select value={role} options={ORG_ROLES.map(r => ({value:r, label:r}))} onChange={v=>v && setRole(v)}/>
+          {lastSuperAdmin && <div style={{fontSize:12, color:T.red, marginTop:4}}>The Organization needs at least one Super Admin.</div>}</Field>
         <Field label="People"><Select value={peopleId} options={reg.people.map(p => ({value:p.id, label:p.name}))} onChange={v=>v && setPeopleId(v)}/></Field>
         {role === 'Super Admin' && <Field label="People access">
           {checkRows(reg.people.map(p => (
@@ -512,7 +515,7 @@ const mtHead = {fontSize:12, fontWeight:500, color:T.attioMuted, whiteSpace:'now
 const mtRow = {display:'flex', alignItems:'center', gap:12, padding:'0 12px 0 16px', height:T.attioRowH, borderBottom:`1px solid ${T.attioLine}`, fontSize:13, color:T.attioText};
 const mtTable = {border:`1px solid ${T.attioLine}`, borderRadius:8, overflow:'hidden'};
 const mtHeadRow = {display:'flex', alignItems:'center', gap:12, padding:'0 12px 0 16px', height:36, background:T.headerBg, borderBottom:`1px solid ${T.attioLine}`};
-const createdLabel = (iso) => iso ? new Date(`${iso}T00:00:00`).toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'}) : '';
+const createdLabel = (iso) => iso ? new Date(`${iso}T00:00:00`).toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric', timeZone:LOCAL_TZ}) : '';
 function BranchesPage({module, onMembers}){
   const reg = useOrg();
   const [panel, setPanel] = React.useState(null);   // {branch?}: Add, or Rename

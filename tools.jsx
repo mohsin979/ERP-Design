@@ -8,7 +8,7 @@
    against a record chosen first: Log Call or a live Call, Task, Schedule / Log Meeting, Note; New
    email opens the composer. Quotes have their own page (quotes.jsx). */
 
-const dateKey = (d) => { if(!d) return ''; const x = new Date(d); return `${ymdOf(x)}T${String(x.getHours()).padStart(2, '0')}:${String(x.getMinutes()).padStart(2, '0')}`; };
+const dateKey = (d) => { if(!d) return ''; const z = zonedParts(d), p = (n) => String(n).padStart(2, '0'); return `${z.y}-${p(z.m + 1)}-${p(z.d)}T${p(z.h)}:${p(z.mi)}`; };
 // Who did it: the person who added it (their stamped name), the client (named as the record's person), or the team member.
 const byName = (a, record) => a.source === 'you' ? a.by || CURRENT_USER.name : a.source === 'client' ? (record && record.name) || 'Client' : a.by || '';
 const viewFilter = (id, name, prop, value) => ({id, name, filters:{nodes:[{id:`f-${id}`, kind:'row', joinOp:'AND', prop, op:'is', value, value2:'', values:[]}]}, sort:{key:'date', dir:'desc'}});

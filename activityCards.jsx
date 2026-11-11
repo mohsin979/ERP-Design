@@ -322,7 +322,7 @@ function NoteDetail({a, contact, calls, onUpdate, onStub, across}){
    record's Notes permissions. `own`: an older call's own notes (its `body`), shown first and
    following the call's permissions. */
 const fmtNoteStamp = (at) => { const d = new Date(at), p = (n) => String(n).padStart(2, '0');
-  return `${fmtActTime(d).replace(/\s+/g, '')} | ${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()}`; };
+  const z = zonedParts(d); return `${fmtActTime(d).replace(/\s+/g, '')} | ${p(z.d)}/${p(z.m + 1)}/${z.y}`; };
 function ActivityNoteItem({n, contact, canEdit, canDelete, onSave, onDelete}){
   const [editing, setEditing] = React.useState(false);
   const [text, setText] = React.useState('');
@@ -832,9 +832,11 @@ function NewScheduleMeeting({contact, team, onAdd, onDone}){
 
 // `contact`: the record the task is for — its owner is the default assignee.
 function NewTask({team, contact, onAdd, onDone, initial}){
+  const hub = useRecordHub();
+  // The due date and time start from the signed-in user's Settings → Tasks defaults.
   const [t, setT] = React.useState(() => { const pipelineId = (initial && initial.pipelineId) || DEFAULT_TASK_PIPELINE_ID;
     const {assignee:_a, ...given} = initial || {};
-    return {title:'', description:'', pipelineId, status:firstStageOf(pipelineId), taskType:'To-do', dueDate:'', dueTimeOfDay:'', ...given}; });
+    return {title:'', description:'', pipelineId, status:firstStageOf(pipelineId), taskType:'To-do', ...taskDueDefaults(hub && hub.data), ...given}; });
   const [assignee, setAssignee] = useOwnerDefault(contact, team, initial && initial.assignee);
   const set = (p) => setT(x => ({...x, ...p}));
   const ok = !!t.title.trim() && !!assignee;

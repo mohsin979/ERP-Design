@@ -4,7 +4,7 @@
    One payment structure per record ("Payment Terms"): every record starts with it — a First
    installment, Unpaid (the default terms) — and none is created by hand. Its ⋯ (until the first
    payment is recorded):
-     Edit Payment Terms — the title, the total, a start date and the installments (rename them,
+     Edit Payment Terms — the title, the total and its currency, a start date and the installments (rename them,
        their percentage, Day N from the start date or a calendar date), as on a quote.
      Add installment    — the same editor with a new installment to fill in.
      Pull from quote    — a quote sent to the record (Sent or Signed) fills the structure with its
@@ -32,6 +32,10 @@
    by hand, in bulk or by a workflow — so no recorded cash leaves Cash Received or Goals. */
 
 const ACCOUNTING_RECORD_TYPES = ['contacts', 'deals', 'customers'];
+/* A structure's currency: its quote's, the deal amount's (the default terms), or the one chosen
+   when its terms are edited (the default currency to start with). Its payments are in it; totals
+   across records convert to the default currency. Saved before currencies could be chosen: AED. */
+const scheduleCurrency = (s) => (s && s.currency) || LEGACY_CURRENCY;
 const PAYMENT_STATUS = {unpaid:{label:'Unpaid', tone:'warn'}, partial:{label:'Partially Paid', tone:'info'}, paid:{label:'Paid', tone:'success'}};
 const acId = (p) => `${p}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
@@ -77,7 +81,7 @@ const termsOfSchedule = (s) => s.source === 'manual' && s.terms ? s.terms
   : (s.installments || []).filter(x => !x.parentId).map(x => ({id:x.id, description:x.description, percent:x.percent, due: x.dueDate ? {type:'date', date:x.dueDate} : {type:'days', days:0}}));
 // A quote's payment structure, as pulled.
 const scheduleFromQuote = (q, object, record) => ({
-  id:`qs-${q.id}`, source:'quote', quoteId:q.id, quoteNumber:q.number, quoteTitle:q.title, object, recordId:record.id, createdAt:q.createdAt, createdBy:q.createdBy, total:quoteTotal(q),
+  id:`qs-${q.id}`, source:'quote', quoteId:q.id, quoteNumber:q.number, quoteTitle:q.title, object, recordId:record.id, createdAt:q.createdAt, createdBy:q.createdBy, total:quoteTotal(q), currency:quoteCurrency(q),
   installments:(q.installments || []).map((x, i) => ({id:`qs-${q.id}-${x.id || i}`, parentId:null, description:x.description, percent:Number(x.percent) || 0,
     amount:installmentAmount(q, x), dueDate:tentativeDate(x.due, q.sentAt), tentative: x.due && x.due.type !== 'date' ? fmtTentative(x.due) : '', payments:[]})),
 });
@@ -86,20 +90,20 @@ const scheduleFromQuote = (q, object, record) => ({
    while the terms are untouched (0 for a contact or customer until it's set). A real structure (edited, paid or replaced like any other),
    so the record's First Installment Status reads Unpaid for workflows. No due date is invented:
    it's set when the terms are edited (Forecasted Cash counts installments by due date). */
-const defaultTermsOf = (id, object, recordId, total, startDate, createdAt) => ({id, source:'manual', isDefault:true, object, recordId, createdAt, createdBy:'System',
-  title:'Payment terms', total, startDate, terms:[{id:id + 't', description:'First installment', percent:100, due:null}],
+const defaultTermsOf = (id, object, recordId, total, startDate, createdAt, currency) => ({id, source:'manual', isDefault:true, object, recordId, createdAt, createdBy:'System',
+  title:'Payment terms', total, ...(currency ? {currency} : {}), startDate, terms:[{id:id + 't', description:'First installment', percent:100, due:null}],
   installments:[{id:id + 'i', parentId:null, description:'First installment', percent:100, amount:total, dueDate:'', tentative:'', payments:[]}]});
 const defaultPaymentTerms = (object, record) =>
-  defaultTermsOf(acId('ps'), object, record.id, object === 'deals' ? r2(Number(record.amount) || 0) : 0, ymdOf(new Date()), new Date());
+  defaultTermsOf(acId('ps'), object, record.id, object === 'deals' ? r2(Number(record.amount) || 0) : 0, ymdOf(new Date()), new Date(), object === 'deals' ? record.currency : undefined);
 /* Saved compactly while untouched (every record has them, and browser storage is small); once
    edited or paid they're saved in full like any other structure. */
 const packPaymentTerms = (list) => list.map(s => {
   if(!s.isDefault) return s;
-  const fresh = defaultTermsOf(s.id, s.object, s.recordId, s.total, s.startDate, s.createdAt);
-  return JSON.stringify(s) === JSON.stringify(fresh) ? {defaultTerms:[s.id, s.object, s.recordId, s.total, s.startDate, +new Date(s.createdAt)]} : s;
+  const fresh = defaultTermsOf(s.id, s.object, s.recordId, s.total, s.startDate, s.createdAt, s.currency);
+  return JSON.stringify(s) === JSON.stringify(fresh) ? {defaultTerms:[s.id, s.object, s.recordId, s.total, s.startDate, +new Date(s.createdAt), ...(s.currency ? [s.currency] : [])]} : s;
 });
 const unpackPaymentTerms = (list) => (list || []).map(s => s && s.defaultTerms
-  ? (([id, object, recordId, total, startDate, at]) => defaultTermsOf(id, object, recordId, total, startDate, new Date(at)))(s.defaultTerms) : s);
+  ? (([id, object, recordId, total, startDate, at, currency]) => defaultTermsOf(id, object, recordId, total, startDate, new Date(at), currency))(s.defaultTerms) : s);
 // A manual structure's installments from its definition: amounts from the total (the last takes the cents left), dates from the start date.
 const manualInstallments = (def) => { const amounts = splitAmounts(def.total, (def.terms || []).map(x => x.percent));
   return (def.terms || []).map((x, i) => ({id:x.id, parentId:null, description:x.description, percent:Number(x.percent) || 0,
@@ -114,6 +118,7 @@ function PaymentStructurePanel({initial, addRow, onCancel, onSave, pullable = []
   const [pickOpen, setPickOpen] = React.useState(false);
   const [title, setTitle] = React.useState(initial ? initial.title : '');
   const [total, setTotal] = React.useState(initial ? String(initial.total) : '');
+  const [currency, setCurrency] = React.useState((initial && initial.currency) || defaultCurrency());
   const [startDate, setStartDate] = React.useState(initial ? initial.startDate : ymdOf(new Date()));
   const [terms, setTerms] = React.useState(() => [...(initial ? initial.terms.map(x => ({...x, percent:String(x.percent), due:{...x.due}}))
     : [{id:acId('mt'), description:'', percent:'100', due:{type:'days', days:0}}]), ...(addRow ? [{id:acId('mt'), description:'', percent:'', due:{type:'days', days:0}}] : [])]);
@@ -124,8 +129,8 @@ function PaymentStructurePanel({initial, addRow, onCancel, onSave, pullable = []
   const money = {fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap'};
   const section = {fontSize:11, fontWeight:600, color:T.attioFaint, textTransform:'uppercase', letterSpacing:.4};
   // Saved untouched, the terms stay exactly as they are (a quote's stay the quote's, invoices and all).
-  const opened = React.useRef(JSON.stringify({title, total, startDate, terms})).current;
-  const save = () => ok && (JSON.stringify({title, total, startDate, terms}) === opened ? onCancel() : onSave({title:title.trim(), total:r2(total), startDate,
+  const opened = React.useRef(JSON.stringify({title, total, currency, startDate, terms})).current;
+  const save = () => ok && (JSON.stringify({title, total, currency, startDate, terms}) === opened ? onCancel() : onSave({title:title.trim(), total:r2(total), currency, startDate,
     terms:terms.map(x => ({...x, description:x.description.trim(), percent:Number(x.percent), due:normalizeDue(x.due)}))}));
   return (
     <CreatePanelFrame title={initial ? 'Edit Payment Terms' : 'New Payment Terms'} onClose={onCancel} placement="fixed" width={1000} actions={<>
@@ -147,7 +152,7 @@ function PaymentStructurePanel({initial, addRow, onCancel, onSave, pullable = []
                   onMouseEnter={e=>e.currentTarget.style.background = T.headerBg} onMouseLeave={e=>e.currentTarget.style.background = 'transparent'}>
                   <div style={{display:'flex', alignItems:'center', gap:8}}>
                     <span style={{fontSize:13, fontWeight:500, color:T.attioText}}>{q.number}</span><QuoteStatusPill status={quoteStatusOf(q)}/>
-                    <span style={{flex:1}}/><span style={{fontSize:12.5, color:T.attioText, fontVariantNumeric:'tabular-nums'}}>{fmtMoney(quoteTotal(q))}</span>
+                    <span style={{flex:1}}/><span style={{fontSize:12.5, color:T.attioText, fontVariantNumeric:'tabular-nums'}}>{fmtMoney(quoteTotal(q), quoteCurrency(q))}</span>
                   </div>
                   <span style={{fontSize:12, color:T.attioMuted}}>{q.title} · {plural((q.installments || []).length, 'installment')}</span>
                 </div>
@@ -158,19 +163,21 @@ function PaymentStructurePanel({initial, addRow, onCancel, onSave, pullable = []
       )}
       {stack(<>
         <Field label="Title"><input autoFocus value={title} onChange={e=>setTitle(e.target.value)} placeholder="e.g. Visa application fees" style={fieldText}/></Field>
-        <Field label={`Total (${DEAL_CURRENCY})`}><input value={total} onChange={e=>setTotal(e.target.value.replace(/[^0-9.]/g, ''))} inputMode="decimal" placeholder="0"
-          style={{...fieldText, fontVariantNumeric:'tabular-nums'}}/></Field>
+        <Field label="Total"><div style={{display:'flex', gap:6}}>
+          <div style={{width:168, flexShrink:0}}><FormSelect value={currency} options={currencyOptions()} onChange={(c)=>c && setCurrency(c)}/></div>
+          <input value={total} onChange={e=>setTotal(e.target.value.replace(/[^0-9.]/g, ''))} inputMode="decimal" placeholder="0" aria-label="Total"
+            style={{...fieldText, flex:1, minWidth:0, fontVariantNumeric:'tabular-nums'}}/></div></Field>
         <Field label="Start date (Day 0)"><DateField required value={startDate} onChange={setStartDate}/></Field>
       </>)}
       <div style={{borderTop:`1px solid ${T.border}`, margin:'18px -20px 14px'}}/>
-      <InstallmentsEditor rows={terms} onChange={setTerms} total={totalOk ? Number(total) : 0} newId={()=>acId('mt')}/>
+      <InstallmentsEditor rows={terms} onChange={setTerms} total={totalOk ? Number(total) : 0} currency={currency} newId={()=>acId('mt')}/>
     </CreatePanelFrame>
   );
 }
 
 /* ── Update an installment's status: Paid or Partially Paid, with the payment and its evidence ── */
 function PaymentModal({schedule, inst, onCancel, onSave}){
-  const st = installmentState(schedule, inst);
+  const st = installmentState(schedule, inst), cur = scheduleCurrency(schedule);
   const due = r2(inst.amount - st.received);
   const [status, setStatus] = React.useState('paid');
   const [amount, setAmount] = React.useState('');
@@ -187,7 +194,7 @@ function PaymentModal({schedule, inst, onCancel, onSave}){
   const linkOk = !link.trim() || /^https?:\/\/\S+$/i.test(link.trim());
   // Paid today or earlier; the rest of a part payment is expected today or later.
   const today = ymdOf(new Date()), paidOnOk = !!paidOn && paidOn <= today, expectedOk = !partial || (!!expected && expected >= today);
-  // A payment needs something owed: an installment of AED 0 (terms whose total isn't set yet) takes none.
+  // A payment needs something owed: an installment of 0 (terms whose total isn't set yet) takes none.
   const ok = unpaid || (due > 0 && paidOnOk && amountOk && linkOk && expectedOk);
   const radio = (k, label) => (
     <label key={k} style={{display:'flex', alignItems:'center', gap:8, fontSize:13, color:T.attioText, cursor:'pointer'}}>
@@ -201,17 +208,17 @@ function PaymentModal({schedule, inst, onCancel, onSave}){
       <div style={{display:'grid', gridTemplateColumns:'minmax(0, 1fr) 1px minmax(0, 1.2fr)', columnGap:14, minHeight:310}}>
         <div style={{display:'flex', flexDirection:'column', gap:14}}>
           <PayDetail label="Installment">{inst.description}</PayDetail>
-          <PayDetail label="Outstanding">{fmtMoney(due)}</PayDetail>
-          {partial && <PayDetail label="Remaining balance">{fmtMoney(amountOk && amount ? r2(due - amt) : due)}</PayDetail>}
+          <PayDetail label="Outstanding">{fmtMoney(due, cur)}</PayDetail>
+          {partial && <PayDetail label="Remaining balance">{fmtMoney(amountOk && amount ? r2(due - amt) : due, cur)}</PayDetail>}
         </div>
         <div style={{background:T.border}}/>
         <div style={{display:'flex', flexDirection:'column', gap:14, minWidth:0}}>
           <div style={{display:'flex', gap:20}}>{radio('paid', 'Paid')}{radio('partial', 'Partially Paid')}{radio('unpaid', 'Unpaid')}</div>
           {partial && <>
-            <div><label style={fieldLabel}>Amount received ({DEAL_CURRENCY})</label>
+            <div><label style={fieldLabel}>Amount received ({cur})</label>
               <input autoFocus value={amount} onChange={e=>setAmount(e.target.value.replace(/[^0-9.]/g, ''))} inputMode="decimal" placeholder="0"
                 style={{...fieldInput, fontVariantNumeric:'tabular-nums', borderColor: amount && !amountOk ? T.red : T.borderStrong}}/>
-              {amount && !amountOk && <div style={{fontSize:12, color:T.red, marginTop:4}}>Less than {fmtMoney(due)} — a full payment is Paid.</div>}
+              {amount && !amountOk && <div style={{fontSize:12, color:T.red, marginTop:4}}>Less than {fmtMoney(due, cur)} — a full payment is Paid.</div>}
             </div>
             <div><label style={fieldLabel}>Remaining balance expected on</label><DateField required value={expected} onChange={setExpected}/>
               {expected && !expectedOk && <div style={{fontSize:12, color:T.red, marginTop:4}}>Choose today or a later date.</div>}</div>
@@ -253,7 +260,7 @@ function PaymentSuccessIcon(){
     </svg>
   );
 }
-function PaymentVerificationModal({inst, onClose}){
+function PaymentVerificationModal({inst, currency, onClose}){
   const [shown, setShown] = React.useState(null);   // the payment whose screenshot is open
   const a = {...formTextAction, fontWeight:400};
   const evidence = (inst.payments || []).map(p => {
@@ -270,7 +277,7 @@ function PaymentVerificationModal({inst, onClose}){
           <div style={{display:'flex', justifyContent:'center', padding:'4px 0 6px'}}><PaymentSuccessIcon/></div>
           <PayDetail label="Installment">{inst.description}</PayDetail>
           {/* What was paid on it (a part payment's amount, not the installment's). */}
-          <PayDetail label="Amount">{fmtMoney(r2((inst.payments || []).reduce((s, p) => s + (Number(p.amount) || 0), 0)))}</PayDetail>
+          <PayDetail label="Amount">{fmtMoney(r2((inst.payments || []).reduce((s, p) => s + (Number(p.amount) || 0), 0)), currency)}</PayDetail>
           <div style={{display:'flex', justifyContent:'space-between', gap:12, fontSize:13, color:T.attioText}}>
             <span style={{whiteSpace:'nowrap'}}>Payment Evidence</span>
             <span style={{display:'flex', gap:10, minWidth:0}}>{evidence.length ? evidence : <span style={{color:T.attioMuted}}>—</span>}</span>
@@ -306,7 +313,7 @@ function PaymentScheduleCard({schedule, canEdit, canPay, quote, pullable, archiv
   const summary = (label, value, tone) => (
     <div style={{minWidth:150, padding:'8px 12px', border:`1px solid ${T.attioLine}`, borderRadius:8}}>
       <div style={{fontSize:12, color:T.attioMuted, whiteSpace:'nowrap'}}>{label}</div>
-      <div style={{fontSize:14, fontWeight:600, color: tone || T.attioText, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', marginTop:1}}>{fmtMoney(value)}</div>
+      <div style={{fontSize:14, fontWeight:600, color: tone || T.attioText, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', marginTop:1}}>{fmtMoney(value, scheduleCurrency(schedule))}</div>
     </div>
   );
   return (
@@ -359,7 +366,7 @@ function PaymentScheduleCard({schedule, canEdit, canPay, quote, pullable, archiv
                     <span style={{minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}} title={inst.description}>{inst.description}</span>
                   </span>
                   <span style={num}>{r2(inst.percent)}%</span>
-                  <span style={num}>{fmtMoney(inst.amount)}</span>
+                  <span style={num}>{fmtMoney(inst.amount, scheduleCurrency(schedule))}</span>
                   {/* Its invoice (`invoicedAt`: when the installment was invoiced), on hover. */}
                   <span style={{...cell, gap:6}} title={inst.invoicedAt ? `Invoiced ${fmtQuoteDate(inst.invoicedAt)}` : 'Not invoiced yet'}><PaymentStatusPill status={st.status}/>
                     {/* A workflow violation about this installment (e.g. it must be paid by now). */}
@@ -455,7 +462,7 @@ function RecordAccounting({object, record}){
   const openedQuote = quoteOpen && quotes.find(q => q.id === quoteOpen);
   const editingSchedule = editing && all.find(s => s.id === editing.id);
   const editingDef = editingSchedule ? {title:editingSchedule.source === 'manual' ? editingSchedule.title : editingSchedule.quoteTitle, total:scheduleTotals(editingSchedule).total,
-    startDate:editingSchedule.startDate || ymdOf(new Date()), terms:termsOfSchedule(editingSchedule)} : null;
+    currency:editingSchedule.currency || (scheduleTotals(editingSchedule).total > 0 ? LEGACY_CURRENCY : defaultCurrency()), startDate:editingSchedule.startDate || ymdOf(new Date()), terms:termsOfSchedule(editingSchedule)} : null;
   const card = (s, archived) => {
     const quote = s.source !== 'manual' ? quotes.find(q => q.id === s.quoteId) || null : null;
     return <PaymentScheduleCard key={s.id} schedule={s} quote={quote} archived={archived} canEdit={canEdit} pullable={pullable}
@@ -482,11 +489,11 @@ function RecordAccounting({object, record}){
         </>}
       </div>
       {payingInst && <PaymentModal schedule={payingSchedule} inst={payingInst} onCancel={()=>setPaying(null)} onSave={(v)=>savePayment(payingSchedule.id, payingInst.id, v)}/>}
-      {viewingInst && <PaymentVerificationModal inst={viewingInst} onClose={()=>setViewing(null)}/>}
+      {viewingInst && <PaymentVerificationModal inst={viewingInst} currency={scheduleCurrency(viewingSchedule)} onClose={()=>setViewing(null)}/>}
       {editing && editingDef && <PaymentStructurePanel key={`${editing.id}-${editing.add ? 'add' : 'edit'}`} initial={editingDef} addRow={!!editing.add}
         onCancel={()=>setEditing(null)} onSave={saveManual} pullable={pullable} onPull={pull}/>}
       {/* The quotation, as on Tools → Quotes. */}
-      {openedQuote && <PageSidePanel width={560} title={`${openedQuote.number} · ${openedQuote.title}`} subtitle={`${QUOTE_STATUS[quoteStatusOf(openedQuote)].label} · ${fmtMoney(quoteTotal(openedQuote))}`}
+      {openedQuote && <PageSidePanel width={560} title={`${openedQuote.number} · ${openedQuote.title}`} subtitle={`${QUOTE_STATUS[quoteStatusOf(openedQuote)].label} · ${fmtMoney(quoteTotal(openedQuote), quoteCurrency(openedQuote))}`}
         onClose={()=>setQuoteOpen(null)}>
         <div style={{flex:1, overflowY:'auto', padding:'4px 20px 24px'}}><QuoteDocument quote={openedQuote}/></div>
       </PageSidePanel>}
@@ -494,4 +501,4 @@ function RecordAccounting({object, record}){
   );
 }
 
-Object.assign(window, {primaryTermsOf, hasPayments, recordHasPayments, termsHolderOf, defaultPaymentTerms, defaultTermsOf, packPaymentTerms, unpackPaymentTerms, AccountingTab, ACCOUNTING_RECORD_TYPES, installmentState, scheduleTotals});
+Object.assign(window, {scheduleCurrency, primaryTermsOf, hasPayments, recordHasPayments, termsHolderOf, defaultPaymentTerms, defaultTermsOf, packPaymentTerms, unpackPaymentTerms, AccountingTab, ACCOUNTING_RECORD_TYPES, installmentState, scheduleTotals});

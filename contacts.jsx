@@ -1,8 +1,8 @@
 /* HOF Pulse ERP — Contacts module.
    Reuses the previously-defined Contacts understanding (explicitly reauthorized by the product
    designer) plus this round's additions: Actions column (Delete only, type-to-confirm modal),
-   Search + Filters (Filters is a UI stub only — no filter criteria defined), Export + Table
-   Settings (stub) buttons, and the All Views modal matching the new Figma reference
+   Search + Filters (Filters is a UI stub only — no filter criteria defined), Export (the current
+   view as CSV, exportViewCsv) + Table Settings buttons, and the All Views modal matching the new Figma reference
    ("Claude Feeder - Contacts module all view modal", node 144:3152). */
 
 /* 30 sample rows — enough to actually exercise 25-per-page pagination (page 1 full, page 2
@@ -251,11 +251,50 @@ const selectValues = (key, values = SELECT_VALUES) => values[key] || [];
 const CONTACTS_SCHEMA = {properties:CONTACT_PROPERTIES, filterProps:FILTER_PROPS, selectValues:SELECT_VALUES,
   noun:'contact', searchKeys:['name', 'email'], boards:true, selectable:true, fillWidth:true, canCreateProperty:true};
 const RecordSchema = React.createContext(null);
-const useRecordSchema = () => {
-  const sc = React.useContext(RecordSchema) || CONTACTS_SCHEMA;
+const resolveRecordSchema = (sc) => {
   const byKey = (k) => sc.properties.find(p => p.key === k) || (sc.extendedObject ? extendedPropOf(k) : undefined);
   return {...CONTACTS_SCHEMA, renderCell:null, renderActions:null, ...sc, propByKey:byKey, colWidth:(k) => (byKey(k)?.width) || 170};
 };
+const useRecordSchema = () => resolveRecordSchema(React.useContext(RecordSchema) || CONTACTS_SCHEMA);
+
+/* The grid's rows as the table lists them: Customer Profile / Accounting columns read onto the
+   rows, then the search, then the sort (the table and Export share this). */
+function gridRowsOf(rows, {columnOrder, search, sort, searchKeys, ordered}){
+  const extKeys = columnOrder.filter(isExtendedKey);
+  const read = extKeys.length ? rows.map(r => ({...r, ...Object.fromEntries(extKeys.map(k => [k, extendedValue(k, r)]))})) : rows;
+  const q = (search || '').trim().toLowerCase();
+  const searched = !q ? read : read.filter(r => searchKeys.some(k => String(r[k] || '').toLowerCase().includes(q)));
+  if(!sort || ordered) return searched;
+  const dir = sort.dir === 'asc' ? 1 : -1;
+  // Numbers sort as numbers, dates by date (stored as "Sep 8, 2026", with or without a time); everything else as text.
+  const time = (v) => v instanceof Date ? v.getTime() : typeof v === 'string' && /^([A-Z][a-z]{2} \d{1,2}, \d{4}|\d{4}-\d{2}-\d{2})/.test(v) ? Date.parse(v.replace(' · ', ' ')) : NaN;
+  return searched.slice().sort((a,b)=> { const x = a[sort.key], y = b[sort.key];
+    if(typeof x === 'number' && typeof y === 'number') return (x - y) * dir;
+    const tx = time(x), ty = time(y);
+    if(!isNaN(tx) || !isNaN(ty)) return ((isNaN(tx) ? -Infinity : tx) - (isNaN(ty) ? -Infinity : ty)) * dir;
+    return String(formatValue(x)||'').localeCompare(String(formatValue(y)||'')) * dir; });
+}
+
+/* Export: the current view downloaded as CSV — its rows (filters, search and sort applied, every
+   page) and its columns in their order, each cell as the table shows it. */
+function exportViewCsv({schema, rows, columnOrder, search, sort, fileName}){
+  const sc = resolveRecordSchema(schema || CONTACTS_SCHEMA);
+  const list = gridRowsOf(rows, {columnOrder, search, sort, searchKeys:sc.searchKeys, ordered:sc.ordered});
+  const text = (key, row) => {
+    const cell = sc.renderCell ? sc.renderCell(key, row) : undefined;
+    if(typeof cell === 'string' || typeof cell === 'number') return String(cell);
+    if(isExtendedKey(key)) return extendedValueText(key, row) || '';
+    const v = formatValue(row[key]);
+    return v || v === 0 ? String(v) : '';
+  };
+  const esc = (v) => /[",\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+  const lines = [columnOrder.map(k => esc((sc.propByKey(k) || {}).label || k)), ...list.map(r => columnOrder.map(k => esc(text(k, r))))];
+  const blob = new Blob(['\ufeff' + lines.map(l => l.join(',')).join('\r\n')], {type:'text/csv;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = `${fileName}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
 
 const propMeta = (key, props = FILTER_PROPS) => props.find(p=>p.key===key);
 // A property's filter carries its type's operators (propertyFilterMeta); other filters use their kind's.
@@ -947,11 +986,6 @@ function ContactsDataGrid({rows, columnOrder, setColumnOrder, sort, setSort, sea
   }, [fillWidth]);
   React.useEffect(() => () => roRef.current && roRef.current.disconnect(), []);
   const [selected, setSelected] = React.useState(()=>new Set());
-  /* Customer Profile / Accounting columns: their values read onto the rows (as numbers where they
-     are — sorting and search use them) and shown as their pickers show them (extendedProps.jsx). */
-  const extKeys = columnOrder.filter(isExtendedKey);
-  rows = extKeys.length ? rows.map(r => ({...r, ...Object.fromEntries(extKeys.map(k => [k, extendedValue(k, r)]))})) : rows;
-
   const moveCol = (key, dir) => {
     setColumnOrder(order => {
       const i = order.indexOf(key);
@@ -1044,23 +1078,10 @@ function ContactsDataGrid({rows, columnOrder, setColumnOrder, sort, setSort, sea
     document.addEventListener('mouseup', finishDrag);
   };
 
-  const searched = React.useMemo(()=>{
-    const q = search.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter(r => searchKeys.some(k => String(r[k] || '').toLowerCase().includes(q)));
-  }, [rows, search]);
-
-  const sortedRows = React.useMemo(()=>{
-    if (!sort || ordered) return searched;
-    const dir = sort.dir === 'asc' ? 1 : -1;
-    // Numbers sort as numbers, dates by date (stored as "Sep 8, 2026", with or without a time); everything else as text.
-    const time = (v) => v instanceof Date ? v.getTime() : typeof v === 'string' && /^([A-Z][a-z]{2} \d{1,2}, \d{4}|\d{4}-\d{2}-\d{2})/.test(v) ? Date.parse(v.replace(' · ', ' ')) : NaN;
-    return searched.slice().sort((a,b)=> { const x = a[sort.key], y = b[sort.key];
-      if(typeof x === 'number' && typeof y === 'number') return (x - y) * dir;
-      const tx = time(x), ty = time(y);
-      if(!isNaN(tx) || !isNaN(ty)) return ((isNaN(tx) ? -Infinity : tx) - (isNaN(ty) ? -Infinity : ty)) * dir;
-      return String(formatValue(x)||'').localeCompare(String(formatValue(y)||'')) * dir; });
-  }, [searched, sort]);
+  // Customer Profile / Accounting columns read onto the rows (as numbers where they are — sorting
+  // and search use them), then searched and sorted (gridRowsOf, shared with Export).
+  const extSig = columnOrder.filter(isExtendedKey).join('|');
+  const sortedRows = React.useMemo(() => gridRowsOf(rows, {columnOrder, search, sort, searchKeys, ordered}), [rows, search, sort, extSig]);
 
   // Ticked rows that are gone (deleted, or filtered out of the table) aren't selected any more.
   React.useEffect(() => { setSelected(s => { if(!s.size) return s; const ids = new Set(sortedRows.map(r => r.id)); const n = new Set([...s].filter(id => ids.has(id))); return n.size === s.size ? s : n; }); }, [sortedRows]);
@@ -2137,7 +2158,7 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
           {/* The pipeline a Board is grouped by: only in Board mode, beside the switcher. */}
           {viewMode === 'board' && <PipelineSelector pipelineId={pipelineId} onChange={setPipelineId}/>}
           <TableBoardSwitch mode={viewMode} onChange={setViewMode}/>
-          <button onClick={()=>{}} style={toolbarButton}><Icon name="export" size={13} color={T.gray600}/> Export</button>
+          <button onClick={()=>exportViewCsv({schema:objectSchema, rows:filteredContacts, columnOrder, search, sort, fileName:activeView.name})} style={toolbarButton}><Icon name="export" size={13} color={T.gray600}/> Export</button>
           <button onClick={()=>setContactForm({mode:'add', initial:null})} title="Add contact" style={toolbarIconButton}>
             <Icon name="plus" size={14} color={T.gray800}/>
           </button>
@@ -2320,5 +2341,5 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
   );
 }
 
-Object.assign(window, {withScopeFilters, recordScopeFilterProps, newContactRecord, contactView, ownerUserOptions, assocFilterSchema, withAssocRecords, withAssocFilters, RecordToolbar, TableBoardSwitch, toolbarButton, toolbarIconButton, ContactsModule, RecordSchema, useRecordSchema, ContactsDataGrid, Pagination, SaveViewMenu, FilterModal,
+Object.assign(window, {exportViewCsv, gridRowsOf, withScopeFilters, recordScopeFilterProps, newContactRecord, contactView, ownerUserOptions, assocFilterSchema, withAssocRecords, withAssocFilters, RecordToolbar, TableBoardSwitch, toolbarButton, toolbarIconButton, ContactsModule, RecordSchema, useRecordSchema, ContactsDataGrid, Pagination, SaveViewMenu, FilterModal,
   TableSettingsModal, ViewSettingsDrawer, ConfirmOverwriteModal, SaveAsCopyModal, applyFilters, countAppliedFilters, EMPTY_FILTERS});

@@ -1446,7 +1446,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
     /* A deal: the contact's deal, and — from a customer — the customer's deal, when it has none
        yet (a customer has one deal: Deals → Customers is One-to-many). */
     const amount = values.amount === '' || values.amount == null ? '' : Number(values.amount);
-    const nd = {id:newRecordId('deals'), contactId, ...values, pipeline:values.pipeline || (pl || {}).id || '', ...(stage ? {stage} : {}), amount, currency:DEAL_CURRENCY, created};
+    const nd = {id:newRecordId('deals'), contactId, ...values, pipeline:values.pipeline || (pl || {}).id || '', ...(stage ? {stage} : {}), amount, currency:values.currency || defaultCurrency(), created};
     const linked = from !== 'customers' || !(rec.dealIds || []).length;
     editActivities(m => ({...m, [nd.id]:[]}));
     setDealsTracked(rs => [...rs.map(r => from === 'customers' && linked && r.id === rec.id ? {...r, dealIds:[nd.id]} : r), nd], childChain(run));
@@ -1905,7 +1905,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
           /* A deal created through this customer: the customer's contact's deal, and the customer's
              deal — a customer has one (Deals → Customers is One-to-many), so one that has a deal keeps it. */
           const amount = input.values.amount === '' || input.values.amount == null ? '' : Number(input.values.amount);
-          const nd = {id:newRecordId('deals'), contactId:deal.contactId ?? null, ...input.values, amount, currency:DEAL_CURRENCY, created:storePropertyValue('Date & time', new Date())};
+          const nd = {id:newRecordId('deals'), contactId:deal.contactId ?? null, ...input.values, amount, currency:input.values.currency || defaultCurrency(), created:storePropertyValue('Date & time', new Date())};
           const linked = !(deal.dealIds || []).length;
           editActivities(m => ({...m, [nd.id]:[]}));
           setDealsTracked(rs => [...rs.map(r => linked && r.id === deal.id ? {...r, dealIds:[nd.id]} : r), nd], childChain(run));
@@ -2723,7 +2723,7 @@ function triggerExpectation(data, v, deal, acts, attempt){
     const actual = recordValueText(data, deal, prop, deal[c.property]);
     const shown = f.options && f.options.length ? ((f.options.find(o => o.value === c.value) || {}).label || c.value)
       : f.kind === 'number' && c.value !== '' ? Number(c.value).toLocaleString('en-US')
-      : f.kind === 'date' && c.value ? new Date(`${c.value}T00:00`).toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'}) : c.value;
+      : f.kind === 'date' && c.value ? new Date(`${c.value}T00:00`).toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric', timeZone:LOCAL_TZ}) : c.value;
     const opDef = fieldOperatorOf(f, c.op) || {};
     return {expected: op ? `${L} ${op}${opDef.noValue ? '' : ` ${shown}`}` : '',
       current: actual ? `${L} ${['number', 'count'].includes(f.kind) ? '=' : 'is'} ${actual}` : `${L} is empty`};

@@ -285,7 +285,20 @@ const useRecordAccess = () => React.useContext(RecordAccessCtx);
    the current owner only; Until the <record> Is Removed also counts its earlier owners. No acting
    user (nothing registered): everything is allowed. */
 let ACCESS = {user:null, perms:null, users:[], history:() => []};
-const setAccessContext = ({user, users, history, data}) => { ACCESS = {user, data, users:users || [], history:history || (() => []), perms:user ? normalizePermissions(user.permissions, levelOfPreset(user.preset)) : null}; };
+/* A seat bounds what a user can do (the seat comes first, SEAT_TYPES): a Full Seat — their
+   permissions; a View Seat — view only, nothing in Settings & Administration; no seat, or a
+   deactivated user — nothing. */
+function capBySeat(perms, seat){
+  if(seat === 'Full Seat') return perms;
+  const cap = (v, path) => Array.isArray(v) || !v || typeof v !== 'object' ? v : Object.fromEntries(Object.entries(v).map(([k, x]) =>
+    k === 'on' && typeof x === 'boolean' ? [k, x && seat === 'View Seat' && path[path.length - 1] === 'view' && path[0] !== 'admin']
+    : k === 'enabled' && typeof x === 'boolean' ? [k, x && seat === 'View Seat']
+    : [k, cap(x, [...path, k])]));
+  return cap(perms, []);
+}
+const seatTypeOf = (data, user) => !user || user.status === 'Deactivated' ? null : ((seatOfUser((data && data.seats) || [], user.id) || {}).type || null);
+const setAccessContext = ({user, users, history, data}) => { ACCESS = {user, data, users:users || [], history:history || (() => []),
+  perms:user ? capBySeat(normalizePermissions(user.permissions, levelOfPreset(user.preset)), seatTypeOf(data, user)) : null}; };
 const accessUser = () => ACCESS.user;
 function recordOwners(object, record, withHistory){
   const owner = userIdOf(record.ownerId || record.owner, ACCESS.users);
@@ -490,16 +503,24 @@ function memberFromSession(session, presets, preset = SUPER_ADMIN){
     status:'Activated', lastActive:null, created:new Date().toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'}), teamId:null,
     permissions: p ? JSON.parse(JSON.stringify(p.permissions)) : DEFAULT_CONTACT_PERMISSIONS()};
 }
-// The signed-in person is in `people`'s Users; added (on a free Full Seat) when they aren't — and among the employees, unless already one.
+/* The signed-in person is in `people`'s Users; added when they aren't — and among the employees,
+   unless already one (in their own People instance). Whoever starts an empty CRM instance is its
+   Super Admin on a Full Seat; anyone else opening it joins as a member with no preset and no seat
+   (so no access) until an administrator sets them up. Their ID is their Organization ID. */
 function withSessionMember(people, session, preset = SUPER_ADMIN){
   if(!session || !session.email) return people;
   const email = session.email.toLowerCase();
   if(people.users.some(u => String(u.email || '').toLowerCase() === email)) return people;
-  let u = memberFromSession(session, people.presets, preset);
+  const starter = !people.users.length, org = typeof orgUserByEmail === 'function' ? orgUserByEmail(email) : null;
+  let u = starter ? memberFromSession(session, people.presets, preset)
+    : {...memberFromSession(session, people.presets, ''), access:'manual', permissions:normalizePermissions(DEFAULT_CONTACT_PERMISSIONS(), levelOfPreset(''))};
+  if(org && org.id) u = {...u, id:org.id};
   if(people.users.some(x => x.id === u.id)) u = {...u, id:`${u.id}-${Date.now().toString(36)}`};
-  const free = people.seats.findIndex(st => st.type === 'Full Seat' && !st.assigneeId);
-  const seats = free >= 0 ? people.seats.map((st, i) => i === free ? {...st, assigneeId:u.id} : st) : [...people.seats, {id:`F${people.seats.length + 1}`, type:'Full Seat', assigneeId:u.id}];
-  const employees = people.people || [], employee = employees.some(p => String(p.email || '').toLowerCase() === email) ? employees : [...employees, {id:`p-${u.id}`, name:u.name, email:u.email}];
+  // The starter takes a free Full Seat (none is made beyond the seats there are).
+  const free = starter ? people.seats.findIndex(st => st.type === 'Full Seat' && !st.assigneeId) : -1;
+  const seats = free >= 0 ? people.seats.map((st, i) => i === free ? {...st, assigneeId:u.id} : st) : people.seats;
+  const employees = people.people || [], employee = employees.some(p => String(p.email || '').toLowerCase() === email) ? employees
+    : [...employees, {id:`p-${u.id}`, name:u.name, email:u.email, ...(org && org.peopleId ? {peopleId:org.peopleId} : {})}];
   return {...people, users:[...people.users, u], seats, people:employee};
 }
 /* An empty workspace's people: no users, teams or employees yet — only its seats and the
@@ -664,6 +685,8 @@ function RecordViewsModule({schema, rows, defaultViews, columns, savedViews = tr
   /* What's in view, for `filterControls` / `overlay` given as functions: the Board's pipeline, or
      (Table) the listed rows. */
   const viewInfo = {mode: board && st.viewMode === 'board' ? 'board' : 'table', pipelineId: board ? st.pipelineId || board.defaultPipelineId : null, rows:filtered};
+  // Export (the second argument to `actions`): this view's rows and columns as CSV, named after the view.
+  const exportCsv = () => exportViewCsv({schema, rows:filtered, columnOrder:st.columnOrder, search:st.search, sort:st.sort, fileName:activeView.name});
 
   return (
     <RecordSchema.Provider value={{boards:!!board, selectable:true, ...schema}}>
@@ -680,7 +703,7 @@ function RecordViewsModule({schema, rows, defaultViews, columns, savedViews = tr
             {/* The Contacts board controls: pipeline selector (Board only), then Table / Board. */}
             {board && st.viewMode === 'board' && <PipelineSelector pipelines={board.pipelines} pipelineId={st.pipelineId} onChange={set('pipelineId')}/>}
             {board && <TableBoardSwitch mode={st.viewMode} onChange={set('viewMode')}/>}
-            {actions && actions(btn)}
+            {actions && actions(btn, {exportCsv})}
           </>}
           search={st.search} onSearch={set('search')} filters={st.filters} setFilters={set('filters')} appliedFilterCount={appliedFilterCount}
           filterControls={typeof filterControls === 'function' ? filterControls(viewInfo) : filterControls}/>
@@ -798,6 +821,29 @@ function DeleteUserModal({user, owned, users, onCancel, onConfirm}){
   );
 }
 
+/* Bulk Deactivate / Delete of the users ticked (those it applies to; `skipped`: the others).
+   Delete: whoever takes over the records they own, then Delete typed to confirm. */
+function BulkUsersModal({kind, users, skipped, owned, people, onCancel, onConfirm}){
+  const [to, setTo] = React.useState('');
+  const [typed, setTyped] = React.useState('');
+  const n = users.length, del = kind === 'delete', needs = del && owned > 0;
+  const skip = skipped ? ` ${bulkPlural(skipped, 'user')} can't be ${del ? 'deleted' : 'deactivated'} and will be skipped.` : '';
+  return (
+    <StModal title={`${del ? 'Delete' : 'Deactivate'} ${bulkPlural(n, 'User')}`} primary={del ? 'Delete' : 'Deactivate'} danger
+      canSubmit={!del || ((!needs || !!to) && typed === 'Delete')} onCancel={onCancel} onSubmit={()=>onConfirm(to || null)}>
+      <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>
+        {del ? `${needs ? `${n === 1 ? `${users[0].name} owns` : 'They own'} ${bulkPlural(owned, 'record')}. Choose who takes them over. ` : ''}${n === 1 ? 'Their past activity keeps their name.' : 'Their past activity keeps their names.'}`
+          : n === 1 ? `${users[0].name} will lose access to the CRM and their seat will be freed. The records they own stay theirs.`
+          : 'They lose access to the CRM and their seats are freed. The records they own stay theirs.'}{skip}
+      </div>
+      {needs && <StField label="Reassign their records to">
+        <PersonSelect value={to} people={people} labelOf={(u)=>u.name} onChange={setTo} placeholder="Select user"/>
+      </StField>}
+      {del && <input value={typed} onChange={e=>setTyped(e.target.value)} placeholder="Type Delete to confirm" aria-label="Type Delete to confirm" style={fieldInput}/>}
+    </StModal>
+  );
+}
+
 function UsersModule({data, setData, onStub, focus}){
   const hub = useRecordHub();
   const [editing, setEditing] = React.useState(null);
@@ -813,7 +859,37 @@ function UsersModule({data, setData, onStub, focus}){
   const saveProfile = (id, patch) => saveUserProfileIn(setData, id, patch);
   const rows = React.useMemo(()=>data.users.map(u => ({...u, seat:(seatOfUser(data.seats, u.id) || {}).type || '', team:teamName(data.teams, u.teamId)})),
     [data.users, data.seats, data.teams]);
+  /* Bulk Actions: Reactivate, Deactivate and Delete — the row ⋯'s, for each ticked user they apply
+     to (with the permission; never yourself, and one Super Admin always stays active). */
+  const [bulkUsers, setBulkUsers] = React.useState(null);   // {kind, users, skipped, clear}
+  const pickUsers = (ids, ok) => { const all = ids.map(id => data.users.find(u => u.id === id)).filter(Boolean);
+    let admins = data.users.filter(x => x.status === 'Activated' && x.preset === SUPER_ADMIN).length;
+    const list = all.filter(ok).filter(u => sameEmail(u.email, CURRENT_USER.email) ? false
+      : u.preset === SUPER_ADMIN && u.status === 'Activated' ? (admins > 1 ? (admins--, true) : false) : true);
+    return {users:list, skipped:all.length - list.length}; };
+  const bulkOpen = (kind, verb, ids, clear, ok) => { const picked = pickUsers(ids, ok);
+    if(!picked.users.length) return hub && hub.toast(`None of these users can be ${verb}`);
+    setBulkUsers({kind, ...picked, clear}); };
+  const bulkActions = (ids, clear) => [
+    {label:'Reactivate', onClick:()=>{ const {users, skipped} = pickUsers(ids, u => u.status !== 'Activated' && userAdminCan('users', 'deactivate', u));
+      if(users.length) setData(d => ({...d, users:d.users.map(u => users.some(x => x.id === u.id) ? {...u, status:'Activated'} : u)}));
+      clear(); hub && hub.toast(`${bulkPlural(users.length, 'user')} reactivated${skipped ? ` · ${skipped} skipped` : ''}`); }},
+    {label:'Deactivate', danger:true, onClick:()=>bulkOpen('deactivate', 'deactivated', ids, clear, u => u.status === 'Activated' && userAdminCan('users', 'deactivate', u))},
+    {label:'Delete', danger:true, onClick:()=>bulkOpen('delete', 'deleted', ids, clear, u => userAdminCan('users', 'delete', u))},
+  ];
+  // Deleting users: their records to `to` (each a recorded owner change); their names stay readable in history.
+  const deleteUsers = (list, to) => {
+    const ids = list.map(u => u.id);
+    if(to) ids.forEach(id => ownedBy(id).forEach(r => hub.updateRecord(r.object, r.id, {owner:to})));
+    /* Their name stays readable in history (deletedUsers — owner changes, notes); a team they led has no lead. */
+    setData(d => ({...d, users:d.users.filter(u => !ids.includes(u.id)), seats:d.seats.map(st => ids.includes(st.assigneeId) ? {...st, assigneeId:null} : st),
+      teams:(d.teams || []).map(t => ids.includes(t.leadId) ? {...t, leadId:null} : t),
+      deletedUsers:[...(d.deletedUsers || []).filter(x => !ids.includes(x.id)), ...list.map(u => ({id:u.id, name:u.name, email:u.email}))]}));
+    // Out of this CRM instance for the Organization too, so it doesn't add them back (workspaces.jsx).
+    list.forEach(u => leaveCrm(u));
+  };
   const schema = {
+    bulkActions,
     properties:USER_PROPERTIES, filterProps:USER_FILTER_PROPS, selectValues:{...USER_SELECT_VALUES, preset:[...new Set(data.presets.map(p => p.name))]},
     noun:'user', searchKeys:['name', 'email'], canCreateProperty:false,
     renderCell: (key, u) => key === 'name'
@@ -825,13 +901,18 @@ function UsersModule({data, setData, onStub, focus}){
        their own — each for Their Team users or All users. */
     renderActions: (u) => { const can = (action) => userAdminCan('users', action, u);
       return <RowActionsMenu title="User actions" items={[
-        ...(userAdminCan('permissions', 'assign', u) || userAdminCan('permissions', 'edit', u) ? [{label:'Edit Permissions', onClick:()=>setEditing(u)}] : []),
-        ...(can('edit') ? [{label:'Edit User', onClick:()=>setEditingUser(u.id)}, {label:'Change Seat', onClick:()=>setChangingSeat(u)}, {label:'Change Team', onClick:()=>setChangingTeam(u)}] : []),
-        ...(can('deactivate') && u.status === 'Activated' ? [{label:'Deactivate user', onClick:()=>setDeactivating(u)}] : []),
-        ...(can('delete') ? [{label:'Delete user', danger:true, onClick:()=>setDeleting(u)}] : []),
+        // Seats and permissions are for activated users (a deactivated user holds none); Reactivate brings one back, with no seat until given one.
+        ...(u.status === 'Activated' && (userAdminCan('permissions', 'assign', u) || userAdminCan('permissions', 'edit', u)) ? [{label:'Edit Permissions', onClick:()=>setEditing(u)}] : []),
+        ...(can('edit') ? [{label:'Edit User', onClick:()=>setEditingUser(u.id)}, ...(u.status === 'Activated' ? [{label:'Change Seat', onClick:()=>setChangingSeat(u)}] : []), {label:'Change Team', onClick:()=>setChangingTeam(u)}] : []),
+        ...(can('deactivate') && u.status !== 'Activated' ? [{label:'Reactivate User', onClick:()=>setData(d => ({...d, users:d.users.map(x => x.id === u.id ? {...x, status:'Activated'} : x)}))}] : []),
+        // Not yourself, and not the last Super Admin: someone must be able to run the CRM.
+        ...(can('deactivate') && u.status === 'Activated' ? [{label:'Deactivate user', disabled:protectedUser(u), onClick:()=>!protectedUser(u) && setDeactivating(u)}] : []),
+        ...(can('delete') ? [{label:'Delete user', danger:!protectedUser(u), disabled:protectedUser(u), onClick:()=>!protectedUser(u) && setDeleting(u)}] : []),
       ]}/>; },
   };
   const ownedBy = (uid) => ['contacts', 'deals', 'customers'].flatMap(o => (((hub && hub.records) || {})[o] || []).filter(r => r.owner === uid).map(r => ({object:o, id:r.id})));
+  const activeSuperAdmins = data.users.filter(x => x.status === 'Activated' && x.preset === SUPER_ADMIN);
+  const protectedUser = (u) => sameEmail(u.email, CURRENT_USER.email) || (u.preset === SUPER_ADMIN && u.status === 'Activated' && activeSuperAdmins.length <= 1);
   return (
     <RecordViewsModule schema={schema} rows={rows} columns={USER_COLUMNS} focus={focus}
       defaultViews={USER_DEFAULT_VIEWS.map(v => ({id:v.id, name:v.name, filters:isFilter('status', v.status), sort:{key:'name', dir:'asc'}}))}
@@ -846,7 +927,9 @@ function UsersModule({data, setData, onStub, focus}){
       {changingSeat && <ChangeSeatModal data={data} user={changingSeat} onClose={()=>setChangingSeat(null)}
         onSave={(type) => { setData(d => ({...d, seats:assignSeat(d.seats, changingSeat.id, type)})); setChangingSeat(null); }}/>}
       {changingTeam && <ChangeTeamModal data={data} user={changingTeam} onClose={()=>setChangingTeam(null)}
-        onSave={(teamId) => { setData(d => ({...d, users:d.users.map(u => u.id === changingTeam.id ? {...u, teamId} : u)})); setChangingTeam(null); }}/>}
+        onSave={(teamId) => { setData(d => ({...d, users:d.users.map(u => u.id === changingTeam.id ? {...u, teamId} : u),
+          // Leading the team they leave: that team has no lead until one is chosen.
+          teams:(d.teams || []).map(t => t.leadId === changingTeam.id && t.id !== teamId ? {...t, leadId:null} : t)})); setChangingTeam(null); }}/>}
       {addingUser && <AddUserModal data={data} onStub={onStub} onClose={()=>setAddingUser(false)}
         onAdd={(u, setPermissions) => {
           setData(d => ({...d, users:[...d.users, u]}));
@@ -861,12 +944,14 @@ function UsersModule({data, setData, onStub, focus}){
           setData(d => ({...d, users:d.users.map(u => u.id === id ? {...u, status:'Deactivated'} : u), seats:d.seats.map(st => st.assigneeId === id ? {...st, assigneeId:null} : st)}));
           setDeactivating(null); }}/>}
       {deleting && <DeleteUserModal user={deleting} owned={ownedBy(deleting.id)} users={data.users} onCancel={()=>setDeleting(null)}
-        onConfirm={(to) => { const id = deleting.id;
-          if(to) ownedBy(id).forEach(r => hub.updateRecord(r.object, r.id, {owner:to}));
-          setData(d => ({...d, users:d.users.filter(u => u.id !== id), seats:d.seats.map(st => st.assigneeId === id ? {...st, assigneeId:null} : st)}));
-          // Out of this CRM instance for the Organization too, so it doesn't add them back (workspaces.jsx).
-          leaveCrm(deleting);
-          setDeleting(null); }}/>}
+        onConfirm={(to) => { deleteUsers([deleting], to); setDeleting(null); }}/>}
+      {bulkUsers && <BulkUsersModal kind={bulkUsers.kind} users={bulkUsers.users} skipped={bulkUsers.skipped}
+        owned={bulkUsers.users.reduce((n, u) => n + ownedBy(u.id).length, 0)}
+        people={data.users.filter(u => u.status === 'Activated' && !bulkUsers.users.some(x => x.id === u.id))} onCancel={()=>setBulkUsers(null)}
+        onConfirm={(to) => { const {kind, users, clear} = bulkUsers;
+          if(kind === 'delete') deleteUsers(users, to);
+          else setData(d => ({...d, users:d.users.map(u => users.some(x => x.id === u.id) ? {...u, status:'Deactivated'} : u), seats:d.seats.map(st => users.some(x => x.id === st.assigneeId) ? {...st, assigneeId:null} : st)}));
+          clear(); setBulkUsers(null); }}/>}
       {editing && <EditPermissionsDrawer user={editing} seats={data.seats} presets={data.presets} onStub={onStub} onClose={()=>setEditing(null)}
         onCreatePreset={(p) => setData(d => ({...d, presets:[...d.presets, p]}))}
         onSave={({seat, ...patch}) => {
@@ -883,7 +968,7 @@ function UsersModule({data, setData, onStub, focus}){
    carry over), set the initial status. An employee who isn't in HRMS yet has to be added there
    first ("Add employee first" — not defined yet). The new user starts with no seat, team or
    preset. The Employee ↔ User relationship beyond this is not defined yet. */
-const USER_INITIAL_STATUSES = USER_STATUSES;
+const USER_INITIAL_STATUSES = ['Activated'];   // a new user starts active (Deactivate is a later step)
 function AddUserModal({data, onClose, onAdd, onStub}){
   const [query, setQuery] = React.useState('');
   const [picked, setPicked] = React.useState(null);
@@ -1077,7 +1162,7 @@ function TeamsModule({data, setData, onStub, openUsers}){
   const schema = {
     properties:TEAM_PROPERTIES, filterProps:TEAM_FILTER_PROPS, selectValues:{}, noun:'team', searchKeys:['name', 'lead'], fillWidth:true, canCreateProperty:false,
     // The user count opens Users filtered to this team.
-    renderCell: (key, r) => key === 'users' ? countLink(r.count, ()=>openUsers({prop:'team', op:'contains', value:r.name})) : undefined,
+    renderCell: (key, r) => key === 'users' ? countLink(r.count, ()=>openUsers({prop:'team', op:'is', value:r.name})) : undefined,
     renderActions: (r) => <RowActionsMenu title="Team actions" items={[{label:'Edit team', onClick:()=>onStub(`Edit ${r.name}`)}]}/>,
   };
   return (
@@ -1160,7 +1245,8 @@ function PresetsModule({data, setData, onStub, openUsers}){
   const [editingPreset, setEditingPreset] = React.useState(null);
   // Assigned users: users on this preset (manual access) holding a seat of the preset's type.
   const rows = React.useMemo(()=>data.presets.map(p => {
-    const count = data.users.filter(u => u.preset === p.name && (seatOfUser(data.seats, u.id) || {}).type === p.seat).length;
+    // Every user on the preset — the same people its link lists.
+    const count = data.users.filter(u => u.preset === p.name).length;
     return {...p, count, assigned:`${count} user${count === 1 ? '' : 's'}`};
   }), [data.presets, data.users, data.seats]);
   const schema = {

@@ -604,6 +604,10 @@ function panelEditSpec(hub, object, record, key){
     const pl = recordPipelines(hub.data, object).find(p => p.id === record.pipeline), st = pl ? pl.stages : [];
     return {prop:{...prop, type:'Single Selection', options:st.map(x => x.id)}, options:st.map(x => ({value:x.id, label:x.label})), value:record.stage, save:(v) => save({stage:v})};
   }
+  // An amount with its currency (Deal Amount): edited together, as the Currency input.
+  const ck = amountCurrencyKey(prop);
+  if(ck) return {prop:{...prop, type:'Currency'}, value:record[key] === '' || record[key] == null ? '' : {currency:record[ck] || LEGACY_CURRENCY, amount:record[key]},
+    save:(v) => { const m = ptMoney(v); save({[key]:m.amount === '' ? '' : Number(m.amount), [ck]:m.currency || defaultCurrency()}); }};
   return {prop, value:record[key], save:(v) => save({[key]:v})};
 }
 // The row's value, editable in place when panelEditSpec allows it (`display`: as the panel shows it).

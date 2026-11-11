@@ -88,7 +88,8 @@ const CONTACT_PROPERTY_SETUP = {
 /* Deals. Deal Name, Deal Pipeline, Deal Stage and Deal Owner are mandatory and locked. Deal
    Pipeline is the deal's one manual pipeline; Deal Stage, its stage there. Actual Close Date is set
    when the deal reaches Deal Won or Deal Lost and cleared if it moves back out. Currency is
-   archived: every deal is in AED (DEAL_CURRENCY, deals.jsx). */
+   archived: it's entered with Deal Amount (amountCurrencyKey, propertyTypes.jsx), starting at
+   the default currency. */
 const DEAL_TYPES = ['New Business', 'Existing Business'];
 const DEAL_PROPERTY_SETUP = [
   {key:'name',      label:'Deal Name',     type:'Single-Line Text', onCreate:true, mandatory:true, locked:true, placeholder:'e.g. Ali Khan', width:220},
@@ -231,6 +232,9 @@ const migrateDataModel = (d) => {
   // The assessment templates of the discarded scoring system go.
   const profileForms = withSeedProfileForms(d.profileForms);
   const {assessmentTemplates, ...rest} = d;
+  // Settings → Defaults' currency is a code (was "AED — UAE Dirham"); the earlier default, PKR, is AED (decided 2026-11-11).
+  const cur = d.defaults && d.defaults.currency;
+  if(cur && !/^[A-Z]{3}$/.test(cur)) rest.defaults = {...d.defaults, currency:/^PKR/.test(cur) ? 'AED' : cur.slice(0, 3)};
   return {...rest, objects, associations, properties, pipelines, profileForms, postponedOpen:true, propertySet:PROPERTY_SET_VERSION, propertiesObjectId: has(d.propertiesObjectId) ? d.propertiesObjectId : null};
 };
 
@@ -329,7 +333,7 @@ const customContactSchema = (props) => {
     properties:all.map(p => ({key:p.key, label:p.label, width:width(p.key)})),
     filterProps:all.map(propertyFilterMeta),
     selectValues:{...Object.fromEntries(all.filter(p => p.options).map(p => [p.key, p.options])),
-      ...Object.fromEntries(all.filter(p => p.type === 'User').map(p => [p.key, USER_DIRECTORY.map(u => u.name)]))},
+      ...Object.fromEntries(all.filter(p => p.type === 'User').map(p => [p.key, USER_DIRECTORY.filter(u => !u.deleted).map(u => u.name)]))},
   };
 };
 
@@ -549,9 +553,13 @@ function ObjectsSettings({data, setData, navigate, records = {}, updateRecords, 
     const a = objectAssociations(data, o.id).length, p = objectProperties(data, o.id).length;
     return {...o, assocCount:a, propCount:p, assoc:String(a), props:String(p), records:String(recordCount(o.id)), createdBy:creatorOf(o)};
   }), [data.objects, data.associations, data.properties, records]);
+  // Bulk Actions → Delete: record types with no entries, as Delete Record (their properties, pipelines, associations and workflows go too).
+  const objectBulk = useTableBulkDelete({rows, noun:'record', canDelete:(r) => adminRecordsCan('delete', data.objects.find(o => o.id === r.id)) && !recordCount(r.id),
+    skipNote:'that have entries', note:'Their properties, pipelines, associations, workflows and navigation items are deleted too.',
+    remove:(ids) => setData(d => ids.reduce((x, id) => deleteObjectFrom(x, id), d))});
   const schema = {
     properties:OBJECT_COLS, filterProps:[{key:'name', label:'Record Name', type:'text'}, {key:'group', label:'Group', type:'select'}],
-    selectValues:{group:OBJECT_GROUPS}, noun:'record', searchKeys:['name', 'group'], fillWidth:true,
+    selectValues:{group:OBJECT_GROUPS}, noun:'record', searchKeys:['name', 'group'], fillWidth:true, bulkActions:objectBulk.bulkActions,
     /* Counts are underlined numbers. Properties opens the Properties view filtered to this Object;
        what Associated Objects opens is not defined yet. */
     renderCell: (key, r) => key === 'props'
@@ -583,6 +591,7 @@ function ObjectsSettings({data, setData, navigate, records = {}, updateRecords, 
           setData(d => ({...d, objects:[...d.objects, {...obj, createdBy:by}], associations:[...d.associations, ...assocs], properties:[...d.properties, ...props.map(p => ({...p, createdBy:by}))]}));
           setCreating(false);
         }}/>}
+      {objectBulk.bulkModal}
       {deleting && <DeleteObjectModal data={data} object={deleting} recordCount={recordCount(deleting.id)} onClose={()=>setDeleting(null)}
         onDelete={() => { setData(d => deleteObjectFrom(d, deleting.id)); setDeleting(null); }}/>}
       {details && <RecordDetailsPanel data={data} objectId={details} records={records} onClose={()=>setDetails(null)}
@@ -861,8 +870,32 @@ function PropertiesSettings({data, setData, records = {}, updateRecords, onWorkf
   const propCan = (objectId, action, prop) => !ADMIN_RECORD_OBJECTS.includes(objectId) || adminPropertyCan(objectId, action, prop);
   const addableHolders = PROPERTY_HOLDERS(data).filter(o => propCan(o.id, 'add'));
   const archivedTag = <span style={{marginLeft:8, fontSize:11.5, fontWeight:500, color:T.gray600, background:T.headerBg, borderRadius:9999, padding:'1px 8px'}}>Archived</span>;
+  /* Bulk Actions: Archive, Restore and Delete — the row ⋯'s, for each ticked property they apply to
+     (not a locked one; with the permission). One a blocker keeps (in use where it can't go) is
+     skipped; what the rest change, and what's skipped, is reviewed once (nothing to review: done
+     at once). Delete is then confirmed by typing Delete. */
+  const [bulkDelete, setBulkDelete] = React.useState(null);   // {props, clear}
+  const bulkRun = (kind, verb, ids, clear, applies, apply) => {
+    const picked = ids.map(id => rows.find(r => r.id === id)).filter(Boolean), list = picked.filter(applies).map(findProp).filter(Boolean);
+    const cs = kind === 'restore' ? list.map(p => ({p, c:{lines:[], blockers:[]}})) : list.map(p => ({p, c:changeConsequences(data, records, {kind, before:p})}));
+    const go = cs.filter(x => !x.c.blockers.length), skipped = picked.length - go.length, Verb = verb.replace(/^./, c => c.toUpperCase());
+    if(!go.length) return setReview({title:`${Verb} Properties`, lines:[], blockers:[`None of these properties can be ${verb}d.`]});
+    // Nothing to review (as a single Archive or Restore): done at once.
+    if(!skipped && go.every(x => !x.c.lines.length)) return apply(go.map(x => x.p), clear);
+    setReview({title:`${Verb} ${bulkPlural(go.length, 'Property', 'Properties')}`, confirmLabel:Verb, danger:kind === 'delete', blockers:[],
+      lines:[...(skipped ? [`${bulkPlural(skipped, 'property', 'properties')} can't be ${verb}d and will be skipped.`] : []), ...go.flatMap(x => x.c.lines)],
+      apply:() => apply(go.map(x => x.p), clear)});
+  };
+  const bulkActions = (ids, clear) => [
+    {label:'Archive', onClick:()=>bulkRun('archive', 'archive', ids, clear, (r) => !r.locked && !r.archived && propCan(r.objectId, 'edit', findProp(r)),
+      (props, done) => { setData(d => ({...d, properties:d.properties.map(x => props.some(p => same(p, x)) ? {...x, archived:true} : x)})); done(); })},
+    {label:'Restore', onClick:()=>bulkRun('restore', 'restore', ids, clear, (r) => !r.locked && r.archived && propCan(r.objectId, 'edit', findProp(r)),
+      (props, done) => { setData(d => ({...d, properties:d.properties.map(x => props.some(p => same(p, x)) ? (({archived:_, ...rest}) => rest)(x) : x)})); done(); })},
+    {label:'Delete', danger:true, onClick:()=>bulkRun('delete', 'delete', ids, clear, (r) => !r.locked && propCan(r.objectId, 'delete', findProp(r)),
+      (props, done) => setBulkDelete({props, clear:done}))},
+  ];
   const schema = {
-    properties:PROPERTY_COLS, noun:'property', nounPlural:'properties', searchKeys:['label', 'type', 'objectName'], fillWidth:true,
+    properties:PROPERTY_COLS, noun:'property', nounPlural:'properties', searchKeys:['label', 'type', 'objectName'], fillWidth:true, bulkActions,
     filterProps:[{key:'label', label:'Property Label', type:'text'}, {key:'type', label:'Property Type', type:'select'}, {key:'objectName', label:'Record', type:'select'}],
     selectValues:{type:[...PROPERTY_TYPES, ...SYSTEM_PROPERTY_TYPES], objectName:PROPERTY_HOLDERS(data).map(o => o.name)},
     // Actions: the workflow quick action (a property workflows can watch — its Record and Property as the context), then ⋯.
@@ -913,6 +946,9 @@ function PropertiesSettings({data, setData, records = {}, updateRecords, onWorkf
         }}/>}
       {review && <ConsequencesModal title={review.title} lines={review.lines} blockers={review.blockers} confirmLabel={review.confirmLabel} danger={review.danger}
         onCancel={()=>setReview(null)} onConfirm={()=>{ const r = review; setReview(null); r.apply(); }}/>}
+      {bulkDelete && <BulkDeleteModal count={bulkDelete.props.length} noun="property" plural="properties" onCancel={()=>setBulkDelete(null)}
+        onConfirm={()=>{ const {props, clear} = bulkDelete; applyEffects(props.map(p => ({kind:'delete', before:p})));
+          setData(d => ({...d, properties:d.properties.filter(x => !props.some(p => same(p, x)))})); clear(); setBulkDelete(null); }}/>}
       {stub && <StubPanel title={stub} onClose={()=>setStub(null)} zIndex={110}/>}
     </SettingsPage>
     {workflow && <SettingsWorkflow data={data} setData={setData} initial={workflow} onClose={()=>setWorkflow(null)} onStub={setStub} onWorkflowOpen={onWorkflowOpen}/>}
@@ -1143,8 +1179,15 @@ function PipelinesSettings({data, setData, records = {}, onWorkflowOpen, target,
   const entriesOf = (p) => (records[p.objectId] || []).filter(r => stageIdOf(p, r)).length;
   // Settings & Administration → Pipelines (per record type): View shows its pipelines; Create, Edit, Delete.
   const rows = (data.pipelines || []).filter(p => pipelineAdminCan(p.objectId, 'view', p)).map(p => ({...p, createdBy:creatorOf(p), objectName:objectName(data, p.objectId), entryCount:String(entriesOf(p)), stageCount:p.stages.length, workflowCount:workflowsOf(p.id)}));
+  /* Bulk Actions → Delete: the pipelines Delete allows (no records or workflows in them, not a record
+     type's only one) — a record type always keeps one. */
+  const pipelineBulk = useTableBulkDelete({rows, noun:'pipeline', skipNote:'in use',
+    canDelete:(r) => pipelineAdminCan(r.objectId, 'delete', r) && pipelineDeletable(r, records[r.objectId], data),
+    remove:(ids) => setData(d => { let pls = d.pipelines || [];
+      ids.forEach(id => { const p = pls.find(x => x.id === id); if(p && pls.some(x => x.objectId === p.objectId && x.id !== id)) pls = pls.filter(x => x.id !== id); });
+      return {...d, pipelines:pls}; })});
   const schema = {
-    properties:PIPELINE_COLS, noun:'pipeline', searchKeys:['label', 'objectName'], fillWidth:true, canCreateProperty:false,
+    properties:PIPELINE_COLS, noun:'pipeline', searchKeys:['label', 'objectName'], fillWidth:true, canCreateProperty:false, bulkActions:pipelineBulk.bulkActions,
     filterProps:[{key:'label', label:'Pipeline Name', type:'text'}, {key:'objectName', label:'Record', type:'select'}],
     selectValues:{objectName:data.objects.map(o => o.name)},
     // The name, the stage count and the workflow count all open the one pipeline side panel.
@@ -1173,6 +1216,7 @@ function PipelinesSettings({data, setData, records = {}, onWorkflowOpen, target,
       return <EditPipelineModal pipeline={pl} setData={setData} onClose={()=>setEditingId(null)}
         taken={(data.pipelines || []).filter(p => p.objectId === pl.objectId && p.id !== pl.id).map(p => p.label.toLowerCase())}/>; })()}
     {deletingId && <DeletePipelineModal pipeline={data.pipelines.find(p => p.id === deletingId)} setData={setData} onCancel={()=>setDeletingId(null)} onDeleted={()=>setDeletingId(null)}/>}
+    {pipelineBulk.bulkModal}
     {stub && <StubPanel title={stub} onClose={()=>setStub(null)} zIndex={110}/>}
     </div>
   );

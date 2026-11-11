@@ -740,7 +740,7 @@ const propertyConditionSummary = (data, w) => {
   if(op.noValue) return `${f.label} ${op.label.toLowerCase()}`;
   const sym = numeric && PROPERTY_SUMMARY_SYMBOLS[op.id] || op.label.toLowerCase();
   const label = (v) => f.options && f.options.length ? ((f.options.find(o => (typeof o === 'string' ? o : o.value) === v) || {}).label || v) : v;
-  const shown = Array.isArray(c.value) ? c.value.map(label).join(', ') : compare === 'date' ? (ptDay(c.value) !== null ? new Date(`${c.value}T00:00`).toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'}) : c.value) : label(c.value);
+  const shown = Array.isArray(c.value) ? c.value.map(label).join(', ') : compare === 'date' ? (ptDay(c.value) !== null ? new Date(`${c.value}T00:00`).toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric', timeZone:LOCAL_TZ}) : c.value) : label(c.value);
   return `${f.label} ${sym} ${numeric ? shown : wfQuote(shown)}`;
 };
 const STAGE_SUMMARIES = {
@@ -864,7 +864,7 @@ const actionSummary = (data, a, context) => {
     const opt = propertyOptions(data, objectId, p, {pipeline:ctx.pipeline}).flatMap(o => o && o.options ? o.options : [o]).find(o => (typeof o === 'string' ? o : o.value) === v);
     if(opt) return typeof opt === 'string' ? opt : opt.label;
     if(p.type === 'Number' && !isNaN(Number(v))) return Number(v).toLocaleString('en-US');
-    if(propertyCompare(p) === 'date' && !isNaN(new Date(v).getTime())) return new Date(String(v).length === 10 ? `${v}T00:00` : v).toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'});
+    if(propertyCompare(p) === 'date' && !isNaN(new Date(v).getTime())) return new Date(String(v).length === 10 ? `${v}T00:00` : v).toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric', ...(String(v).length === 10 ? {timeZone:LOCAL_TZ} : {})});
     // Any other type: its own one-line display (Currency, Location, a range, a list, True / False).
     if(typeof v === 'object' || typeof v === 'boolean') return formatPropertyValueOf(p, storePropertyValue(p, v));
     return String(v);

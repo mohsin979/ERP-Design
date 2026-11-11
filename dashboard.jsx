@@ -29,6 +29,8 @@
                       A part-paid installment counts what was paid on it; its balance the rest.
                       Lost and Postponed deals' installments aren't counted (Postponed: an open
                       stage, known by its name).
+     Money totals are in the default currency (Settings → Defaults), each amount converted at
+     Settings' exchange rates.
      Stage Types      every record's stage has a Stage Type (board.jsx): Open, or closed — Won, Lost,
                       Undecided. Total Open: the records in an Open stage now. Total Closed and its
                       Won / Lost / Undecided: the records that reached a closed stage in the period
@@ -108,14 +110,16 @@ function dashBusinessData({deals = [], customers = [], contacts = [], accounting
     // A Lost or Postponed deal's installments aren't expected cash: left out of the forecast.
     const deal = sched.object === 'deals' && dealById.get(sched.recordId);
     const forecast = !deal || (recordStageType('deals', deal) !== 'lost' && !dealPostponed(deal));
+    // Every amount in the default currency (Settings' exchange rates), so the totals add up.
+    const cur = scheduleCurrency(sched), dflt = (n) => toDefaultCurrency(n, cur);
     (sched.installments || []).forEach(i => {
       const invoicedAt = dashDayTime(i.invoicedAt, 10), due = dashDayTime(i.dueDate, 9);
       /* Forecast: an installment whose rest moved to a balance installment counts only what was paid
          on it — the balance carries the rest, by its own date (counted once). */
       const split = (sched.installments || []).some(x => x.parentId === i.id);
-      if(forecast && due != null) p.ev.installments.push({amount: split ? (i.payments || []).reduce((s, pay) => s + (Number(pay.amount) || 0), 0) : i.amount, due});
-      if(invoicedAt != null) p.ev.invoices.push({at:invoicedAt, amount:i.amount});
-      (i.payments || []).forEach(pay => { const at = dashDayTime(pay.paidOn, 12); if(at != null) p.ev.payments.push({amount:Number(pay.amount) || 0, at, sent:invoicedAt}); });
+      if(forecast && due != null) p.ev.installments.push({amount:dflt(split ? (i.payments || []).reduce((s, pay) => s + (Number(pay.amount) || 0), 0) : i.amount), due});
+      if(invoicedAt != null) p.ev.invoices.push({at:invoicedAt, amount:dflt(i.amount)});
+      (i.payments || []).forEach(pay => { const at = dashDayTime(pay.paidOn, 12); if(at != null) p.ev.payments.push({amount:dflt(Number(pay.amount) || 0), at, sent:invoicedAt}); });
     });
   });
   return {people:[...people.values()], now:now.getTime()};
@@ -141,7 +145,7 @@ function personMetrics(p, range){
 /* ── A user's statistics ── the same records and rules as the dashboard, for one person (the
    owner of the deals, customers and contacts), over any range. One source for the user profile
    panel (its figures and trends) and for workflows' User Properties (all-time). `kind`: 'money'
-   (sums, AED), 'count', 'days' / 'hours' (averages — empty when there's nothing to average). */
+   (sums, in the default currency), 'count', 'days' / 'hours' (averages — empty when there's nothing to average). */
 // The Deal record type as the workspace names it (HOF Partners: Lead).
 const dashDeal = () => typeSingular('deals', 'Deal'), dashDeals = () => typePlural('deals', 'Deals');
 /* `needs`: a statistic about a record type the workspace may not have (Contacts): shown only where it has it. */
@@ -266,9 +270,9 @@ function DateFilter({value, onChange}){
    'count' | 'percent' | 'hours'), read(ctx) → number | null, sub(ctx)?, accounting?}. `ctx`:
    {data, range, records}. The cash KPIs' `accent` draws their line in the Graph view. */
 const DASH_KPIS = [
-  {key:'invoiced', label:'Total Cash Invoiced',   icon:'quote',    accent:'#3A5BF9', unit:'AED', hint:'Invoices issued in the period'},
-  {key:'received', label:'Total Cash Received',   icon:'coins',    accent:'#1C1C1F', unit:'AED', hint:'Payments received in the period'},
-  {key:'forecast', label:'Total Cash Forecasted', icon:'calendar', accent:'#A6A6AD', unit:'AED', hint:'Installments due in the period'},
+  {key:'invoiced', label:'Total Cash Invoiced',   icon:'quote',    accent:'#3A5BF9', hint:'Invoices issued in the period'},
+  {key:'received', label:'Total Cash Received',   icon:'coins',    accent:'#1C1C1F', hint:'Payments received in the period'},
+  {key:'forecast', label:'Total Cash Forecasted', icon:'calendar', accent:'#A6A6AD', hint:'Installments due in the period'},
 ];
 // Win Rate = Won ÷ Closed × 100, whole percent (— when nothing closed).
 const dashWinRate = (k) => k.closed ? Math.round(k.won / k.closed * 100) : null;
@@ -441,7 +445,7 @@ function DashKpiRow({ids, ctx, replay, arrange}){
             {v == null ? '—' : t.kind === 'hours' ? fmtHours(v) : <CountUp value={v || 0} replay={replay} suffix={t.kind === 'percent' ? '%' : ''}/>}
           </div>
           <div style={{fontSize:10.5, fontWeight:800, color:ink, letterSpacing:.7, marginTop:9, textTransform:'uppercase', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>
-            {t.sub ? t.sub(ctx) : t.kind === 'money' ? 'AED' : ''}
+            {t.sub ? t.sub(ctx) : t.kind === 'money' ? defaultCurrency() : ''}
           </div>
         </div>
       </div>
@@ -560,7 +564,7 @@ function LineTrend({buckets, step, lines, fmt, axis = dashShort, empty = 1000, h
   const H = height, L = 48, R = 12, Tp = 12, B = 28, iw = Math.max(10, w - L - R), ih = H - Tp - B;
   const max = dashNiceMax(Math.max(0, ...buckets.flatMap(x => lines.map(k => x[k.key] || 0))), empty);
   const x = (i) => L + (buckets.length === 1 ? iw / 2 : i * iw / (buckets.length - 1)), y = (v) => Tp + ih - v / max * ih;
-  const label = (t) => { const d = new Date(t); return step < DASH_DAY ? `${d.getHours()}:00` : `${DATE_MONTHS[d.getMonth()]} ${d.getDate()}`; };
+  const label = (t) => { const d = new Date(t); return step < DASH_DAY ? `${zonedParts(d).h}:00` : `${DATE_MONTHS[d.getMonth()]} ${d.getDate()}`; };
   const every = Math.max(1, Math.ceil(buckets.length / 8));
   const onMove = (e) => { const r = e.currentTarget.getBoundingClientRect(); const i = Math.round((e.clientX - r.left - L) / (iw / Math.max(1, buckets.length - 1))); setHover(Math.max(0, Math.min(buckets.length - 1, i))); };
   // Each line in runs of the buckets that have a value.
@@ -827,7 +831,7 @@ function DealOutcomeList({deals, type, tone, range, now, onOpen}){
           <span style={{minWidth:0, flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>
             <ContactName name={d.name} onOpen={()=>onOpen(d)} style={{fontSize:13, fontWeight:500}}/>
           </span>
-          <span style={{fontSize:12.5, color:T.attioMuted, fontVariantNumeric:'tabular-nums'}}>{d.amount ? fmtMoney(d.amount) : ''}</span>
+          <span style={{fontSize:12.5, color:T.attioMuted, fontVariantNumeric:'tabular-nums'}}>{d.amount ? fmtMoney(d.amount, d.currency || LEGACY_CURRENCY) : ''}</span>
         </div>
       ))}
       {!list.length && <div style={{fontSize:13, color:T.attioMuted, borderTop:`1px solid ${T.attioLine}`, padding:'14px 0'}}>No {dashDeals().toLowerCase()} in this range.</div>}
@@ -983,7 +987,7 @@ function DashWidgetGrid({items, ctx, arrange}){
    Payment Terms), grouped as in the catalogue: the KPI on the left, its value on the right. Its own
    date filter (starting from the dashboard's) sets the period. Read-only; for everyone. Opened by
    its own button, beside View Settings. */
-const fmtKpiValue = (k, v) => v == null ? '—' : k.kind === 'money' ? `AED ${formatAmount(Math.round(v))}`
+const fmtKpiValue = (k, v) => v == null ? '—' : k.kind === 'money' ? `${defaultCurrency()} ${formatAmount(Math.round(v))}`
   : k.kind === 'percent' ? `${v}%` : k.kind === 'hours' ? fmtHours(v) : formatAmount(v);
 function AllKpisButton({onClick}){
   return (
@@ -1078,7 +1082,7 @@ function DashViewSettingsModal({config, onApply, onRearrange, onClose}){
 /* The page, on the Workflow canvas's dot grid: the greeting (View Settings and the KPIs / Graph
    switcher top right), the date filter, the KPI cards or the Graph, then Key Indicators beside
    Today's Tasks; generous side margins. */
-const dashGreeting = (d = new Date()) => d.getHours() < 12 ? 'Good Morning' : d.getHours() < 17 ? 'Good Afternoon' : 'Good Evening';
+const dashGreeting = (d = new Date()) => { const h = zonedParts(d).h; return h < 12 ? 'Good Morning' : h < 17 ? 'Good Afternoon' : 'Good Evening'; };
 // The dashboard's records from the record hub (the dashboard, and a user's profile panel).
 function useDashBusinessData(hub){
   const deals = (hub && hub.records && hub.records.deals) || [];

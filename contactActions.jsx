@@ -262,15 +262,22 @@ function RecordFields({fields, values, set, optionsFor, tried, autoFocus}){
       // One field per row; a grouped input (a phone's country code and number, a timestamp's date and time, …) keeps its parts on it.
       <div key={p.key} style={{gridColumn:'1 / -1', minWidth:0}}>
         {!toggle && <label style={fieldLabel}>{label}{p.required && <span style={{color:T.red}}> *</span>}</label>}
-        <PropertyInput prop={p} value={values[p.key]} onChange={val=>set({[p.key]:val})} options={optionsFor(p)} invalid={err} autoFocus={autoFocus && i === 0}
-          label={toggle ? <span style={{fontSize:12.5, color:T.gray600}}>{label}</span> : undefined}/>
+        {amountCurrencyKey(p)
+          // An amount with its currency (Deal Amount): the Currency input, the two kept on their own keys.
+          ? <PropertyInput prop={{...p, type:'Currency'}} value={{currency:values[amountCurrencyKey(p)] || defaultCurrency(), amount:values[p.key]}} invalid={err} autoFocus={autoFocus && i === 0}
+              onChange={m=>set({[p.key]:m.amount, [amountCurrencyKey(p)]:m.currency})}/>
+          : <PropertyInput prop={p} value={values[p.key]} onChange={val=>set({[p.key]:val})} options={optionsFor(p)} invalid={err} autoFocus={autoFocus && i === 0}
+          label={toggle ? <span style={{fontSize:12.5, color:T.gray600}}>{label}</span> : undefined}/>}
         {err && <div style={{fontSize:12, color:T.red, marginTop:4}}>{err}</div>}
       </div>
     );
   });
 }
-const emptyValues = (fields, initial) => Object.fromEntries(fields.map(p => [p.key, inputPropertyValue(p, initial ? initial[p.key] : '')]));
-const storedValues = (fields, v) => Object.fromEntries(fields.map(p => [p.key, storePropertyValue(p, v[p.key])]));
+// An amount's currency (amountCurrencyKey) comes with it: the record's, else the default currency.
+const emptyValues = (fields, initial) => Object.fromEntries(fields.flatMap(p => [[p.key, inputPropertyValue(p, initial ? initial[p.key] : '')],
+  ...(amountCurrencyKey(p) ? [[amountCurrencyKey(p), (initial && initial[amountCurrencyKey(p)]) || defaultCurrency()]] : [])]));
+const storedValues = (fields, v) => Object.fromEntries(fields.flatMap(p => [[p.key, storePropertyValue(p, v[p.key])],
+  ...(amountCurrencyKey(p) ? [[amountCurrencyKey(p), v[amountCurrencyKey(p)] || defaultCurrency()]] : [])]));
 
 /* ── Create through associated object (Add forms) ── one line; it opens the Objects this record
    can be associated with (Settings → Associations; Objects that have records). Each Object can be

@@ -4,7 +4,11 @@
    readout at the bottom of the table. A table offers only what it already does for one row:
      Contacts, Deals, Customers — Enroll in Email Sequence, Edit Properties, Delete.
      Other tables — Delete, where they delete a row today (Forms, Quotes, Services, Email
-                    Templates and Sequences, Customer Profile forms).
+                    Templates and Sequences, Quote Templates, Playbooks, Customer Profile
+                    forms, Records, Pipelines).
+     Settings lists — their row actions that apply to several rows: Disconnect (Email, Calls,
+                    Meetings, Calendar); Archive, Restore, Delete (Properties); Reactivate,
+                    Deactivate, Delete (Users). Edit-one-at-a-time actions stay on the row.
    Each table passes `bulkActions(ids, clear)` in its schema (RecordSchema); the grid shows the
    dropdown while rows are ticked.
 
@@ -233,7 +237,12 @@ function useTableBulkDelete({rows, noun, plural, remove, canDelete, skipNote, no
   let bulkModal = null;
   if(bulk){
     const chosen = rows.filter(r => bulk.ids.includes(r.id)), ok = chosen.filter(r => !canDelete || canDelete(r));
-    bulkModal = <BulkDeleteModal count={ok.length} noun={noun} plural={plural} note={note} skipped={chosen.length - ok.length} skipNote={skipNote} onCancel={()=>setBulk(null)}
+    const Plural = (plural || `${noun}s`).replace(/^./, c => c.toUpperCase());
+    // None of them can go: said so, nothing to confirm.
+    bulkModal = !ok.length ? <StModal title={`Can't Delete ${Plural}`} cancelLabel="Close" onCancel={()=>setBulk(null)}>
+        <div style={{fontSize:13, color:T.gray600, lineHeight:1.5}}>None of the selected {plural || `${noun}s`} can be deleted.</div>
+      </StModal>
+      : <BulkDeleteModal count={ok.length} noun={noun} plural={plural} note={note} skipped={chosen.length - ok.length} skipNote={skipNote} onCancel={()=>setBulk(null)}
       onConfirm={()=>{ if(ok.length) remove(ok.map(r => r.id)); if(bulk.clear) bulk.clear(); setBulk(null); onDone && onDone(ok.length, chosen.length - ok.length); }}/>;
   }
   return {bulkActions, bulkModal};

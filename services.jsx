@@ -4,8 +4,9 @@
 
    The workspace's service catalog — what quotations are built from (quotes.jsx). A service has
    a name, a description (rich text, richText.jsx) and either its milestones — Enable milestones:
-   the stages the service is delivered in, each with a name, a description and a price (AED, as
-   every deal), the service's price their sum — or, milestones off, one price. Services are
+   the stages the service is delivered in, each with a name, a description and a price, the
+   service's price their sum — or, milestones off, one price — in the service's currency (the
+   default one to start with, Settings → Defaults; the sample services are in AED). Services are
    created, viewed, edited and deleted here, and created from the quote builder and the Quotes
    page too (the same panel); a quotation keeps its own copy of a service as it was quoted, so
    changing or deleting a service never changes a quote already made.
@@ -50,7 +51,7 @@ const SAMPLE_SERVICES = () => {
   ].map(priced);
 };
 // Whole amounts as they are; a fraction (a discount, VAT, an installment) to two decimals.
-const fmtMoney = (n, currency = DEAL_CURRENCY) => n === '' || n == null || isNaN(n) ? ''
+const fmtMoney = (n, currency = defaultCurrency()) => n === '' || n == null || isNaN(n) ? ''
   : `${currency} ${Number.isInteger(Number(n)) ? formatAmount(Number(n)) : Number(n).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})}`;
 /* Milestone prices. A service saved before they existed keeps its price on its first milestone. */
 const withMilestonePrices = (s) => (s.milestones || []).some(m => m.price != null) || !(s.milestones || []).length ? s
@@ -95,7 +96,7 @@ function DetailPanel({title, onClose, menuItems, width, fields, children}){
 }
 
 /* Milestones, edited in order: name, description and price per milestone, add, move, remove. */
-function MilestonesEditor({value, onChange}){
+function MilestonesEditor({value, onChange, currency}){
   const list = value || [];
   const set = (i, p) => onChange(list.map((m, j) => j === i ? {...m, ...p} : m));
   const move = (i, d) => { const n = list.slice(); const [m] = n.splice(i, 1); n.splice(i + d, 0, m); onChange(n); };
@@ -116,7 +117,7 @@ function MilestonesEditor({value, onChange}){
           <textarea value={m.description} onChange={e=>set(i, {description:e.target.value})} rows={2} placeholder="Description" aria-label={`Milestone ${i + 1} description`}
             style={{...fieldInput, resize:'vertical', lineHeight:1.5, marginLeft:28, width:'calc(100% - 28px)'}}/>
           <div style={{display:'flex', alignItems:'center', gap:8, marginLeft:28}}>
-            <span style={{fontSize:12.5, color:T.attioMuted}}>Price ({DEAL_CURRENCY})</span>
+            <span style={{fontSize:12.5, color:T.attioMuted}}>Price ({currency})</span>
             <input value={m.price ?? ''} onChange={e=>set(i, {price:e.target.value.replace(/[^0-9.]/g, '')})} inputMode="decimal" placeholder="0" aria-label={`Milestone ${i + 1} price`}
               style={{...fieldInput, width:140, textAlign:'right', fontVariantNumeric:'tabular-nums'}}/>
           </div>
@@ -134,13 +135,14 @@ function MilestonesEditor({value, onChange}){
    Description (rich text), Enable milestones: on, Milestones with their prices and the Price they
    add up to; off, the Price; Cancel and Save at the bottom. `zIndex`: over the quote builder. */
 function ServiceFormPanel({initial, onCancel, onSave, zIndex}){
-  const [s, setS] = React.useState(() => ({name:'', description:'', milestones:[], price:'', ...(initial ? withMilestonePrices(initial) : {})}));
+  const [s, setS] = React.useState(() => ({name:'', description:'', milestones:[], price:'', ...(initial ? withMilestonePrices(initial) : {}),
+    currency:(initial && initial.currency) || defaultCurrency()}));
   const [withMilestones, setWithMilestones] = React.useState(() => !initial || (initial.milestones || []).length > 0);
   const set = (p) => setS(x => ({...x, ...p}));
   const priceOk = (v) => v !== '' && v != null && Number.isFinite(Number(v)) && Number(v) >= 0;
   const ok = !!s.name.trim() && (withMilestones ? s.milestones.length > 0 && s.milestones.every(m => m.name.trim() && priceOk(m.price)) : priceOk(s.price));
   const total = withMilestones ? s.milestones.reduce((sum, m) => sum + (Number(m.price) || 0), 0) : Number(s.price) || 0;
-  const save = () => onSave({...s, name:s.name.trim(), description:s.description || '', price:total, currency:DEAL_CURRENCY,
+  const save = () => onSave({...s, name:s.name.trim(), description:s.description || '', price:total, currency:s.currency,
     milestones: withMilestones ? s.milestones.map(m => ({...m, name:m.name.trim(), description:(m.description || '').trim(), price:Number(m.price)})) : []});
   return (
     <CreatePanelFrame title={initial ? 'Edit Service' : 'New Service'} onClose={onCancel} zIndex={zIndex} actions={<>
@@ -150,12 +152,13 @@ function ServiceFormPanel({initial, onCancel, onSave, zIndex}){
       {stack(<>
         <Field label="Name"><input autoFocus value={s.name} onChange={e=>set({name:e.target.value})} placeholder="e.g. US NIW Petition" style={fieldText}/></Field>
         <Field label="Description"><RichTextEditor value={s.description} onChange={(v)=>set({description:v})} ariaLabel="Service description"/></Field>
+        <Field label="Currency"><FormSelect value={s.currency} options={currencyOptions()} onChange={(c)=>c && set({currency:c})}/></Field>
         <Field label="Enable milestones"><label style={{display:'inline-flex', alignItems:'center', minHeight:34, cursor:'pointer'}}><UtToggle on={withMilestones} onChange={setWithMilestones}/></label></Field>
-        {withMilestones && <Field label="Milestones"><div style={{paddingTop:2}}><MilestonesEditor value={s.milestones} onChange={(v)=>set({milestones:v})}/></div></Field>}
+        {withMilestones && <Field label="Milestones"><div style={{paddingTop:2}}><MilestonesEditor value={s.milestones} currency={s.currency} onChange={(v)=>set({milestones:v})}/></div></Field>}
         {withMilestones
-          ? <Field label="Price"><ReadValue>{fmtMoney(total)}</ReadValue></Field>
+          ? <Field label="Price"><ReadValue>{fmtMoney(total, s.currency)}</ReadValue></Field>
           : <Field label="Price"><div style={{position:'relative', width:200}}>
-              <span style={{position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', fontSize:12, color:T.attioMuted, pointerEvents:'none'}}>{DEAL_CURRENCY}</span>
+              <span style={{position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', fontSize:12, color:T.attioMuted, pointerEvents:'none'}}>{s.currency}</span>
               <input value={s.price ?? ''} onChange={e=>set({price:e.target.value.replace(/[^0-9.]/g, '')})} inputMode="decimal" placeholder="0" aria-label="Price"
                 style={{...fieldText, paddingLeft:44, textAlign:'right', fontVariantNumeric:'tabular-nums'}}/>
             </div></Field>}

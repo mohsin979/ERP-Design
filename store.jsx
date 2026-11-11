@@ -127,11 +127,13 @@ const DB = (() => {
                module id). What they are in a CRM instance (preset, seat, team, permissions) is in
                that instance's store: its Users & Teams.
    Which CRM and People branches are open, who is signed in (mocked email sign-in,
-   workspaces.jsx) and the accounts offered at sign-in are this browser's own (BROWSER_KEY,
+   workspaces.jsx), the accounts offered at sign-in and each person's time zone (profile menu)
+   are this browser's own (BROWSER_KEY,
    localStorage — with SQLite every browser and tab reads one registry). */
 const ORG_KEY = 'hof-erp-org-v1';
 const BROWSER_KEY = 'hof-erp-browser-v1';
-const BROWSER_FIELDS = ['crmId', 'peopleId', 'openCrm', 'session', 'accounts'];   // `openCrm`: the page starts in the CRM (a switch from inside it)
+// `openCrm`: the page starts in the CRM (a switch from inside it); `timeZones`: each person's pick in the profile menu, by email.
+const BROWSER_FIELDS = ['crmId', 'peopleId', 'openCrm', 'session', 'accounts', 'timeZones'];
 const browserState = (() => { try { return JSON.parse(window.localStorage.getItem(BROWSER_KEY) || 'null'); } catch(e){ return null; } })();
 const DEFAULT_BRAND = () => ({primary:'#15141B', secondary:'#FF0004'});
 // HOF's brand colours: black primary, blue secondary.
@@ -208,7 +210,7 @@ const ORG_REGISTRY = (() => {
   const b = browserState || legacy || {}, crmOf = (id) => reg.crm.some(c => c.id === id) ? id : reg.crm.some(c => c.id === LEGACY_CRM_OF[id]) ? LEGACY_CRM_OF[id] : null;
   const crmId = crmOf(b.crmId) || crmOf(b.activeId) || reg.crm[0].id;
   const peopleId = reg.people.some(p => p.id === b.peopleId) ? b.peopleId : reg.people[0].id;   // the open People branch
-  const out = {...reg, crmId, peopleId, openCrm:!!b.openCrm, session:b.session || null, accounts:b.accounts || []};
+  const out = {...reg, crmId, peopleId, openCrm:!!b.openCrm, session:b.session || null, accounts:b.accounts || [], timeZones:b.timeZones || {}};
   // Migrated (or nothing saved yet): saved now, so every browser and tab reads the same.
   if(!readStore(ORG_KEY)){ try { DB.setItem(ORG_KEY, JSON.stringify(Object.fromEntries(Object.entries(out).filter(([k]) => !BROWSER_FIELDS.includes(k))))); DB.flush(); } catch(e){ console.warn('HOF ERP: could not save the organization', e); } }
   return out;
