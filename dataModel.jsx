@@ -224,12 +224,14 @@ const migrateDataModel = (d) => {
   const pipelines = (d.pipelines || []).filter(p => has(p.objectId) && !REMOVED_PIPELINE_IDS.includes(p.id))
     .map(p => p.objectId === 'contacts' && p.source === 'property' ? {...p, stages:p.stages.filter(st => !REMOVED_CONTACT_STAGES.includes(st.value))} : p)
     // Every stage has a Stage Type; an "Outcome stage" saved before takes its type from its name.
-    .map(p => ({...p, stages:(p.stages || []).map(withStageType)}));
+    .map(p => ({...p, stages:(p.stages || []).map(withStageType)}))
+    // Postponed became an open stage (2026-11-11), once: a Deal pipeline's Postponed saved as Undecided is Open.
+    .map(p => d.postponedOpen || p.objectId !== 'deals' ? p : {...p, stages:p.stages.map(st => /^postponed$/i.test(st.label || '') && st.type === 'undecided' ? {...st, type:'open'} : st)});
   // Customer Profile forms (Settings → Customer Profile): saved ones as saved, shipped ones added.
   // The assessment templates of the discarded scoring system go.
   const profileForms = withSeedProfileForms(d.profileForms);
   const {assessmentTemplates, ...rest} = d;
-  return {...rest, objects, associations, properties, pipelines, profileForms, propertySet:PROPERTY_SET_VERSION, propertiesObjectId: has(d.propertiesObjectId) ? d.propertiesObjectId : null};
+  return {...rest, objects, associations, properties, pipelines, profileForms, postponedOpen:true, propertySet:PROPERTY_SET_VERSION, propertiesObjectId: has(d.propertiesObjectId) ? d.propertiesObjectId : null};
 };
 
 /* Pipelines — one store for every Object's pipelines. Contacts' Types of Contact is the existing
@@ -239,9 +241,9 @@ const migrateDataModel = (d) => {
 const stageList = (labels) => labels.map(label => ({id:label.toLowerCase().replace(/[^a-z0-9]+/g, '-'), label}));
 // Each stage's Stage Type (board.jsx): Open unless given. Closed stages sit outside the ordered stages.
 const typed = (types) => (s) => ({...s, type:types[s.id] || 'open'});
-// Deal Won, Postponed and Deal Lost close a deal: Won, Undecided, Lost.
+// Deal Won and Deal Lost close a deal: Won, Lost. Postponed is an open stage (left out of the forecast, dashboard.jsx).
 const US_NIW_STAGES = stageList(['Qualified Client', 'CCL Sent', 'Last Month Rollover', 'Expected Sale', 'Payment Made', 'Deal Won', 'Postponed', 'Deal Lost'])
-  .map(typed({'deal-won':'won', 'postponed':'undecided', 'deal-lost':'lost'}));
+  .map(typed({'deal-won':'won', 'deal-lost':'lost'}));
 /* Customer service pipelines, stage names exactly as given. The closing stages are closed types,
    as Deal Won / Deal Lost on deals. */
 const CANADA_AUS_SERVICE_STAGES = stageList(['Initial Welcome Call', 'ECA', 'IELTS', 'Spouse Sponsorship', 'Express Entry & PNP', 'NOI/ITA',

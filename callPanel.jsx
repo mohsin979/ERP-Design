@@ -372,10 +372,10 @@ function CallPanel({contact, onEnded, onClose, onRunProfile}){
             <>
               <button onClick={onClose} style={{padding:'8px 14px', borderRadius:8, border:`1px solid ${T.borderStrong}`, background:'#fff', fontSize:13, cursor:'pointer'}}>Close</button>
               <div style={{flex:1}}/>
-              <button onClick={()=>onRunProfile(record)} disabled={!segments.length && !notes.trim()}
+              {onRunProfile && <button onClick={()=>onRunProfile(record)} disabled={!segments.length && !notes.trim()}
                 style={{padding:'8px 16px', borderRadius:8, border:'none', background: segments.length || notes.trim() ? T.black : T.gray400, color:'#fff', fontSize:13, fontWeight:600, cursor: segments.length || notes.trim() ? 'pointer' : 'default'}}>
                 Run Customer Profile
-              </button>
+              </button>}
             </>
           )}
         </div>

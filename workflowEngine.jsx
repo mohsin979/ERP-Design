@@ -44,7 +44,7 @@ const pipelineById2 = (data, id) => (data.pipelines || []).find(p => p.id === id
 const orderedStages = (pipeline) => ((pipeline && pipeline.stages) || []).filter(s => !isClosedStage(s));
 const stageLabelOf = (data, pipelineId, stageId) => (((pipelineById2(data, pipelineId) || {}).stages || []).find(s => s.id === stageId) || {}).label || '';
 // 'forward' | 'backward' | null (same stage, or either end outside the ordered stages). Entering a
-// closed stage (Won, Lost, Undecided — e.g. Deal Won, Deal Lost, Postponed) from any other stage moves forward.
+// closed stage (Won, Lost, Undecided — e.g. Deal Won, Deal Lost) from any other stage moves forward.
 const stageMoveDirection = (pipeline, from, to) => {
   if(from && to && from !== to && ((pipeline && pipeline.stages) || []).some(s => s.id === to && isClosedStage(s))) return 'forward';
   const ids = orderedStages(pipeline).map(s => s.id);
@@ -269,8 +269,9 @@ const ACCOUNTING_TRIGGER_FIELDS = [
 ];
 // A record's payment terms (Accounting), and one property's values across them (any may match).
 // Its one Payment Terms (accounting.jsx, primaryTermsOf) — archived ones don't count.
-const recordPaymentTerms = (rec) => { if(!rec) return [];
-  const p = primaryTermsOf((WF_LIVE.accounting || []).filter(s => s.object === recordObjectOf(rec.id) && String(s.recordId) === String(rec.id))); return p ? [p] : []; };
+// A customer with a deal reads its deal's (accounting.jsx termsHolderOf).
+const recordPaymentTerms = (rec) => { if(!rec) return []; const h = termsHolderOf(recordObjectOf(rec.id), rec);
+  const p = primaryTermsOf((WF_LIVE.accounting || []).filter(s => s.object === h.object && String(s.recordId) === String(h.id))); return p ? [p] : []; };
 const accountingValues = (rec, f) => f.level === 'installments' ? f.readAll(recordPaymentTerms(rec))
   : [f.readRecord(recordPaymentTerms(rec))];
 /* The fields a property trigger can watch in a scope (`prop:<key>`, as the record's own are). */
@@ -611,6 +612,8 @@ const withSeeded = (saved, defaults, seeded) => !saved ? defaults
 /* System-generated values, set on the one path records change (setDealsTracked): a deal's Actual
    Close Date — when it reaches a closed stage (Stage Type Won, Lost or Undecided), cleared if it
    moves back to an Open one — and its Deal Source; a customer's Customer Source and Customer Since. */
+// A stage's name, as the pipeline names it now (kept on the record's history when it moves).
+const stageLabelIn = (data, pipelineId, stageId) => { const pl = (data.pipelines || []).find(x => x.id === pipelineId), st = pl && pl.stages.find(s => s.id === stageId); return st ? st.label : ''; };
 const isClosedStageIn = (data, pipelineId, stageId) => {
   const pl = (data.pipelines || []).find(x => x.id === pipelineId), st = pl && pl.stages.find(s => s.id === stageId);
   return !!(st && isClosedStage(st));
@@ -619,9 +622,11 @@ function recordSystemValues(data, p, d, now){
   const obj = recordObjectOf(d.id);
   if(obj === 'deals'){
     let n = !p && d.source == null ? {...d, source:'Manual'} : d;
-    const closed = isClosedStageIn(data, n.pipeline, n.stage);
-    if(closed && (!n.actualCloseDate || (p && (p.stage !== n.stage || p.pipeline !== n.pipeline)))) n = {...n, actualCloseDate:dealStamp(new Date(now))};
-    else if(!closed && n.actualCloseDate) n = {...n, actualCloseDate:''};
+    /* Only on the deal's own move (or its creation), never because another record changed: set on
+       entering a closed stage, cleared on moving to an open one. */
+    const moved = !p || p.stage !== n.stage || p.pipeline !== n.pipeline, closed = isClosedStageIn(data, n.pipeline, n.stage);
+    if(moved && closed) n = {...n, actualCloseDate:dealStamp(new Date(now))};
+    else if(moved && n.actualCloseDate) n = {...n, actualCloseDate:''};
     return n;
   }
   if(obj === 'customers' && !p){
@@ -873,6 +878,9 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
       return {...d0, stage:p.stage, pipeline:p.pipeline};
     });
     const now = Date.now(), changes = [], propChanges = [];
+    // Who made this change, for its history: the workflow (named) or the person signed in.
+    const changedBy = () => { const wf = chain && chain.workflowId && getWorkflow(chain.workflowId);
+      return wf ? {source:'team', by:`${wf.name || workflowTitle(dataRef.current, wf)} (workflow)`, viaWorkflow:wf.id} : {source:'you', by:CURRENT_USER.name}; };
     // Each record's own Object's properties.
     const propsCache = {}, allPropsOf = (d) => propsCache[recordObjectOf(d.id)] || (propsCache[recordObjectOf(d.id)] = objectProperties(dataRef.current, recordObjectOf(d.id)));
     const created = [], updated = [];
@@ -885,8 +893,10 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
       // Property changes on an existing deal (a new deal isn't a property change); each property's
       // last change time is kept on the deal (`changedAt`) for Is changed / Is not changed.
       const changedKeys = p ? props.filter(pr => !same(p[pr.key], d0[pr.key])).map(pr => pr.key) : [];
-      const d = p && (changedKeys.length || (p.changedAt && !d0.changedAt))
-        ? {...d0, changedAt:{...(p.changedAt || {}), ...(d0.changedAt || {}), ...Object.fromEntries(changedKeys.map(k => [k, now]))}} : d0;
+      // Each property keeps its latest stamp (a record written from an older copy can't take one back).
+      const latest = (a = {}, b = {}) => Object.fromEntries([...new Set([...Object.keys(a), ...Object.keys(b)])].map(k => [k, Math.max(Number(a[k]) || 0, Number(b[k]) || 0)]));
+      const d = p && (changedKeys.length || (p.changedAt && !d0.changedAt) || (d0.changedAt && d0.changedAt !== p.changedAt))
+        ? {...d0, changedAt:{...latest(p.changedAt, d0.changedAt), ...Object.fromEntries(changedKeys.map(k => [k, now]))}} : d0;
       changedKeys.forEach(k => propChanges.push({deal:d, property:k, from:p[k], to:d[k]}));
       // Record events: a new deal; any change to an existing one (stage moves too) — one per save.
       if(!p) created.push(d); else if(allProps.some(pr => !same(p[pr.key], d[pr.key]))) updated.push(d);
@@ -914,10 +924,17 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
       // A new owner: the record's User Properties (its owner's) change with it.
       const before = userPropertiesOf(dataRef.current, c.from) || {}, after = userPropertiesOf(dataRef.current, c.to) || {};
       userPropertyFields(dataRef.current).filter(f => !samePropertyValue(before[f.key], after[f.key])).forEach(f => emitScoped(c.deal.id, 'owner', f.key, before[f.key], after[f.key], chain));
-      const wf = chain && chain.workflowId && getWorkflow(chain.workflowId);
-      addActivity(c.deal.id, {id:wfNewId('own'), ...recordKey(c.deal.id), type:'ownerChange', at:new Date(now), from:c.from || null, to:c.to || null,
-        ...(wf ? {source:'team', by:`${wf.name || workflowTitle(dataRef.current, wf)} (workflow)`, viaWorkflow:wf.id} : {source:'you', by:null})});
+      addActivity(c.deal.id, {id:wfNewId('own'), ...recordKey(c.deal.id), type:'ownerChange', at:new Date(now), from:c.from || null, to:c.to || null, ...changedBy()});
     });
+    /* Stage history: every move of an existing record (a person's, or a workflow's — named), with
+       the stages' names as they were. */
+    changes.filter(c => c.prev).forEach(c => addActivity(c.next.id, {id:wfNewId('stg'), ...recordKey(c.next.id), type:'stageChange', at:new Date(now),
+      from:{pipeline:c.prev.pipeline, stage:c.prev.stage, label:stageLabelIn(dataRef.current, c.prev.pipeline, c.prev.stage)},
+      to:{pipeline:c.next.pipeline, stage:c.next.stage, label:stageLabelIn(dataRef.current, c.next.pipeline, c.next.stage)}, ...changedBy()}));
+    // A new customer: noted on its deals and its contact ("Customer created").
+    created.filter(d => recordObjectOf(d.id) === 'customers').forEach(d =>
+      [...(d.dealIds || []), ...(d.contactId != null ? [String(d.contactId)] : [])].filter(id => next.some(r => r.id === id)).forEach(id =>
+        addActivity(id, {id:wfNewId('cus'), ...recordKey(id), type:'customerCreated', at:new Date(now), customerId:d.id, customerName:d.name || '', ...changedBy()})));
     created.forEach(d => emit({type:'recordCreated', recordId:d.id, pipelineId:d.pipeline, attrs:{}}, chain));
     updated.forEach(d => emit({type:'recordUpdated', recordId:d.id, pipelineId:d.pipeline, attrs:{}}, chain));
     emitAssociatedCreated(prev, next, created, chain);
@@ -1369,9 +1386,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
     const contactId = from === 'contacts' ? Number(rec.id) : rec.contactId ?? null;
     const created = storePropertyValue('Date & time', new Date());
     if(object === 'customers'){
-      // A deal has one customer: one that already has it isn't given a second (no duplicates).
-      const existing = from === 'deals' && dealCustomer(rec.id);
-      if(existing) return `${typeSingular('customers', 'Customer')} already exists: ${existing.name || ''} · linked to this ${typeNoun('deals', 'deal')} (no duplicate created)`;
+      // A deal can have several customers (as Create Customer by hand): each run makes one.
       /* Linked to the deal it came from (Deals ↔ Customers) and to the contact (Contacts → Customers),
          in the service pipeline for the deal's pipeline (CUSTOMER_PIPELINE_FOR_DEAL), with its details. */
       const forDeal = from === 'deals' && !values.pipeline ? pipes.find(x => x.id === CUSTOMER_PIPELINE_FOR_DEAL[rec.pipeline]) : null;
@@ -1559,10 +1574,8 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
         if(!objects.length) return {status:'skipped', result: associatedToCreate(c).length ? 'Creating that record isn’t available yet' : 'No record to create'};
         // Enforce Rules: created at once, named after the record, with its owner; Track: the owner is asked to.
         if(!prompt) return {status:'done', result:objects.map(o => createLinkedRecord(deal, o, {name:deal.name || '', owner:deal.owner || ''}, run)).join(' · ')};
-        // A deal that already has its customer isn't asked for another.
-        const needed = objects.filter(o => !(o === 'customers' && recordObjectOf(deal.id) === 'deals' && dealCustomer(deal.id)));
-        if(!needed.length) return {status:'done', result:`Customer already exists · ${dealCustomer(deal.id).name || ''}`};
-        const ids = needed.map(o => createPrompt(run, step, deal, 'createRecord', `Create ${objectName(data, o).replace(/s$/, '')}`, {object:o, values:{}}));
+        // A deal can have several customers, so one that has a customer is still asked (as by hand).
+        const ids = objects.map(o => createPrompt(run, step, deal, 'createRecord', `Create ${objectName(data, o).replace(/s$/, '')}`, {object:o, values:{}}));
         return prompted(ids, owner);
       }
       // Prompt to Clear Property Value (Track Violations): the owner is asked to clear them.
@@ -2167,11 +2180,14 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
       });
     }
   }, [profiles, profileFacts, accounting]);
-  /* Create Customer (a violation on a deal): done once the deal has its customer — created from the
-     violation, from the deal's menu or anywhere else — so it's checked whenever records change. */
+  /* Create Customer (a violation on a deal): done once a customer is created for the deal after it
+     was raised — from the violation, from the deal's menu or anywhere else (a deal can have several,
+     so one it already had doesn't count) — checked whenever records change. */
+  const customerSince = (dealId, since) => dealsRef.current.find(r => recordObjectOf(r.id) === 'customers' && (r.dealIds || []).includes(dealId)
+    && (toTime(r.createdAt) || toTime(r.created) || 0) >= (toTime(since) || 0)) || null;
   React.useEffect(() => {
     esRef.current.prompts.filter(p => p.status === 'pending' && p.kind === 'createRecord' && (p.payload || {}).object === 'customers' && recordObjectOf(p.dealId) === 'deals')
-      .forEach(p => { const c = dealCustomer(p.dealId); if(c) resolvePrompt(p.id, 'done', `Customer created · ${c.name || ''} linked to the deal`); });
+      .forEach(p => { const c = customerSince(p.dealId, p.createdAt); if(c) resolvePrompt(p.id, 'done', `Customer created · ${c.name || ''} linked to the deal`); });
   }, [records]);
   /* A user's own properties changed (Settings → Users: Country, Language, Designation): the
      records they own see their User Properties change — evaluated like any owner-scope change. */

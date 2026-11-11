@@ -35,7 +35,7 @@ const associatedFeedRows = (hub, object, records) => records.flatMap(r =>
 const activityDateValue = (d) => d ? new Date(d).toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'}) : '';
 // Activity types (File change: listed for when file activity exists).
 const ACTIVITY_TYPE_VALUES = ['Email', 'Call', 'Meeting', 'Task', 'Note', 'File', 'File deleted', 'Quote', 'Owner change', 'Workflow'];
-const ACTIVITY_TYPE_LABEL = {email:'Email', call:'Call', meeting:'Meeting', task:'Task', note:'Note', file:'File', fileChange:'File deleted', quote:'Quote', ownerChange:'Owner change', workflow:'Workflow'};
+const ACTIVITY_TYPE_LABEL = {email:'Email', call:'Call', meeting:'Meeting', task:'Task', note:'Note', file:'File', fileChange:'File deleted', quote:'Quote', ownerChange:'Owner change', stageChange:'Stage change', customerCreated:'Customer created', taskReassigned:'Task reassigned', workflow:'Workflow'};
 // An activity always has a type and a date, so no Is empty / Is not empty.
 const ACTIVITY_TYPE_OPS = ['is', 'isNot', 'isAnyOf'], ACTIVITY_DATE_OPS = ['is', 'isNot', 'isBefore', 'isAfter', 'isBetween'];
 /* The filters a tab offers: Activity Type (Activity tab) and Activity Date. */
@@ -54,7 +54,8 @@ function activityFilterSchema(tabId){
 function activityFilterRows(entries){
   return entries.flatMap(({acts}) => (acts || []).map(a => ({id:a.id, _act:a,
     type:ACTIVITY_TYPE_LABEL[a.type] || (ACTIVITY_TYPES[a.type] || {}).label || a.type, date:activityDateValue(a.at),
-    text:[a.title, a.body, a.outcome, a.notes, a.name, a.fileName].filter(Boolean).join(' ')})));
+    // Searched as the words shown (a rich note's or email's markup isn't matched).
+    text:[a.title, a.body && richTextPlain(a.body), a.outcome, a.notes && richTextPlain(a.notes), a.name, a.fileName].filter(Boolean).join(' ')})));
 }
 
 /* The second navigation level (Emails, Meetings): smaller pills under the toolbar — what the

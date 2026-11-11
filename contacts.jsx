@@ -309,8 +309,11 @@ function filterRowMatches(row, c, props){
   if(!meta || !op) return true;
   // An associated object's property: the record matches when any associated record does.
   if(meta.assoc && meta.field){
-    const inner = [{...meta, key:meta.field, assoc:undefined, field:undefined}];
-    return ((c._assoc || {})[meta.assoc] || []).some(r => filterRowMatches({...row, prop:meta.field}, r, inner));
+    // Not narrowing until it has its value; a record with none associated reads as one with the property empty.
+    const value = op.values === 'multi' ? (row.values || []) : row.value;
+    if(op.values === 'multi' ? !value.length : op.values === 1 && (value === '' || value == null)) return true;
+    const inner = [{...meta, key:meta.field, assoc:undefined, field:undefined}], list = (c._assoc || {})[meta.assoc] || [];
+    return (list.length ? list : [{}]).some(r => filterRowMatches({...row, prop:meta.field}, r, inner));
   }
 
   // Customer / Accounting Properties: read from the record's Customer Profile or payment terms.
@@ -919,8 +922,9 @@ function DeleteConfirmModal({contactName, note, noun = 'Contact', paid, onCancel
   );
 }
 
+/* `resetKey`: what the rows are chosen by (filters, view) — a change starts again at page 1. */
 function ContactsDataGrid({rows, columnOrder, setColumnOrder, sort, setSort, search, actions, onOpenContact,
-                           frozenLeft=0, frozenRight=0, actionsFrozen=true, rowsPerPage=25}){
+                           frozenLeft=0, frozenRight=0, actionsFrozen=true, rowsPerPage=25, resetKey}){
   const {propByKey, colWidth:baseColWidth, renderCell, renderActions, noun, nounPlural, searchKeys, selectable, fillWidth, onRowReorder,
          pinGutter = true, paginate = true, ordered = false, bulkActions} = useRecordSchema();
   const plural = nounPlural || `${noun}s`;
@@ -1049,9 +1053,13 @@ function ContactsDataGrid({rows, columnOrder, setColumnOrder, sort, setSort, sea
   const sortedRows = React.useMemo(()=>{
     if (!sort || ordered) return searched;
     const dir = sort.dir === 'asc' ? 1 : -1;
-    // Numeric values (e.g. a Deal's Total Amount) sort as numbers; everything else as text.
-    return searched.slice().sort((a,b)=> (typeof a[sort.key] === 'number' && typeof b[sort.key] === 'number'
-      ? a[sort.key] - b[sort.key] : String(formatValue(a[sort.key])||'').localeCompare(String(formatValue(b[sort.key])||''))) * dir);
+    // Numbers sort as numbers, dates by date (stored as "Sep 8, 2026", with or without a time); everything else as text.
+    const time = (v) => v instanceof Date ? v.getTime() : typeof v === 'string' && /^([A-Z][a-z]{2} \d{1,2}, \d{4}|\d{4}-\d{2}-\d{2})/.test(v) ? Date.parse(v.replace(' · ', ' ')) : NaN;
+    return searched.slice().sort((a,b)=> { const x = a[sort.key], y = b[sort.key];
+      if(typeof x === 'number' && typeof y === 'number') return (x - y) * dir;
+      const tx = time(x), ty = time(y);
+      if(!isNaN(tx) || !isNaN(ty)) return ((isNaN(tx) ? -Infinity : tx) - (isNaN(ty) ? -Infinity : ty)) * dir;
+      return String(formatValue(x)||'').localeCompare(String(formatValue(y)||'')) * dir; });
   }, [searched, sort]);
 
   // Ticked rows that are gone (deleted, or filtered out of the table) aren't selected any more.
@@ -1064,7 +1072,9 @@ function ContactsDataGrid({rows, columnOrder, setColumnOrder, sort, setSort, sea
   const sortIndicator = (key) => sort && sort.key === key ? (sort.dir === 'asc' ? ' ↑' : ' ↓') : '';
 
   const [page, setPage] = React.useState(1);
-  React.useEffect(()=>{ setPage(1); }, [search, sort, rows.length, rowsPerPage]);
+  React.useEffect(()=>{ setPage(1); }, [search, sort, rowsPerPage, resetKey]);
+  // A row added or deleted keeps the page shown — unless it no longer exists.
+  React.useEffect(()=>{ setPage(p => Math.min(p, Math.max(1, Math.ceil(sortedRows.length / rowsPerPage)))); }, [sortedRows.length, rowsPerPage]);
   /* A violation card chose a record (Violations panel): the page it's on is shown and its row
      pointed out, beside the panel. */
   const engineCtx = useWorkflowEngineCtx();
@@ -1823,6 +1833,7 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
   // The first view is the default view, shared with everyone in the team/company.
   const [views, setViews] = usePersistedState('views:contacts', ()=>[makeView('v1', 'All contacts', {isDefault:true})]);   // saved (store.jsx)
   const [activeViewId, setActiveViewId] = React.useState('v1');
+  const [deletingView, setDeletingView] = React.useState(null);   // a saved view asked to be deleted
   const [allViewsOpen, setAllViewsOpen] = React.useState(false);
   const [confirmOverwrite, setConfirmOverwrite] = React.useState(false);
   const [showSaveAsCopy, setShowSaveAsCopy] = React.useState(false);
@@ -1927,7 +1938,7 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
     onDelete:  (c) => setPendingDelete(c),
     onEnrich:  (c) => setEnrichFor(c),
     onCopied:  showToast,
-    onCall:    (c) => setCallFor(c.id),
+    onCall:    (c) => startCallFor(c.id),
     // Edit Contact Owner: the owner modal (the change is recorded as an owner-change activity).
     onOwner:   (c) => setChangingOwner(recordOf(c.id)),
     /* Create Deal opens Create Deal for the contact; Create Customer, a new customer linked to the
@@ -1971,12 +1982,12 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
   };
   /* The Table's row menu also carries the activity actions. Call opens the call interface;
      the others are not defined yet and open the same placeholder the Board card's icons do. */
-  const tableRowActions = {...contactActions, onActivity: (title, c) => title === 'Call' ? setCallFor(c.id) : setActivityStub(title)};
+  const tableRowActions = {...contactActions, onActivity: (title, c) => title === 'Call' ? startCallFor(c.id) : setActivityStub(title)};
   /* Tools in the ⋯ menu: Call opens the call window; Task and Note open the contact on that tab
      with its form; File and Quote, on the Files and Quotes tabs. Email and Meeting aren't defined
      yet (placeholder), as everywhere else. */
   const contactToolAction = (key, c) => {
-    if(key === 'call') return setCallFor(c.id);
+    if(key === 'call') return startCallFor(c.id);
     // Email: the composer; Quote: a new quotation for the contact (recordHub.jsx).
     if(key === 'email' && hub) return hub.composeEmail({object:'contacts', id:c.id});
     if(key === 'quote' && hub) return hub.newQuote({object:'contacts', id:c.id});
@@ -1987,17 +1998,21 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
   /* A finished call becomes a Call activity carrying its transcript, and counts as the
      contact's latest touchpoint. Sales Notes taken during the call are saved as a Note on the
      contact at the same moment, linked to the call. */
+  // One call at a time: another contact's call can't start while a call's panel is open (it would be saved on the wrong contact).
+  const startCallFor = (id) => { const c = contacts.find(x => x.id === id);
+    if(!c || !String(c.phone || '').trim()) return showToast('No phone number to call');
+    setCallFor(cur => { if(cur != null && cur !== id){ showToast('Finish the current call first'); return cur; } return id; }); };
   const endCall = (contactId, {startedAt, durationMs, segments, lang, notes = ''}) => {
     const id = `call-${contactId}-${Date.now()}`;
-    const activity = {id, contactId, type:'call', at:startedAt, source:'you', by:null, direction:'outbound',
+    const activity = {id, contactId, type:'call', at:startedAt, source:'you', by:CURRENT_USER.name, direction:'outbound',
       outcome:'Connected', logged:false,   // a live call from the app: read-only
       durationMin: Math.max(1, Math.round(durationMs / 60000)),
       body: segments.length ? `Live transcript · ${segments.length} lines` : 'No transcript captured',
       transcript: segments, notes, lang};
-    const note = notes ? {id:`note-${id}`, contactId, type:'note', at:new Date(startedAt.getTime() + durationMs), source:'you', by:null, body:notes, callId:id} : null;
+    const note = notes ? {id:`note-${id}`, contactId, type:'note', at:new Date(startedAt.getTime() + durationMs), source:'you', by:CURRENT_USER.name, body:notes, callId:id} : null;
     setActivities(m => ({...m, [contactId]: [...(note ? [note] : []), activity, ...(m[contactId] || [])]}));
     const today = todayLabel();
-    setContacts(cs => cs.map(c => c.id === contactId ? {...c, lastContacted:today, lastActivity:today} : c));
+    setContacts(cs => cs.map(c => c.id === contactId ? {...c, lastActivity:today} : c));   // Last Contacted follows the activity (App)
     return {id, contactId, startedAt, durationMs, segments, notes};
   };
 
@@ -2009,10 +2024,11 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
     setActivities(m => ({...m, [contactId]: (m[contactId] || []).map(a => a.id === id ? {...a, ...patch} : a)}));
   };
   const addActivity = (contactId, act) => {
-    const a = {id:`${act.type}-${contactId}-${Date.now()}-${Math.random().toString(36).slice(2,6)}`, contactId, at:new Date(), ...act};
+    // What a person adds carries their name (the history keeps who did it).
+    const a = {id:`${act.type}-${contactId}-${Date.now()}-${Math.random().toString(36).slice(2,6)}`, contactId, at:new Date(), ...act, ...(act.source === 'you' && !act.by ? {by:CURRENT_USER.name} : {})};
     setActivities(m => ({...m, [contactId]: [a, ...(m[contactId] || [])]}));
     const today = todayLabel();
-    setContacts(cs => cs.map(c => c.id === contactId ? {...c, lastActivity:today, ...(a.type === 'call' ? {lastContacted:today} : {})} : c));
+    setContacts(cs => cs.map(c => c.id === contactId ? {...c, lastActivity:today} : c));   // Last Contacted follows the activity (App)
   };
 
   /* Confirmed answers merge into the contact's shared facts; each selected template gets a
@@ -2037,12 +2053,7 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
     if(!prev) return;
     if(Object.keys(patch).every(k => (prev[k] || '') === (patch[k] || ''))) return;   // nothing changed
     contactsRef.current = contactsRef.current.map(c => c.id === id ? {...c, ...patch} : c);
-    if(patch.owner !== undefined && patch.owner !== prev.owner){
-      setActivities(m => ({...m, [id]: [
-        {id:`a${id}-${Date.now()}`, contactId:id, type:'ownerChange', at:new Date(), from:prev.owner || null, to:patch.owner || null, source:'you', by:null},   // user IDs
-        ...(m[id] || []),
-      ]}));
-    }
+    // An owner change is kept in the contact's history by the save itself (workflowEngine.jsx), once.
     setContacts(cs => cs.map(c => c.id === id ? {...c, ...patch} : c));
   };
 
@@ -2138,7 +2149,7 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
       <div style={{flex:1, minHeight:0, display:'flex', flexDirection:'column', position:'relative', overflow:'hidden'}}>
       {contactViolationMode && <ViolationPanel object="contacts" pipelines={[pipelineId]} onClose={()=>setContactViolationMode(false)}/>}
       {viewMode === 'table' ? (
-        <ContactsDataGrid rows={filteredContacts} columnOrder={columnOrder} setColumnOrder={setColumnOrder}
+        <ContactsDataGrid rows={filteredContacts} resetKey={`${activeViewId}:${JSON.stringify(filters)}`} columnOrder={columnOrder} setColumnOrder={setColumnOrder}
           frozenLeft={frozenLeft} frozenRight={frozenRight} actionsFrozen={actionsFrozen} rowsPerPage={rowsPerPage}
           sort={sort} setSort={setSort} search={search}
           actions={tableRowActions} onOpenContact={openContact}/>
@@ -2166,24 +2177,28 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
           onClose={()=>setAllViewsOpen(false)}
           onReorder={(from,to)=>setViews(vs=>{ const next=vs.slice(); const [m]=next.splice(from,1); next.splice(to,0,m); return next; })}
           onToggleHide={(id)=>persist(id, {hidden: !views.find(v=>v.id===id).hidden})}
-          onClone={(id)=>{ const v = views.find(x=>x.id===id); setViews(vs=>[...vs, makeView('v'+Date.now(), `${v.name} copy`, {columnOrder:v.columnOrder, sort:v.sort, viewMode:v.viewMode, search:v.search, filters:v.filters, cardSettings:v.cardSettings})]); }}
-          onDelete={(id)=>{
-            const next = views.filter(v=>v.id!==id);
-            const finalViews = next.length ? next : [makeView('v1','All contacts')];
-            setViews(finalViews);
-            if (activeViewId === id) setActiveViewId(finalViews[0].id);
-          }}
+          // A clone copies the whole view: columns, freezes, rows per page, sort, search, filters, its board and pipeline.
+          onClone={(id)=>{ const {id:_id, name, isDefault, hidden, ...rest} = views.find(x=>x.id===id); setViews(vs=>[...vs, makeView('v'+Date.now(), `${name} copy`, JSON.parse(JSON.stringify(rest)))]); }}
+          onDelete={(id)=>setDeletingView(id)}
           onRename={(id,name)=>persist(id, {name})}
           onPatchView={(id,patch)=>{ persist(id, patch); if(id===activeViewId){
             if(patch.viewMode!==undefined) setViewMode(patch.viewMode);
             if(patch.rowsPerPage!==undefined) setRowsPerPage(patch.rowsPerPage);
           }}}
-          onOpenTableSettings={(id)=>{ setActiveViewId(id); setTableSettingsDraft({
-            columnOrder, frozenLeft, frozenRight, actionsFrozen,
-          }); }}
+          // The chosen view's own table settings (the open view's as they stand).
+          onOpenTableSettings={(id)=>{ const v = views.find(x=>x.id===id) || {}; setTableSettingsDraft(id === activeViewId ? {columnOrder, frozenLeft, frozenRight, actionsFrozen}
+            : {columnOrder:v.columnOrder || columnOrder, frozenLeft:v.frozenLeft ?? 0, frozenRight:v.frozenRight ?? 0, actionsFrozen:v.actionsFrozen ?? true}); setActiveViewId(id); }}
           onOpenCardSettings={(id)=>{ setActiveViewId(id); setCardSettingsDraft(JSON.parse(JSON.stringify(id === activeViewId ? cardSettings : (views.find(v=>v.id===id).cardSettings || DEFAULT_CARD_SETTINGS())))); }}
           liveViewMode={viewMode} livePipelineId={pipelineId}/>
       )}
+
+      {/* Deleting a saved view: asked first. With none left, the default view comes back. */}
+      {deletingView && (() => { const v = views.find(x => x.id === deletingView);
+        return v ? <StModal title="Delete View" primary="Delete View" danger onCancel={()=>setDeletingView(null)}
+          onSubmit={()=>{ const next = views.filter(x => x.id !== v.id), finalViews = next.length ? next : [makeView('v1', 'All contacts', {isDefault:true})];
+            setViews(finalViews); if(activeViewId === v.id) setActiveViewId(finalViews[0].id); setDeletingView(null); }}>
+          <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>"{v.name}" will be deleted.</div>
+        </StModal> : null; })()}
 
       {tableSettingsDraft && (
         <TableSettingsModal draft={tableSettingsDraft} setDraft={setTableSettingsDraft}
@@ -2253,7 +2268,7 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
           sources:{own:activityFilterRows([{acts:common.acts, contact:dc}], dealData)},
           schemaFor:(tabId) => activityFilterSchema(tabId, dealData),
         } : null;
-        return <RecordAccessCtx.Provider value={{object:'contacts', record:dc}}><ContactDetail {...common} mode={detail.mode} actions={tableRowActions} activityViews={activityViews}
+        return <RecordAccessCtx.Provider value={{object:'contacts', record:dc}}><ContactDetail key={dc.id} {...common} mode={detail.mode} actions={tableRowActions} activityViews={activityViews}
           profiles={profiles[dc.id]} requestedTab={detail.tab}
           team={ownerOptions} onUpdateActivity={updateActivity} onAddActivity={addActivity}
           onReassignOwner={(id, owner)=>updateContact(id, {owner})}

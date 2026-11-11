@@ -271,7 +271,7 @@ const WORKSPACE_TEMPLATES = {
         ],
         pipelines:[
           {id:'lead-pipeline', label:'Lead Pipeline', objectId:'deals', source:'record',
-            stages:typedStages([['Qualified', 'open'], ['Contacted', 'open'], ['Expected Sales', 'open'], ['Won', 'won'], ['Postponed', 'undecided'], ['Lost', 'lost']])},
+            stages:typedStages([['Qualified', 'open'], ['Contacted', 'open'], ['Expected Sales', 'open'], ['Won', 'won'], ['Postponed', 'open'], ['Lost', 'lost']])},
           {id:'service', label:'Service', objectId:'customers', source:'record', stages:typedStages([['In Service', 'open'], ['Needs Attention', 'open'], ['Close', 'undecided']])},
         ],
         propertySet:PROPERTY_SET_VERSION, noFormProperties:true,

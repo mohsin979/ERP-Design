@@ -437,8 +437,10 @@ function CustomersModule({data, customers, setCustomers, activities, setActiviti
   const viewPipelines = (v) => v.mode === 'board' ? [v.pipelineId] : [...new Set(v.rows.map(r => (byId.get(r.id) || {}).pipeline).filter(Boolean))];
   /* Bulk Actions (bulkActions.jsx): edit as updateCustomer does; delete as the customer's Delete
      does (its activity goes; its contact and deals stay). */
+  // The Board's stage and pipeline moves too (as on Deals): one change, as a card dragged between stages.
   const customerBulk = useRecordBulk({object:'customers', data, records:customers,
     update:(ids, patch) => setCustomers(cs => cs.map(c => ids.includes(c.id) ? {...c, ...patch} : c)),
+    move:(ids, fn) => setCustomers(cs => cs.map(c => ids.includes(c.id) ? fn(c) : c)),
     remove:(ids) => {
       setCustomers(cs => cs.filter(c => !ids.includes(c.id)));
       setActivities(m => { const n = {...m}; ids.forEach(id => delete n[id]); return n; });
@@ -481,7 +483,7 @@ function CustomersModule({data, customers, setCustomers, activities, setActiviti
             const pipeline = pipelineOf(pipelineId) || pipelines[0];
             // The board shows the selected pipeline's customers; the filters and search still apply.
             const onBoard = filtered.map(r => byId.get(r.id)).filter(c => c && recordInPipeline(pipeline, c));
-            return <ContactBoard rows={onBoard} search={search} pipeline={pipeline} searchKeys={['name', 'email']} noun="customer"
+            return <ContactBoard rows={onBoard} search={search} pipeline={pipeline} searchKeys={['name', 'email']} noun="customer" bulk={customerBulk.board(pipeline)}
               onChangeStage={(id, stageId)=>{
                 const c0 = customers.find(c => c.id === id);
                 if(c0 && !stageMoveCan('customers', c0)) return hub && hub.toast("You can't move this customer between stages");
@@ -538,7 +540,7 @@ function CustomersModule({data, customers, setCustomers, activities, setActiviti
           sources:{own:activityFilterRows([{acts}], data)},
           schemaFor:(tabId) => activityFilterSchema(tabId, data),
         };
-        return <RecordAccessCtx.Provider value={{object:'customers', record:dc}}><CustomerDetail mode={detail.mode} customer={dc} view={view} acts={acts}
+        return <RecordAccessCtx.Provider value={{object:'customers', record:dc}}><CustomerDetail key={dc.id} mode={detail.mode} customer={dc} view={view} acts={acts}
           contact={contact} deals={cdeals} data={data} profiles={profileStore ? profileStore.profiles[profileHolderId('customers', dc)] : undefined}
           props={props} settings={settings} menu={menu(dc, ()=>setPanelDraft(JSON.parse(JSON.stringify(settings))))} requestedTab={detail.tab}
           team={owners.map(u => u.name)} activityViews={activityViews}

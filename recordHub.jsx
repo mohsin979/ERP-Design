@@ -87,11 +87,19 @@ function RecordHubProvider({value, children}){
   const showToast = (m) => { setToast(m); clearTimeout(toastTimer.current); toastTimer.current = setTimeout(()=>setToast(null), 2200); };
   const hub = {...value,
     composeEmail:(opts) => setComposer(opts || {}),
-    startCall:(target) => setCall(target),
+    // One call at a time: another can't start while a call's panel is open (it would be saved on the wrong record).
+    // …and only to a record with a phone number (as Tools → Calls).
+    startCall:(target) => { const person = target && hubRecordPerson(hub, target.object, target.id);
+      if(!person || !String(person.phone || '').trim()) return showToast('No phone number to call');
+      setCall(c => { if(c && (c.object !== target.object || String(c.id) !== String(target.id))){ showToast('Finish the current call first'); return c; } return target; }); },
     newQuote:(target) => setQuote({mode:'new', ...(target || {})}),
     editQuote:(id) => setQuote({mode:'edit', id}),
     toast:showToast,
-    removeActivity:(actId) => { const f = hubFindActivity(value, actId); if(f) value.remove(f.object, f.recordId, actId); },
+    /* A deleted call or meeting keeps its notes: they stay on the record, no longer linked to it. */
+    removeActivity:(actId) => { const f = hubFindActivity(value, actId); if(!f) return;
+      ((value.activities[f.object] || {})[f.recordId] || []).filter(n => n.type === 'note' && (n.callId === actId || n.meetingId === actId))
+        .forEach(n => value.update(f.object, f.recordId, n.id, n.callId === actId ? {callId:null} : {meetingId:null}));
+      value.remove(f.object, f.recordId, actId); },
   };
   const callPerson = call && hubRecordPerson(hub, call.object, call.id);
   return (
@@ -101,10 +109,10 @@ function RecordHubProvider({value, children}){
       {composer && <EmailComposer {...composer} placement="fixed" onClose={()=>setComposer(null)}/>}
       {call && callPerson && <CallPanel contact={{id:call.id, ...callPerson}} onClose={()=>setCall(null)}
         onEnded={({startedAt, durationMs, segments, lang, notes = ''})=>{
-          const a = hub.add(call.object, call.id, {type:'call', at:startedAt, source:'you', by:null, direction:'outbound', outcome:'Connected', logged:false,
+          const a = hub.add(call.object, call.id, {type:'call', at:startedAt, source:'you', by:CURRENT_USER.name, direction:'outbound', outcome:'Connected', logged:false,
             durationMin:Math.max(1, Math.round(durationMs / 60000)), body: segments.length ? `Live transcript · ${segments.length} lines` : 'No transcript captured',
             transcript:segments, notes, lang});
-          if(notes) hub.add(call.object, call.id, {type:'note', at:new Date(startedAt.getTime() + durationMs), source:'you', by:null, body:notes, callId:a && a.id});
+          if(notes) hub.add(call.object, call.id, {type:'note', at:new Date(startedAt.getTime() + durationMs), source:'you', by:CURRENT_USER.name, body:notes, callId:a && a.id});
           return {id:a && a.id, startedAt, durationMs, segments, notes};
         }}/>}
       {/* Opened from a list's quick actions: the creation panel at the CRM's right edge. */}

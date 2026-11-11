@@ -9,7 +9,8 @@
    email opens the composer. Quotes have their own page (quotes.jsx). */
 
 const dateKey = (d) => { if(!d) return ''; const x = new Date(d); return `${ymdOf(x)}T${String(x.getHours()).padStart(2, '0')}:${String(x.getMinutes()).padStart(2, '0')}`; };
-const byName = (a) => a.source === 'you' ? CURRENT_USER.name : a.source === 'client' ? 'Customer' : a.by || '';
+// Who did it: the person who added it (their stamped name), the client (named as the record's person), or the team member.
+const byName = (a, record) => a.source === 'you' ? a.by || CURRENT_USER.name : a.source === 'client' ? (record && record.name) || 'Client' : a.by || '';
 const viewFilter = (id, name, prop, value) => ({id, name, filters:{nodes:[{id:`f-${id}`, kind:'row', joinOp:'AND', prop, op:'is', value, value2:'', values:[]}]}, sort:{key:'date', dir:'desc'}});
 const isUpcoming = (a) => a.status === 'scheduled' && new Date(a.scheduledFor || a.at).getTime() > Date.now();
 
@@ -104,7 +105,7 @@ function ToolActivityPage({pageId}){
   const refOf = (e) => ({object:e.object, recordId:e.recordId, actId:e.act.id});
   // The open item, read fresh from its record each time (so edits and new items show at once).
   const openEntry = panel && panel.ref ? {object:panel.ref.object, recordId:panel.ref.recordId, act:{id:panel.ref.actId}} : null;
-  const rows = entries.map(e => ({id:e.act.id, ...page.row(e.act), _e:e, record:e.record.name, object:HUB_NOUN[e.object], by:byName(e.act), date:dateKey(e.act.at)}));
+  const rows = entries.map(e => ({id:e.act.id, ...page.row(e.act), _e:e, record:e.record.name, object:HUB_NOUN[e.object], by:byName(e.act, e.record), date:dateKey(e.act.at)}));
   const columns = [page.first, {key:'record', label:'Record', width:200}, {key:'object', label:'Record Type', width:130}, ...page.columns,
     {key:'by', label:'By', width:160}, {key:'date', label:'Date', width:160}];
   const uniq = (k) => [...new Set(rows.map(r => r[k]).filter(Boolean))].sort();
@@ -398,7 +399,7 @@ function ListToolPage({pageId}){
   const [stub, setStub] = React.useState(null);
   const vis = useVisibility(hub, page.type);
   const entries = hubActivities(hub, page.type).filter(vis.keep);
-  const rows = entries.map(e => ({id:e.act.id, _e:e, ...page.fields(e.act), recordType:HUB_NOUN[e.object], by:byName(e.act),
+  const rows = entries.map(e => ({id:e.act.id, _e:e, ...page.fields(e.act), recordType:HUB_NOUN[e.object], by:byName(e.act, e.record),
     date:activityDateValue(page.when ? page.when(e.act) : e.act.at), text:[e.record.name, ...page.search(e.act)].filter(Boolean).join(' ')}));
   const schema = listFilterSchema(page, rows);
   const q = search.trim().toLowerCase();
@@ -562,7 +563,7 @@ function TasksBoardPage(){
   const [pipelineId, setPipelineId] = React.useState(DEFAULT_TASK_PIPELINE_ID);
   const pipeline = pipelines.find(p => p.id === pipelineId) || pipelines[0];
   const entries = hubActivities(hub, 'task').filter(vis.keep).filter(e => taskPipelineIdOf(e.act) === pipeline.id);
-  const rows = entries.map(e => ({id:e.act.id, _e:e, taskType:e.act.taskType || '', assignee:e.act.assignee || '', by:byName(e.act),
+  const rows = entries.map(e => ({id:e.act.id, _e:e, taskType:e.act.taskType || '', assignee:e.act.assignee || '', by:byName(e.act, e.record),
     due:e.act.due ? activityDateValue(e.act.due) : '', date:activityDateValue(e.act.at), text:[e.act.title, e.act.description, e.record.name, e.act.assignee].filter(Boolean).join(' ')}));
   const uniq = (k) => [...new Set(rows.map(r => r[k]).filter(Boolean))].sort();
   const schema = {properties:[], noun:'task', searchKeys:['text'], boards:false, selectable:false, cardSettings:false, associated:false,
@@ -572,7 +573,8 @@ function TasksBoardPage(){
     selectValues:{taskType:TASK_TYPES, assignee:uniq('assignee'), by:uniq('by')}};
   const q = search.trim().toLowerCase();
   const shown = applyFilters(rows.filter(r => byRecordFeed(r._e, feed) && (!q || r.text.toLowerCase().includes(q))), filters, schema.filterProps).map(r => r._e);
-  const openEntry = panel && panel.ref ? entries.find(e => e.act.id === panel.ref.actId) || null : null;
+  // The open task is looked up among all tasks: reassigned or moved to another pipeline, it's still there.
+  const openEntry = panel && panel.ref ? hubActivities(hub, 'task').find(e => e.act.id === panel.ref.actId) || null : null;
   const view = (r) => r && {...r, owner:userLabel(r.owner) || r.owner};
   return (
     <RecordSchema.Provider value={schema}>

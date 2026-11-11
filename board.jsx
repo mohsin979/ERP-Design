@@ -456,8 +456,8 @@ function BoardColumn({stage, contacts, activities, isDropTarget, columnRef, onSt
           </button>
           <MenuShell open={menuOpen} onClose={()=>setMenuOpen(false)} anchorRight width={210}>
             {/* Select All first, set apart: disabled once every card on screen in the column is
-                already selected. */}
-            <MenuItem label="Select All" disabled={allSelected} onClick={pick(()=>onSelectAll(ids))}/>
+                already selected, or when the column has none. */}
+            <MenuItem label="Select All" disabled={allSelected || !ids.length} onClick={pick(()=>onSelectAll(ids))}/>
             {bulk && menuDivider}
             {/* The stage's actions act on every record shown in it — the cards ticked have the
                 selection bar. Add Workflow isn't offered on the unmapped bucket: not a stage. */}

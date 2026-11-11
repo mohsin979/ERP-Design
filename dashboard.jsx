@@ -27,7 +27,8 @@
      Cash Invoiced    installments invoiced (their invoice date) — issuing isn't payment.
      Forecasted Cash  installments due in the period — expected, paid or not.
                       A part-paid installment counts what was paid on it; its balance the rest.
-                      Lost and Undecided (Postponed) deals' installments aren't counted.
+                      Lost and Postponed deals' installments aren't counted (Postponed: an open
+                      stage, known by its name).
      Stage Types      every record's stage has a Stage Type (board.jsx): Open, or closed — Won, Lost,
                       Undecided. Total Open: the records in an Open stage now. Total Closed and its
                       Won / Lost / Undecided: the records that reached a closed stage in the period
@@ -60,6 +61,8 @@ const dashIn = (t, [a, b]) => t >= a && t < b;
    invoices, installments (due), payments, closed deals, deals created, the client's replies. */
 const dashTime = (v) => { if(v == null || v === '') return null; if(typeof v === 'number') return v; const t = new Date(v).getTime(); return isNaN(t) ? null : t; };
 const dashDayTime = (ymd, hour) => ymd ? dashTime(`${ymd}T${String(hour).padStart(2, '0')}:00:00`) : null;
+// A deal in its pipeline's Postponed stage (an open stage the forecast leaves out).
+const dealPostponed = (d) => { const pl = STAGE_PIPELINES.find(p => p.id === d.pipeline), st = pl && pl.stages.find(x => x.id === d.stage); return !!st && /^postponed$/i.test(st.label || ''); };
 function dashBusinessData({deals = [], customers = [], contacts = [], accounting = [], activities = {}, users = [], now = new Date()}){
   const people = new Map();
   const person = (ownerId) => {
@@ -102,9 +105,9 @@ function dashBusinessData({deals = [], customers = [], contacts = [], accounting
   // Accounting: each installment invoiced, due and paid — the record's owner's.
   accounting.forEach(sched => {
     const p = person(ownerOf.get(String(sched.recordId))); if(!p) return;
-    // A Lost or Undecided (Postponed) deal's installments aren't expected cash: left out of the forecast.
+    // A Lost or Postponed deal's installments aren't expected cash: left out of the forecast.
     const deal = sched.object === 'deals' && dealById.get(sched.recordId);
-    const forecast = !deal || !['lost', 'undecided'].includes(recordStageType('deals', deal));
+    const forecast = !deal || (recordStageType('deals', deal) !== 'lost' && !dealPostponed(deal));
     (sched.installments || []).forEach(i => {
       const invoicedAt = dashDayTime(i.invoicedAt, 10), due = dashDayTime(i.dueDate, 9);
       /* Forecast: an installment whose rest moved to a balance installment counts only what was paid

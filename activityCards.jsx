@@ -328,9 +328,8 @@ function ActivityNoteItem({n, contact, canEdit, canDelete, onSave, onDelete}){
   const [text, setText] = React.useState('');
   const [confirm, setConfirm] = React.useState(false);
   const person = activityActor(n, contact);
-  const plain = (body) => String(body || '').replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>\s*<p[^>]*>/gi, '\n').replace(/<[^>]+>/g, '');
   const menu = [
-    ...(canEdit ? [{label:'Edit Note', icon:'edit', onClick:()=>{ setText(plain(n.body)); setEditing(true); }}] : []),
+    ...(canEdit ? [{label:'Edit Note', icon:'edit', onClick:()=>{ setText(n.body || ''); setEditing(true); }}] : []),
     ...(canDelete ? [{label:'Delete Note', icon:'trash', danger:true, onClick:()=>setConfirm(true)}] : []),
   ];
   return (
@@ -349,9 +348,10 @@ function ActivityNoteItem({n, contact, canEdit, canDelete, onSave, onDelete}){
       </div>
       {editing
         ? <div style={{display:'flex', flexDirection:'column', gap:8}}>
-            <textarea autoFocus value={text} onChange={e=>setText(e.target.value)} rows={3} aria-label="Note" style={{...fieldText, resize:'vertical', lineHeight:1.5}}/>
+            {/* Edited as written — its formatting kept (a rich-text note, as on the Notes tab). */}
+            <RichTextEditor value={text} onChange={setText} minHeight={90} ariaLabel="Note"/>
             <div style={{display:'flex', justifyContent:'flex-end', gap:8}}>
-              {saveBar(()=>setEditing(false), ()=>{ onSave(text.trim()); setEditing(false); }, !!text.trim() && text.trim() !== plain(n.body).trim())}
+              {saveBar(()=>setEditing(false), ()=>{ onSave(sanitizeRichText(text)); setEditing(false); }, !richIsEmpty(text) && text !== (n.body || ''))}
             </div>
           </div>
         : <RichTextView html={n.body} style={{fontSize:13, lineHeight:1.55, color:T.attioText}}/>}
@@ -481,12 +481,17 @@ function EmailDetail({a, contact, acts, onStub, onUpdate, across}){
 }
 
 function TaskDetail({a, contact, team, onUpdate, onStub, across}){
+  const hub = useRecordHub();
   const blank = () => ({title:a.title || '', description:a.description || '', pipelineId:taskPipelineIdOf(a), status:a.status, taskType:a.taskType, assignee:a.assignee, dueDate:taskDueParts(a).date, dueTimeOfDay:taskDueParts(a).time});
   const [editing, setEditing] = React.useState(false);
   const [d, setD] = React.useState(blank);
   const set = (p) => setD(x => ({...x, ...p}));
   const cancel = () => { setD(blank()); setEditing(false); };
-  const save = () => { const {dueDate, dueTimeOfDay, ...rest} = d; onUpdate(a.id, {...rest, ...taskDueValue(dueDate, dueTimeOfDay), title:d.title.trim(), description:d.description.trim()}); setEditing(false); };
+  const save = () => { const {dueDate, dueTimeOfDay, ...rest} = d; onUpdate(a.id, {...rest, ...taskDueValue(dueDate, dueTimeOfDay), title:d.title.trim(), description:d.description.trim()});
+    // A new assignee is kept in the record's history (Task reassigned: from → to).
+    if(hub && d.assignee !== a.assignee){ const [object, id] = a.customerId != null ? ['customers', a.customerId] : a.dealId != null ? ['deals', a.dealId] : ['contacts', a.contactId];
+      hub.add(object, id, {type:'taskReassigned', taskId:a.id, taskTitle:d.title.trim(), from:a.assignee || null, to:d.assignee || null, source:'you', by:CURRENT_USER.name}); }
+    setEditing(false); };
   const orig = blank();
   const dirty = Object.keys(d).some(k => (typeof d[k] === 'string' ? d[k].trim() : d[k]) !== orig[k]);
   return (
@@ -600,6 +605,8 @@ function MeetingDetail({a, contact, team, comments, onUpdate, onAdd, onStub, acr
         {editing && <Field label="Link"><input value={d.link} onChange={e=>set({link:e.target.value})} placeholder="Meeting link" style={fieldText}/></Field>}
         {!editing && personLed(across) && recordFields(across)}
         {!editing && <Field label="Time Stamp"><ReadValue>{fmtActStamp(a.at)}</ReadValue></Field>}
+        {!editing && a.durationMin > 0 && <Field label="Duration"><ReadValue>{`${a.durationMin} min`}</ReadValue></Field>}
+        {!editing && a.description && <Field label="Description"><ReadValue>{a.description}</ReadValue></Field>}
         {!editing && <Field label="Link">{a.link
           ? <div style={{paddingTop:7, fontSize:13, minWidth:0, overflowWrap:'anywhere'}}><a href={meetingHref(a.link)} target="_blank" rel="noopener noreferrer"
               style={{color:T.blue, textDecorationLine:'underline', textUnderlineOffset:2}}>{a.link}</a></div>
@@ -610,6 +617,17 @@ function MeetingDetail({a, contact, team, comments, onUpdate, onAdd, onStub, acr
   );
 }
 
+/* A stage move, a customer created from the record, or a task reassigned: what changed, read-only. */
+function HistoryChangeDetail({a, contact}){
+  const rows = a.type === 'stageChange' ? [['Previous stage', (a.from || {}).label], ['New stage', (a.to || {}).label]]
+    : a.type === 'customerCreated' ? [['Customer', a.customerName]]
+    : [['Task', a.taskTitle], ['Previous assignee', a.from], ['New assignee', a.to]];
+  return (
+    <DetailFrame head={activityHead(a, contact)}>
+      {stack(<>{rows.map(([label, value]) => <Field key={label} label={label}><ReadValue>{value || '—'}</ReadValue></Field>)}</>)}
+    </DetailFrame>
+  );
+}
 function OwnerChangeDetail({a, contact, team, onReassign}){
   const [editing, setEditing] = React.useState(false);
   const [owner, setOwner] = React.useState(contact.owner || null);
@@ -637,6 +655,7 @@ function ActivityDetail({a, contact, team, acts, onUpdate, onAdd, onStub, onReas
   if(a.type === 'task') return <TaskDetail a={a} contact={contact} team={team} onUpdate={onUpdate} onStub={onStub} across={across && across.hideType ? across : undefined}/>;
   if(a.type === 'note') return <NoteDetail a={a} contact={contact} calls={acts.filter(x => x.type === 'call' || x.type === 'meeting')} onUpdate={onUpdate} onStub={onStub} across={across}/>;
   if(a.type === 'ownerChange') return <OwnerChangeDetail a={a} contact={contact} team={team} onReassign={onReassign}/>;
+  if(['stageChange', 'customerCreated', 'taskReassigned'].includes(a.type)) return <HistoryChangeDetail a={a} contact={contact}/>;
   if(a.type === 'file') return <FileActivityDetail a={a} contact={contact} onStub={onStub}/>;
   if(a.type === 'fileChange') return <FileChangeDetail a={a} contact={contact}/>;
   if(a.type === 'quote') return <QuoteActivityDetail a={a} contact={contact}/>;
@@ -787,7 +806,9 @@ function NewScheduleMeeting({contact, team, onAdd, onDone}){
   const [m, setM] = React.useState({title:'', platform:null, date:ymdOf(new Date(Date.now() + 86400000)), time:'10:00', duration:'30 minutes', description:'', attendees:[]});
   const [organiser, setOrganiser] = useOwnerDefault(contact, team);
   const set = (p) => setM(x => ({...x, ...p}));
-  const ok = !!m.title.trim() && !!m.platform && !!m.date && !!m.time && !!organiser;
+  // A scheduled meeting is in the future (one that has happened is a Log Meeting).
+  const when = m.date && m.time ? taskDueValue(m.date, m.time).due : null, future = !!when && new Date(when).getTime() > Date.now();
+  const ok = !!m.title.trim() && !!m.platform && !!m.date && !!m.time && !!organiser && future;
   const save = () => {
     const at = taskDueValue(m.date, m.time).due, id = newId('meeting');
     onAdd({id, type:'meeting', logged:false, status:'scheduled', at, scheduledFor:at, title:m.title.trim(), platform:m.platform,
@@ -799,7 +820,8 @@ function NewScheduleMeeting({contact, team, onAdd, onDone}){
       <Field label="Title"><input autoFocus value={m.title} onChange={e=>set({title:e.target.value})} placeholder="Meeting title" style={fieldText}/></Field>
       <Field label="Platform"><Select value={m.platform} options={MEETING_PLATFORMS} placeholder="Select platform" onChange={v=>set({platform:v})}/></Field>
       <Field label="Date"><DateField required value={m.date} onChange={v=>set({date:v})} ariaLabel="Meeting date"/></Field>
-      <Field label="Time"><TimeField required value={m.time} onChange={v=>set({time:v})} ariaLabel="Meeting time"/></Field>
+      <Field label="Time"><TimeField required value={m.time} onChange={v=>set({time:v})} ariaLabel="Meeting time"/>
+        {when && !future && <div style={{fontSize:12, color:T.red, marginTop:4}}>Choose a time in the future.</div>}</Field>
       <Field label="Duration"><Select value={m.duration} options={SCHEDULE_DURATIONS.map(d => d[0])} onChange={v=>v && set({duration:v})}/></Field>
       <Field label="Organiser"><PersonPicker value={organiser} team={team} contact={contact} placeholder="Select organiser" onChange={setOrganiser}/></Field>
       <Field label="Attendees"><AttendeesField value={m.attendees} team={team} contact={contact} onChange={v=>set({attendees:v})}/></Field>
@@ -890,7 +912,9 @@ function ActivityNavItem({a, contact, context, selected, onSelect, record, count
 // `prefill`: what a new item's form starts with (a task's name and type).
 /* `recordOf(act)` → {object, record}: an associated feed — each item names the record it's on,
    and opens on that record (its details, edits and comments go to it). */
-function ActivityTab({tabId, contact, acts, team, adding, setAdding, prefill, onUpdate, onAdd, onStub, onReassign, emptyText, recordOf}){
+/* `acts`: what the tab lists (its filters and search applied); `allActs`: the record's whole activity —
+   what an opened item reads (a call's notes, an email's thread), so a filter can't hide them. */
+function ActivityTab({tabId, contact, acts, allActs, team, adding, setAdding, prefill, onUpdate, onAdd, onStub, onReassign, emptyText, recordOf}){
   const hub = useRecordHub();
   const type = ACTIVITY_TAB_TYPES[tabId];
   const all = type ? acts.filter(a => a.type === type) : listedActivities(acts);
@@ -927,7 +951,7 @@ function ActivityTab({tabId, contact, acts, team, adding, setAdding, prefill, on
           <TaskStatusBoard entries={entries} onUpdate={update} onOpen={(e)=>setSelectedId(e.act.id)} showAssignee/>
           {open && <PageSidePanel width={560} title={open.act.title || 'Task'} subtitle={`${HUB_NOUN[open.object]} · ${open.record.name}`} onClose={()=>setSelectedId(null)}>
             <div style={{flex:1, minHeight:0, display:'flex', flexDirection:'column'}}>
-              {own(open) ? <ActivityDetail key={open.act.id} a={open.act} contact={contact} team={team} acts={acts} onUpdate={onUpdate} onAdd={onAdd} onStub={onStub} onReassign={onReassign}/>
+              {own(open) ? <ActivityDetail key={open.act.id} a={open.act} contact={contact} team={team} acts={allActs || acts} onUpdate={onUpdate} onAdd={onAdd} onStub={onStub} onReassign={onReassign}/>
                 : <RecordAccessCtx.Provider value={{object:open.object, record:open.record}}>
                     <ActivityDetail key={open.act.id} a={open.act} contact={view(open.record)} team={team} acts={(hub.activities[open.object] || {})[open.recordId] || []}
                       onUpdate={(id, patch)=>hub.update(open.object, open.recordId, id, patch)} onAdd={(x)=>hub.add(open.object, open.recordId, x)}
@@ -952,7 +976,7 @@ function ActivityTab({tabId, contact, acts, team, adding, setAdding, prefill, on
       <div style={{flex:1, minWidth:0, minHeight:0, display:'flex', flexDirection:'column'}}>
         {selected && (() => {
           const on = recordOf && recordOf(selected);
-          if(!on) return <ActivityDetail key={selected.id} a={selected} contact={contact} team={team} acts={acts}
+          if(!on) return <ActivityDetail key={selected.id} a={selected} contact={contact} team={team} acts={allActs || acts}
             onUpdate={onUpdate} onAdd={onAdd} onStub={onStub} onReassign={onReassign}/>;
           // On an associated record: as on the Tools pages, with the record named in the details.
           const view = {...on.record, owner:userLabel(on.record.owner) || on.record.owner};

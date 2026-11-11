@@ -25,6 +25,8 @@
    and optional evidence — an uploaded screenshot (≤2 MB) and / or a payment gateway or reference
    link. A part payment's balance is expected today or later.
 
+   A customer with a deal shows its deal's Payment Terms (termsHolderOf): one structure for the sale.
+
    Recording payments and manual structures need edit access to the record; everyone who can see
    it sees its structures. A record with payments recorded can't be deleted (recordHasPayments) —
    by hand, in bulk or by a workflow — so no recorded cash leaves Cash Received or Goals. */
@@ -59,6 +61,9 @@ function recordEditable(object, record){
 // The quotes on the record (its own).
 const recordQuotes = (hub, object, record) => (hub.quotes || []).filter(q => q.object === object && String(q.recordId) === String(record.id));
 const hasPayments = (s) => (s.installments || []).some(x => (x.payments || []).length);
+/* Whose Payment Terms a record shows: a customer with a deal shows its deal's (one structure for the
+   sale — the Accounting tab, the Accounting columns and workflows all read it); anything else its own. */
+const termsHolderOf = (object, record) => object === 'customers' && record && (record.dealIds || []).length ? {object:'deals', id:record.dealIds[0]} : {object, id:record ? record.id : null};
 // Whether a record has payments recorded (in any of its payment terms): such a record can't be deleted.
 const recordHasPayments = (object, id, list = WF_LIVE.accounting) => (list || []).some(s => s.object === object && String(s.recordId) === String(id) && hasPayments(s));
 // A record's one payment structure among those saved for it (see the header); the rest are archived.
@@ -380,7 +385,13 @@ function PaymentScheduleCard({schedule, canEdit, canPay, quote, pullable, archiv
 
 /* ── The record's Accounting tab ── its one Payment Terms (primaryTermsOf); any archived ones
    under it, read-only. */
+// A customer with a deal: the deal's Payment Terms (termsHolderOf), as the deal shows them.
 function AccountingTab({object, record}){
+  const hub = useRecordHub(), holder = termsHolderOf(object, record);
+  const deal = holder.object !== object ? (((hub && hub.records) || {}).deals || []).find(d => d.id === holder.id) : null;
+  return deal ? <RecordAccounting key={deal.id} object="deals" record={deal}/> : <RecordAccounting object={object} record={record}/>;
+}
+function RecordAccounting({object, record}){
   const hub = useRecordHub();
   const [paying, setPaying] = React.useState(null);   // {scheduleId, instId}
   const [viewing, setViewing] = React.useState(null); // {scheduleId, instId}: View payment
@@ -483,4 +494,4 @@ function AccountingTab({object, record}){
   );
 }
 
-Object.assign(window, {primaryTermsOf, hasPayments, recordHasPayments, defaultPaymentTerms, defaultTermsOf, packPaymentTerms, unpackPaymentTerms, AccountingTab, ACCOUNTING_RECORD_TYPES, installmentState, scheduleTotals});
+Object.assign(window, {primaryTermsOf, hasPayments, recordHasPayments, termsHolderOf, defaultPaymentTerms, defaultTermsOf, packPaymentTerms, unpackPaymentTerms, AccountingTab, ACCOUNTING_RECORD_TYPES, installmentState, scheduleTotals});

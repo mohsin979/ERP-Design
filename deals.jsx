@@ -445,8 +445,10 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
       setDeals(ds => ds.map(d => d.id === form.id ? {...d, ...vals, amount} : d));
     } else {
       const id = newRecordId('deals');   // never reused (store.jsx)
-      // Its contact: none, the one chosen, or the one created with it.
-      const contactId = !assoc ? null : assoc.existingId != null && assoc.existingId !== '' ? assoc.existingId : onCreateContact ? onCreateContact(assoc.values) : null;
+      // Its contact: none, the one chosen, or the one created with it — else, linked to a customer, that customer's contact.
+      const linkedCustomer = custLink && custLink.existingId ? customers.find(c => c.id === custLink.existingId) : null;
+      const contactId = !assoc ? (linkedCustomer ? linkedCustomer.contactId ?? null : null)
+        : assoc.existingId != null && assoc.existingId !== '' ? assoc.existingId : onCreateContact ? onCreateContact(assoc.values) : null;
       setDeals(ds => [...ds, {id, contactId, ...vals, amount, currency:DEAL_CURRENCY, created:dealStamp(new Date())}]);
       setActivities(m => ({...m, [id]: []}));
       // An existing customer without a deal: its deal (a customer has one deal).
@@ -541,7 +543,7 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
           sources:{own:activityFilterRows([{acts, contact, deal:dd}], data)},
           schemaFor:(tabId) => activityFilterSchema(tabId, data),
         };
-        return <RecordAccessCtx.Provider value={{object:'deals', record:dd}}><DealDetail mode={detail.mode} deal={dd} view={view} acts={acts} contact={contact} activityViews={activityViews}
+        return <RecordAccessCtx.Provider value={{object:'deals', record:dd}}><DealDetail key={dd.id} mode={detail.mode} deal={dd} view={view} acts={acts} contact={contact} activityViews={activityViews}
           profiles={profileStore ? profileStore.profiles[profileHolderId('deals', dd)] : undefined} props={props} settings={settings}
           menu={dealMenu(dd, ()=>setPanelDraft(JSON.parse(JSON.stringify(settings))))}
           requestedTab={detail.tab} team={owners.map(u => u.name)}

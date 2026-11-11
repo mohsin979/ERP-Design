@@ -16,8 +16,11 @@
                                   but not always — colleagues also log notes, tasks and calls.
      source:'client'              the contact initiated it: a received email, an inbound call,
                                   a meeting they booked.
-     source:'you'                 done in this prototype session (e.g. reassigning the owner via
-                                  Edit). There is no signed-in user, so no name is invented. */
+     source:'you'                 done in this session, by the person signed in (`by` names them).
+
+   Last Contacted (a Contact's property) and the Summary's "Last contacted" are one rule
+   (isRealTouch): the latest connected call, sent email or held meeting — for a contact, on it and
+   on its deals and customers (kept in step by App). */
 
 const ACTIVITY_TYPES = {
   email:       {label:'Email',        icon:'envelope'},
@@ -26,6 +29,9 @@ const ACTIVITY_TYPES = {
   task:        {label:'Task',         icon:'tasks'},
   note:        {label:'Note',         icon:'notepad'},
   ownerChange: {label:'Owner change', icon:'userSwitch'},
+  stageChange: {label:'Stage change', icon:'kanbanView'},        // the record moved stage (workflowEngine.jsx, setDealsTracked)
+  customerCreated: {label:'Customer created', icon:'customers'}, // a customer made from this deal or contact
+  taskReassigned: {label:'Task reassigned', icon:'userSwitch'},  // a task given to someone else
   workflow:    {label:'Workflow',     icon:'workflows'},   // a workflow run on the record (workflowEngine.jsx)
   file:        {label:'File',         icon:'paperclip'},   // a file added to the record, or received with its email (files.jsx)
   fileChange:  {label:'File deleted', icon:'trash'},       // a file removed from the record — the record keeps that it was
@@ -34,6 +40,11 @@ const ACTIVITY_TYPES = {
 /* The contact-facing types, used to seed each contact's mock history. */
 const CARD_ACTIVITY_ORDER = ['email', 'call', 'meeting', 'task', 'note'];
 const TOUCH_TYPES = ['email', 'call', 'meeting'];   // what "contacted" means
+/* A real touch — what Last Contacted counts (the property and the Summary alike): a connected call,
+   an email sent (not one still scheduled), a meeting that has taken place; never one in the future. */
+const isRealTouch = (a, now = Date.now()) => { const t = new Date(a && a.at).getTime(); if(!t || t > now) return false;
+  return (a.type === 'call' && /^connected/i.test(a.outcome || '')) || (a.type === 'email' && a.direction === 'sent' && a.status !== 'scheduled') || (a.type === 'meeting' && a.status !== 'cancelled'); };
+const latestTouch = (acts, now = Date.now()) => (acts || []).filter(a => isRealTouch(a, now)).reduce((best, a) => !best || new Date(a.at) > new Date(best.at) ? a : best, null);
 
 /* ── Mock history ───────────────────────────────────────────────────────────────────────── */
 
@@ -289,11 +300,9 @@ const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 function buildActivitySummary(contact, acts, lead){
   const parts = [];
   parts.push(lead || `${contact.contactType || 'No stage'}${contact.dealCount ? ` with ${plural(contact.dealCount, 'associated deal')}` : ''}.`);
-  const touch = acts.find(a => TOUCH_TYPES.includes(a.type));
+  const touch = latestTouch(acts);
   if(touch){
-    const how = touch.type === 'call' ? `${touch.direction === 'inbound' ? 'a call from them' : 'a call'} (${touch.outcome.toLowerCase()})`
-              : touch.type === 'email' ? (touch.direction === 'received' ? 'an email from them' : 'email')
-              : 'a meeting';
+    const how = touch.type === 'call' ? (touch.direction === 'inbound' ? 'a call from them' : 'a call') : touch.type === 'email' ? 'email' : 'a meeting';
     parts.push(`Last contacted ${fmtActDate(touch.at)} by ${how}.`);
   } else {
     parts.push('Not contacted yet.');
@@ -301,7 +310,9 @@ function buildActivitySummary(contact, acts, lead){
   const open = acts.filter(a => a.type === 'task' && isTaskOpen(a));
   const overdue = open.filter(isOverdue);
   if(overdue.length) parts.push(`${plural(overdue.length, 'task')} overdue: ${overdue[0].title}.`);
-  else if(open.length) parts.push(`Next task: ${open[0].title}${open[0].due ? `, due ${fmtActDate(open[0].due)}` : ''}.`);
+  // The next task: the soonest due (tasks without a due date after those with one).
+  else if(open.length){ const next = [...open].sort((x, y) => (x.due ? new Date(x.due).getTime() : Infinity) - (y.due ? new Date(y.due).getTime() : Infinity))[0];
+    parts.push(`Next task: ${next.title}${next.due ? `, due ${fmtActDate(next.due)}` : ''}.`); }
   else if(acts.length) parts.push('No open tasks.');
   return parts.join(' ');
 }
@@ -316,6 +327,9 @@ function activityHeadline(a){
     case 'task':    return a.title;
     case 'note':    return richTextPlain(a.body);   // a rich-text note, as one line
     case 'ownerChange': return `${userLabel(a.from) || 'No owner'} → ${userLabel(a.to) || 'No owner'}`;   // user IDs (older history: names)
+    case 'stageChange': return `${(a.from || {}).label || '—'} → ${(a.to || {}).label || '—'}`;
+    case 'customerCreated': return a.customerName;
+    case 'taskReassigned': return `${a.taskTitle} · ${a.from || 'No one'} → ${a.to || 'No one'}`;
     case 'workflow':    return a.title;
   }
   return '';
@@ -342,14 +356,14 @@ function activityWhen(a){
               "Task assigned by …" / "Task done by …", "Call by …"
      'type' — a single-type list (the Emails / Tasks / Notes / Calls dropdowns and Overview
               groups): the section already says what these are, so don't repeat it —
-              "Sent by …", "Received from Customer", "By …", "Assigned by …" / "Done by …"
+              "Sent by …", "Received from <name>", "By …", "Assigned by …" / "Done by …"
    Person: internal users by their real name, "(Owner)" after the contact's current owner; the
-   contact is always "Customer" (not a system user); anyone else in a thread by name. "You" is
-   this session — there is no signed-in user whose name could be shown. CC'd people follow. */
+   client by the record's name (a contact may not be a Customer); anyone else in a thread by name.
+   What a person adds in the app carries their name (`by`). CC'd people follow. */
 /* → {name, owner, kind}: `owner` marks the contact's current owner, shown as "(Owner)";
    `kind` is 'team' | 'you' (internal people), 'customer', or 'other' (a third party). */
 function activityActor(a, contact){
-  if(a.source === 'client') return {name:'Customer', owner:false, kind:'customer'};
+  if(a.source === 'client') return {name:(contact && contact.name) || 'Client', owner:false, kind:'customer'};   // the record's person, by name
   // Added in the app: the person who added it (stamped since; before, the signed-in person).
   if(a.source === 'you'){ const name = a.by || CURRENT_USER.name; return {name, owner: !!contact && name === contact.owner, kind:'you'}; }
   if(!a.by) return null;
@@ -402,6 +416,9 @@ function activityLines(a, contact, context = 'all'){
     // Always an internal team member: "Meeting by [name]".
     case 'meeting': return {lead: all ? act('Meeting', 'by') : (who ? act('', 'by') : act('Meeting')), detail:a.title, when};
     case 'ownerChange': return {lead:act('Owner changed', 'by'), detail:`${userLabel(a.from) || 'No owner'} → ${userLabel(a.to) || 'No owner'}`, when};
+    case 'stageChange': return {lead:act('Stage changed', 'by'), detail:activityHeadline(a), when};
+    case 'customerCreated': return {lead:act('Customer created', 'by'), detail:a.customerName, when};
+    case 'taskReassigned': return {lead:act('Task reassigned', 'by'), detail:activityHeadline(a), when};
     case 'workflow': return {lead:act('Workflow ran'), detail:a.title, when};
     case 'file': return a.origin === 'received'
       ? {lead:act(all ? 'File received' : 'Received', 'from'), detail:a.name, when}
@@ -618,6 +635,7 @@ function HistoryItem({a, last}){
     case 'task':    title = a.title; extra = activityWhen(a).text; break;
     case 'note':    body = richTextPlain(a.body); break;
     case 'ownerChange': title = `${userLabel(a.from) || 'No owner'} → ${userLabel(a.to) || 'No owner'}`; break;
+    case 'stageChange': case 'customerCreated': case 'taskReassigned': title = activityHeadline(a); break;
     case 'workflow':    title = a.title; body = a.body; break;
   }
   const overdue = isOverdue(a);
@@ -667,7 +685,7 @@ function ActivityHistory({acts}){
   );
 }
 
-Object.assign(window, {isOverdue, taskDueParts, taskDueValue, fmtTaskDue, ymdOf, 
+Object.assign(window, {isRealTouch, latestTouch, isOverdue, taskDueParts, taskDueValue, fmtTaskDue, ymdOf, 
   ACTIVITY_TYPES, generateActivities, withSampleTaskDescriptions, buildActivitySummary,
   ActivitySection, ActivityHistory, SummaryBlock, ActivityDropdown, HistoryItem, activityBox,
   ActivityRow, ActivityLead, activityLines, activityActor, listedActivities, leadText,

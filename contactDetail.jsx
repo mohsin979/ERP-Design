@@ -438,7 +438,7 @@ function ContactWorkspace({contact, acts, onStub, onCall, onCreateProfile, profi
           schema={activityViews.schemaFor(actTabId)} controls={<ActivityAddButton tabId={actTabId} onPick={pickAdd}/>}
           render={(shown, emptyText, recordOf) => (
             <div style={{flex:1, minHeight:0, display:'flex', overflow:'hidden'}}>
-              <ActivityTab tabId={actTabId} contact={contact} acts={shown} emptyText={emptyText} recordOf={recordOf} team={team || []} adding={adding} setAdding={setAdding} prefill={prefill}
+              <ActivityTab tabId={actTabId} contact={contact} acts={shown} allActs={acts} emptyText={emptyText} recordOf={recordOf} team={team || []} adding={adding} setAdding={setAdding} prefill={prefill}
                 onUpdate={(id, patch)=>onUpdateActivity && onUpdateActivity(contact.id, id, patch)}
                 onAdd={(act)=>onAddActivity && onAddActivity(contact.id, act)} onStub={onStub}
                 onReassign={(owner)=>onReassignOwner && onReassignOwner(contact.id, owner)}/>
@@ -524,7 +524,7 @@ function OwnerEditableValue({prop, value, onSave, options, display, pencil, alig
   const [error, setError] = React.useState(null);
   const label = prop.label, shown = display !== undefined ? display : formatPropertyValueOf(prop, value);
   const commit = (v) => {
-    const err = propertyValueError(prop, v);
+    const err = propertyValueError(prop, v, !!prop.mandatory);   // Mandatory holds here as in the Edit form
     if(err){ setError(err); return; }
     setEditing(false); setError(null);
     const stored = storePropertyValue(prop, v);

@@ -642,8 +642,11 @@ function App(){
     const legacy = !v2 && WF_SAVED && WF_SAVED.deals ? WF_SAVED.deals.map(d => linkSavedDeal(SPLIT_AC_PIPELINES.includes(d.pipeline) ? {...d, pipeline:'australia-canada'} : d)) : null;
     // A deal's contact is optional (null: none); its owner is a user ID.
     return withBiz(withSampleValues(withStageEntry(withSeeded(v2 || legacy, seedList(SAMPLE_DEALS), prevSettings.seededDeals)), SAMPLE_DEALS(), ['email', 'phone', 'dealType', 'source', 'actualCloseDate']), 'deals')
-      .map(x => ({...x, contactId:x.contactId ?? null, owner:userIdOf(x.owner, settingsData.users)}));
+      .map(x => ({...x, contactId:x.contactId ?? null, owner:userIdOf(x.owner, settingsData.users)}))
+      // Postponed became an open stage (2026-11-11): deals saved in it lose the Actual Close Date it gave them, once.
+      .map(x => savedSlice('postponedOpen') || x.stage !== 'postponed' || !x.actualCloseDate ? x : {...x, actualCloseDate:''});
   });
+  React.useEffect(() => { persistSlice('postponedOpen', true); }, []);
   // Each deal's activity history (keyed by deal id), as Contacts keep theirs; sample deals added since get theirs.
   const [dealActivities, setDealActivities] = React.useState(() => {
     // Sample activity comes with the documents clients emailed (files.jsx).
@@ -748,6 +751,24 @@ function App(){
     const follow = (s) => s.isDefault && s.object === 'deals' && amountOf.has(String(s.recordId)) && amountOf.get(String(s.recordId)) !== s.total && untouched(s);
     if(accounting.some(follow)) setAccounting(list => list.map(s => follow(s) ? defaultTermsOf(s.id, s.object, s.recordId, amountOf.get(String(s.recordId)), s.startDate, s.createdAt) : s));
   }, [contacts, deals, customers, accounting]);
+  /* Last Contacted (a Contact's): its latest real touch — a connected call, a sent email or a held
+     meeting, on the contact or on its deals and customers (activities.jsx isRealTouch) — kept in
+     step with the activity. Written as a system value (no workflow event for each contact). */
+  React.useEffect(() => {
+    const now = Date.now(), latest = new Map();
+    const note = (cid, acts) => { if(cid == null) return; const t = latestTouch(acts, now); if(t){ const ms = new Date(t.at).getTime(); if(ms > (latest.get(cid) || 0)) latest.set(cid, ms); } };
+    contacts.forEach(c => note(c.id, contactActivities[c.id]));
+    deals.forEach(d => note(d.contactId, dealActivities[d.id]));
+    customers.forEach(x => note(x.contactId, customerActivities[x.id]));
+    const day = (t) => new Date(t).toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'});
+    const label = (id) => latest.has(id) ? day(latest.get(id)) : '';
+    // Last Activity Date is never before Last Contacted: the latest of its own activity and that touch.
+    const lastAct = (c) => { const own = Math.max(0, ...(contactActivities[c.id] || []).map(a => new Date(a.at).getTime() || 0).filter(t => t <= now));
+      const t = Math.max(own, latest.get(c.id) || 0), stored = Date.parse(c.lastActivity || '') || 0; return t > stored ? day(t) : c.lastActivity || ''; };
+    const next = (c) => ({lastContacted:label(c.id), lastActivity:lastAct(c)});
+    const differs = (c) => { const n = next(c); return (c.lastContacted || '') !== n.lastContacted || (c.lastActivity || '') !== n.lastActivity; };
+    if(contacts.some(differs)) setContacts(cs => cs.map(c => differs(c) ? {...c, ...next(c)} : c));
+  }, [contacts, deals, customers, contactActivities, dealActivities, customerActivities]);
   // Overview View Settings per record type — pinned Highlights and Snapshots (overviewSettings.jsx).
   const [overviewSettings, setOverviewSettings] = usePersistedState('overviewSettings', {});
   const engine = useWorkflowEngine({data:settingsData, setData:setSettingsData, deals, setDealsRaw, dealActivities, setDealActivities, setContacts,
@@ -824,13 +845,20 @@ function App(){
      contact: that contact — and can be changed in the form (any contact or none, any deals or none). */
   const startCustomer = ({contact, deal} = {}) => {
     const src = deal || contact, person = contact || null;
+    /* From a deal it starts as the workflow's Create Customer does: in the service pipeline for the
+       deal's pipeline (CUSTOMER_PIPELINE_FOR_DEAL, its first open stage), Customer Status Active. */
+    const service = deal && recordPipelines(settingsData, 'customers').find(p => p.id === CUSTOMER_PIPELINE_FOR_DEAL[deal.pipeline]);
+    const serviceStage = service && (service.stages.find(st => !isClosedStage(st)) || service.stages[0]);
+    const fromDeal = deal ? {...(service ? {pipeline:service.id, stage:serviceStage ? serviceStage.id : ''} : {}), status:'Active'} : {};
     // Email and phone: the deal's own, else its contact's — editable in the form.
-    setCustomerForm({initial: src ? {name:src.name || '', email:(deal && deal.email) || (person && person.email) || '', phone:(deal && deal.phone) || (person && person.phone) || '', owner:src.owner || ''} : null,
+    setCustomerForm({initial: src ? {name:src.name || '', email:(deal && deal.email) || (person && person.email) || '', phone:(deal && deal.phone) || (person && person.phone) || '', owner:src.owner || '', ...fromDeal} : null,
       links:{contactId: contact ? contact.id : null, dealIds: deal ? [deal.id] : []}});
   };
   const saveCustomer = (vals, links) => {
     const id = newRecordId('customers');
-    const c = {id, ...vals, contactId:links.contactId ?? null, dealIds:links.dealIds || [], created:dealStamp(new Date())};
+    // From a deal: Customer Status Active unless the form set one (as the workflow's Create Customer).
+    const status = vals.status || ((links.dealIds || []).length ? 'Active' : vals.status);
+    const c = {id, ...vals, ...(status ? {status} : {}), contactId:links.contactId ?? null, dealIds:links.dealIds || [], created:dealStamp(new Date())};
     setCustomerActivities(m => ({...m, [id]:[]}));
     setCustomers(cs => [...cs, c]);
     setCustomerForm(null);
@@ -857,7 +885,7 @@ function App(){
     const a = {id:`${act.type}-${id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, contactId:id, at:new Date(), ...act, ...(act.source === 'you' && !act.by ? {by:CURRENT_USER.name} : {})};
     setContactActivities(m => ({...m, [id]:[a, ...(m[id] || [])]}));
     const today = todayLabel();
-    setContacts(cs => cs.map(c => c.id === id ? {...c, lastActivity:today, ...(a.type === 'call' ? {lastContacted:today} : {})} : c));
+    setContacts(cs => cs.map(c => c.id === id ? {...c, lastActivity:today} : c));   // Last Contacted: kept in step with the activity (above)
     return a;
   };
   const hubUpdate = (object, id, actId, patch) => object !== 'contacts' ? engine.value.api.updateDealActivity(actId, patch)

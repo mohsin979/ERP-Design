@@ -624,6 +624,7 @@ function RecordViewsModule({schema, rows, defaultViews, columns, savedViews = tr
   const [views, setViews] = usePersistedState(storeKey || `views:${defaultViews[0].id}`, ()=>defaultViews.map((v, i) => makeRecordView(v.id, v.name, columns, {filters:v.filters || {nodes:[]}, sort:v.sort || null, isDefault:i === 0,
     ...(board ? {pipelineId:v.pipelineId || board.defaultPipelineId, ...(board.cardSettings ? {cardSettings:board.cardSettings.defaults()} : {})} : {})})));
   const [activeViewId, setActiveViewId] = React.useState(initialViewId || defaultViews[0].id);
+  const [deletingView, setDeletingView] = React.useState(null);   // a saved view asked to be deleted
   const activeView = views.find(v => v.id === activeViewId) || views[0];
   // `initialFilters` opens the first view already filtered (an unsaved change, as in Contacts).
   const [st, setSt] = React.useState(()=>({...Object.fromEntries(VIEW_STATE.map(k => [k, activeView[k]])), ...(initialFilters ? {filters:initialFilters} : {})}));
@@ -687,7 +688,7 @@ function RecordViewsModule({schema, rows, defaultViews, columns, savedViews = tr
         {/* `overlay`: floats over the records, under the toolbar (e.g. Deals → Violations). */}
         <div style={{overflow:'hidden', flex:1, minHeight:0, display:'flex', flexDirection:'column', position:'relative'}}>
           {typeof overlay === 'function' ? overlay(viewInfo) : overlay}
-          {board && st.viewMode === 'board' ? board.render(filtered, {search:st.search, pipelineId:st.pipelineId, cardSettings:st.cardSettings}) : <ContactsDataGrid rows={filtered} columnOrder={st.columnOrder} setColumnOrder={set('columnOrder')} sort={st.sort} setSort={set('sort')} search={st.search}
+          {board && st.viewMode === 'board' ? board.render(filtered, {search:st.search, pipelineId:st.pipelineId, cardSettings:st.cardSettings}) : <ContactsDataGrid rows={filtered} resetKey={`${activeViewId}:${JSON.stringify(st.filters)}`} columnOrder={st.columnOrder} setColumnOrder={set('columnOrder')} sort={st.sort} setSort={set('sort')} search={st.search}
             frozenLeft={st.frozenLeft} frozenRight={st.frozenRight} actionsFrozen={st.actionsFrozen} rowsPerPage={st.rowsPerPage} onOpenContact={()=>{}}/>}
         </div>
       </div>
@@ -698,18 +699,15 @@ function RecordViewsModule({schema, rows, defaultViews, columns, savedViews = tr
           onReorder={(from, to)=>setViews(vs => { const n = vs.slice(); const [m] = n.splice(from, 1); n.splice(to, 0, m); return n; })}
           onToggleHide={(id)=>persist(id, {hidden:!views.find(v => v.id === id).hidden})}
           onClone={(id)=>{ const v = views.find(x => x.id === id); setViews(vs => [...vs, makeRecordView('rv' + Date.now(), `${v.name} copy`, columns, Object.fromEntries(VIEW_STATE.map(k => [k, v[k]])))]); }}
-          onDelete={(id)=>{
-            const next = views.filter(v => v.id !== id);
-            const finalViews = next.length ? next : [makeRecordView('rv1', 'All', columns)];
-            setViews(finalViews);
-            if(activeViewId === id) setActiveViewId(finalViews[0].id);
-          }}
+          onDelete={(id)=>setDeletingView(id)}
           onRename={(id, name)=>persist(id, {name})}
           onPatchView={(id, patch)=>{ persist(id, patch); if(id === activeViewId){
             if(patch.rowsPerPage !== undefined) set('rowsPerPage')(patch.rowsPerPage);
             if(patch.viewMode !== undefined) set('viewMode')(patch.viewMode);
           }}}
-          onOpenTableSettings={(id)=>{ setActiveViewId(id); setTableSettingsDraft({columnOrder:st.columnOrder, frozenLeft:st.frozenLeft, frozenRight:st.frozenRight, actionsFrozen:st.actionsFrozen}); }}
+          // The chosen view's own table settings (the open view's as they stand).
+          onOpenTableSettings={(id)=>{ const v = id === activeViewId ? st : (views.find(x => x.id === id) || st);
+            setTableSettingsDraft({columnOrder:v.columnOrder || st.columnOrder, frozenLeft:v.frozenLeft ?? 0, frozenRight:v.frozenRight ?? 0, actionsFrozen:v.actionsFrozen ?? true}); setActiveViewId(id); }}
           onOpenCardSettings={(id)=>{
             if(!board || !board.cardSettings) return;
             const v = views.find(x => x.id === id);
@@ -717,6 +715,14 @@ function RecordViewsModule({schema, rows, defaultViews, columns, savedViews = tr
             setCardDraft(JSON.parse(JSON.stringify((id === activeViewId ? st.cardSettings : v && v.cardSettings) || board.cardSettings.defaults())));
           }} liveViewMode={st.viewMode || 'table'} livePipelineId={st.pipelineId}/>
       )}
+      {/* Deleting a saved view: asked first. With none left, the default view comes back. */}
+      {deletingView && (() => { const v = views.find(x => x.id === deletingView);
+        return v ? <StModal title="Delete View" primary="Delete View" danger onCancel={()=>setDeletingView(null)}
+          onSubmit={()=>{ const next = views.filter(x => x.id !== v.id), d0 = defaultViews[0];
+            const finalViews = next.length ? next : [makeRecordView(d0.id, d0.name, columns, {...d0, isDefault:true})];
+            setViews(finalViews); if(activeViewId === v.id) setActiveViewId(finalViews[0].id); setDeletingView(null); }}>
+          <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>"{v.name}" will be deleted.</div>
+        </StModal> : null; })()}
       {tableSettingsDraft && (
         <TableSettingsModal draft={tableSettingsDraft} setDraft={setTableSettingsDraft} onClose={()=>setTableSettingsDraft(null)}
           onApply={()=>{ setSt(x => ({...x, ...tableSettingsDraft})); setTableSettingsDraft(null); }}/>

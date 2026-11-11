@@ -192,8 +192,8 @@ function generateBusinessData({users, services, now = new Date(), takenNames = [
     const [stage, stageEnteredAt] = reached[reached.length - 1];
     const enteredOf = (s) => (path.find(p => p[0] === s && p[1] <= NOW) || [])[1];
     const won = stage === 'deal-won', lost = stage === 'deal-lost';
-    // Every closed stage (Won, Lost, Undecided — Postponed) has its Actual Close Date.
-    const closedAt = won || lost || stage === 'postponed' ? stageEnteredAt : null;
+    // Every closed stage (Won, Lost) has its Actual Close Date; Postponed is open.
+    const closedAt = won || lost ? stageEnteredAt : null;
     const lastPastAt = stageEnteredAt;
     // The quote only as far as it had got by now.
     const qs = quote && quote.draftAt <= NOW ? {status: quote.signedAt && quote.signedAt <= NOW ? 'signed' : quote.sentAt <= NOW ? 'sent' : 'draft'} : null;

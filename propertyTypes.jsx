@@ -260,11 +260,14 @@ function propertyValueMatches(p, opId, actual, value){
   }
   if(compare === 'number' || compare === 'amount'){
     const a = compare === 'amount' ? ptNumber(ptMoney(actual).amount) : ptNumber(actual), b = ptNumber(value);
+    // An empty value isn't the one asked for (Does not equal includes it, as for text); it's no comparison otherwise.
+    if(a === null && b !== null) return opId === 'notEquals';
     if(a === null || b === null) return false;
     return {equals:a === b, notEquals:a !== b, gt:a > b, lt:a < b, gte:a >= b, lte:a <= b}[opId] ?? false;
   }
   if(compare === 'date'){
     const a = ptDay(actual), b = ptDay(value);
+    if(a === null && b !== null) return opId === 'notEquals';
     if(a === null || b === null) return false;
     return {equals:a === b, notEquals:a !== b, gt:a > b, lt:a < b}[opId] ?? false;
   }
