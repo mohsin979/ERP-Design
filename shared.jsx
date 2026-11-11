@@ -223,6 +223,27 @@ function useFloatZ(open){
   return z;
 }
 
+/* Escape closes the panel or modal opened last (the record, create and detail panels, modals) —
+   one at a time, so a form over a record panel closes first. Escape typed in a field belongs to
+   the field (as on the record panels). */
+const ESCAPE_STACK = [];
+function useEscapeClose(onClose, active = true){
+  const fn = React.useRef(onClose); fn.current = onClose;
+  React.useEffect(() => {
+    if(!active) return;
+    const entry = {close:() => fn.current && fn.current()};
+    ESCAPE_STACK.push(entry);
+    return () => { const i = ESCAPE_STACK.indexOf(entry); if(i >= 0) ESCAPE_STACK.splice(i, 1); };
+  }, [active]);
+}
+window.addEventListener('keydown', (e) => {
+  if(e.key !== 'Escape' || !ESCAPE_STACK.length || e.defaultPrevented) return;
+  const t = e.target, tag = t && t.tagName;
+  if(/^(INPUT|TEXTAREA|SELECT)$/.test(tag || '') || (t && t.isContentEditable) || document.querySelector('[data-hof-floating]')) return;
+  e.stopImmediatePropagation(); e.preventDefault();
+  ESCAPE_STACK[ESCAPE_STACK.length - 1].close();
+}, true);
+
 /* Generic dropdown-menu shell — matches the Dropdown open/closed disclosure pattern in Figma. */
 /* `up` opens the menu above its trigger (for triggers at the bottom of the screen). */
 function MenuShell({open, onClose, anchorRight, up, width=200, children}){
@@ -230,7 +251,8 @@ function MenuShell({open, onClose, anchorRight, up, width=200, children}){
   const z = useFloatZ(open);
   React.useEffect(()=>{
     if(!open) return;
-    const h = (e)=>{ if(ref.current && !ref.current.contains(e.target)) onClose && onClose(); };
+    // A floating panel (a dropdown or time picker inside the menu) counts as inside.
+    const h = (e)=>{ if(ref.current && !ref.current.contains(e.target) && !(e.target.closest && e.target.closest('[data-hof-floating]'))) onClose && onClose(); };
     document.addEventListener('mousedown', h);
     return ()=>document.removeEventListener('mousedown', h);
   }, [open]);
@@ -425,6 +447,86 @@ function TimeField({value, onChange, placeholder = 'Select time', inputStyle, re
           <div style={{flex:1, minHeight:0, display:'flex', borderTop:`1px solid ${T.border}`, paddingTop:4}}>
             {column(TIME_HOURS, 'h')}{column(TIME_MINUTES, 'm')}{column(['AM', 'PM'], 'p')}
           </div>
+        </div>, document.body)}
+    </div>
+  );
+}
+/* Dropdown — the one select control (a native <select> popup ignores the design system and
+   mis-positions in scrolling panels). The trigger takes the host's control style (`controlStyle`);
+   the list opens under it (above it when there's no room), portalled and fixed with
+   data-hof-floating, like TimeField. `options`: strings, {value, label, disabled}, or {group,
+   options, disabled} — a labelled run (a disabled group shows but can't be picked).
+   `placeholder`: shown while nothing is picked, and offered first so a choice can be cleared
+   ('' — `required` leaves it out). Keyboard: Enter, Space or ↓ opens; ↑ ↓ move; Enter picks;
+   Escape closes; a letter jumps to the next option starting with it. */
+function Dropdown({value, options, onChange, placeholder, controlStyle, invalid, ariaLabel, required, disabled}){
+  const [pos, setPos] = React.useState(null);
+  const [active, setActive] = React.useState(-1);
+  const z = useFloatZ(!!pos);
+  const btnRef = React.useRef(null), panelRef = React.useRef(null);
+  const rows = [];
+  if(placeholder && !required) rows.push({value:'', label:placeholder, muted:true});
+  (options || []).forEach(o => {
+    if(typeof o === 'string') rows.push({value:o, label:o});
+    else if(o.group){ rows.push({header:o.group}); (o.options || []).forEach(x => rows.push(typeof x === 'string' ? {value:x, label:x, disabled:!!o.disabled} : {...x, disabled:!!(o.disabled || x.disabled)})); }
+    else rows.push(o);
+  });
+  const pickable = (i) => rows[i] && !rows[i].header && !rows[i].disabled;
+  const same = (v) => value != null && value !== '' && String(v) === String(value);   // as a native select compares
+  const current = rows.find(r => !r.header && !r.muted && same(r.value));
+  const PANEL_MAX = 264;
+  const open = () => {
+    if(disabled || !btnRef.current) return;
+    const r = btnRef.current.getBoundingClientRect(), h = Math.min(PANEL_MAX, rows.length * 32 + 12);
+    setPos({top: window.innerHeight - r.bottom < h + 8 && r.top > h + 8 ? r.top - h - 4 : r.bottom + 4, left:r.left, width:Math.max(r.width, 160)});
+    setActive(Math.max(0, rows.findIndex(x => !x.header && same(x.value))));
+  };
+  const close = () => setPos(null);
+  const pick = (i) => { if(!pickable(i)) return; close(); if(!same(rows[i].value) && !(rows[i].muted && !value)) onChange(rows[i].value); btnRef.current && btnRef.current.focus(); };
+  React.useEffect(() => {
+    if(!pos) return;
+    const out = (e) => { if(!(panelRef.current && panelRef.current.contains(e.target)) && !(btnRef.current && btnRef.current.contains(e.target))) close(); };
+    const onScroll = (e) => { if(!(panelRef.current && panelRef.current.contains(e.target))) close(); };
+    document.addEventListener('mousedown', out, true); window.addEventListener('scroll', onScroll, true); window.addEventListener('resize', close);
+    return () => { document.removeEventListener('mousedown', out, true); window.removeEventListener('scroll', onScroll, true); window.removeEventListener('resize', close); };
+  }, [pos]);
+  // The active option stays in view.
+  React.useEffect(() => { if(!pos || !panelRef.current) return; const el = panelRef.current.querySelector(`[data-i="${active}"]`); el && el.scrollIntoView({block:'nearest'}); }, [active, !!pos]);
+  const move = (d) => setActive(a => { let i = a; for(let n = 0; n < rows.length; n++){ i = (i + d + rows.length) % rows.length; if(pickable(i)) return i; } return a; });
+  const onKey = (e) => {
+    if(!pos){ if(['Enter', ' ', 'ArrowDown', 'ArrowUp'].includes(e.key)){ e.preventDefault(); open(); } return; }
+    if(e.key === 'Escape'){ e.preventDefault(); e.stopPropagation(); close(); }
+    else if(e.key === 'ArrowDown'){ e.preventDefault(); move(1); }
+    else if(e.key === 'ArrowUp'){ e.preventDefault(); move(-1); }
+    else if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); pick(active); }
+    else if(e.key === 'Tab') close();
+    else if(e.key.length === 1){ const k = e.key.toLowerCase(); const start = active < 0 ? 0 : active + 1;
+      for(let n = 0; n < rows.length; n++){ const i = (start + n) % rows.length; if(pickable(i) && !rows[i].muted && String(rows[i].label).toLowerCase().startsWith(k)){ setActive(i); break; } } }
+  };
+  const base = controlStyle || {};
+  return (
+    <div style={{position:'relative', minWidth:0}}>
+      <button ref={btnRef} type="button" aria-haspopup="listbox" aria-expanded={!!pos} aria-label={ariaLabel} disabled={disabled}
+        onClick={()=>pos ? close() : open()} onKeyDown={onKey}
+        style={{...base, appearance:'none', WebkitAppearance:'none', display:'flex', alignItems:'center', gap:8, width:'100%', boxSizing:'border-box', textAlign:'left',
+          paddingRight:32, position:'relative', cursor: disabled ? 'default' : 'pointer', color: current ? T.attioText : T.gray400,
+          borderColor: invalid ? T.red : pos ? T.blue : (base.borderColor || T.borderStrong), opacity: disabled ? .6 : 1}}>
+        <span style={{flex:1, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{current ? current.label : (placeholder || '')}</span>
+        <span style={{position:'absolute', right:10, top:'50%', transform:'translateY(-50%)', display:'flex'}}><Icon name="chevDown" size={T.chevronSize} color={T.gray600}/></span>
+      </button>
+      {pos && ReactDOM.createPortal(
+        <div ref={panelRef} data-hof-floating="" role="listbox" onMouseDown={e=>{ e.preventDefault(); e.stopPropagation(); }}
+          style={{position:'fixed', top:pos.top, left:pos.left, width:pos.width, maxHeight:PANEL_MAX, overflowY:'auto', zIndex:z, boxSizing:'border-box',
+            background:'#fff', border:`1px solid ${T.border}`, borderRadius:10, padding:6, boxShadow:'0 4px 16px rgba(16,24,40,.12)', fontFamily:"'DM Sans', sans-serif"}}>
+          {rows.map((r, i) => r.header
+            ? <div key={`h-${i}`} style={{padding:'6px 10px 2px', fontSize:11.5, color:T.gray400}}>{r.header}</div>
+            : <div key={`${i}-${r.value}`} data-i={i} role="option" aria-selected={same(r.value) && !r.muted} aria-disabled={r.disabled || undefined}
+                onClick={()=>pick(i)} onMouseEnter={()=>pickable(i) && setActive(i)}
+                style={{display:'flex', alignItems:'center', gap:8, padding:'7px 10px', borderRadius:6, fontSize:13, cursor: r.disabled ? 'default' : 'pointer',
+                  color: r.disabled || r.muted ? T.gray400 : T.attioText, background: i === active && !r.disabled ? T.headerBg : 'transparent'}}>
+                <span style={{flex:1, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}} title={String(r.label)}>{r.label}</span>
+                {!r.muted && same(r.value) && <Icon name="check" size={11} color={T.blue}/>}
+              </div>)}
         </div>, document.body)}
     </div>
   );
@@ -640,4 +742,4 @@ function StubPanel({title, onClose, zIndex=90}){
   );
 }
 
-Object.assign(window, {LOCAL_TZ, setAppTimeZone, zonedParts, zonedDate, useFloatZ, DateField, DateTimeField, parseDate, dateLabel, TimeField, parseTime, timeLabel, ActionsMenu, menuDivider, ViewSettingsButton, T, Icon, Avatar, RowCheckbox, MenuShell, MenuItem, StubPanel});
+Object.assign(window, {useEscapeClose, Dropdown, LOCAL_TZ, setAppTimeZone, zonedParts, zonedDate, useFloatZ, DateField, DateTimeField, parseDate, dateLabel, TimeField, parseTime, timeLabel, ActionsMenu, menuDivider, ViewSettingsButton, T, Icon, Avatar, RowCheckbox, MenuShell, MenuItem, StubPanel});

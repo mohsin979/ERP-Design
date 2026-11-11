@@ -125,7 +125,8 @@ const SAMPLE_DEAL_ACTIVITIES = (deals, users) => {
 const dealFilterType = (t) => propertyFilterType(t);   // the one mapping (dataModel.jsx)
 function dealSchema(props, pipelines, users){
   return {
-    properties:props.map(p => ({key:p.key, label:p.label, width:p.width || 170})),
+    // Money (Deal Amount, a Currency property) reads right-aligned.
+    properties:props.map(p => ({key:p.key, label:p.label, width:p.width || 170, money:p.key === 'amount' || (propertyTypeId(p.type) === 'Currency' && !p.currencyOnly)})),
     filterProps:props.map(propertyFilterMeta),
     selectValues:{
       // The Pipeline property's values: the record's own (manual) pipelines.
@@ -182,7 +183,7 @@ const DEAL_TAGS = [
 ];
 const DEAL_DROPDOWNS = [
   ...CARD_DROPDOWNS,
-  {key:'meeting', setting:'Meetings', label:'Meetings', icon:'calendar', type:'meeting', link:'View all meetings', empty:'No meetings yet.'},
+  {key:'meeting', setting:'Meetings', label:'Meetings', icon:'calendar', type:'meeting', link:'View all meetings', empty:'No meetings yet'},
 ];
 const DEAL_RELATED_FIELDS = [
   {key:'owner',         get label(){ return `${typeSingular('deals', 'Deal')} Owner`; }},
@@ -354,7 +355,7 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
   React.useEffect(() => () => engineCtx && engineCtx.setViolationMode(m => m === 'deals' ? false : m), []);
   const [toast, setToast] = React.useState(null);
   const toastTimer = React.useRef(null);
-  const showToast = (message) => { setToast(message); clearTimeout(toastTimer.current); toastTimer.current = setTimeout(()=>setToast(null), 1800); };
+  const showToast = (message) => { setToast(message); clearTimeout(toastTimer.current); toastTimer.current = setTimeout(()=>setToast(null), TOAST_MS); };
 
   // Rows show names and labels; the deal keeps ids (pipeline, stage, owner).
   const toRow = (d) => dealRowOf(data, d);
@@ -424,7 +425,7 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
     // The name with the deal's workflow violations beside it.
     renderCell: (key, r) => key === 'name' ? <span data-deal-id={r.id} style={{display:'inline-flex', alignItems:'center', gap:8, minWidth:0, maxWidth:'100%'}}>
         <ContactName name={r.name} onOpen={()=>openDeal(r)} style={{fontSize:'inherit', fontWeight:500}}/><DealPromptMarker dealId={r.id}/></span>
-      : key === 'amount' ? moneyText(r.amount, r.currency) : undefined,
+      : key === 'amount' ? moneyText(r.amount, r.currency) || '—' : undefined,
     renderActions: (r) => dealMenu(r),
     bulkActions: dealBulk.bulkActions,
   };
@@ -453,6 +454,7 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
       // An existing customer without a deal: its deal (a customer has one deal).
       if(custLink && custLink.existingId && onLinkCustomer) onLinkCustomer(custLink.existingId, {dealIds:[id]});
     }
+    showToast(`${typeSingular('deals', 'Deal')} ${form.mode === 'edit' ? 'saved' : 'added'}`);
     setForm(null);
   };
   const formOptions = dealFormOptions(data), adjust = dealFormAdjust(data);
@@ -528,6 +530,7 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
           onRecordDeleted && onRecordDeleted('deals', id);
           if(detail && detail.id === id) setDetail(null);
           setPendingDelete(null);
+          showToast(`${typeSingular('deals', 'Deal')} deleted`);
         }}/>}
       {(() => {
         const dd = detail && byId.get(detail.id);

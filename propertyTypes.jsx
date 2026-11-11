@@ -99,6 +99,12 @@ const ptDay = (v) => {
 };
 const ptFmtDay = (iso) => { const d = ptDay(iso); if(d === null) return ''; const y = Math.floor(d / 10000), m = Math.floor(d / 100) % 100, dd = d % 100;
   return new Date(y, m, dd).toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric', timeZone:LOCAL_TZ}); };
+/* A stored date as shown: the year is left out in the current year ("Nov 10, 3:00 PM"), kept
+   otherwise ("Nov 10, 2025"). Stored values, filters and exports keep the full date. Anything
+   that isn't a stored date ("Nov 10, 2026" or "Nov 10, 2026, 3:00 PM") is returned as it is. */
+const STORED_DATE_RE = /^([A-Z][a-z]{2} \d{1,2}), (\d{4})(, \d{1,2}:\d{2} [AP]M)?$/;
+const dateShown = (v) => { if(typeof v !== 'string') return v; const m = STORED_DATE_RE.exec(v);
+  return m && Number(m[2]) === new Date().getFullYear() ? `${m[1]}${m[3] || ''}` : v; };
 const ptMoneyText = (m) => ptBlank(m.amount) ? (m.currency || '') : `${m.currency ? m.currency + ' ' : ''}${Number(m.amount).toLocaleString('en-US')}`;
 
 /* ── Operators — one catalogue; each type offers its own (in the document's order) ── */
@@ -163,6 +169,7 @@ const PROPERTY_TYPE_DEFS = [
   PT({id:'Date', compare:'date', ops:DATE_OPS, empty:ptBlank,
     store:(v) => { if(ptBlank(v)) return ''; const [y, m, d] = String(v).split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric', timeZone:LOCAL_TZ}); },
     load:(v) => { const d = ptDay(v); if(d === null) return ''; return `${Math.floor(d / 10000)}-${String(Math.floor(d / 100) % 100 + 1).padStart(2, '0')}-${String(d % 100).padStart(2, '0')}`; },
+    format:(v) => dateShown(ptText(v)),
     validate:(v) => ptBlank(v) || ptDay(v) !== null ? null : 'Enter a valid date'}),
   PT({id:'Timestamp', compare:'date', ops:DATE_OPS, empty:ptBlank,
     // Kept as the wall clock: one typed in ("YYYY-MM-DDTHH:mm") as typed; a moment (a Date) in the app's time zone.
@@ -170,6 +177,7 @@ const PROPERTY_TYPE_DEFS = [
       return `${d.toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric', ...tz})}, ${d.toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit', ...tz})}`; },
     load:(v) => { if(ptBlank(v)) return ''; const d = new Date(String(v).replace(/, (\d{1,2}:\d{2} [AP]M)$/, ' $1')); if(isNaN(d)) return '';
       const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; },
+    format:(v) => dateShown(ptText(v)),
     validate:(v) => ptBlank(v) || !isNaN(new Date(v).getTime()) ? null : 'Enter a valid date and time'}),
   PT({id:'Date Range', compare:'none', ops:GROUP_OPS, empty:(v) => { const r = ptDateRange(v); return !r.start && !r.end; },
     store:(v) => { const r = ptDateRange(v); return !r.start && !r.end ? '' : r; }, load:(v) => ptDateRange(v),
@@ -253,7 +261,8 @@ function convertPropertyValue(fromP, toP, v){
   const fits = (x) => x !== null && x !== undefined && x !== '' && !propertyIsEmpty(toP, x) && !validatePropertyValue(toP, x);
   const keep = (x) => fits(x) ? {value:x, cleared:false} : {value:'', cleared:true};
   if(same) return keep(v);
-  const fromType = propertyTypeId(propOf(fromP).type), text = String(formatPropertyValueOf(fromP, v) ?? '').trim();
+  // A date converts from its stored text (the display leaves the current year out).
+  const fromType = propertyTypeId(propOf(fromP).type), text = (['Date', 'Timestamp'].includes(fromType) ? ptText(v) : String(formatPropertyValueOf(fromP, v) ?? '')).trim();
   const opts = (d) => (d.options ? d.options(propOf(toP)) : propOf(toP).options || []).map(o => typeof o === 'string' ? o : o.value);
   const pick = (list) => list.find(o => String(o).toLowerCase() === text.toLowerCase());
   switch(to){
@@ -342,7 +351,7 @@ function PhoneNumberInput({prop, value, onChange, invalid, base}){
   const set = (d, number) => onChange(number.trim() ? (d ? `+${d} ${number.trim()}` : number) : '');
   return (
     <div style={{display:'flex', gap:6}}>
-      <div style={{width:104, flexShrink:0}}><FormSelect value={dial} placeholder="Code" options={dialOptions()} onChange={(d)=>{ setDial(d); set(d, p.number); }} invalid={invalid}/></div>
+      <div style={{width:128, flexShrink:0}}><FormSelect value={dial} placeholder="Select code" options={dialOptions()} onChange={(d)=>{ setDial(d); set(d, p.number); }} invalid={invalid}/></div>
       <input type="tel" value={p.number} onChange={e=>set(dial, e.target.value)} placeholder={prop.placeholder || '300 0000000'} style={{...base, flex:1, minWidth:0}}/>
     </div>
   );
@@ -372,7 +381,7 @@ function TypedPropertyInput({prop, value, onChange, options, invalid, autoFocus,
       return (
         // The currency up to 168px wide; in a narrow column (a side panel) it gives way so the amount keeps 80px.
         <div style={{display:'grid', gridTemplateColumns:'minmax(0, 168px) minmax(80px, 1fr)', gap:6}}>
-          <div style={{minWidth:0}}><FormSelect value={m.currency} placeholder="Currency" options={currencyOptions()} onChange={(c)=>onChange({...m, currency:c})} invalid={invalid}/></div>
+          <div style={{minWidth:0}}><FormSelect value={m.currency} placeholder="Select currency" options={currencyOptions()} onChange={(c)=>onChange({...m, currency:c})} invalid={invalid}/></div>
           <input type="number" value={ptText(m.amount)} onChange={e=>onChange({...m, amount:e.target.value})} placeholder="Amount" style={{...base, minWidth:0}}/>
         </div>
       );
@@ -382,7 +391,7 @@ function TypedPropertyInput({prop, value, onChange, options, invalid, autoFocus,
       return (
         // Two per row where there's room (forms), one per row in narrow columns (side panels).
         <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(170px, 1fr))', gap:6}}>
-          <div><FormSelect value={l.country} placeholder="Country" options={countryOptions()} onChange={(v)=>set('country', v)} invalid={invalid}/></div>
+          <div><FormSelect value={l.country} placeholder="Select country" options={countryOptions()} onChange={(v)=>set('country', v)} invalid={invalid}/></div>
           <input value={l.street} onChange={e=>set('street', e.target.value)} placeholder="Street Address" aria-label="Street Address" style={base}/>
           <input value={l.city} onChange={e=>set('city', e.target.value)} placeholder="City" aria-label="City" style={base}/>
           <input value={l.state} onChange={e=>set('state', e.target.value)} placeholder="State or Province" aria-label="State or Province" style={base}/>
@@ -441,11 +450,11 @@ function ConditionValueInput({prop, op, value, onChange, options, compact}){
   if(op.multi || compare === 'multi') return <MultiSelectMenu value={Array.isArray(value) ? value : ptList(value)} options={opts} onChange={onChange}/>;
   if(compare === 'number' || compare === 'amount') return <input type="number" value={ptText(value)} onChange={e=>onChange(e.target.value)} placeholder={compare === 'amount' ? 'Amount' : 'Value'} style={style}/>;
   if(compare === 'date') return <DateField value={ptText(value)} onChange={onChange} inputStyle={style}/>;
-  if(compare === 'choice') return <FormSelect value={ptText(value)} placeholder="Select…" options={opts} onChange={onChange}/>;
+  if(compare === 'choice') return <FormSelect value={ptText(value)} placeholder="Select value" options={opts} onChange={onChange}/>;
   return <input type="text" value={ptText(value)} onChange={e=>onChange(e.target.value)} placeholder="Value" style={style}/>;
 }
 
-Object.assign(window, {LEGACY_CURRENCY, sampleRatesIn, setMoneyDefaults, defaultCurrency, currencyRate, toDefaultCurrency, convertAmount, moneyText, amountCurrencyKey, COUNTRY_LIST, CURRENCY_LIST, LANGUAGE_LIST, countryOptions, currencyOptions, dialOptions, flagOf, LOCATION_FIELDS,
+Object.assign(window, {dateShown, LEGACY_CURRENCY, sampleRatesIn, setMoneyDefaults, defaultCurrency, currencyRate, toDefaultCurrency, convertAmount, moneyText, amountCurrencyKey, COUNTRY_LIST, CURRENCY_LIST, LANGUAGE_LIST, countryOptions, currencyOptions, dialOptions, flagOf, LOCATION_FIELDS,
   PT_OPS, PROPERTY_TYPE_DEFS, LEGACY_PROPERTY_TYPES, CREATABLE_PROPERTY_TYPES, propertyTypeId, propertyTypeDef, propertyOperators, propertyCompare, propertyIsEmpty,
   storePropertyValueOf, loadPropertyValueOf, formatPropertyValueOf, validatePropertyValue, propertyValueError, samePropertyValue, formatValue, propertyValueMatches,
   MultiSelectMenu, TypedPropertyInput, ConditionValueInput, convertPropertyValue, ptList, ptBool, ptMoney, ptPhone, ptDay});

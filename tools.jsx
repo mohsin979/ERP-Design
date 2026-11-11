@@ -43,7 +43,7 @@ const TOOL_PAGES = {
     row:(a) => ({subject:a.title || 'Meeting', meetingType:a.logged ? 'Meeting log' : 'Meeting', platform:a.platform || '', when: isUpcoming(a) ? 'Upcoming' : 'Past',
       organiser:a.organizer || a.by || ''}),
     columns:[{key:'when', label:'When', width:110, filter:'select'}, {key:'meetingType', label:'Meeting Type', width:140, filter:'select'},
-      {key:'platform', label:'Platform', width:130, filter:'select'}, {key:'organiser', label:'Organiser', width:160, filter:'select'}],
+      {key:'platform', label:'Platform', width:130, filter:'select'}, {key:'organiser', label:'Organizer', width:160, filter:'select'}],
     views:[viewFilter('tmeet-up', 'Upcoming', 'when', 'Upcoming'), viewFilter('tmeet-past', 'Past', 'when', 'Past'), {id:'tmeet-all', name:'All Meetings', sort:{key:'date', dir:'desc'}}],
     create:['Schedule Meeting', 'Log Meeting']},
   notes: {type:'note', noun:'note', label:'Note', first:{key:'subject', label:'Note', width:320},
@@ -66,10 +66,10 @@ function ToolPanel({page, entry, creating, onClose, onCreated}){
   const act = entry && acts.find(a => a.id === entry.act.id);
   const onAdd = (a) => hub.add(object, recordId, a);
   const onUpdate = (id, patch) => hub.update(object, recordId, id, patch);
-  const title = entry ? `${page.label} · ${record ? record.name : ''}` : creating;
+  const title = entry ? page.label : creating;
   return (
-    <PageSidePanel width={560} title={title} subtitle={record ? `${HUB_NOUN[object]} · ${record.name}` : `Choose the ${page.noun}'s record`} onClose={onClose}
-      menuItems={record ? [{label:`Open ${HUB_NOUN[object].toLowerCase()}`, onClick:()=>hub.openRecord(object, recordId, 'panel')}] : undefined}>
+    <PageSidePanel title={title} onClose={onClose}
+      menuItems={record ? [{label:`Open ${HUB_NOUN[object]}`, onClick:()=>hub.openRecord(object, recordId, 'panel')}] : undefined}>
       {!entry && (
         <div style={{padding:'4px 20px 16px', borderBottom:`1px solid ${T.border}`}}>
           <RecordPicker value={target} onChange={setTarget}/>
@@ -86,8 +86,8 @@ function ToolPanel({page, entry, creating, onClose, onCreated}){
             : creating === 'Schedule Meeting' ? <NewScheduleMeeting contact={view} team={team} onAdd={onAdd} onDone={(id)=>onCreated(id, object, recordId)}/>
             : creating === 'Call' ? (
               <div style={{padding:20, display:'flex', flexDirection:'column', gap:12}}>
-                <div style={{fontSize:13, color:T.attioText}}>{(hubRecordPerson(hub, object, recordId) || {}).phone || 'No phone number on this record.'}</div>
-                <div><StCta icon="call" label="Start call" disabled={!(hubRecordPerson(hub, object, recordId) || {}).phone} onClick={()=>{ hub.startCall({object, id:recordId}); onClose(); }}/></div>
+                <div style={{fontSize:13, color:T.attioText}}>{(hubRecordPerson(hub, object, recordId) || {}).phone || 'No phone number on this record'}</div>
+                <div><StCta icon="call" label="Start Call" disabled={!(hubRecordPerson(hub, object, recordId) || {}).phone} onClick={()=>{ hub.startCall({object, id:recordId}); onClose(); }}/></div>
               </div>) : null}
         </RecordAccessCtx.Provider>}
       </div>
@@ -118,12 +118,12 @@ function ToolActivityPage({pageId}){
       : key === 'record' ? <HubRecordLink object={r._e.object} id={r._e.recordId} name={r.record}/>
       : (key === 'date' || (key === 'due' && r.due)) && r[key] ? <span>{key === 'due' ? fmtTaskDue(r._e.act) : fmtActStamp(new Date(r._e.act.at))}</span>
       : undefined,
-    renderActions:(r) => <RowActionsMenu title={`${page.label} actions`} width={MENU_W} items={[
-      {label:`View ${page.noun}`, onClick:()=>setPanel({ref:refOf(r._e)})},
-      {label:`Open ${r.object.toLowerCase()}`, onClick:()=>hub.openRecord(r._e.object, r._e.recordId, 'panel')}]}/>,
+    renderActions:(r) => <RowActionsMenu title={`${page.label} Actions`} width={MENU_W} items={[
+      {label:`View ${titleWord(page.noun)}`, onClick:()=>setPanel({ref:refOf(r._e)})},
+      {label:`Open ${r.object}`, onClick:()=>hub.openRecord(r._e.object, r._e.recordId, 'panel')}]}/>,
   };
   const create = (what) => { setMenu(false); if(what === 'Email') return hub.composeEmail({}); setPanel({creating:what}); };
-  const addLabel = {Call:'Call', 'Log Call':'Log call', Task:'New task', 'Schedule Meeting':'Schedule meeting', 'Log Meeting':'Log meeting', Note:'New note', Email:'New email'};
+  const addLabel = {Call:'Call', 'Log Call':'Log Call', Task:'Add Task', 'Schedule Meeting':'Schedule Meeting', 'Log Meeting':'Log Meeting', Note:'Add Note', Email:'Add Email'};
   return (
     <div style={{flex:1, minWidth:0, minHeight:0, display:'flex', flexDirection:'column', position:'relative', overflow:'hidden'}}>
       <RecordViewsModule inset="page" schema={schema} rows={rows} columns={columns.map(c => c.key)} defaultViews={page.views} storeKey={`views:tools-${pageId}`}
@@ -152,7 +152,9 @@ function ToolActivityPage({pageId}){
    item on the right in its usual detail (Edit, comments, Reply, ⋯ Delete). Adding asks for the
    record first, then opens the item's usual form (Email: the composer). */
 // The workspace's record types only, by their names (HOF Partners: Lead calls, Customer calls).
-const RECORD_FEEDS = (noun) => [{id:'all', name:`All ${noun}s`}, ...hubObjects().map(o => ({id:o, name:`${HUB_NOUN[o]} ${noun}s`}))];
+// Title Case: "All Calls", "Contact Calls".
+const titleWord = (w) => w.charAt(0).toUpperCase() + w.slice(1);
+const RECORD_FEEDS = (noun) => [{id:'all', name:`All ${titleWord(noun)}s`}, ...hubObjects().map(o => ({id:o, name:`${HUB_NOUN[o]} ${titleWord(noun)}s`}))];
 const byRecordFeed = (e, feed) => feed === 'all' || e.object === feed;
 // Emails' and Meetings' second level: by the record each is on.
 const SECOND_LEVEL = (plural) => [{id:'all', name:`All ${plural}`}, ...hubObjects().map(o => ({id:o, name:`${HUB_NOUN[o]} ${plural}`}))];
@@ -177,7 +179,7 @@ const LIST_PAGES = {
     when:(a) => new Date(a.scheduledFor || a.at), added:'Meeting added', byRecordType:true, search:(a) => [a.title, byName(a), a.body, a.platform],
     fields:(a) => ({meetingType:a.logged ? 'Meeting log' : 'Meeting', platform:a.platform || ''}),
     filters:[{key:'meetingType', label:'Meeting Type', type:'select', ops:['is', 'isNot'], values:['Meeting', 'Meeting log']}, {key:'platform', label:'Platform', type:'select', ops:['is', 'isNot', 'isAnyOf']}],
-    byLabel:'Organiser', dateLabel:'Meeting Date'},
+    byLabel:'Organizer', dateLabel:'Meeting Date'},
   notes: {type:'note', noun:'note', addTab:'notes', get feeds(){ return RECORD_FEEDS('note'); }, inFeed:byRecordFeed, line:(a) => richTextPlain(a.body) || 'Note',
     added:'Note added', search:(a) => [byName(a), richTextPlain(a.body)], fields:(a) => ({linked:a.callId ? 'Call' : a.meetingId ? 'Meeting' : 'None'}),
     filters:[{key:'linked', label:'Linked To', type:'select', ops:['is', 'isNot'], values:['Call', 'Meeting', 'None']}], byLabel:'Note By', dateLabel:'Note Date'},
@@ -268,7 +270,7 @@ function PeoplePicker({vis, open, setOpen}){
       </button>
       <MenuShell open={open} onClose={()=>setOpen(false)} anchorRight width={260}>
         <div style={{padding:'8px 10px', display:'flex', flexDirection:'column', gap:4}}>
-          <input autoFocus value={q} onChange={e=>setQ(e.target.value)} placeholder="Search people" aria-label="Search people" style={{...fieldText, padding:'6px 8px'}}/>
+          <input autoFocus value={q} onChange={e=>setQ(e.target.value)} placeholder="Search users" aria-label="Search users" style={{...fieldText, padding:'6px 8px'}}/>
           <div style={{maxHeight:260, overflowY:'auto', display:'flex', flexDirection:'column'}}>
             {shown.map(n => (
               <label key={n} onClick={()=>togglePerson(n)} style={{display:'flex', alignItems:'center', gap:8, padding:'5px 2px', fontSize:13, color:T.attioText, cursor:'pointer'}}>
@@ -277,7 +279,7 @@ function PeoplePicker({vis, open, setOpen}){
                 <span style={{minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{n}</span>
               </label>
             ))}
-            {!shown.length && <div style={{fontSize:12.5, color:T.attioMuted, padding:'6px 2px'}}>No one found.</div>}
+            {!shown.length && <div style={{fontSize:12.5, color:T.attioMuted, padding:'6px 2px'}}>No users match</div>}
           </div>
         </div>
       </MenuShell>
@@ -369,9 +371,9 @@ function NewActivityPanel({what, initialObject, team, prefill, onDone}){
   const form = what === 'Call'
     ? <CreatePanelFrame title="Call" onClose={()=>finish(null)} top={recordField} actions={<>
         <StSecondary label="Cancel" onClick={()=>finish(null)}/>
-        <StCta icon="call" label="Start call" disabled={!phone} onClick={()=>{ hub.startCall({object:target.object, id:target.id}); finish(null); }}/>
+        <StCta icon="call" label="Start Call" disabled={!phone} onClick={()=>{ hub.startCall({object:target.object, id:target.id}); finish(null); }}/>
       </>}>
-        {stack(<Field label="Phone"><ReadValue>{record ? phone || 'No phone number on this record.' : ''}</ReadValue></Field>)}
+        {stack(<Field label="Phone"><ReadValue>{record ? phone || 'No phone number on this record' : ''}</ReadValue></Field>)}
       </CreatePanelFrame>
     : what === 'Log Call' ? <NewLogCall contact={view} team={team} onAdd={onAdd} onDone={finish}/>
     : what === 'Note' ? <NewNote onAdd={onAdd} onDone={finish}/>
@@ -423,7 +425,7 @@ function ListToolPage({pageId}){
   const done = (id, target) => { setAdding(null); if(id){ setSelected({object:target.object, recordId:target.id, actId:id}); setFeed(page.feeds.find(f => f.id === 'all') ? 'all' : feed); setScope('all'); hub.toast(page.added); } };
   // A sent or scheduled email: shown in the folder it's in.
   const emailDone = (result, id, target) => { setCompose(null); if(id){ setFeed(result === 'scheduled' ? 'scheduled' : 'sent'); setSelected({object:target.object, recordId:target.id, actId:id}); } };
-  const empty = entries.length ? `No ${page.noun}s match these filters.` : `No ${page.noun}s yet.`;
+  const empty = entries.length ? `No ${page.noun}s match these filters` : `No ${page.noun}s yet`;
   return (
     <RecordSchema.Provider value={schema}>
       <div style={{flex:1, minWidth:0, minHeight:0, display:'flex', flexDirection:'column', overflow:'hidden', background:'#fff'}}>
@@ -439,7 +441,7 @@ function ListToolPage({pageId}){
           <div style={{width:460, flexShrink:0, overflowY:'auto', borderRight:`1px solid ${T.border}`, padding:'8px 0'}}>
             {shown.map(e => <ListToolItem key={e.act.id} page={page} e={e} personLed={vis.personLed} selected={current && current.act.id === e.act.id}
               onSelect={()=>setSelected({object:e.object, recordId:e.recordId, actId:e.act.id})}/>)}
-            {!shown.length && <div style={{fontSize:13, color:T.attioMuted, padding:'24px 20px', textAlign:'center'}}>{empty}</div>}
+            {!shown.length && <EmptyState compact title={empty}/>}
           </div>
           <div style={{flex:1, minWidth:0, minHeight:0, display:'flex', flexDirection:'column'}}>
             {sel ? (
@@ -532,17 +534,16 @@ function TaskStatusBoard({entries, onUpdate, onOpen, showAssignee}){
             <div style={{flex:1, minHeight:0, overflowY:'auto', padding:'0 10px 12px', display:'flex', flexDirection:'column', gap:8}}>
               {col.map(e => <TaskCard key={e.act.id} e={e} showAssignee={showAssignee} dragging={drag === e.act.id}
                 onDragStart={()=>setDrag(e.act.id)} onOpen={()=>onOpen(e)}/>)}
-              {!col.length && <div style={{fontSize:12.5, color:T.attioMuted, padding:'12px 4px', textAlign:'center'}}>No tasks</div>}
+              {!col.length && <div style={{fontSize:12.5, color:T.attioMuted, padding:'12px 4px', textAlign:'center'}}>No tasks yet</div>}
             </div>
           </div>
         );
       })}
       {rs && <StModal title="New due date" primary="Move to In Progress" canSubmit={rsOk} onCancel={()=>setRescheduling(null)}
         onSubmit={()=>{ if(!rsOk) return; onUpdate(rs.e, {status:'inProgress', ...rsDue}); setRescheduling(null); }}>
-        <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>{rs.e.act.title || 'This task'} is past its due date. Give it a new one to move it back to In Progress.</div>
         <div style={{display:'flex', gap:12}}>
-          <div style={{flex:1}}><label style={fieldLabel}>Due date</label><DateField required value={rs.date} onChange={v=>setRescheduling(x => ({...x, date:v}))} ariaLabel="Due date"/></div>
-          <div style={{flex:1}}><label style={fieldLabel}>Due time</label><TimeField value={rs.time} onChange={v=>setRescheduling(x => ({...x, time:v}))} ariaLabel="Due time"/></div>
+          <div style={{flex:1}}><label style={fieldLabel}>Due Date</label><DateField required value={rs.date} onChange={v=>setRescheduling(x => ({...x, date:v}))} ariaLabel="Due date"/></div>
+          <div style={{flex:1}}><label style={fieldLabel}>Due Time</label><TimeField value={rs.time} onChange={v=>setRescheduling(x => ({...x, time:v}))} ariaLabel="Due time"/></div>
         </div>
         {rs.date && !rsOk && <div style={{fontSize:12, color:T.red}}>Choose a date and time that haven't passed.</div>}
       </StModal>}
@@ -593,8 +594,8 @@ function TasksBoardPage(){
           onDone={(id, target)=>{ setAdding(false); if(id){ setPanel({ref:{object:target.object, recordId:target.id, actId:id}}); hub.toast('Task added'); } }}/>}
         </div>
         {panel && (
-          <PageSidePanel width={560} title={(openEntry && openEntry.act.title) || 'Task'} subtitle={openEntry ? `${HUB_NOUN[openEntry.object]} · ${openEntry.record.name}` : ''}
-            onClose={()=>setPanel(null)} menuItems={openEntry ? [{label:`Open ${HUB_NOUN[openEntry.object].toLowerCase()}`, onClick:()=>hub.openRecord(openEntry.object, openEntry.recordId, 'panel')}] : undefined}>
+          <PageSidePanel title={(openEntry && openEntry.act.title) || 'Task'}
+            onClose={()=>setPanel(null)} menuItems={openEntry ? [{label:`Open ${HUB_NOUN[openEntry.object]}`, onClick:()=>hub.openRecord(openEntry.object, openEntry.recordId, 'panel')}] : undefined}>
             <div style={{flex:1, minHeight:0, display:'flex', flexDirection:'column'}}>
               {openEntry ? <RecordAccessCtx.Provider value={{object:openEntry.object, record:openEntry.record}}>
                 <ActivityDetail key={openEntry.act.id} a={openEntry.act} contact={view(openEntry.record)} team={team}

@@ -43,8 +43,8 @@ function TemplateFormPanel({initial, onCancel, onSave}){
   const ok = !!name.trim() && !!subject.trim() && emailContentReady(content);
   const save = () => onSave({name:name.trim(), subject:subject.trim(), ...emailContentToSave(content)});
   return (
-    <CreatePanelFrame title={initial ? 'Edit Email Template' : 'New Email Template'} onClose={onCancel} width={EMAIL_PANEL_W} flush
-      actions={panelActions(onCancel, initial ? 'Save changes' : 'Create template', ok, save)}>
+    <CreatePanelFrame title={initial ? 'Edit Email Template' : 'Add Email Template'} onClose={onCancel} width={EMAIL_PANEL_W} flush
+      actions={panelActions(onCancel, initial ? 'Save Changes' : 'Add Email Template', ok, save)}>
       <EmailSplit form={<>
         <Field label="Email Template Name"><input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Document request" style={fieldText}/></Field>
         <Field label="Subject"><input value={subject} onChange={e=>setSubject(e.target.value)} style={fieldText}/></Field>
@@ -64,7 +64,7 @@ function SequenceFormPanel({initial, templates, onCancel, onSave}){
     style={{border:'none', background:'transparent', cursor: disabled ? 'default' : 'pointer', display:'flex', padding:4, opacity: disabled ? .35 : 1}}><Icon name={icon} size={13} color={T.gray600}/></button>;
   const save = () => onSave({name:s.name.trim(), emails:s.emails.map(({key, ...e}) => e)});
   return (
-    <CreatePanelFrame title={initial ? 'Edit Email Sequence' : 'New Email Sequence'} onClose={onCancel} actions={panelActions(onCancel, initial ? 'Save changes' : 'Create sequence', ok, save)}>
+    <CreatePanelFrame title={initial ? 'Edit Email Sequence' : 'Add Email Sequence'} onClose={onCancel} actions={panelActions(onCancel, initial ? 'Save Changes' : 'Add Email Sequence', ok, save)}>
       {stack(<>
       <Field label="Name"><input autoFocus value={s.name} onChange={e=>setS(x => ({...x, name:e.target.value}))} placeholder="e.g. New client onboarding" style={fieldText}/></Field>
       <Field label="Emails"><div style={{display:'flex', flexDirection:'column', gap:8, paddingTop:2}}>
@@ -84,13 +84,13 @@ function SequenceFormPanel({initial, templates, onCancel, onSave}){
               <span style={{fontSize:12.5, color:T.gray600, whiteSpace:'nowrap'}}>{i === 0 ? 'Send after' : 'Then after'}</span>
               <input value={e.delay.amount} onChange={ev=>setEmail(i, {delay:{...e.delay, amount:ev.target.value.replace(/[^0-9]/g, '')}})} inputMode="numeric" aria-label={`Email ${i + 1} delay`}
                 style={{...fieldText, width:80, fontVariantNumeric:'tabular-nums'}}/>
-              <div style={{width:130}}><FormSelect value={e.delay.unit} placeholder="Unit" options={SEQUENCE_UNITS} onChange={(v)=>setEmail(i, {delay:{...e.delay, unit:v || 'Days'}})}/></div>
+              <div style={{width:130}}><FormSelect value={e.delay.unit} placeholder="Select unit" options={SEQUENCE_UNITS} onChange={(v)=>setEmail(i, {delay:{...e.delay, unit:v || 'Days'}})}/></div>
             </div>
           </div>
         ))}
         <button type="button" onClick={()=>setS(x => ({...x, emails:[...x.emails, {key:`se-${Date.now().toString(36)}`, templateId:'', delay:{amount:'1', unit:'Days'}}]}))}
           style={{alignSelf:'flex-start', display:'inline-flex', alignItems:'center', gap:6, border:'none', background:'transparent', padding:'4px 0', fontSize:13, fontWeight:500, color:T.attioText, cursor:'pointer', fontFamily:'inherit'}}>
-          <Icon name="plus" size={13} color={T.gray600}/> Add email
+          <Icon name="plus" size={13} color={T.gray600}/> Add Email
         </button>
       </div></Field>
       </>)}
@@ -108,7 +108,7 @@ function QuoteTemplateFormPanel({templates, onCancel, onSave}){
   const save = () => onSave({name:t.name.trim(), ...normalizeQuoteConfig(t), vatRate:t.vatRate, terms:t.terms, currency:t.currency});
   const divider = <div style={{borderTop:`1px solid ${T.border}`, margin:'4px -20px 0'}}/>;
   return (
-    <CreatePanelFrame title="New Quote Template" width={QUOTE_PANEL_W} onClose={onCancel} actions={panelActions(onCancel, 'Create template', ok, save)}>
+    <CreatePanelFrame title="Add Quote Template" width={QUOTE_PANEL_W} onClose={onCancel} actions={panelActions(onCancel, 'Add Quote Template', ok, save)}>
       <div style={{display:'flex', flexDirection:'column', gap:16}}>
         {stack(<>
           <Field label="Name"><input autoFocus value={t.name} onChange={e=>set({name:e.target.value})} placeholder="e.g. US NIW Standard" style={fieldText}/></Field>
@@ -142,8 +142,8 @@ function QuoteTemplatesTab({data, setData, say}){
     {key:'installments', label:'Installments', width:120}, {key:'createdBy', label:'Created By', width:160}, {key:'created', label:'Created', width:150}];
   const rows = list.map(t => ({id:t.id, code:t.code, name:t.name, services:(t.items || []).map(it => it.name).join(', '), installments:(t.installments || []).length,
     createdBy:creatorOf(t), created:fmtQuoteDate(t.createdAt)}));
-  const actions = (t) => [{label:'View template', onClick:()=>setOpenId(t.id)}, ...(can('edit', t) ? [{label:'Rename template', onClick:()=>setRenaming({id:t.id, name:t.name})}] : []),
-    ...(can('delete', t) ? [{label:'Delete template', danger:true, onClick:()=>setDeleting(t)}] : [])];
+  const actions = (t) => [{label:'View Template', onClick:()=>setOpenId(t.id)}, ...(can('edit', t) ? [{label:'Rename Template', onClick:()=>setRenaming({id:t.id, name:t.name})}] : []),
+    ...(can('delete', t) ? [{label:'Delete Template', danger:true, onClick:()=>setDeleting(t)}] : [])];
   // Bulk Actions → Delete, as the row's (the ones the person may delete).
   const qtBulk = useTableBulkDelete({rows, noun:'template', canDelete:(r) => can('delete', list.find(t => t.id === r.id)), skipNote:'not yours to delete',
     remove:(ids) => { setList(ts => ts.filter(t => !ids.includes(t.id))); if(ids.includes(openId)) setOpenId(null); }, onDone:(n) => say(`${bulkPlural(n, 'template')} deleted`)});
@@ -152,7 +152,7 @@ function QuoteTemplatesTab({data, setData, say}){
     filterProps:[{key:'name', label:'Name', type:'text'}, {key:'createdBy', label:'Created By', type:'select'}], selectValues:{createdBy:[...new Set(list.map(t => t.createdBy).filter(Boolean))]},
     renderCell:(key, r) => key === 'name' ? <ContactName name={r.name} onOpen={()=>setOpenId(r.id)} style={{fontSize:'inherit', fontWeight:500}}/>
       : key === 'installments' ? <span style={{fontVariantNumeric:'tabular-nums'}}>{r.installments}</span> : undefined,
-    renderActions:(r) => <RowActionsMenu title="Actions" width={MENU_W} items={actions(list.find(t => t.id === r.id))}/>,
+    renderActions:(r) => <RowActionsMenu title="Template Actions" width={MENU_W} items={actions(list.find(t => t.id === r.id))}/>,
   };
   const section = {...QUOTE_SECTION, marginBottom:8};
   const totals = open ? quoteTotals(open) : null;
@@ -165,10 +165,10 @@ function QuoteTemplatesTab({data, setData, say}){
     <div style={{display:'flex', flexDirection:'column', flex:1, minHeight:0}}>
       <RecordViewsModule schema={schema} rows={rows} columns={cols.map(c => c.key)} storeKey="views:templates-quoteTemplates"
         defaultViews={[{id:'tv-quoteTemplates', name:'All Quote Templates', sort:{key:'code', dir:'asc'}}]}
-        actions={() => can('create') && <StCta icon="plus" title="New quote template" onClick={()=>{ setOpenId(null); setCreating(true); }}/>}
+        actions={() => can('create') && <button onClick={()=>{ setOpenId(null); setCreating(true); }} title="Add Quote Template" aria-label="Add Quote Template" style={toolbarIconButton}><Icon name="plus" size={14} color={T.gray800}/></button>}
         overlay={creating ? <QuoteTemplateFormPanel templates={all} onCancel={()=>setCreating(false)} onSave={create}/>
-          : open && <DetailPanel width={560} title={open.name} onClose={()=>setOpenId(null)} menuItems={actions(open).filter(it => !/^View/.test(it.label))}
-          fields={[['Code', open.code], ['Services', String((open.items || []).length)], ['Total', fmtMoney(totals.total, quoteCurrency(open))], ['Created', fmtQuoteDate(open.createdAt)], ['Created by', creatorOf(open)]]}>
+          : open && <DetailPanel title={open.name} onClose={()=>setOpenId(null)} menuItems={actions(open).filter(it => !/^View/.test(it.label))}
+          fields={[['Code', open.code], ['Services', String((open.items || []).length)], ['Total', fmtMoney(totals.total, quoteCurrency(open))], ['Created', fmtQuoteDate(open.createdAt)], ['Created By', creatorOf(open)]]}>
             <div>
               <div style={section}>Services</div>
               {(open.items || []).map(it => (
@@ -183,7 +183,7 @@ function QuoteTemplatesTab({data, setData, say}){
             <div>
               <div style={section}>Payment terms</div>
               {(open.installments || []).map((x, i) => row(`${i + 1}. ${x.description}`, `${round2(x.percent)}%`, x.id || i))}
-              {!(open.installments || []).length && <div style={{fontSize:13, color:T.attioMuted}}>No installments.</div>}
+              {!(open.installments || []).length && <div style={{fontSize:13, color:T.attioMuted}}>No installments</div>}
             </div>
             <div>
               <div style={section}>Discount & tax</div>
@@ -197,14 +197,14 @@ function QuoteTemplatesTab({data, setData, say}){
               {richIsEmpty(richHtmlOf(open.terms)) ? <div style={{fontSize:13, color:T.attioMuted}}>None.</div> : <RichTextView html={open.terms} style={{fontSize:12.5}}/>}
             </div>
         </DetailPanel>}/>
-      {renaming && <StModal title="Rename template" primary="Save" canSubmit={!!renaming.name.trim()} onCancel={()=>setRenaming(null)}
-        onSubmit={()=>{ setList(ts => ts.map(t => t.id === renaming.id ? {...t, name:renaming.name.trim()} : t)); setRenaming(null); say('Saved'); }}>
-        <div><label style={fieldLabel}>Template name</label><input autoFocus value={renaming.name} onChange={e=>setRenaming(r => ({...r, name:e.target.value}))} style={fieldInput}/></div>
+      {renaming && <StModal title="Rename Template" primary="Rename Template" canSubmit={!!renaming.name.trim()} onCancel={()=>setRenaming(null)}
+        onSubmit={()=>{ setList(ts => ts.map(t => t.id === renaming.id ? {...t, name:renaming.name.trim()} : t)); setRenaming(null); say('Template renamed'); }}>
+        <div><label style={fieldLabel}>Template Name</label><input autoFocus value={renaming.name} onChange={e=>setRenaming(r => ({...r, name:e.target.value}))} style={fieldInput}/></div>
       </StModal>}
       {qtBulk.bulkModal}
-      {deleting && <StModal title="Delete template" primary="Delete" danger onCancel={()=>setDeleting(null)}
-        onSubmit={()=>{ setList(ts => ts.filter(t => t.id !== deleting.id)); if(openId === deleting.id) setOpenId(null); setDeleting(null); say('Deleted'); }}>
-        <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>{deleting.code} · {deleting.name} will be deleted. Quotes made from it keep what they were given.</div>
+      {deleting && <StModal title="Delete Template" primary="Delete Template" danger onCancel={()=>setDeleting(null)}
+        onSubmit={()=>{ setList(ts => ts.filter(t => t.id !== deleting.id)); if(openId === deleting.id) setOpenId(null); setDeleting(null); say('Template deleted'); }}>
+        <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>{deleting.code} · {deleting.name} will be deleted. Quotes made from it keep what they were given. This can't be undone.</div>
       </StModal>}
     </div>
   );
@@ -220,7 +220,7 @@ function TemplatesSettings({data, setData}){
   const [openId, setOpenId] = React.useState(null);
   const [deleting, setDeleting] = React.useState(null);  // {kind, item}
   const [toast, setToast] = React.useState(null);
-  const say = (m) => { setToast(m); setTimeout(()=>setToast(null), 1800); };
+  const say = (m) => { setToast(m); setTimeout(()=>setToast(null), TOAST_MS); };
   const templates = emailTemplatesOf(data), sequences = emailSequencesOf(data);
   const setTemplates = (fn) => setData(d => ({...d, emailTemplates:fn(emailTemplatesOf(d))}));
   const setSequences = (fn) => setData(d => ({...d, emailSequences:fn(emailSequencesOf(d))}));
@@ -243,7 +243,7 @@ function TemplatesSettings({data, setData}){
     : [{key:'name', label:'Sequence Name', width:240}, {key:'steps', label:'Emails', width:110}, {key:'span', label:'Templates', width:380}, {key:'usedBy', label:'Used By', width:120}, {key:'createdBy', label:'Created By', width:170}];
   const rows = list.map(x => isT ? {id:x.id, name:x.name, subject:x.subject, usedBy:usage('templates', x.id).length, createdBy:creatorOf(x)}
     : {id:x.id, name:x.name, steps:x.emails.length, span:x.emails.map(e => templateName(e.templateId)).join(' → '), usedBy:usage('sequences', x.id).length, createdBy:creatorOf(x)});
-  const noun = isT ? 'template' : 'sequence';
+  const noun = isT ? 'template' : 'sequence', Noun = isT ? 'Template' : 'Sequence';
   // Bulk Actions: Delete — one in use (by a sequence or a workflow) is skipped, as its Delete refuses.
   const listBulk = useTableBulkDelete({rows:list, noun, canDelete:(x) => can('delete', x) && !usage(tab, x.id).length, skipNote:'in use or not yours to delete',
     remove:(ids) => { (isT ? setTemplates : setSequences)(xs => xs.filter(x => !ids.includes(x.id))); if(ids.includes(openId)) setOpenId(null); }, onDone:(n) => say(`${bulkPlural(n, noun)} deleted`)});
@@ -252,9 +252,9 @@ function TemplatesSettings({data, setData}){
     filterProps:[{key:'name', label:'Name', type:'text'}, {key:'usedBy', label:'Used By', type:'number'}], selectValues:{},
     renderCell:(key, r) => key === 'name' ? <ContactName name={r.name} onOpen={()=>setOpenId(r.id)} style={{fontSize:'inherit', fontWeight:500}}/> : undefined,
     renderActions:(r) => { const x = list.find(y => y.id === r.id);
-      return <RowActionsMenu title="Actions" width={MENU_W} items={[{label:`View ${noun}`, onClick:()=>setOpenId(r.id)},
-        ...(can('edit', x) ? [{label:`Edit ${noun}`, onClick:()=>setForm({kind:tab, initial:x})}] : []),
-        ...(can('delete', x) ? [{label:`Delete ${noun}`, danger:true, onClick:()=>setDeleting({kind:tab, item:x})}] : [])]}/>; },
+      return <RowActionsMenu title={`${Noun} Actions`} width={MENU_W} items={[{label:`View ${Noun}`, onClick:()=>setOpenId(r.id)},
+        ...(can('edit', x) ? [{label:`Edit ${Noun}`, onClick:()=>setForm({kind:tab, initial:x})}] : []),
+        ...(can('delete', x) ? [{label:`Delete ${Noun}`, danger:true, onClick:()=>setDeleting({kind:tab, item:x})}] : [])]}/>; },
   };
   const save = (vals) => {
     const editing = form.initial;
@@ -284,13 +284,13 @@ function TemplatesSettings({data, setData}){
         <div style={{display:'flex', flexDirection:'column', flex:1, minHeight:0}}>
           <RecordViewsModule key={tab} schema={schema} rows={rows} columns={cols.map(c => c.key)} storeKey={`views:templates-${tab}`}
             defaultViews={[{id:`tv-${tab}`, name: isT ? 'All Templates' : 'All Sequences', sort:{key:'name', dir:'asc'}}]}
-            actions={() => can('create') && <StCta icon="plus" title={isT ? 'New template' : 'New sequence'} onClick={()=>{ setOpenId(null); setForm({kind:tab}); }}/>}
+            actions={() => can('create') && <button onClick={()=>{ setOpenId(null); setForm({kind:tab}); }} title={isT ? 'Add Email Template' : 'Add Email Sequence'} aria-label={isT ? 'Add Email Template' : 'Add Email Sequence'} style={toolbarIconButton}><Icon name="plus" size={14} color={T.gray800}/></button>}
             overlay={form ? (form.kind === 'templates'
                 ? <TemplateFormPanel key={form.initial ? form.initial.id : 'new'} initial={form.initial} onCancel={()=>setForm(null)} onSave={save}/>
                 : <SequenceFormPanel key={form.initial ? form.initial.id : 'new'} initial={form.initial} templates={templates} onCancel={()=>setForm(null)} onSave={save}/>)
-              : open && <DetailPanel width={isT ? 680 : 480} title={open.name} onClose={()=>setOpenId(null)}
-              menuItems={[...(can('edit', open) ? [{label:`Edit ${noun}`, onClick:()=>setForm({kind:tab, initial:open})}] : []), ...(can('delete', open) ? [{label:`Delete ${noun}`, danger:true, onClick:()=>setDeleting({kind:tab, item:open})}] : [])]}
-              fields={[...(isT ? [['Subject', open.subject], ['Email Format', emailFormatLabel(templateContentOf(open).format)]] : [['Emails', String(open.emails.length)]]), ['Used by', usage(tab, open.id).length ? usage(tab, open.id).join(', ') : 'Not used'], ['Created by', creatorOf(open)]]}>
+              : open && <DetailPanel title={open.name} onClose={()=>setOpenId(null)}
+              menuItems={[...(can('edit', open) ? [{label:`Edit ${Noun}`, onClick:()=>setForm({kind:tab, initial:open})}] : []), ...(can('delete', open) ? [{label:`Delete ${Noun}`, danger:true, onClick:()=>setDeleting({kind:tab, item:open})}] : [])]}
+              fields={[...(isT ? [['Subject', open.subject], ['Email Format', emailFormatLabel(templateContentOf(open).format)]] : [['Emails', String(open.emails.length)]]), ['Used By', usage(tab, open.id).length ? usage(tab, open.id).join(', ') : 'Not used'], ['Created By', creatorOf(open)]]}>
                 {isT ? <div style={{display:'flex', flexDirection:'column', gap:8}}><EmailHtmlFrame html={emailHtmlOf(templateContentOf(open))}/>
                     {templateContentOf(open).format === 'simple' && <EmailAttachmentList list={templateContentOf(open).attachments}/>}</div>
                   : <ol style={{margin:0, padding:0, listStyle:'none', display:'flex', flexDirection:'column', gap:10}}>
@@ -306,9 +306,9 @@ function TemplatesSettings({data, setData}){
       </SettingsPage>
       {listBulk.bulkModal}
       {deleting && <StModal title={`Delete ${deleting.kind === 'templates' ? 'template' : 'sequence'}`} primary={used.length ? null : 'Delete'} danger onCancel={()=>setDeleting(null)}
-        onSubmit={()=>{ (deleting.kind === 'templates' ? setTemplates : setSequences)(xs => xs.filter(x => x.id !== deleting.item.id)); if(openId === deleting.item.id) setOpenId(null); setDeleting(null); say('Deleted'); }}>
+        onSubmit={()=>{ (deleting.kind === 'templates' ? setTemplates : setSequences)(xs => xs.filter(x => x.id !== deleting.item.id)); if(openId === deleting.item.id) setOpenId(null); setDeleting(null); say(deleting.kind === 'templates' ? 'Email template deleted' : 'Sequence deleted'); }}>
         <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>
-          {used.length ? `${deleting.item.name} is used by ${used.join(', ')}. Remove it there first, then delete it.` : `${deleting.item.name} will be deleted.`}
+          {used.length ? `${deleting.item.name} is used by ${used.join(', ')}. Remove it there first, then delete it.` : `${deleting.item.name} will be deleted. This can't be undone.`}
         </div>
       </StModal>}
       <CopyToast message={toast}/>

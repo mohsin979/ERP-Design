@@ -33,7 +33,9 @@ const contactCopyText = (c) => [c.name, c.phone, c.email].filter(Boolean).join('
 
 /* Brief confirmation after a copy — the only feedback the action has, since nothing on screen
    changes when the clipboard does. */
-/* `action`: an optional link after the message ({label, onClick}), e.g. Open deal. */
+/* `action`: an optional link after the message ({label, onClick}), e.g. Open deal. Every toast
+   stays TOAST_MS (one with an action TOAST_ACTION_MS, time to reach it). */
+const TOAST_MS = 2500, TOAST_ACTION_MS = 5000;
 function CopyToast({message, action}){
   if(!message) return null;
   return (
@@ -81,7 +83,7 @@ const copyAction = (text, label, onCopied) => () => {
   if(!text){ onCopied && onCopied(`No ${label} to copy`); return; }
   copyText(text).then(ok => onCopied && onCopied(ok ? `${label[0].toUpperCase()+label.slice(1)} copied` : 'Copy failed'));
 };
-const viewSettingsItem = (onViewSettings) => onViewSettings && {label:'View settings', icon:<Icon name="settingsGear" size={13} color={T.gray600}/>, onClick:onViewSettings};
+const viewSettingsItem = (onViewSettings) => onViewSettings && {label:'Side Panel Settings', icon:<Icon name="settingsGear" size={13} color={T.gray600}/>, onClick:onViewSettings};
 
 /* ── The record ⋯ menu ── one structure for Contacts, Deals and Customers, named for the record:
      Tools          Call, Email, Meeting, Task, Note, File, Quote (by tool permission)
@@ -191,7 +193,7 @@ const associatedNote = (counts, noun) => {
 function ChangeOwnerModal({record, noun, users, ownerName, onClose, onSave}){
   const [owner, setOwner] = React.useState(record.owner || '');
   return (
-    <StModal title={`Edit ${noun} Owner`} primary="Change owner" canSubmit={!!owner && owner !== record.owner} onCancel={onClose} onSubmit={()=>onSave(owner)}>
+    <StModal title={`Edit ${noun} Owner`} primary="Change Owner" canSubmit={!!owner && owner !== record.owner} onCancel={onClose} onSubmit={()=>onSave(owner)}>
       <div style={stTextB}>{record.name} · {record.owner ? `Currently ${ownerName(record.owner)}` : 'No owner'}</div>
       <div>
         <label style={fieldLabel}>{noun} Owner</label>
@@ -212,28 +214,12 @@ const fieldInput = {
   fontSize:13, fontFamily:'inherit', color:T.attioText, background:'#fff',
 };
 
-function FormSelect({value, placeholder, options, onChange, invalid}){
-  return (
-    <div style={{position:'relative'}}>
-      <select value={value} onChange={e=>onChange(e.target.value)}
-        style={{...fieldInput, appearance:'none', WebkitAppearance:'none', MozAppearance:'none',
-                paddingRight:32, cursor:'pointer', color: value ? T.attioText : T.gray400,
-                borderColor: invalid ? T.red : T.borderStrong}}>
-        <option value="">{placeholder}</option>
-        {/* Options are plain strings, or {value, label} when the stored value is an id, or
-            {group, options, disabled} for a labelled group of them (a disabled group shows but
-            can't be picked). */}
-        {options.map(function opt(o){
-          if(typeof o === 'string') return <option key={o} value={o}>{o}</option>;
-          if(o.group) return <optgroup key={o.group} label={o.group} disabled={!!o.disabled}>{o.options.map(opt)}</optgroup>;
-          return <option key={o.value} value={o.value}>{o.label}</option>;
-        })}
-      </select>
-      <div style={{position:'absolute', right:10, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', display:'flex'}}>
-        <Icon name="chevDown" size={T.chevronSize} color={T.gray600}/>
-      </div>
-    </div>
-  );
+/* A form's dropdown (Dropdown, shared.jsx): options are plain strings, or {value, label} when the
+   stored value is an id, or {group, options, disabled} for a labelled group of them (a disabled
+   group shows but can't be picked). The placeholder is offered first, to clear the choice ('').
+   `ariaLabel`: its name where no label names it. */
+function FormSelect({value, placeholder, options, onChange, invalid, ariaLabel}){
+  return <Dropdown value={value} options={options} onChange={onChange} placeholder={placeholder} invalid={invalid} ariaLabel={ariaLabel} controlStyle={fieldInput}/>;
 }
 
 /* Built from the Contact object's properties (Settings → Properties): every property that's
@@ -259,16 +245,18 @@ function RecordFields({fields, values, set, optionsFor, tried, autoFocus}){
     // A Boolean: its toggle, then its label, on one line.
     const toggle = propertyTypeId(p.type) === 'Boolean';
     return (
-      // One field per row; a grouped input (a phone's country code and number, a timestamp's date and time, …) keeps its parts on it.
-      <div key={p.key} style={{gridColumn:'1 / -1', minWidth:0}}>
-        {!toggle && <label style={fieldLabel}>{label}{p.required && <span style={{color:T.red}}> *</span>}</label>}
+      // One field per row, its label beside it (as every create and edit panel); a grouped input (a
+      // phone's country code and number, a timestamp's date and time, …) keeps its parts on it.
+      <div key={p.key} style={{gridColumn:'1 / -1', minWidth:0, display:'flex', alignItems:'flex-start', gap:12}}>
+        <label style={{...actFieldLabel, paddingTop:9}}>{label}{p.required && <span style={{color:T.red}}> *</span>}</label>
+        <div style={{flex:1, minWidth:0}}>
         {amountCurrencyKey(p)
           // An amount with its currency (Deal Amount): the Currency input, the two kept on their own keys.
           ? <PropertyInput prop={{...p, type:'Currency'}} value={{currency:values[amountCurrencyKey(p)] || defaultCurrency(), amount:values[p.key]}} invalid={err} autoFocus={autoFocus && i === 0}
               onChange={m=>set({[p.key]:m.amount, [amountCurrencyKey(p)]:m.currency})}/>
-          : <PropertyInput prop={p} value={values[p.key]} onChange={val=>set({[p.key]:val})} options={optionsFor(p)} invalid={err} autoFocus={autoFocus && i === 0}
-          label={toggle ? <span style={{fontSize:12.5, color:T.gray600}}>{label}</span> : undefined}/>}
+          : <div style={toggle ? {paddingTop:7} : undefined}><PropertyInput prop={p} value={values[p.key]} onChange={val=>set({[p.key]:val})} options={optionsFor(p)} invalid={err} autoFocus={autoFocus && i === 0}/></div>}
         {err && <div style={{fontSize:12, color:T.red, marginTop:4}}>{err}</div>}
+        </div>
       </div>
     );
   });
@@ -304,7 +292,7 @@ function AssociatedCreation({options, value, onChange, tried, onPull}){
       <div style={{gridColumn:'1 / -1', position:'relative'}}>
         <button type="button" onClick={()=>setMenu(m => !m)} style={{display:'inline-flex', alignItems:'center', gap:6, border:'none', background:'transparent', padding:'4px 0',
           fontSize:13, fontWeight:500, color:T.attioText, cursor:'pointer', fontFamily:'inherit'}}>
-          <Icon name="plus" size={13} color={T.gray600}/>Create through associated record<Icon name="chevDown" size={T.chevronSize} color={T.gray600}/>
+          <Icon name="plus" size={13} color={T.gray600}/>Add Associated Record<Icon name="chevDown" size={T.chevronSize} color={T.gray600}/>
         </button>
         <MenuShell open={menu} onClose={()=>setMenu(false)} width={220}>
           {left.map(o => <MenuItem key={o.object} label={sentenceCase(o.noun)} onClick={()=>{ setMenu(false);
@@ -370,9 +358,9 @@ const associationMissing = (options, list) => (list || []).some(a => {
 function RecordLinkField({link, value, onChange}){
   const label = `Associated ${sentenceCase(link.noun)}${link.multiple ? 's' : ''}`;
   if(!link.multiple) return (
-    <div style={{gridColumn:'1 / -1', minWidth:0}}>
-      <label style={fieldLabel}>{label}</label>
-      <div style={{display:'flex', alignItems:'center', gap:6}}>
+    <div style={{gridColumn:'1 / -1', minWidth:0, display:'flex', alignItems:'flex-start', gap:12}}>
+      <label style={{...actFieldLabel, paddingTop:9}}>{label}</label>
+      <div style={{flex:1, minWidth:0, display:'flex', alignItems:'center', gap:6}}>
         <div style={{flex:1, minWidth:0}}>
           <SearchableSelect value={value || ''} options={link.options} onChange={onChange} placeholder={`Select ${link.noun}`} searchPlaceholder={`Search ${link.noun}s`}/>
         </div>
@@ -384,8 +372,9 @@ function RecordLinkField({link, value, onChange}){
   const ids = value || [];
   const rest = link.options.filter(o => !ids.includes(o.value));
   return (
-    <div style={{gridColumn:'1 / -1', minWidth:0}}>
-      <label style={fieldLabel}>{label}</label>
+    <div style={{gridColumn:'1 / -1', minWidth:0, display:'flex', alignItems:'flex-start', gap:12}}>
+      <label style={{...actFieldLabel, paddingTop:9}}>{label}</label>
+      <div style={{flex:1, minWidth:0}}>
       {ids.length > 0 && (
         <div style={{display:'flex', flexWrap:'wrap', gap:6, marginBottom:8}}>
           {ids.map(id => (
@@ -399,6 +388,7 @@ function RecordLinkField({link, value, onChange}){
         </div>
       )}
       {rest.length > 0 && <SearchableSelect value="" options={rest} onChange={(id)=>onChange([...ids, id])} placeholder={`Add ${link.noun}`} searchPlaceholder={`Search ${link.noun}s`}/>}
+      </div>
     </div>
   );
 }
@@ -410,13 +400,13 @@ function RecordLinkField({link, value, onChange}){
    person can edit — all but the ones the system sets (`auto`) — so a property that isn't on the
    creation form can still be edited, with a search to find a field quickly. Mandatory ones stay
    required. `initial`: values it starts with (a record created from another carries its name,
-   email and phone — all editable). `subtitle`: where it's created from. `association` (Add
+   email and phone — all editable). `association` (Add
    only): Create through associated object; onSave(values, [association]). `links` (Add and Edit):
    associated records picked from existing ones, starting at `initialLinks` ({key: id | ids});
    onSave(values, association, links). `zIndex`: over a modal it's opened from. */
 /* `canEditField(p)`: editing, the fields the signed-in user may change (Records → Edit — its stage
    moves and property values); the others aren't offered, and keep their values. */
-function ContactFormModal({mode, initial, properties, owners, stages, onCancel, onSave, noun = 'contact', optionsFor: optionsForProp, adjust, association, links, initialLinks, subtitle, zIndex, canEditField}){
+function ContactFormModal({mode, initial, properties, owners, stages, onCancel, onSave, noun = 'contact', optionsFor: optionsForProp, adjust, association, links, initialLinks, zIndex, canEditField}){
   const fields = (properties || []).filter(p => mode === 'edit' ? !p.auto && (!canEditField || canEditField(p)) : p.onCreate)
     .map(p => mode === 'edit' ? {...p, required:!!p.mandatory} : p);
   const [v, setV] = React.useState(() => emptyValues(fields, initial));
@@ -437,32 +427,29 @@ function ContactFormModal({mode, initial, properties, owners, stages, onCancel, 
   const q = query.trim().toLowerCase();
   const shown = q ? fields.filter(p => String(p.formLabel || p.label).toLowerCase().includes(q)) : fields;
   const linksShown = (links || []).filter(l => !q || `associated ${l.noun}`.includes(q));
-  const title = mode === 'edit' ? `Edit ${noun}` : `Add ${noun}`;
-  const top = mode === 'edit' || subtitle ? (
-    <div style={{display:'flex', flexDirection:'column', gap:10}}>
-      {subtitle && <div style={{fontSize:13, color:T.attioMuted}}>{subtitle}</div>}
-      {mode === 'edit' && (
-        <div style={{position:'relative'}}>
-          <div style={{position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', display:'flex'}}><Icon name="search" size={13} color={T.gray400}/></div>
-          <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search fields" aria-label="Search fields" style={{...fieldInput, paddingLeft:30}}/>
-        </div>
-      )}
+  // Title Case: "Add Contact", "Edit Deal"; the button "Add Contact" / "Save Changes".
+  const Noun = String(noun).replace(/\b\w/g, c => c.toUpperCase());
+  const title = mode === 'edit' ? `Edit ${Noun}` : `Add ${Noun}`;
+  const top = mode === 'edit' ? (
+    <div style={{position:'relative'}}>
+      <div style={{position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', display:'flex'}}><Icon name="search" size={13} color={T.gray400}/></div>
+      <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search fields" aria-label="Search fields" style={{...fieldInput, paddingLeft:30}}/>
     </div>
   ) : null;
 
   return (
-    <CreatePanelFrame title={sentenceCase(title)} onClose={onCancel} top={top} more={false} zIndex={zIndex} actions={<>
+    <CreatePanelFrame title={title} onClose={onCancel} top={top} zIndex={zIndex} actions={<>
       <StSecondary label="Cancel" onClick={onCancel}/>
-      <StCta label={mode === 'edit' ? 'Save changes' : `Add ${noun}`} onClick={submit}/>
+      <StCta label={mode === 'edit' ? 'Save Changes' : `Add ${Noun}`} onClick={submit}/>
     </>}>
       <div style={{display:'grid', gridTemplateColumns:'minmax(0, 1fr)', gap:16}}>
         <RecordFields fields={shown} values={v} set={set} optionsFor={optionsFor} tried={tried} autoFocus={mode === 'add'}/>
         {assocOptions && <AssociatedCreation options={assocOptions} value={assoc} onChange={setAssoc} tried={tried} onPull={set}/>}
         {linksShown.map(l => <RecordLinkField key={l.key} link={l} value={linked[l.key]} onChange={(val)=>setLinked(s => ({...s, [l.key]:val}))}/>)}
-        {q && !shown.length && !linksShown.length && <div style={{fontSize:13, color:T.attioMuted}}>No fields match “{query.trim()}”</div>}
+        {q && !shown.length && !linksShown.length && <div style={{fontSize:13, color:T.attioMuted}}>No fields match "{query.trim()}"</div>}
       </div>
     </CreatePanelFrame>
   );
 }
 
-Object.assign(window, {customerHasDeal, quickActionAvailable, RecordFields, AssociatedCreation, RecordLinkField, RecordActionsMenu, StandardRecordMenu, RECORD_TOOLS, ChangeOwnerModal, associatedNote, QUICK_ACTION_DEFS, QUICK_TOOL_KEYS, OBJECT_QUICK_ACTIONS, objectQuickActions, OBJECT_NOUNS, quickActionLabel, quickActionLabels, normalizeQuickActions, defaultQuickActions, shownQuickActions, runQuickAction, copyAction, viewSettingsItem, contactCopyText, ContactActionsMenu, ContactFormModal, CopyToast, copyText, todayLabel});
+Object.assign(window, {TOAST_MS, TOAST_ACTION_MS, customerHasDeal, quickActionAvailable, RecordFields, AssociatedCreation, RecordLinkField, RecordActionsMenu, StandardRecordMenu, RECORD_TOOLS, ChangeOwnerModal, associatedNote, QUICK_ACTION_DEFS, QUICK_TOOL_KEYS, OBJECT_QUICK_ACTIONS, objectQuickActions, OBJECT_NOUNS, quickActionLabel, quickActionLabels, normalizeQuickActions, defaultQuickActions, shownQuickActions, runQuickAction, copyAction, viewSettingsItem, contactCopyText, ContactActionsMenu, ContactFormModal, CopyToast, copyText, todayLabel});

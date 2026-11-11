@@ -12,12 +12,14 @@
 
 const EMPTY_ILLUSTRATIONS = {
   profile: 'assets/empty-states/customer-profile.svg',
+  list:    'assets/empty-states/empty-list.svg',   // every other empty list, table, tab and page
 };
 
-function EmptyState({illustration, title, description, action}){
+// `illustration`: a registered name; the list one when none is given. `compact`: less padding (inside a tab or table).
+function EmptyState({illustration = 'list', title, description, action, compact}){
   const src = illustration && EMPTY_ILLUSTRATIONS[illustration];
   return (
-    <div style={{padding:'64px 24px', display:'flex', flexDirection:'column', alignItems:'center', textAlign:'center'}}>
+    <div style={{padding: compact ? '32px 24px' : '64px 24px', display:'flex', flexDirection:'column', alignItems:'center', textAlign:'center'}}>
       {src && <img src={src} width={131} height={131} alt="" style={{display:'block', flexShrink:0}}/>}
       <div style={{fontSize:14, fontWeight:500, color:T.attioText, marginTop: src ? 18 : 0}}>{title}</div>
       {description && <div style={{fontSize:13, color:T.attioMuted, marginTop:4}}>{description}</div>}

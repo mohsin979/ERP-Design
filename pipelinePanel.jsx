@@ -118,14 +118,14 @@ function PipelinePanel({data, setData, pipelineId, deals = [], onClose, onStub, 
     renderActions: (r) => {
       const n = countsDeals ? dealsIn(r.id) : 0;
       const items = [
-        ...(canWorkflow ? [{label:'Add Workflow', onClick:()=>setEditing({stage:r.stage, workflow:newWorkflow(r.stage)})}] : []),
-        ...(editable ? [{label: n ? `Delete Stage · ${n} ${recNoun}${n === 1 ? '' : 's'}` : 'Delete Stage', danger:!n, disabled:!!n, onClick:()=>setDeleting(r.stage)}] : []),
+        // A stage with records can't be deleted (shown disabled).
+        ...(editable ? [{label:'Delete Stage', danger:!n, disabled:!!n, onClick:()=>setDeleting(r.stage)}] : []),
       ];
       return <div style={{display:'flex', alignItems:'center', gap:2}}>
         {canWorkflow && <button title="Add Workflow" onClick={()=>setEditing({stage:r.stage, workflow:newWorkflow(r.stage)})} style={stageWorkflowBtn}>
           <Icon name="workflows" size={15} color={T.attioMuted}/>
         </button>}
-        {items.length > 0 && <RowActionsMenu title="Stage actions" width={MENU_W} items={items}/>}
+        {items.length > 0 && <RowActionsMenu title="Stage Actions" width={MENU_W} items={items}/>}
       </div>;
     },
   };
@@ -148,7 +148,7 @@ function PipelinePanel({data, setData, pipelineId, deals = [], onClose, onStub, 
           <div style={{width:PIPELINE_INFO_W, flexShrink:0, display:'flex', flexDirection:'column', borderRight:`1px solid ${T.border}`, minHeight:0}}>
             <div style={pipelineColumnHeader}>
               <span style={{flex:1, minWidth:0, fontSize:15, fontWeight:600, color:T.attioText, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{pipeline.label}</span>
-              <RowActionsMenu title="Pipeline actions" width={MENU_W} items={pipelineMenuItems(pipeline, deals, ()=>setEditingPipeline(true), undefined, data, ()=>setDeletingPipeline(true))}/>
+              <RowActionsMenu title="Pipeline Actions" width={MENU_W} items={pipelineMenuItems(pipeline, deals, ()=>setEditingPipeline(true), undefined, data, ()=>setDeletingPipeline(true))}/>
             </div>
             <div style={{flex:1, minHeight:0, overflowY:'auto', padding:'16px 20px 24px'}}>
               <div style={{marginBottom:6}}>
@@ -197,13 +197,13 @@ function PipelinePanel({data, setData, pipelineId, deals = [], onClose, onStub, 
       // Its workflows (shown here, and that the person may delete) go with it; others pointing at it are flagged in the builder.
       const gone = workflows.filter(w => stageOfWorkflow(w) === deleting.id && workflowCan('delete', w)).map(w => w.id), n = gone.length;
       return (
-        <StModal title="Delete Stage" primary="Delete stage" danger onCancel={()=>setDeleting(null)}
+        <StModal title="Delete Stage" primary="Delete Stage" danger onCancel={()=>setDeleting(null)}
           onSubmit={()=>{
             setStages(list => list.filter(s => s.id !== deleting.id));
             setData(d => ({...d, workflows:(d.workflows || []).filter(w => !gone.includes(w.id))}));
             setDeleting(null);
           }}>
-          <div style={stTextB}>Delete "{deleting.label}" from {pipeline.label}?{n ? ` Its ${n} workflow${n === 1 ? '' : 's'} will be deleted too.` : ''}</div>
+          <div style={stTextB}>Delete "{deleting.label}" from {pipeline.label}?{n ? ` Its ${n} workflow${n === 1 ? '' : 's'} will be deleted too.` : ''} This can't be undone.</div>
         </StModal>
       );
     })()}
@@ -221,8 +221,8 @@ const pipelineMenuItems = (pipeline, deals, onEdit, noun = typeNoun('deals', 'de
   const n = pipelineDealCount(pipeline, deals), can = !!onDelete && pipelineDeletable(pipeline, deals, data);
   // Settings & Administration → Pipelines: Edit and Delete, for the pipeline's record type.
   return [
-    ...(pipelineAdminCan(pipeline.objectId, 'edit', pipeline) ? [{label:'Edit', onClick:onEdit}] : []),
-    ...(pipelineAdminCan(pipeline.objectId, 'delete', pipeline) ? [{label: n ? `Delete · ${n} ${noun}${n === 1 ? '' : 's'}` : 'Delete', danger:can, disabled:!can, onClick:can ? onDelete : ()=>{}}] : []),
+    ...(pipelineAdminCan(pipeline.objectId, 'edit', pipeline) ? [{label:'Edit Pipeline', onClick:onEdit}] : []),
+    ...(pipelineAdminCan(pipeline.objectId, 'delete', pipeline) ? [{label:'Delete Pipeline', danger:can, disabled:!can, onClick:can ? onDelete : ()=>{}}] : []),
   ];
 };
 
@@ -246,20 +246,25 @@ function EditPipelineModal({pipeline, setData, onClose, taken = []}){
       : {...p, label:label.trim(), stages:p.stages.map(s => ({...withStageType(s), ...(ownNames ? {label:(names[s.id] || s.label).trim()} : {}), type:types[s.id] || 'open'}))})}));
     onClose();
   };
+  // A side panel, as Add Pipeline (labels beside the fields).
   return (
-    <StModal title="Edit Pipeline" primary="Save changes" canSubmit={ok} onCancel={onClose} onSubmit={save} width={520}>
-      <div>
-        <label style={fieldLabel} htmlFor="pipeline-name">Pipeline name</label>
+    <CreatePanelFrame title="Edit Pipeline" onClose={onClose} zIndex={110} actions={<>
+      <StSecondary label="Cancel" onClick={onClose}/>
+      <StCta label="Save Changes" disabled={!ok} onClick={()=>ok && save()}/>
+    </>}>
+      <div style={{display:'flex', flexDirection:'column', gap:16}}>
+      <Field label="Pipeline Name" wide>
         <input id="pipeline-name" value={label} onChange={e=>setLabel(e.target.value)} style={fieldInput}/>
         {nameTaken && <div style={{fontSize:12, color:T.red, marginTop:6}}>Another pipeline has this name.</div>}
-      </div>
-      <div>
+      </Field>
+      <Field label="Stages" wide>
+        <div>
         <div style={{display:'flex', alignItems:'baseline'}}>
-          <label style={{...fieldLabel, flex:1}}>Stages</label>
+          <span style={{flex:1}}/>
           <span style={{...fieldLabel, width:130, flexShrink:0}}>Stage Type</span>
         </div>
         {/* Plain rows, in pipeline order. */}
-        <div style={{display:'flex', flexDirection:'column', gap:8, maxHeight:340, overflowY:'auto'}}>
+        <div style={{display:'flex', flexDirection:'column', gap:8}}>
           {pipeline.stages.map((s, i) => (
             <div key={s.id} style={{display:'flex', alignItems:'center', gap:10}}>
               <span style={{width:18, fontSize:12.5, color:T.gray400, fontVariantNumeric:'tabular-nums', flexShrink:0}}>{i + 1}</span>
@@ -270,8 +275,10 @@ function EditPipelineModal({pipeline, setData, onClose, taken = []}){
           ))}
         </div>
         {dupes && <div style={{fontSize:12, color:T.red, marginTop:6}}>Two stages can't have the same name.</div>}
+        </div>
+      </Field>
       </div>
-    </StModal>
+    </CreatePanelFrame>
   );
 }
 
@@ -279,7 +286,7 @@ function DeletePipelineModal({pipeline, setData, onCancel, onDeleted}){
   return (
     <StModal title="Delete Pipeline" primary="Delete Pipeline" danger onCancel={onCancel}
       onSubmit={()=>{ setData(d => ({...d, pipelines:(d.pipelines || []).filter(p => p.id !== pipeline.id)})); onDeleted && onDeleted(); }}>
-      <div style={stTextB}>"{pipeline.label}" will be deleted.</div>
+      <div style={stTextB}>"{pipeline.label}" will be deleted. This can't be undone.</div>
     </StModal>
   );
 }
@@ -289,9 +296,9 @@ function AddStageModal({stages, onCancel, onAdd}){
   const l = label.trim();
   const taken = stages.some(s => s.label.toLowerCase() === l.toLowerCase());
   return (
-    <StModal title="Add Stage" primary="Add stage" canSubmit={!!l && !taken} onCancel={onCancel} onSubmit={()=>onAdd(l, type)}>
+    <StModal title="Add Stage" primary="Add Stage" canSubmit={!!l && !taken} onCancel={onCancel} onSubmit={()=>onAdd(l, type)}>
       <div>
-        <label style={fieldLabel} htmlFor="stage-name">Stage name</label>
+        <label style={fieldLabel} htmlFor="stage-name">Stage Name</label>
         <input id="stage-name" autoFocus value={label} onChange={e=>setLabel(e.target.value)} placeholder="e.g. Documents Received" style={fieldInput}
           onKeyDown={e=>{ if(e.key === 'Enter' && l && !taken) onAdd(l, type); }}/>
         {taken && <div style={{fontSize:12, color:T.red, marginTop:4}}>This pipeline already has a stage with this name.</div>}

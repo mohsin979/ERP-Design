@@ -116,6 +116,7 @@ function PanelQuickActions({contact, items, actions, onStub, onCall}){
 
 /* Field order is fixed by the product spec. Name, email and phone are in the header; Primary
    Company appears under the name; Lifecycle Stage and Lead Status are deliberately not shown. */
+// The full date ("Nov 10, 2026"): lists sort and filter by it; panels show it through dateShown.
 const fmtInfoDate = (d) => d ? d.toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'}) : '';
 
 /* Owner dates come from the contact's own history, not stored fields:
@@ -231,7 +232,7 @@ function ContactInfo({contact, acts, onStub, keys, onOpenDeals, onOpenCustomers,
           ) : r.open ? (
             <button onClick={()=>r.open(r.value)} style={{border:'none', background:'transparent', padding:0, cursor:'pointer', fontSize:13, color:T.attioBlue, textAlign:'left'}}>{r.value}</button>
           ) : (
-            <span style={{fontSize:13, color:T.attioText, minWidth:0, overflowWrap:'anywhere'}}>{r.value}</span>
+            <span style={{fontSize:13, color:T.attioText, minWidth:0, overflowWrap:'anywhere'}}>{dateShown(r.value)}</span>
           )}
         </div>
       ))}
@@ -333,7 +334,7 @@ const CONTACT_TABS = [
   {id:'profile',  label:'Customer Profile', icon:'profile',  list:false},
   {id:'calls',    label:'Calls',            icon:'call',     list:true},
   {id:'notes',    label:'Notes',            icon:'notepad',  list:true},
-  {id:'email',    label:'Email',            icon:'envelope', list:true},
+  {id:'email',    label:'Emails',            icon:'envelope', list:true},
   {id:'tasks',    label:'Tasks',            icon:'tasks',    list:true},
   {id:'meetings', label:'Meetings',         icon:'videoCamera', list:true},
   {id:'files',    label:'Files',            icon:'folder',   list:true},
@@ -522,7 +523,7 @@ function OwnerEditableValue({prop, value, onSave, options, display, pencil, alig
   const [draft, setDraft] = React.useState('');
   const [hover, setHover] = React.useState(false);
   const [error, setError] = React.useState(null);
-  const label = prop.label, shown = display !== undefined ? display : formatPropertyValueOf(prop, value);
+  const label = prop.label, shown = dateShown(display !== undefined ? display : formatPropertyValueOf(prop, value));
   const commit = (v) => {
     const err = propertyValueError(prop, v, !!prop.mandatory);   // Mandatory holds here as in the Edit form
     if(err){ setError(err); return; }
@@ -651,7 +652,7 @@ function OwnerProfilePanel({name, onClose, user: userProp, editable, onSaveProfi
       background:'#fff', borderLeft:`1px solid ${T.border}`, boxShadow:'-12px 0 32px rgba(16,24,40,.10)', display:'flex', flexDirection:'column',
     }}>
       <div style={{padding:'16px 14px 12px 20px', flexShrink:0}}>
-        <NameRow contact={{name: user ? user.name : name}} subtitle={values.language}
+        <NameRow contact={{name: user ? user.name : name}}
           headerActions={<button title="Close" onClick={onClose} style={barIconBtn}><Icon name="close" size={13} color={T.gray600}/></button>}/>
       </div>
       <div style={{flex:1, minHeight:0, overflowY:'auto', padding:'0 20px 24px'}}>
@@ -741,10 +742,11 @@ function ContactDetail({mode, contact, acts, properties, panelProperties, onClos
             {/* Side panel: Close, Expand and the menu sit right of the name. Full screen: only
                 the menu — Close and Collapse live in the top bar, and nothing is duplicated. */}
             {(() => {
+              // ⋯, then Open Full Screen, then × at the far right (as every panel).
               const headerActions = <>
+                {menu || <ContactActionsMenu contact={contact} {...actions} onViewSettings={onOpenPanelSettings || (()=>onStub('Side Panel Settings'))}/>}
+                {!full && <button title="Open Full Screen" onClick={onExpand} style={barIconBtn}><Icon name="expand" size={15} color={T.gray600}/></button>}
                 {!full && <button title="Close" onClick={onClose} style={barIconBtn}><Icon name="close" size={13} color={T.gray600}/></button>}
-                {!full && <button title="Open full screen" onClick={onExpand} style={barIconBtn}><Icon name="expand" size={15} color={T.gray600}/></button>}
-                {menu || <ContactActionsMenu contact={contact} {...actions} onViewSettings={onOpenPanelSettings || (()=>onStub('View Settings'))}/>}
               </>;
               return renderName ? renderName(headerActions) : <NameRow contact={contact} subtitle={contactSubtitle(contact, panelSettings)} headerActions={headerActions}/>;
             })()}

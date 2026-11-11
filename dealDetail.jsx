@@ -29,7 +29,7 @@ const DEAL_TABS = [
   {id:'profile',  label:'Customer Profile', icon:'profile',     list:false},
   {id:'calls',    label:'Calls',            icon:'call',        list:true},
   {id:'notes',    label:'Notes',            icon:'notepad',     list:true},
-  {id:'email',    label:'Email',            icon:'envelope',    list:true},
+  {id:'email',    label:'Emails',            icon:'envelope',    list:true},
   {id:'tasks',    label:'Tasks',            icon:'tasks',       list:true},
   {id:'meetings', label:'Meetings',         icon:'videoCamera', list:true},
   {id:'files',    label:'Files',            icon:'folder',      list:true},
@@ -170,7 +170,7 @@ function DealInfo({deal, view, acts, contact, customers = [], keys, props, onOpe
               : !r.value ? <span style={{fontSize:13, color:T.attioFaint}}>—</span>
               : r.list ? <AssociatedRecordsValue records={r.value} noun="customer" onOpen={(x)=>onOpenCustomer && onOpenCustomer(x)}/>
               : r.open ? <button onClick={r.open} style={linkButton}>{r.value}</button>
-              : <span style={{fontSize:13, color:T.attioText, minWidth:0, overflowWrap:'anywhere'}}>{r.value}</span>}
+              : <span style={{fontSize:13, color:T.attioText, minWidth:0, overflowWrap:'anywhere'}}>{dateShown(r.value)}</span>}
           </div>
         );
       })}
@@ -251,7 +251,7 @@ function DealActionsMenu({deal, contact, onTool, onCreateCustomer, onEdit, onOwn
    the record. `q` is the tab's search. */
 function AssociatedRecords({columns, rows, q, onOpen, empty}){
   const shown = rows.filter(r => !q || String(r.name || '').toLowerCase().includes(q.toLowerCase()));
-  if(!shown.length) return <div style={{padding:'40px 24px', textAlign:'center', fontSize:13, color:T.gray400}}>{rows.length ? 'No matches.' : empty}</div>;
+  if(!shown.length) return <div style={{padding:'40px 24px', textAlign:'center', fontSize:13, color:T.gray400}}>{rows.length ? 'No matches' : empty}</div>;
   const grid = {display:'grid', gridTemplateColumns:columns.map(c => c.width || '1fr').join(' '), gap:16, alignItems:'center', padding:'0 4px'};
   return (
     <div style={{padding:'12px 20px 24px'}}>
@@ -289,10 +289,10 @@ function DealDetail({mode, deal, view, acts, contact, profiles, props, settings,
           onCreate={(templateId)=>onCreateProfile(holder, templateId)} onStub={onStub}/>
       : <div style={{padding:'40px 24px', textAlign:'center', fontSize:13, color:T.gray400}}>This {typeNoun('deals', 'deal')} has no contact, so it has no Customer Profile.</div>;
     if(tab.id === 'contacts') return <AssociatedRecords columns={ASSOCIATED_CONTACT_COLUMNS} rows={contact ? [contactView(contact)] : []} q={q}
-      onOpen={(c)=>onOpenContact(c)} empty={`No contacts on this ${typeNoun('deals', 'deal')}.`}/>;
+      onOpen={(c)=>onOpenContact(c)} empty={`No contacts on this ${typeNoun('deals', 'deal')}`}/>;
     // Deals → Customers: the deal's customers.
     if(tab.id === 'customers') return <AssociatedRecords columns={ASSOCIATED_CUSTOMER_COLUMNS} rows={customers} q={q}
-      onOpen={(x)=>onOpenCustomer && onOpenCustomer(x)} empty={`No customers on this ${typeNoun('deals', 'deal')}.`}/>;
+      onOpen={(x)=>onOpenCustomer && onOpenCustomer(x)} empty={`No customers on this ${typeNoun('deals', 'deal')}`}/>;
     return undefined;
   };
   return (
@@ -339,7 +339,7 @@ function CreateDealModal({contact, data, onCancel, onSave}){
   // Starts from the contact: its name, email, phone and owner — every one editable.
   const initial = {name:contact.name || '', email:contact.email || '', phone:contact.phone || '', owner:contactOwner ? contactOwner.id : '',
     ...(pipelines.length === 1 ? {pipeline:pipelines[0].id} : {})};
-  return <ContactFormModal mode="add" initial={initial} properties={objectFormProperties(data, 'deals')} noun={typeNoun('deals', 'deal')} subtitle={`From ${contact.name}`}
+  return <ContactFormModal mode="add" initial={initial} properties={objectFormProperties(data, 'deals')} noun={typeNoun('deals', 'deal')}
     optionsFor={pipelineFormOptions(data, 'deals')} adjust={pipelineFormAdjust(data, 'deals')} onCancel={onCancel} onSave={(vals)=>onSave(vals)}/>;
 }
 
@@ -347,7 +347,7 @@ function CreateDealModal({contact, data, onCancel, onSave}){
    every deal of theirs, so it's offered here (the existing profile builder). */
 function ProfilePromptModal({contact, onCancel, onCreate}){
   return (
-    <StModal title="Create Customer Profile" primary="Create profile" onSubmit={onCreate} onCancel={onCancel}>
+    <StModal title="Create Customer Profile" primary="Create Customer Profile" onSubmit={onCreate} onCancel={onCancel}>
       <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>
         {contact.name} doesn't have a Customer Profile yet. It's shared by the contact and their deals, so the new deal will show it too.
       </div>

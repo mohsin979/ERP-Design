@@ -9,7 +9,7 @@
      Add installment    — the same editor with a new installment to fill in.
      Pull from quote    — a quote sent to the record (Sent or Signed) fills the structure with its
        payment terms (total and installments: description, percentage, amount, tentative date — a
-       "Day N" counting from the quote's sent date), marked "Imported from Quotation". Each quote
+       "Day N" counting from the quote's sent date), marked "Imported from Quote". Each quote
        can be pulled once. Payments can be recorded once the quote is signed.
    A record saved with more than one structure (before this rule) keeps one — the one with
    payments, else a quote's, else its own (primaryTermsOf) — and the others stay, archived:
@@ -133,7 +133,7 @@ function PaymentStructurePanel({initial, addRow, onCancel, onSave, pullable = []
   const save = () => ok && (JSON.stringify({title, total, currency, startDate, terms}) === opened ? onCancel() : onSave({title:title.trim(), total:r2(total), currency, startDate,
     terms:terms.map(x => ({...x, description:x.description.trim(), percent:Number(x.percent), due:normalizeDue(x.due)}))}));
   return (
-    <CreatePanelFrame title={initial ? 'Edit Payment Terms' : 'New Payment Terms'} onClose={onCancel} placement="fixed" width={1000} actions={<>
+    <CreatePanelFrame title={initial ? 'Edit Payment Terms' : 'Add Payment Terms'} onClose={onCancel} placement="fixed" width={1000} actions={<>
       <StSecondary label="Cancel" onClick={onCancel}/>
       <StCta label="Save" disabled={!ok} onClick={save}/>
     </>}>
@@ -145,18 +145,10 @@ function PaymentStructurePanel({initial, addRow, onCancel, onSave, pullable = []
           <div style={{position:'relative'}}>
             <button type="button" disabled={!pullable.length} onClick={()=>setPickOpen(o => !o)}
               style={{...btnSecondarySm, opacity: pullable.length ? 1 : .5, cursor: pullable.length ? 'pointer' : 'default'}}>
-              Pull from quote <Icon name="chevDown" size={11} color={T.gray600}/></button>
+              Pull from Quote <Icon name="chevDown" size={11} color={T.gray600}/></button>
             <MenuShell open={pickOpen} onClose={()=>setPickOpen(false)} anchorRight width={340}>
-              {pullable.map(q => (
-                <div key={q.id} onClick={()=>{ setPickOpen(false); onPull(q); }} style={{padding:'9px 12px', cursor:'pointer', display:'flex', flexDirection:'column', gap:2}}
-                  onMouseEnter={e=>e.currentTarget.style.background = T.headerBg} onMouseLeave={e=>e.currentTarget.style.background = 'transparent'}>
-                  <div style={{display:'flex', alignItems:'center', gap:8}}>
-                    <span style={{fontSize:13, fontWeight:500, color:T.attioText}}>{q.number}</span><QuoteStatusPill status={quoteStatusOf(q)}/>
-                    <span style={{flex:1}}/><span style={{fontSize:12.5, color:T.attioText, fontVariantNumeric:'tabular-nums'}}>{fmtMoney(quoteTotal(q), quoteCurrency(q))}</span>
-                  </div>
-                  <span style={{fontSize:12, color:T.attioMuted}}>{q.title} · {plural((q.installments || []).length, 'installment')}</span>
-                </div>
-              ))}
+              {/* One line each (menu copy never wraps): the quote's number, title and total. */}
+              {pullable.map(q => <MenuItem key={q.id} label={`${q.number} · ${q.title} · ${fmtMoney(quoteTotal(q), quoteCurrency(q))}`} onClick={()=>{ setPickOpen(false); onPull(q); }}/>)}
             </MenuShell>
           </div>
         </div>
@@ -167,7 +159,7 @@ function PaymentStructurePanel({initial, addRow, onCancel, onSave, pullable = []
           <div style={{width:168, flexShrink:0}}><FormSelect value={currency} options={currencyOptions()} onChange={(c)=>c && setCurrency(c)}/></div>
           <input value={total} onChange={e=>setTotal(e.target.value.replace(/[^0-9.]/g, ''))} inputMode="decimal" placeholder="0" aria-label="Total"
             style={{...fieldText, flex:1, minWidth:0, fontVariantNumeric:'tabular-nums'}}/></div></Field>
-        <Field label="Start date (Day 0)"><DateField required value={startDate} onChange={setStartDate}/></Field>
+        <Field label="Start Date (Day 0)"><DateField required value={startDate} onChange={setStartDate}/></Field>
       </>)}
       <div style={{borderTop:`1px solid ${T.border}`, margin:'18px -20px 14px'}}/>
       <InstallmentsEditor rows={terms} onChange={setTerms} total={totalOk ? Number(total) : 0} currency={currency} newId={()=>acId('mt')}/>
@@ -202,7 +194,7 @@ function PaymentModal({schedule, inst, onCancel, onSave}){
     </label>
   );
   return ReactDOM.createPortal(
-    <StModal title="Update Status" primary={unpaid ? 'Save' : 'Save payment'} canSubmit={ok} width={676} onCancel={onCancel}
+    <StModal title="Update Status" primary={unpaid ? 'Save' : 'Save Payment'} canSubmit={ok} width={676} onCancel={onCancel}
       onSubmit={()=>ok && (unpaid ? onCancel() : onSave({status, amount: partial ? r2(amt) : due, paidOn, expected, evidence:{file, link:link.trim()}}))}>
       {/* Two columns: the installment's figures on the left, the payment on the right. */}
       <div style={{display:'grid', gridTemplateColumns:'minmax(0, 1fr) 1px minmax(0, 1.2fr)', columnGap:14, minHeight:310}}>
@@ -220,14 +212,14 @@ function PaymentModal({schedule, inst, onCancel, onSave}){
                 style={{...fieldInput, fontVariantNumeric:'tabular-nums', borderColor: amount && !amountOk ? T.red : T.borderStrong}}/>
               {amount && !amountOk && <div style={{fontSize:12, color:T.red, marginTop:4}}>Less than {fmtMoney(due, cur)} — a full payment is Paid.</div>}
             </div>
-            <div><label style={fieldLabel}>Remaining balance expected on</label><DateField required value={expected} onChange={setExpected}/>
+            <div><label style={fieldLabel}>Remaining Balance Expected On</label><DateField required value={expected} onChange={setExpected}/>
               {expected && !expectedOk && <div style={{fontSize:12, color:T.red, marginTop:4}}>Choose today or a later date.</div>}</div>
           </>}
           {!unpaid && <>
-          <div><label style={fieldLabel}>Payment date</label><DateField required value={paidOn} onChange={setPaidOn}/>
+          <div><label style={fieldLabel}>Payment Date</label><DateField required value={paidOn} onChange={setPaidOn}/>
             {paidOn && !paidOnOk && <div style={{fontSize:12, color:T.red, marginTop:4}}>A payment can't be dated in the future.</div>}</div>
           <div>
-            <label style={fieldLabel}>Payment evidence</label>
+            <label style={fieldLabel}>Payment Evidence</label>
             <div style={{display:'flex', flexDirection:'column', gap:8}}>
               <EvidenceFile tall value={file} accept="image/*,.pdf" onClear={()=>setFile(null)} onChange={(f)=>readUpload(f).then(v => { setFile(v); setError(''); }).catch(e => setError(e.message))}/>
               <input value={link} onChange={e=>setLink(e.target.value)} placeholder="Payment gateway or reference link (https://…)" aria-label="Reference link"
@@ -329,7 +321,7 @@ function PaymentScheduleCard({schedule, canEdit, canPay, quote, pullable, archiv
                   style={{display:'inline-flex', alignItems:'center', gap:5, border:'none', fontFamily:'inherit', fontSize:11.5, fontWeight:500, padding:'2px 8px', borderRadius:9999,
                     background:T.blueLight, color:T.blue, whiteSpace:'nowrap', cursor: quote ? 'pointer' : 'default'}}>
                   <Icon name="quote" size={11} color={T.blue}/>
-                  <span style={quote ? {textDecorationLine:'underline', textUnderlineOffset:2} : undefined}>Imported from Quotation</span></button>
+                  <span style={quote ? {textDecorationLine:'underline', textUnderlineOffset:2} : undefined}>Imported from Quote</span></button>
                 {!quote && <span style={{fontSize:12, color:T.attioMuted, whiteSpace:'nowrap'}}>Quote deleted</span>}
               </>}
             </div>
@@ -338,10 +330,10 @@ function PaymentScheduleCard({schedule, canEdit, canPay, quote, pullable, archiv
           {/* Edit, Add installment and Pull from quote: until the first payment is recorded — payments
               are never removed. Archived terms (`archived`) have none. */}
           {canEdit && !archived && (
-            <RowActionsMenu title="Payment terms actions" items={[
+            <RowActionsMenu title="Payment Terms Actions" items={[
               {label:'Edit Payment Terms', disabled:hasPayments(schedule), onClick:onEdit},
-              {label:'Add installment', disabled:hasPayments(schedule), onClick:onAdd},
-              ...(pullable && pullable.length ? [{label:'Pull from quote', disabled:hasPayments(schedule), onClick:onEdit}] : [])]}/>
+              {label:'Add Installment', disabled:hasPayments(schedule), onClick:onAdd},
+              ...(pullable && pullable.length ? [{label:'Pull from Quote', disabled:hasPayments(schedule), onClick:onEdit}] : [])]}/>
           )}
         </div>
         <div style={{display:'flex', gap:8, flexWrap:'wrap'}}>
@@ -354,7 +346,7 @@ function PaymentScheduleCard({schedule, canEdit, canPay, quote, pullable, archiv
             <span style={{...head, paddingLeft:24}}>Installment</span><span style={{...head, justifyContent:'flex-end'}}>Percentage</span><span style={{...head, justifyContent:'flex-end'}}>Amount</span>
             <span style={head}>Status</span><span style={head}>Tentative</span><span style={head}>Due date</span><span style={{...head, ...actionsCol, background:T.headerBg}}>Actions</span>
           </div>
-          {!schedule.installments.length && <div style={{padding:'14px 24px', fontSize:13, color:T.attioMuted}}>No installments.</div>}
+          {!schedule.installments.length && <div style={{padding:'14px 24px', fontSize:13, color:T.attioMuted}}>No installments</div>}
           {schedule.installments.map(inst => {
             const st = installmentState(schedule, inst);
             const parent = inst.parentId && schedule.installments.find(x => x.id === inst.parentId);
@@ -404,7 +396,7 @@ function RecordAccounting({object, record}){
   const [viewing, setViewing] = React.useState(null); // {scheduleId, instId}: View payment
   const [editing, setEditing] = React.useState(null); // {id, add?}: the Edit Payment Terms panel
   const [showArchived, setShowArchived] = React.useState(false);
-  const [quoteOpen, setQuoteOpen] = React.useState(null); // the quotation opened from "Imported from Quotation"
+  const [quoteOpen, setQuoteOpen] = React.useState(null); // the quotation opened from "Imported from Quote"
   // Payment Terms permissions (Records → <Object> → Accounting), by the record's owner.
   const can = (action) => paymentTermsCan(action, object, record);
   const canEdit = can('edit');
@@ -478,7 +470,7 @@ function RecordAccounting({object, record}){
       </div>
       <div style={{flex:1, minHeight:0, overflowY:'auto', paddingBottom:32, display:'flex', flexDirection:'column'}}>
         {primary && card(primary, false)}
-        {!primary && <div style={{padding:'40px 0', textAlign:'center', fontSize:13, color:T.attioMuted}}>No payment terms yet.</div>}
+        {!primary && <EmptyState compact title="No payment terms yet"/>}
         {/* Archived: extra structures saved before one-per-record — read-only. */}
         {archivedList.length > 0 && <>
           <button type="button" onClick={()=>setShowArchived(v => !v)} style={{...formTextAction, alignSelf:'flex-start', margin:'14px 24px 6px', display:'inline-flex', alignItems:'center', gap:6}}>
@@ -493,7 +485,7 @@ function RecordAccounting({object, record}){
       {editing && editingDef && <PaymentStructurePanel key={`${editing.id}-${editing.add ? 'add' : 'edit'}`} initial={editingDef} addRow={!!editing.add}
         onCancel={()=>setEditing(null)} onSave={saveManual} pullable={pullable} onPull={pull}/>}
       {/* The quotation, as on Tools → Quotes. */}
-      {openedQuote && <PageSidePanel width={560} title={`${openedQuote.number} · ${openedQuote.title}`} subtitle={`${QUOTE_STATUS[quoteStatusOf(openedQuote)].label} · ${fmtMoney(quoteTotal(openedQuote), quoteCurrency(openedQuote))}`}
+      {openedQuote && <PageSidePanel title={openedQuote.number}
         onClose={()=>setQuoteOpen(null)}>
         <div style={{flex:1, overflowY:'auto', padding:'4px 20px 24px'}}><QuoteDocument quote={openedQuote}/></div>
       </PageSidePanel>}

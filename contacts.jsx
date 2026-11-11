@@ -589,7 +589,7 @@ function FilterByField({value, autoOpen, onPick}){
             {found ? (
               <div style={scroll}>
                 {found.map(p => item(p, fullLabel(p)))}
-                {!found.length && <div style={{padding:'8px 10px', fontSize:12.5, color:T.gray400}}>No properties match.</div>}
+                {!found.length && <div style={{padding:'8px 10px', fontSize:12.5, color:T.gray400}}>No properties match</div>}
               </div>
             ) : (<>
               <div style={scroll}>
@@ -680,7 +680,7 @@ function FilterRow({row, autoOpen, onChange, onRemove}){
       valueField = <input type="number" min="0" value={row.value} onChange={e=>set({value:e.target.value})} placeholder="0" style={{...valueInputStyle, width:'100%'}}/>;
     } else if(meta.type === 'select'){
       valueField = (
-        <FilterSelect value={row.value} placeholder="Select…"
+        <FilterSelect value={row.value} placeholder="Select value"
           options={selectValues(row.prop, values).map(v=>({id:v, label:v}))}
           onPick={(v)=>set({value:v})}/>
       );
@@ -727,7 +727,7 @@ function FilterRow({row, autoOpen, onChange, onRemove}){
       {/* Filter type only appears once a property is chosen — its options depend on the type. */}
       <div style={{flex:1, minWidth:0}}>
         {meta && (
-          <FilterSelect value={row.op || ''} placeholder="Filter type"
+          <FilterSelect value={row.op || ''} placeholder="Select operator"
             options={filterOperatorsOf(meta).filter(o => !meta.ops || meta.ops.includes(o.id))}   // `ops`: a property's own subset
             onPick={(id)=>set({op:id || null, value:'', value2:'', values:[]})}/>
         )}
@@ -880,7 +880,7 @@ function FilterModal({filters, setFilters, onClose}){
                   setAutoOpenId(r.id);
                 }}
                 style={{border:'none', background:'transparent', color:T.attioBlue, fontSize:12.5, cursor:'pointer', padding:'4px 0 0'}}>
-                + Add filter to group
+                + Add Filter to group
               </button>
             </div>
           )}
@@ -889,10 +889,10 @@ function FilterModal({filters, setFilters, onClose}){
 
       <div style={{display:'flex', alignItems:'center', gap:8, marginTop:10, paddingTop:10, borderTop:`1px solid ${T.border}`}}>
         <button onClick={addRow} style={{display:'flex', alignItems:'center', gap:6, border:`1px solid ${T.borderStrong}`, background:'#fff', borderRadius:8, padding:'6px 12px', fontSize:13, color:T.gray800, cursor:'pointer'}}>
-          <Icon name="plus" size={13} color={T.gray600}/> Add filter
+          <Icon name="plus" size={13} color={T.gray600}/> Add Filter
         </button>
         <button onClick={addGroup} style={{display:'flex', alignItems:'center', gap:6, border:`1px solid ${T.borderStrong}`, background:'#fff', borderRadius:8, padding:'6px 12px', fontSize:13, color:T.gray800, cursor:'pointer'}}>
-          <Icon name="plus" size={13} color={T.gray600}/> Add group
+          <Icon name="plus" size={13} color={T.gray600}/> Add Group
         </button>
       </div>
     </div>, document.body)}
@@ -912,10 +912,10 @@ function ThreeDotMenu({onMoveLeft, onMoveRight, onSortAsc, onSortDesc, canMove=t
         <Icon name="moreDots" size={15}/>
       </button>
       <MenuShell open={open} onClose={()=>setOpen(false)} anchorRight={align==='right'} width={168}>
-        {canMove && <MenuItem label="Move column left" onClick={()=>{onMoveLeft(); setOpen(false);}}/>}
-        {canMove && <MenuItem label="Move column right" onClick={()=>{onMoveRight(); setOpen(false);}}/>}
-        <MenuItem label="Sort ascending" onClick={()=>{onSortAsc(); setOpen(false);}}/>
-        <MenuItem label="Sort descending" onClick={()=>{onSortDesc(); setOpen(false);}}/>
+        {canMove && <MenuItem label="Move Column Left" onClick={()=>{onMoveLeft(); setOpen(false);}}/>}
+        {canMove && <MenuItem label="Move Column Right" onClick={()=>{onMoveRight(); setOpen(false);}}/>}
+        <MenuItem label="Sort Ascending" onClick={()=>{onSortAsc(); setOpen(false);}}/>
+        <MenuItem label="Sort Descending" onClick={()=>{onSortDesc(); setOpen(false);}}/>
       </MenuShell>
     </div>
   );
@@ -926,38 +926,24 @@ function ThreeDotMenu({onMoveLeft, onMoveRight, onSortAsc, onSortDesc, canMove=t
 // `note`: what happens to the record's associated records (they stay, unlinked).
 // `noun`: the record's name on the button (Contact, Deal, Customer).
 /* `paid`: the record has payments recorded — it can't be deleted, so this says so, with Close only. */
+/* Delete a record (or several, BulkDeleteModal): typed "Delete" confirms. `paid`: it has payments
+   recorded, so it can't be deleted — said so, with only Close. */
 function DeleteConfirmModal({contactName, note, noun = 'Contact', paid, onCancel, onConfirm}){
   const [value, setValue] = React.useState('');
   const canDelete = value === 'Delete';
   if(paid) return (
-    <div style={{position:'fixed', inset:0, background:'rgba(16,24,40,.35)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:100}}>
-      <div style={{background:'#fff', borderRadius:12, width:400, padding:24}}>
-        <div style={{fontSize:16, fontWeight:600, color:T.gray800, marginBottom:8}}>Can't Delete "{contactName}"</div>
-        <div style={{fontSize:13, color:T.gray600, lineHeight:1.5, marginBottom:20}}>This {noun.toLowerCase()} has payments recorded.</div>
-        <div style={{display:'flex', justifyContent:'flex-end'}}>
-          <button onClick={onCancel} style={{padding:'8px 14px', borderRadius:8, border:`1px solid ${T.borderStrong}`, background:'#fff', fontSize:13, cursor:'pointer'}}>Close</button>
-        </div>
-      </div>
-    </div>
+    <StModal title={`Can't Delete ${noun}`} cancelLabel="Close" onCancel={onCancel}>
+      <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>"{contactName}" has payments recorded.</div>
+    </StModal>
   );
   return (
-    <div style={{position:'fixed', inset:0, background:'rgba(16,24,40,.35)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:100}}>
-      <div style={{background:'#fff', borderRadius:12, width:400, padding:24}}>
-        <div style={{fontSize:16, fontWeight:600, color:T.gray800, marginBottom:8}}>Delete "{contactName}"?</div>
-        <div style={{fontSize:13, color:T.gray600, lineHeight:1.5, marginBottom:16}}>
-          {note && <>{note} </>}This can't be undone. Type <strong>Delete</strong> below to confirm.
-        </div>
-        <input autoFocus value={value} onChange={e=>setValue(e.target.value)} placeholder="Type Delete to confirm"
-          style={{width:'100%', padding:'9px 12px', border:`1px solid ${T.borderStrong}`, borderRadius:8, fontSize:13, marginBottom:20, fontFamily:'inherit'}}/>
-        <div style={{display:'flex', justifyContent:'flex-end', gap:8}}>
-          <button onClick={onCancel} style={{padding:'8px 14px', borderRadius:8, border:`1px solid ${T.borderStrong}`, background:'#fff', fontSize:13, cursor:'pointer'}}>Cancel</button>
-          <button onClick={onConfirm} disabled={!canDelete} style={{
-            padding:'8px 14px', borderRadius:8, border:'none', fontSize:13, fontWeight:600,
-            background: canDelete ? T.red : '#F3B4AE', color:'#fff', cursor: canDelete ? 'pointer' : 'default',
-          }}>Delete {noun}</button>
-        </div>
+    <StModal title={`Delete ${noun}`} primary={`Delete ${noun}`} danger canSubmit={canDelete} onCancel={onCancel} onSubmit={()=>canDelete && onConfirm()}>
+      <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>
+        "{contactName}" will be deleted. {note && <>{note} </>}This can't be undone. Type <strong>Delete</strong> to confirm.
       </div>
-    </div>
+      <input autoFocus value={value} onChange={e=>setValue(e.target.value)} placeholder="Type Delete to confirm" aria-label="Type Delete to confirm"
+        onKeyDown={e=>{ if(e.key === 'Enter' && canDelete) onConfirm(); }} style={fieldInput}/>
+    </StModal>
   );
 }
 
@@ -1091,6 +1077,8 @@ function ContactsDataGrid({rows, columnOrder, setColumnOrder, sort, setSort, sea
   const toggleAll = () => setSelected(allChecked ? new Set() : new Set(sortedRows.map(r=>r.id)));
   const toggleOne = (id) => setSelected(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const sortIndicator = (key) => sort && sort.key === key ? (sort.dir === 'asc' ? ' ↑' : ' ↓') : '';
+  // Money columns (`money` on the column, or an Accounting figure) read right-aligned, header and cells.
+  const moneyCol = (key) => !!(propByKey(key) || {}).money || extendedIsMoney(key);
 
   const [page, setPage] = React.useState(1);
   React.useEffect(()=>{ setPage(1); }, [search, sort, rowsPerPage, resetKey]);
@@ -1188,7 +1176,7 @@ function ContactsDataGrid({rows, columnOrder, setColumnOrder, sort, setSort, sea
                     boxShadow: isDragging ? '0 6px 14px rgba(16,24,40,.22)' : 'none',
                     ...cellFreeze(i, true),
                   }}>
-                  <div style={{display:'flex', alignItems:'center', gap:12}}>
+                  <div style={{display:'flex', alignItems:'center', gap:12, justifyContent: moneyCol(key) ? 'flex-end' : 'flex-start'}}>
                     <span title={col.extended ? extendedFullLabel(col) : undefined} style={{fontWeight:500, color:T.attioMuted, whiteSpace:'nowrap'}}>{col.label}{sortIndicator(key)}</span>
                     {!ordered && <ThreeDotMenu visible={hoverCol===key} align={i===0 ? 'left' : 'right'}
                       onMoveLeft={()=>moveCol(key,-1)} onMoveRight={()=>moveCol(key,1)}
@@ -1230,6 +1218,7 @@ function ContactsDataGrid({rows, columnOrder, setColumnOrder, sort, setSort, sea
                   width:colWidth(key), minWidth:colWidth(key), height:T.attioRowH,
                   borderBottom:`1px solid ${T.attioLine}`, borderRight:`1px solid ${T.attioLine}`,
                   padding:'0 12px', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis',
+                  ...(moneyCol(key) ? {textAlign:'right', fontVariantNumeric:'tabular-nums'} : {}),
                   color: !row[key] ? T.attioFaint : (key==='email' ? T.attioBlue : T.attioText),
                   background: draggingKey === key ? T.blueLight : 'transparent',
                   ...cellFreeze(i, false),
@@ -1241,7 +1230,7 @@ function ContactsDataGrid({rows, columnOrder, setColumnOrder, sort, setSort, sea
                     /* Same clickable name as the Board cards; opens the Contact Detail panel. */
                     <ContactName name={row.name} onOpen={()=>onOpenContact(row)}
                       style={{fontSize:'inherit', fontWeight:500}}/>
-                  ) : isExtendedKey(key) ? (extendedValueText(key, row) || '—') : (formatValue(row[key]) || (row[key] === 0 ? 0 : '—'))}
+                  ) : isExtendedKey(key) ? (extendedValueText(key, row) || '—') : (dateShown(formatValue(row[key])) || (row[key] === 0 ? 0 : '—'))}
                 </td>
               ))}
 
@@ -1261,8 +1250,11 @@ function ContactsDataGrid({rows, columnOrder, setColumnOrder, sort, setSort, sea
           {/* Filters can now empty the grid too, so this no longer always blames the search
               box — quoting an empty search term read as: No contacts match "" */}
           {sortedRows.length === 0 && (
-            <tr><td colSpan={displayOrder.length + (gutterOn ? 2 : 1)} style={{padding:'24px 12px', textAlign:'center', color:T.gray400}}>
-              {rows.length === 0 ? `No ${plural} yet` : search ? `No ${plural} match "${search}"` : `No ${plural} match the current filters`}
+            /* The illustrated empty state, kept in view while the table scrolls sideways. */
+            <tr><td colSpan={displayOrder.length + (gutterOn ? 2 : 1)} style={{padding:0}}>
+              <div style={{position:'sticky', left:0, width: boxW || '100%'}}>
+                <EmptyState compact title={rows.length === 0 ? `No ${plural} yet` : search ? `No ${plural} match "${search}"` : `No ${plural} match the current filters`}/>
+              </div>
             </td></tr>
           )}
         </tbody>
@@ -1335,26 +1327,11 @@ function SaveViewMenu({dirty, onSaveCopy, onSaveExisting}){
    is stronger and explicitly says the change affects everyone, not just the current user. */
 function ConfirmOverwriteModal({viewName, isDefault, onConfirm, onCancel}){
   return (
-    <div style={{position:'fixed', inset:0, background:'rgba(16,24,40,.35)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:100}}>
-      <div style={{background:'#fff', borderRadius:12, width:400, padding:24}}>
-        <div style={{fontSize:16, fontWeight:600, color:T.gray800, marginBottom:8}}>Save changes to "{viewName}"?</div>
-        <div style={{fontSize:13, color:T.gray600, lineHeight:1.5, marginBottom:isDefault ? 12 : 20}}>
-          You're about to overwrite the existing saved view "{viewName}" with your current changes.
-        </div>
-        {isDefault && (
-          <div style={{display:'flex', gap:8, background:'#FFF7E6', border:'1px solid #F5D98B', borderRadius:8, padding:'10px 12px', marginBottom:20}}>
-            <span style={{fontSize:13}}>⚠️</span>
-            <span style={{fontSize:12.5, color:'#8A6300', lineHeight:1.5}}>
-              "{viewName}" is the <strong>default view, shared with everyone</strong> in your team/company. Saving will change what everyone sees.
-            </span>
-          </div>
-        )}
-        <div style={{display:'flex', justifyContent:'flex-end', gap:8}}>
-          <button onClick={onCancel} style={{padding:'8px 14px', borderRadius:8, border:`1px solid ${T.borderStrong}`, background:'#fff', fontSize:13, cursor:'pointer'}}>Cancel</button>
-          <button onClick={onConfirm} style={{padding:'8px 14px', borderRadius:8, border:'none', background:T.blue, color:'#fff', fontSize:13, cursor:'pointer', fontWeight:600}}>Save as Existing</button>
-        </div>
+    <StModal title="Save as Existing" primary="Save as Existing" onCancel={onCancel} onSubmit={onConfirm}>
+      <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>
+        "{viewName}" will be saved with your changes.{isDefault && <> It's the default view: everyone sees the change.</>}
       </div>
-    </div>
+    </StModal>
   );
 }
 
@@ -1363,26 +1340,11 @@ function SaveAsCopyModal({defaultName, onCancel, onConfirm}){
   const [name, setName] = React.useState(defaultName);
   const canSave = name.trim().length > 0;
   return (
-    <div style={{position:'fixed', inset:0, background:'rgba(16,24,40,.35)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:100}}>
-      <div style={{background:'#fff', borderRadius:12, width:400, padding:24}}>
-        <div style={{fontSize:16, fontWeight:600, color:T.gray800, marginBottom:8}}>Save as Copy</div>
-        <div style={{fontSize:13, color:T.gray600, lineHeight:1.5, marginBottom:16}}>
-          This creates a new view with your current table configuration and changes. The original view is left untouched.
-        </div>
-        <label style={{fontSize:12.5, fontWeight:500, color:T.gray800, display:'block', marginBottom:6}}>View name</label>
+    <StModal title="Save as Copy" primary="Save as Copy" canSubmit={canSave} onCancel={onCancel} onSubmit={()=>canSave && onConfirm(name.trim())}>
+      <div><label style={fieldLabel}>View Name</label>
         <input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="Enter a view name"
-          onKeyDown={e=>{ if(e.key==='Enter' && canSave) onConfirm(name.trim()); }}
-          style={{width:'100%', padding:'9px 12px', border:`1px solid ${T.borderStrong}`, borderRadius:8, fontSize:13, marginBottom:20, fontFamily:'inherit'}}/>
-        <div style={{display:'flex', justifyContent:'flex-end', gap:8}}>
-          <button onClick={onCancel} style={{padding:'8px 14px', borderRadius:8, border:`1px solid ${T.borderStrong}`, background:'#fff', fontSize:13, cursor:'pointer'}}>Cancel</button>
-          <button onClick={()=>onConfirm(name.trim())} disabled={!canSave} style={{
-            padding:'8px 14px', borderRadius:8, border:'none', fontSize:13, fontWeight:600,
-            background: canSave ? T.blue : T.borderStrong, color: canSave ? '#fff' : T.gray400,
-            cursor: canSave ? 'pointer' : 'default',
-          }}>Save view</button>
-        </div>
-      </div>
-    </div>
+          onKeyDown={e=>{ if(e.key==='Enter' && canSave) onConfirm(name.trim()); }} style={fieldInput}/></div>
+    </StModal>
   );
 }
 
@@ -1396,6 +1358,7 @@ function SaveAsCopyModal({defaultName, onCancel, onConfirm}){
    only offers Freeze on the column adjacent to a frozen block, and Unfreeze on its edge. */
 function TableSettingsModal({draft, setDraft, onApply, onClose}){
   const {properties, propByKey, canCreateProperty, extendedObject} = useRecordSchema();
+  useEscapeClose(onClose);
   const [query, setQuery] = React.useState('');
   const dragIdx = React.useRef(null);
   const [dragOver, setDragOver] = React.useState(null);
@@ -1454,7 +1417,7 @@ function TableSettingsModal({draft, setDraft, onApply, onClose}){
         borderRadius:12, boxShadow:'0 16px 40px rgba(16,24,40,.24)', display:'flex', flexDirection:'column',
       }}>
         <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', padding:'16px 20px', borderBottom:`1px solid ${T.border}`}}>
-          <span style={{fontSize:16, fontWeight:600, color:T.attioText}}>Choose which columns you see</span>
+          <span style={{fontSize:15, fontWeight:600, color:T.attioText}}>Table Settings</span>
           <button onClick={onClose} style={{border:'none', background:'transparent', cursor:'pointer', display:'flex'}}>
             <Icon name="close" size={16} color={T.gray600}/>
           </button>
@@ -1468,7 +1431,7 @@ function TableSettingsModal({draft, setDraft, onApply, onClose}){
                 <div style={{position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', display:'flex'}}>
                   <Icon name="search" size={13} color={T.gray400}/>
                 </div>
-                <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search columns…"
+                <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search columns"
                   style={{width:'100%', padding:'8px 10px 8px 30px', fontSize:13, fontFamily:'inherit',
                           border:`1px solid ${T.borderStrong}`, borderRadius:8}}/>
               </div>
@@ -1476,7 +1439,7 @@ function TableSettingsModal({draft, setDraft, onApply, onClose}){
             <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 16px 8px'}}>
               <span style={{fontSize:11.5, fontWeight:600, letterSpacing:.4, color:T.gray400}}>PROPERTIES</span>
               {/* Creating a property is not defined yet — the affordance only. */}
-              {canCreateProperty && <button title="Create a property" style={{border:'none', background:'transparent', cursor:'pointer', display:'flex', padding:2, color:T.gray600}}>
+              {canCreateProperty && <button title="Add Property" style={{border:'none', background:'transparent', cursor:'pointer', display:'flex', padding:2, color:T.gray600}}>
                 <Icon name="plus" size={14} color={T.gray600}/>
               </button>}
             </div>
@@ -1497,7 +1460,7 @@ function TableSettingsModal({draft, setDraft, onApply, onClose}){
                 </div>
               )}/>}
               {available.length === 0 && !(extendedObject && query.trim() && extendedItems().some(it => [it.label, it.group].some(x => x && x.toLowerCase().includes(query.trim().toLowerCase())))) && (
-                <div style={{fontSize:12.5, color:T.gray400, padding:'8px 6px'}}>No properties match “{query}”.</div>
+                <div style={{fontSize:12.5, color:T.gray400, padding:'8px 6px'}}>No properties match "{query}"</div>
               )}
             </div>
           </div>
@@ -1584,8 +1547,9 @@ function TableSettingsModal({draft, setDraft, onApply, onClose}){
           </div>
         </div>
 
-        <div style={{display:'flex', alignItems:'center', gap:10, padding:'14px 20px', borderTop:`1px solid ${T.border}`}}>
-          <button onClick={onApply} style={{border:'none', background:T.black, color:'#fff', borderRadius:8, padding:'9px 20px', fontSize:13, fontWeight:600, cursor:'pointer'}}>Apply</button>
+        <div style={{display:'flex', alignItems:'center', justifyContent:'flex-end', gap:8, padding:'14px 20px', borderTop:`1px solid ${T.border}`}}>
+          <StSecondary label="Cancel" onClick={onClose}/>
+          <StCta label="Apply" onClick={onApply}/>
         </div>
       </div>
     </div>
@@ -1617,13 +1581,14 @@ function ViewSettingsDrawer({views, activeViewId, setActiveViewId, onClose, onRe
   const [editValue, setEditValue] = React.useState('');
   const [menuFor, setMenuFor] = React.useState(null);
 
+  useEscapeClose(onClose);
+  // A side panel like the others: beneath the app header, the title at the left and × at the right.
   return (
-    <div style={{position:'fixed', inset:0, zIndex:90}}>
-      <div onClick={onClose} style={{position:'absolute', inset:0, background:'rgba(16,24,40,.25)'}}/>
-      <div style={{position:'absolute', top:0, right:0, bottom:0, width:400, background:'#fff', boxShadow:'-8px 0 24px rgba(16,24,40,.16)', display:'flex', flexDirection:'column'}}>
-        <div style={{display:'flex', alignItems:'center', gap:12, padding:'14px 16px', background:T.headerBg, borderBottom:`1px solid ${T.border}`, flexShrink:0}}>
-          <button onClick={onClose} style={{border:'none', background:'transparent', cursor:'pointer', display:'flex', color:T.gray600}}><Icon name="close" size={14} color={T.gray600}/></button>
-          <span style={{fontSize:14, fontWeight:500, color:T.black}}>View Settings</span>
+    <ContentSidePanel width={400} zIndex={90} style={{background:'#fff', borderLeft:`1px solid ${T.border}`, boxShadow:'-8px 0 24px rgba(16,24,40,.08)', display:'flex', flexDirection:'column'}}>
+      <div style={{display:'flex', flexDirection:'column', flex:1, minHeight:0}}>
+        <div style={{display:'flex', alignItems:'center', gap:10, padding:'16px 20px', borderBottom:`1px solid ${T.border}`, flexShrink:0}}>
+          <span style={{flex:1, fontSize:15, fontWeight:600, color:T.attioText}}>View Settings</span>
+          <button onClick={onClose} title="Close" style={{border:'none', background:'transparent', cursor:'pointer', display:'flex', padding:4}}><Icon name="close" size={14} color={T.gray600}/></button>
         </div>
 
         <div style={{padding:14, display:'flex', flexDirection:'column', gap:10, overflowY:'auto', flex:1}}>
@@ -1679,25 +1644,16 @@ function ViewSettingsDrawer({views, activeViewId, setActiveViewId, onClose, onRe
               {/* Table-only settings */}
               {modeOf(v) === 'table' && (
                 <div onClick={e=>e.stopPropagation()} style={{display:'flex', alignItems:'center', gap:10, paddingLeft:24}}>
-                  <span style={{fontSize:12.5, color:T.gray600, flexShrink:0}}>No of rows</span>
-                  {/* Native select arrows sit hard against the field edge, so the chevron is drawn
-                      over an appearance:none select with room reserved for it. */}
-                  <div style={{position:'relative', flexShrink:0}}>
-                    <select value={v.rowsPerPage} onChange={e=>onPatchView(v.id, {rowsPerPage: +e.target.value})}
-                      style={{appearance:'none', WebkitAppearance:'none', MozAppearance:'none',
-                              border:`1px solid ${T.borderStrong}`, borderRadius:8,
-                              padding:'4px 30px 4px 10px', fontSize:12.5, fontFamily:'inherit',
-                              cursor:'pointer', color:T.attioText, background:'#fff'}}>
-                      {ROWS_PER_PAGE_OPTIONS.map(n => <option key={n} value={n}>{n}</option>)}
-                    </select>
-                    <div style={{position:'absolute', right:9, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', display:'flex'}}>
-                      <Icon name="chevDown" size={T.chevronSize} color={T.gray600}/>
-                    </div>
+                  <span style={{fontSize:12.5, color:T.gray600, flexShrink:0}}>Rows per Page</span>
+                  <div style={{position:'relative', flexShrink:0, width:84}}>
+                    <Dropdown value={v.rowsPerPage} onChange={(n)=>onPatchView(v.id, {rowsPerPage:+n})} required ariaLabel="Rows per page"
+                      options={ROWS_PER_PAGE_OPTIONS.map(n => ({value:n, label:String(n)}))}
+                      controlStyle={{border:`1px solid ${T.borderStrong}`, borderRadius:8, padding:'4px 30px 4px 10px', fontSize:12.5, fontFamily:'inherit', color:T.attioText, background:'#fff'}}/>
                   </div>
                   {/* Table settings sits at the far right of the card. */}
                   <button onClick={()=>onOpenTableSettings(v.id)}
                     style={{marginLeft:'auto', display:'flex', alignItems:'center', gap:6, border:`1px solid ${T.borderStrong}`, background:'#fff', borderRadius:8, padding:'5px 10px', fontSize:12.5, color:T.gray800, cursor:'pointer', flexShrink:0}}>
-                    <Icon name="settingsGear" size={13} color={T.gray600}/> Table settings
+                    <Icon name="settingsGear" size={13} color={T.gray600}/> Table Settings
                   </button>
                 </div>
               )}
@@ -1710,7 +1666,7 @@ function ViewSettingsDrawer({views, activeViewId, setActiveViewId, onClose, onRe
                   <span style={{fontSize:12.5, color:T.gray600, flexShrink:0}}>{pipelineLabel(pipelineOf(v))}</span>
                   {cardSettings && <button onClick={()=>onOpenCardSettings(v.id)}
                     style={{marginLeft:'auto', display:'flex', alignItems:'center', gap:6, border:`1px solid ${T.borderStrong}`, background:'#fff', borderRadius:8, padding:'5px 10px', fontSize:12.5, color:T.gray800, cursor:'pointer', flexShrink:0}}>
-                    <Icon name="settingsGear" size={13} color={T.gray600}/> Card settings
+                    <Icon name="settingsGear" size={13} color={T.gray600}/> Card Settings
                   </button>}
                 </div>
               )}
@@ -1718,7 +1674,7 @@ function ViewSettingsDrawer({views, activeViewId, setActiveViewId, onClose, onRe
           ))}
         </div>
       </div>
-    </div>
+    </ContentSidePanel>
   );
 }
 const rowIconBtn = {border:'none', background:'transparent', cursor:'pointer', padding:0, display:'flex', alignItems:'center'};
@@ -1798,7 +1754,7 @@ function RecordToolbar({inset = 'page', views, activeViewId, onSelectView, viewC
           border:'none', background:'transparent', color:T.gray600, fontSize:12.5,
           cursor:'pointer', padding:'7px 2px', textDecoration:'underline',
           textDecorationColor:'#D7D6DA', textUnderlineOffset:2, fontFamily:'inherit',
-        }}>Clear all</button>
+        }}>Clear All</button>
       )}
       {filterControls && <div style={{marginLeft:'auto', display:'flex', alignItems:'center', gap:8}}>{filterControls}</div>}
     </div>
@@ -1852,7 +1808,9 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
   const [ownActivities, setOwnActivities] = React.useState(()=>sharedActivities ? {} : generateActivities(SAMPLE_CONTACTS));
   const activities = sharedActivities || ownActivities, setActivities = setSharedActivities || setOwnActivities;
   // The first view is the default view, shared with everyone in the team/company.
-  const [views, setViews] = usePersistedState('views:contacts', ()=>[makeView('v1', 'All contacts', {isDefault:true})]);   // saved (store.jsx)
+  // Saved (store.jsx); the default view saved as "All contacts" reads in Title Case.
+  const [views, setViews] = usePersistedState('views:contacts', ()=>[makeView('v1', 'All Contacts', {isDefault:true})],
+    (vs) => (vs || []).map(v => v.id === 'v1' && v.name === 'All contacts' ? {...v, name:'All Contacts'} : v));
   const [activeViewId, setActiveViewId] = React.useState('v1');
   const [deletingView, setDeletingView] = React.useState(null);   // a saved view asked to be deleted
   const [allViewsOpen, setAllViewsOpen] = React.useState(false);
@@ -1896,7 +1854,7 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
   const showToast = (msg, action) => {
     setToast({message:msg, action});
     clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(()=>setToast(null), action ? 5000 : 1800);
+    toastTimer.current = setTimeout(()=>setToast(null), action ? TOAST_ACTION_MS : TOAST_MS);
   };
 
   const activeView = views.find(v=>v.id===activeViewId) || views[0];
@@ -1987,10 +1945,10 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
     },
     // The contact's Deals tab: its deals; each opens on the Deals page.
     renderTab: (tab, openTab, q) => tab.id === 'deals' && dealsFor && detail ? (
-      <AssociatedRecords columns={ASSOCIATED_DEAL_COLUMNS} rows={dealsFor(detail.id)} q={q} empty="No deals for this contact yet."
+      <AssociatedRecords columns={ASSOCIATED_DEAL_COLUMNS} rows={dealsFor(detail.id)} q={q} empty="No deals for this contact yet"
         onOpen={(d)=>onOpenDeal && onOpenDeal(d.id, detail.mode)}/>
     ) : tab.id === 'customers' && customersFor && detail ? (
-      <AssociatedRecords columns={ASSOCIATED_CUSTOMER_COLUMNS} rows={customersFor(detail.id)} q={q} empty="No customers for this contact yet."
+      <AssociatedRecords columns={ASSOCIATED_CUSTOMER_COLUMNS} rows={customersFor(detail.id)} q={q} empty="No customers for this contact yet"
         onOpen={(x)=>onOpenCustomer && onOpenCustomer(x.id, detail.mode)}/>
     ) : undefined,
     /* Create a profile from the Customer Profile tab: same flow, template pre-chosen. Uses the
@@ -2099,6 +2057,7 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
         if(a.object === 'customers' && a.existingId && onLinkCustomer) onLinkCustomer(a.existingId, {contactId:id});
       });
     }
+    showToast(contactForm.mode === 'edit' ? 'Contact saved' : 'Contact added');
     setContactForm(null);
   };
   const appliedFilterCount = React.useMemo(()=>countAppliedFilters(filters, objectSchema.filterProps), [filters, objectSchema]);
@@ -2159,7 +2118,7 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
           {viewMode === 'board' && <PipelineSelector pipelineId={pipelineId} onChange={setPipelineId}/>}
           <TableBoardSwitch mode={viewMode} onChange={setViewMode}/>
           <button onClick={()=>exportViewCsv({schema:objectSchema, rows:filteredContacts, columnOrder, search, sort, fileName:activeView.name})} style={toolbarButton}><Icon name="export" size={13} color={T.gray600}/> Export</button>
-          <button onClick={()=>setContactForm({mode:'add', initial:null})} title="Add contact" style={toolbarIconButton}>
+          <button onClick={()=>setContactForm({mode:'add', initial:null})} title="Add Contact" style={toolbarIconButton}>
             <Icon name="plus" size={14} color={T.gray800}/>
           </button>
         </>}
@@ -2216,9 +2175,9 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
       {/* Deleting a saved view: asked first. With none left, the default view comes back. */}
       {deletingView && (() => { const v = views.find(x => x.id === deletingView);
         return v ? <StModal title="Delete View" primary="Delete View" danger onCancel={()=>setDeletingView(null)}
-          onSubmit={()=>{ const next = views.filter(x => x.id !== v.id), finalViews = next.length ? next : [makeView('v1', 'All contacts', {isDefault:true})];
+          onSubmit={()=>{ const next = views.filter(x => x.id !== v.id), finalViews = next.length ? next : [makeView('v1', 'All Contacts', {isDefault:true})];
             setViews(finalViews); if(activeViewId === v.id) setActiveViewId(finalViews[0].id); setDeletingView(null); }}>
-          <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>"{v.name}" will be deleted.</div>
+          <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>"{v.name}" will be deleted. This can't be undone.</div>
         </StModal> : null; })()}
 
       {tableSettingsDraft && (
@@ -2271,6 +2230,7 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
             onRecordDeleted && onRecordDeleted('contacts', id);
             if(detail && detail.id === id) setDetail(null);
             setPendingDelete(null);
+            showToast('Contact deleted');
           }}/>
       )}
       {changingOwner && <ChangeOwnerModal record={changingOwner} noun="Contact" users={users.filter(u => u.status === 'Activated')} ownerName={userLabel}

@@ -2495,6 +2495,13 @@ const WF_TONES = {
   success:{color:'#027A48', bg:'#ECFDF3'}, danger:{color:T.red, bg:'#FEF3F2'}, info:{color:T.blue, bg:T.blueLight},
   warn:{color:'#B54708', bg:'#FFFAEB'}, neutral:{color:T.gray600, bg:T.headerBg},
 };
+// Statuses shown as pills across Settings and records (StatusPill), one tone per meaning.
+const STATUS_PILLS = {
+  Activated:{label:'Activated', tone:'success'}, Deactivated:{label:'Deactivated', tone:'neutral'},
+  Assigned:{label:'Assigned', tone:'success'}, Unassigned:{label:'Unassigned', tone:'neutral'},
+  Connected:{label:'Connected', tone:'info'},
+  Active:{label:'Active', tone:'success'}, 'On Hold':{label:'On Hold', tone:'warn'}, Closed:{label:'Closed', tone:'neutral'},
+};
 const RUN_STATUS = {
   waiting:{label:'Waiting', tone:'info'}, running:{label:'Scheduled', tone:'info'}, awaiting:{label:'Awaiting user', tone:'warn'},
   completed:{label:'Completed', tone:'success'}, failed:{label:'Failed', tone:'danger'}, notRun:{label:'Not run', tone:'neutral'}, notApplicable:{label:'Not applicable', tone:'neutral'},
@@ -2519,7 +2526,7 @@ function conditionValueControl(f, op, value, onChange){
   const p = !f.has && fieldProperty(f);
   if(p && propertyOperators(p).some(o => o.id === op.id)) return <ConditionValueInput compact prop={p} op={op} value={value} onChange={onChange} options={f.options}/>;
   const smallInput = {...fieldInput, padding:'7px 10px'};
-  if(f.kind === 'select' || f.kind === 'choice') return <FormSelect value={value || ''} placeholder="Select…" options={f.options} onChange={onChange}/>;
+  if(f.kind === 'select' || f.kind === 'choice') return <FormSelect value={value || ''} placeholder="Select value" options={f.options} onChange={onChange}/>;
   if(f.kind === 'date') return <DateField value={value || ''} onChange={onChange} inputStyle={smallInput}/>;
   return <input type={['text', 'find'].includes(f.kind) ? 'text' : 'number'} value={value || ''} onChange={e=>onChange(e.target.value)} placeholder="Value" style={smallInput}/>;
 }
@@ -2540,14 +2547,14 @@ function TriggerPropertyCondition({data, workflow, onChange, property}){
     </div>
   );
   if(!f) return property ? pairRow(
-    <div aria-disabled="true" inert="" style={{opacity:.5, pointerEvents:'none'}}><FormSelect value="" placeholder="Operator" options={[]} onChange={()=>{}}/></div>) : null;
+    <div aria-disabled="true" inert="" style={{opacity:.5, pointerEvents:'none'}}><FormSelect value="" placeholder="Select operator" options={[]} onChange={()=>{}}/></div>) : null;
   const kindOps = fieldOperators(f);
   const legacy = !kindOps.some(o => o.id === c.op) && triggerPropertyOperators(f.kind).find(o => o.id === c.op);
   const ops = legacy ? [...kindOps, legacy] : kindOps;
   const op = ops.find(o => o.id === c.op);
   const hasStage = !!((workflow.context || {}).pipeline && (workflow.context || {}).stage);
   const inStage = hasStage && !!c.inStage;
-  const operator = <FormSelect value={c.op || ''} placeholder="Operator" options={ops.map(o => ({value:o.id, label:o.label}))}
+  const operator = <FormSelect value={c.op || ''} placeholder="Select operator" options={ops.map(o => ({value:o.id, label:o.label}))}
     onChange={(v)=>onChange({op:v, value: kindOps.some(o => o.id === v && !o.noValue && !o.change) && op && !op.noValue && !op.change ? c.value ?? '' : ''})}/>;
   const valueControl = op && !op.change && conditionValueControl(f, op, c.value, (v)=>onChange({value:v}));
   return (<>
@@ -2598,14 +2605,14 @@ function ConditionsEditor({value, onChange, data, workflow, embedded}){
             {i > 0 && <span style={{fontSize:11.5, fontWeight:600, letterSpacing:.3, color:T.gray400}}>{join}</span>}
             <div style={{display:'flex', flexDirection:'column', gap:8}}>
               <div style={{display:'flex', alignItems:'center', gap:6}}>
-                <div style={{flex:1, minWidth:0}}><FormSelect value={r.field || ''} placeholder="Select a field" options={groups}
+                <div style={{flex:1, minWidth:0}}><FormSelect value={r.field || ''} placeholder="Select field" options={groups}
                   onChange={(v)=>setRule(r.id, {field:v, op:(fieldOperators(fields.find(x => x.key === v), {withChange:false})[0] || {}).id || '', value:''})}/></div>
                 <button title="Remove condition" onClick={()=>set({rules:cond.rules.filter(x => x.id !== r.id)})}
                   style={{border:'none', background:'transparent', cursor:'pointer', display:'flex', padding:4, flexShrink:0}}><Icon name="close" size={13} color={T.gray600}/></button>
               </div>
               {f && (
                 <div style={{display:'flex', gap:8, paddingRight:26}}>
-                  <div style={{flex:'1 1 0', minWidth:0}}><FormSelect value={r.op || ''} placeholder="Operator" options={ops.map(o => ({value:o.id, label:o.label}))} onChange={(v)=>setRule(r.id, {op:v, value:''})}/></div>
+                  <div style={{flex:'1 1 0', minWidth:0}}><FormSelect value={r.op || ''} placeholder="Select operator" options={ops.map(o => ({value:o.id, label:o.label}))} onChange={(v)=>setRule(r.id, {op:v, value:''})}/></div>
                   <div style={{flex:'1 1 0', minWidth:0}}>{valueField}</div>
                 </div>
               )}
@@ -2628,7 +2635,7 @@ function WorkflowRuns({workflowId}){
   const [open, setOpen] = React.useState(null);
   if(!ctx) return null;
   const runs = ctx.state.runs.filter(r => r.workflowId === workflowId);
-  if(!runs.length) return <div style={{padding:'40px 24px', textAlign:'center', fontSize:13, color:T.gray400}}>No runs yet</div>;
+  if(!runs.length) return <EmptyState compact title="No runs yet"/>;
   const btn = (label, onClick) => <StTextAction label={label} onClick={onClick}/>;
   return (
     <div style={{padding:'8px 24px 24px', maxWidth:880, margin:'0 auto'}}>
@@ -3525,7 +3532,7 @@ function EventRemedies({trace, name, onPick, met, include}){
   );
 }
 
-/* "+ Explain this workflow": collapsed by default; open, why the action happened and how the
+/* "+ Explain This Workflow": collapsed by default; open, why the action happened and how the
    conditions were evaluated. The left column's only explanation. */
 function ExplainWorkflow({children}){
   const [open, setOpen] = React.useState(false);
@@ -3533,7 +3540,7 @@ function ExplainWorkflow({children}){
     <div style={{display:'flex', flexDirection:'column', gap:12}}>
       <button aria-expanded={open} onClick={()=>setOpen(o => !o)} style={{alignSelf:'flex-start', display:'inline-flex', alignItems:'center', gap:6, border:'none', background:'transparent',
         padding:0, cursor:'pointer', fontFamily:'inherit', fontSize:14, color:T.attioText}}>
-        <Icon name="plus" size={13} color={T.attioText} style={{transform: open ? 'rotate(45deg)' : 'none', transition:'transform 120ms ease'}}/>Explain this workflow
+        <Icon name="plus" size={13} color={T.attioText} style={{transform: open ? 'rotate(45deg)' : 'none', transition:'transform 120ms ease'}}/>Explain This Workflow
       </button>
       {open && children}
     </div>
@@ -3541,7 +3548,7 @@ function ExplainWorkflow({children}){
 }
 /* An Automatic Action (the reference): the record and workflow; Automation — the action it ran, in
    one line; Is this workflow blocking you? — the suggested actions as underlined links; then
-   Explain this workflow, collapsed. */
+   Explain This Workflow, collapsed. */
 function AutomaticActionModal({event, onClose, hidden}){
   const ctx = useWorkflowEngineCtx();
   const facts = ctx ? eventFacts(ctx, event) : {trace:event.trace, now:{}, actions:[], deal:null};
@@ -3786,8 +3793,7 @@ function ViolationPanel({onClose, object = 'deals', pipelines}){
       borderLeft:`1px solid ${T.border}`, boxShadow:'-8px 0 24px rgba(16,24,40,.08)', display:'flex', flexDirection:'column'}}>
       <div style={{display:'flex', alignItems:'center', gap:8, height:52, padding:'0 12px 0 16px', borderBottom:`1px solid ${T.border}`, flexShrink:0}}>
         <Icon name="warning" size={15} color={T.red}/>
-        <span style={{fontSize:14, fontWeight:600, color:T.attioText}}>Workflow Violations</span>
-        <span style={{fontSize:12.5, color:T.gray400}}>{list.length}</span>
+        <span style={{fontSize:15, fontWeight:600, color:T.attioText}}>Workflow Violations</span>
         <div style={{flex:1}}/>
         <button title="Close" onClick={onClose} style={{width:28, height:28, borderRadius:8, border:'none', background:'transparent', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center'}}>
           <Icon name="close" size={14} color={T.gray600}/>
@@ -3965,7 +3971,7 @@ function WorkflowPromptModal({promptId, onClose, hidden, direct}){
   } else if(p.kind === 'logCall'){
     primary = 'Log Call'; can = !!callOutcome;
     content = (<>
-      <div><label style={fieldLabel}>Call outcome</label><FormSelect value={callOutcome} placeholder="Select outcome" options={LOG_CALL_OUTCOMES} onChange={setCallOutcome}/></div>
+      <div><label style={fieldLabel}>Call Outcome</label><FormSelect value={callOutcome} placeholder="Select outcome" options={LOG_CALL_OUTCOMES} onChange={setCallOutcome}/></div>
       <div><label style={fieldLabel}>Note</label><textarea rows={3} value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Optional — saved as a note linked to this call" style={{...fieldInput, resize:'vertical', lineHeight:1.5}}/></div>
     </>);
   } else if(p.kind === 'deleteRecord' && !deletable){
@@ -3981,7 +3987,7 @@ function WorkflowPromptModal({promptId, onClose, hidden, direct}){
   const needsInput = PROMPT_NEEDS_INPUT.includes(p.kind) && !['createRecord', 'deleteRecord'].includes(p.kind);
   const facts = eventFacts(ctx, {dealId:p.dealId, workflowId:p.workflowId, runId:p.runId});
   /* The Automatic Actions modal's structure: the record and workflow; Action Required — what
-     resolves it; then + Explain this workflow, collapsed — why it's blocking you. */
+     resolves it; then + Explain This Workflow, collapsed — why it's blocking you. */
   return (
     <WorkflowEventModal title="Workflow Violation" tone={EVENT_TONES.violation} facts={facts} name={deal.name} rule={violationRule(data, p)} lead={<ViolatedRequirement p={p}/>}
       sectionTitle="Action Required" hidden={hidden} onClose={onClose} overlays={(creating && recordForm()) || (deleting && deleteConfirm())}
@@ -4045,5 +4051,5 @@ function WorkflowBell(){
   );
 }
 
-Object.assign(window, {sequenceSchedules, violationTargets, RecordViolationsProvider, useRecordViolations, ViolationMark, ViolationNotice, recordObjectOf, recordKey, recordNoun, ACTIVITY_RECORD_OBJECTS, withSeeded, PROPERTY_CHANGE_OPERATORS, PROPERTY_CHANGE_UNITS, triggerPropertyOperators, isChangeOp, conditionsValid, triggerConditionComplete, TriggerPropertyCondition, CONDITION_OPERATORS, conditionKind, useWorkflowEngine, WorkflowEngineCtx, useWorkflowEngineCtx, WF_SAVED, reviveActivities, withStageEntry, ConditionsEditor, WorkflowRuns,
+Object.assign(window, {STATUS_PILLS, sequenceSchedules, violationTargets, RecordViolationsProvider, useRecordViolations, ViolationMark, ViolationNotice, recordObjectOf, recordKey, recordNoun, ACTIVITY_RECORD_OBJECTS, withSeeded, PROPERTY_CHANGE_OPERATORS, PROPERTY_CHANGE_UNITS, triggerPropertyOperators, isChangeOp, conditionsValid, triggerConditionComplete, TriggerPropertyCondition, CONDITION_OPERATORS, conditionKind, useWorkflowEngine, WorkflowEngineCtx, useWorkflowEngineCtx, WF_SAVED, reviveActivities, withStageEntry, ConditionsEditor, WorkflowRuns,
   DealPromptMarker, WorkflowPromptModal, WorkflowBell, ViolationsButton, ViolationPanel, WorkflowNotices, AutomaticActionModal, workflowExpectations, workflowContextPath, orderedStages, stageMoveDirection, workflowTitle, conditionFields, evalConditions});

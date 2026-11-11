@@ -145,7 +145,7 @@ function OverviewSettingsModal({object, pool, settings, onApply, onClose}){
       <SettingsCheckRow label={it.label} checked={on} onToggle={()=>!off && toggle(it.key)}/></div>; };
 
   return (
-    <SettingsModalShell title="View settings" sections={OVERVIEW_SETTINGS_SECTIONS} order={[]} onReorder={()=>{}} fixed={['highlights']}
+    <SettingsModalShell title="Highlight Settings" sections={OVERVIEW_SETTINGS_SECTIONS} order={[]} onReorder={()=>{}} fixed={['highlights']}
       section={section} onSection={(id)=>{ setSection(id); setQuery(''); }} onClose={onClose}
       onApply={()=>ready && onApply(draft)} applyDisabled={!ready}
       footerNote={section === 'highlights' || !ready ? `${pinned.length} of ${HIGHLIGHT_COUNT} pinned${ready ? '' : ` · pin exactly ${HIGHLIGHT_COUNT} to apply`}` : null}
@@ -155,7 +155,7 @@ function OverviewSettingsModal({object, pool, settings, onApply, onClose}){
             <div style={{position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', display:'flex'}}>
               <Icon name="search" size={13} color={T.gray400}/>
             </div>
-            <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search properties…"
+            <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search properties"
               style={{width:'100%', padding:'8px 10px 8px 30px', fontSize:13, fontFamily:'inherit', border:`1px solid ${T.borderStrong}`, borderRadius:8}}/>
           </div>
         </div>
@@ -167,7 +167,7 @@ function OverviewSettingsModal({object, pool, settings, onApply, onClose}){
           <div style={{...poolGroupLabel, paddingTop:4}}>Pinned to Highlights ({pinned.length}/{HIGHLIGHT_COUNT})</div>
           <DragCheckList items={pinned.map(id => ({id, enabled:true}))} labelOf={it => labelOf(it.id)}
             onChange={(fn)=>setDraft(d => { const next = fn(d.pinned.map(id => ({id, enabled:true}))); return {...d, pinned:next.filter(x => x.enabled).map(x => x.id)}; })}/>
-          {!pinned.length && <div style={{fontSize:12.5, color:T.gray400, padding:'4px 6px'}}>Nothing pinned yet.</div>}
+          {!pinned.length && <div style={{fontSize:12.5, color:T.gray400, padding:'4px 6px'}}>Nothing pinned yet</div>}
         </>}
         {shown.map(c => (
           <div key={c.id}>
@@ -188,7 +188,7 @@ function OverviewSettingsModal({object, pool, settings, onApply, onClose}){
           </div>
         ))}
         <ExtendedPropertyGroups query={query} renderItem={pinRow}/>
-        {!shown.length && !extMatches && <div style={{fontSize:12.5, color:T.gray400, padding:'8px 6px'}}>No properties match “{query}”.</div>}
+        {!shown.length && !extMatches && <div style={{fontSize:12.5, color:T.gray400, padding:'8px 6px'}}>No properties match "{query}"</div>}
       </>)}
 
     </SettingsModalShell>

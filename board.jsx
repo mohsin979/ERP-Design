@@ -30,11 +30,11 @@
    this pipeline (useRecordBulk().board, bulkActions.jsx); an action the record type doesn't
    support isn't there, and isn't shown. A stage's ⋯ menu starts with Select All, then, under a
    separator, the actions on the records shown in that stage: Add Workflow (the pipeline and
-   stage as its context), Enroll in Email Sequence, Email All, Edit All, Move to Pipeline, Move
-   to Stage, Delete All. Cards ticked (Select All, then each card's checkbox) get the selection
-   bar under the columns for as long as one is ticked: the count, Bulk Actions — Email Selected,
-   Enroll Selected in Email Sequence, Move to Pipeline, Move to Stage, Edit Selected, Delete
-   Selected — on exactly the cards ticked, and Deselect all, which also leaves selection. A
+   stage as its context), Email All, Enroll in Email Sequence, Move to Pipeline, Move to Stage,
+   Edit All, Delete All. Cards ticked (Select All, then each card's checkbox) get the selection
+   bar under the columns for as long as one is ticked: the count, Bulk Actions — Email,
+   Enroll in Email Sequence, Move to Pipeline, Move to Stage, Edit Properties, Delete — on
+   exactly the cards ticked, and Deselect All, which also leaves selection. A
    finished bulk action clears the selection. Without `bulk` (Customers) a stage's menu is
    Select All alone. */
 
@@ -109,6 +109,11 @@ let OBJECT_NAMES = {};
 const setObjectNames = (objects) => { OBJECT_NAMES = Object.fromEntries((objects || []).map(o => [o.id, o.name])); };
 const typePlural = (id, fallback) => OBJECT_NAMES[id] || fallback;
 const typeSingular = (id, fallback) => { const n = OBJECT_NAMES[id]; return n ? n.replace(/ies$/, 'y').replace(/s$/, '') : fallback; };
+/* The owner as each record type names it: its owner property's label (Contact Owner, Deal Owner,
+   a Case Manager…), set from Settings → Properties (App). */
+let OWNER_LABELS = {};
+const setOwnerLabels = (properties) => { OWNER_LABELS = Object.fromEntries((properties || []).filter(p => p.key === 'owner').map(p => [p.objectId, p.label])); };
+const ownerLabel = (id) => OWNER_LABELS[id] || `${typeSingular(id, 'Record')} Owner`;
 // Whether the open workspace has a record type (Accounting has no Contacts) — every type until names are set.
 const workspaceHasType = (id) => !Object.keys(OBJECT_NAMES).length || id in OBJECT_NAMES;
 /* Whose Customer Profile a record has (profiles are kept by this id): a contact's own; a deal's or
@@ -460,7 +465,7 @@ function BoardColumn({stage, contacts, activities, isDropTarget, columnRef, onSt
         </div>
         <div style={{flex:1}}/>
         <div style={{position:'relative'}}>
-          <button title="Column options" onClick={()=>setMenuOpen(o=>!o)} style={cardIconBtnBase}>
+          <button title="Stage Actions" onClick={()=>setMenuOpen(o=>!o)} style={cardIconBtnBase}>
             <Icon name="moreDots" size={15} color={T.attioMuted}/>
           </button>
           <MenuShell open={menuOpen} onClose={()=>setMenuOpen(false)} anchorRight width={210}>
@@ -471,11 +476,12 @@ function BoardColumn({stage, contacts, activities, isDropTarget, columnRef, onSt
             {/* The stage's actions act on every record shown in it — the cards ticked have the
                 selection bar. Add Workflow isn't offered on the unmapped bucket: not a stage. */}
             {bulk && bulk.workflow && stage.id !== '__unmapped' && <MenuItem label="Add Workflow" onClick={pick(()=>bulk.workflow(stage))}/>}
-            {bulk && <MenuItem label="Enroll in Email Sequence" disabled={none} onClick={pick(()=>bulk.enroll(ids))}/>}
+            {/* The table's and the selection bar's order: Email, Enroll, Move, Edit, Delete. */}
             {bulk && bulk.email && <MenuItem label="Email All" disabled={none} onClick={pick(()=>bulk.email(ids))}/>}
-            {bulk && <MenuItem label="Edit All" disabled={none} onClick={pick(()=>bulk.edit(ids))}/>}
+            {bulk && <MenuItem label="Enroll in Email Sequence" disabled={none} onClick={pick(()=>bulk.enroll(ids))}/>}
             {bulk && bulk.movePipeline && <MenuItem label="Move to Pipeline" disabled={none} onClick={pick(()=>bulk.movePipeline(ids))}/>}
             {bulk && bulk.moveStage && <MenuItem label="Move to Stage" disabled={none} onClick={pick(()=>bulk.moveStage(ids))}/>}
+            {bulk && <MenuItem label="Edit All" disabled={none} onClick={pick(()=>bulk.edit(ids))}/>}
             {bulk && <MenuItem label="Delete All" danger disabled={none} onClick={pick(()=>bulk.remove(ids))}/>}
           </MenuShell>
         </div>
@@ -608,12 +614,13 @@ function ContactBoard({rows, search, pipelineId, onChangeStage, actions, onAddTo
   const picked = bulk ? searched.filter(r => selected.has(r.id)).map(r => r.id) : [];
   const forPicked = (fn) => () => fn(picked, clearSelection);
   const pickedActions = !bulk ? [] : [
-    bulk.email && {label:'Email Selected', onClick:forPicked(bulk.email)},
-    {label:'Enroll Selected in Email Sequence', onClick:forPicked(bulk.enroll)},
+    // The table's Bulk Actions names and order (bulkActions.jsx), plus the Board's own.
+    bulk.email && {label:'Email', onClick:forPicked(bulk.email)},
+    {label:'Enroll in Email Sequence', onClick:forPicked(bulk.enroll)},
     bulk.movePipeline && {label:'Move to Pipeline', onClick:forPicked(bulk.movePipeline)},
     bulk.moveStage && {label:'Move to Stage', onClick:forPicked(bulk.moveStage)},
-    {label:'Edit Selected', onClick:forPicked(bulk.edit)},
-    {label:'Delete Selected', danger:true, onClick:forPicked(bulk.remove)},
+    {label:'Edit Properties', onClick:forPicked(bulk.edit)},
+    {label:'Delete', danger:true, onClick:forPicked(bulk.remove)},
   ].filter(Boolean);
 
   return (
@@ -642,7 +649,7 @@ function ContactBoard({rows, search, pipelineId, onChangeStage, actions, onAddTo
         <div style={{display:'flex', alignItems:'center', gap:12, padding:'10px 16px', borderTop:`1px solid ${T.border}`, flexShrink:0, fontSize:13, color:T.blue, background:'#fff'}}>
           {`${picked.length} ${picked.length > 1 ? noun + 's' : noun} selected`}
           <BulkActionsMenu items={pickedActions} width={260}/>
-          <StTextAction label="Deselect all" onClick={clearSelection}/>
+          <StTextAction label="Deselect All" onClick={clearSelection}/>
         </div>
       )}
 
@@ -686,6 +693,6 @@ function PipelineSelector({pipelineId, onChange, pipelines = CONTACT_PIPELINES})
 Object.assign(window, {REMOVED_CONTACT_STAGES, withoutRemovedStage, 
   CONTACT_TYPE_STAGES, PIPELINES, pipelineById, setContactPipelines, stageIdOf, withStage,
   setObjectNames, typePlural, typeSingular, typeNoun, workspaceHasType, profileHolderId,
-  setProfileHolders, STAGE_TYPES, CLOSED_STAGE_TYPES, stageTypeOf, isClosedStage, stageTypeLabel, withStageType, setStagePipelines, recordStageType, StageTypeTag,
+  setOwnerLabels, ownerLabel, setProfileHolders, STAGE_TYPES, CLOSED_STAGE_TYPES, stageTypeOf, isClosedStage, stageTypeLabel, withStageType, setStagePipelines, recordStageType, StageTypeTag,
   ContactBoard, PipelineSelector, toolbarDropdownBtn, ContactName, ContactCard, COLUMN_BG,
 });

@@ -11,7 +11,7 @@
                   type it fills in (Maps to); one field must map to Name — with the form's preview
                   beside it. Save and Connect (once the form is valid) saves it and opens
                   its connections.
-     Connections — Meta and Website RFQ. Mocked: Connect / Disconnect, and Simulate lead, which
+     Connections — Meta and Website RFQ. Mocked: Connect / Disconnect, and Simulate Lead, which
                   fills in the form as that source; the website shows its embed snippet.
      Submission — a test submission (or a simulated lead) creates the record from the mapped
                   fields (hub.createRecord) and is kept on the form with the record it created.
@@ -163,7 +163,7 @@ function FormPreview({form, values, onChange, tried}){
           </div>
         );
       })}
-      {!form.fields.length && <div style={{fontSize:13, color:T.attioMuted}}>No fields yet.</div>}
+      {!form.fields.length && <div style={{fontSize:13, color:T.attioMuted}}>No fields yet</div>}
     </div>
   );
 }
@@ -194,7 +194,7 @@ function FieldLabelInput({value, onChange, suggestions, ariaLabel}){
 }
 
 /* The builder's fields, one card each — label, type, required, options (and a Custom Range's
-   settings), moved up / down or removed, and "Add field" for any field type. Shared by Marketing
+   settings), moved up / down or removed, and "Add Field" for any field type. Shared by Marketing
    forms and Customer Profile forms; each adds its own settings to a card:
      `cells(f, i)`    — more cells beside Label / Type (Marketing: Maps to)
      `below(f, i)`    — rows under the options (Customer Profile: Show only when, Fill from)
@@ -202,7 +202,7 @@ function FieldLabelInput({value, onChange, suggestions, ariaLabel}){
      `suggestions(f)` — label suggestions
      `required`        — whether a field can be marked Required (Marketing: yes) */
 function FormFieldsList({fields, setFields, cells, below, onType, suggestions, required = true}){
-  const [adding, setAdding] = React.useState(false);   // the Add field menu
+  const [adding, setAdding] = React.useState(false);   // the Add Field menu
   const setField = (id, p) => setFields(fs => fs.map(f => f.id === id ? {...f, ...p} : f));
   const move = (i, d) => setFields(fs => { const n = fs.slice(); const [f] = n.splice(i, 1); n.splice(i + d, 0, f); return n; });
   const add = (type) => setFields(fs => [...fs, {id:formFieldId(), type, label:'', required:false, options: fieldHasOptions(type) ? ['', ''] : [], range:{label:'', min:'', max:''}, mapTo:''}]);
@@ -228,7 +228,7 @@ function FormFieldsList({fields, setFields, cells, below, onType, suggestions, r
               onChange={v=>v && setField(f.id, {type:v, options: fieldHasOptions(v) && !f.options.length ? ['', ''] : f.options, ...(onType ? onType(f, v) : {})})}/>)}
             {required ? (
               <label onClick={()=>setField(f.id, {required:!f.required})} style={{display:'flex', alignItems:'center', gap:8, height:34, fontSize:13, color:T.attioText, cursor:'pointer', alignSelf:'end'}}>
-                <RowCheckbox checked={f.required} onChange={()=>setField(f.id, {required:!f.required})}/> Required
+                <span onClick={e=>e.stopPropagation()} style={{display:'flex'}}><UtToggle on={!!f.required} onChange={()=>setField(f.id, {required:!f.required})}/></span> Required
               </label>
             ) : null}
           </div>
@@ -244,7 +244,7 @@ function FormFieldsList({fields, setFields, cells, below, onType, suggestions, r
               ))}
               <button type="button" onClick={()=>setField(f.id, {options:[...f.options, '']})}
                 style={{alignSelf:'flex-start', display:'inline-flex', alignItems:'center', gap:6, border:'none', background:'transparent', padding:'2px 0', fontSize:13, color:T.attioText, cursor:'pointer', fontFamily:'inherit'}}>
-                <Icon name="plus" size={12} color={T.gray600}/> Add option
+                <Icon name="plus" size={12} color={T.gray600}/> Add Option
               </button>
             </div>
           )}
@@ -252,9 +252,9 @@ function FormFieldsList({fields, setFields, cells, below, onType, suggestions, r
         </div>
       );
     })}
-    {/* Add field: any field type. */}
+    {/* Add Field: any field type. */}
     <div style={{position:'relative', alignSelf:'flex-start'}}>
-      <button type="button" onMouseDown={e=>e.stopPropagation()} onClick={()=>setAdding(o => !o)} style={btnSecondarySm}><Icon name="plus" size={12} color={T.gray600}/> Add field</button>
+      <button type="button" onMouseDown={e=>e.stopPropagation()} onClick={()=>setAdding(o => !o)} style={btnSecondarySm}><Icon name="plus" size={12} color={T.gray600}/> Add Field</button>
       <MenuShell open={adding} onClose={()=>setAdding(false)} width={220}>
         {FORM_FIELD_TYPES.map(t => <MenuItem key={t.type} label={t.label} onClick={()=>{ setAdding(false); add(t.type); }}/>)}
       </MenuShell>
@@ -295,7 +295,7 @@ function FormEditorPanel({form, onCancel, onSave}){
   const label = {fontSize:12.5, color:T.attioMuted};
   const section = {fontSize:11, fontWeight:600, color:T.attioFaint, textTransform:'uppercase', letterSpacing:.4};
   return (
-    <CreatePanelFrame title={form ? 'Edit Form' : 'New Form'} onClose={onCancel} placement="fixed" width="min(1120px, calc(100vw - 72px))" flush more={false}
+    <CreatePanelFrame title={form ? 'Edit Form' : 'Add Form'} onClose={onCancel} placement="fixed" width="min(1120px, calc(100vw - 72px))" flush
       actions={<>
         <StSecondary label="Cancel" onClick={onCancel}/>
         <StCta label="Save and Connect" disabled={!ok} onClick={save}/>
@@ -304,7 +304,7 @@ function FormEditorPanel({form, onCancel, onSave}){
       <div style={{flex:1, minWidth:0, overflowY:'auto', padding:20, display:'flex', flexDirection:'column', gap:16}}>
         <span style={section}>Form details</span>
         {stack(<>
-          <Field label="Form name" wide><input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Canada PR Eligibility" style={fieldText}/></Field>
+          <Field label="Form Name" wide><input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Canada PR Eligibility" style={fieldText}/></Field>
           <Field label="Description" wide><textarea value={description} onChange={e=>setDescription(e.target.value)} rows={3} style={{...fieldText, resize:'vertical', lineHeight:1.5}}/></Field>
         </>)}
         <div style={{borderTop:`1px solid ${T.border}`, margin:'4px -20px 0'}}/>
@@ -356,12 +356,13 @@ function LinkMark({size = 18, color = T.attioText}){
 function FormConnectionsModal({form, saved, onClose, onToggle, onSetLink, onSimulate}){
   const [copied, setCopied] = React.useState(null);   // 'link' | 'snippet'
   const [linking, setLinking] = React.useState(null); // {id, value}: the link being entered
+  const [disconnecting, setDisconnecting] = React.useState(null);   // a source asked to be disconnected (confirmed first)
   const snippet = `<script src="https://forms.pulse.app/embed/${form.id}.js" async></script>`;
   const copy = (what, text) => { try { navigator.clipboard.writeText(text); } catch(e){} setCopied(what); setTimeout(()=>setCopied(null), 1500); };
   const tile = (mark) => <span style={{width:40, height:32, borderRadius:8, background:'#fff', border:`1px solid ${T.attioLine}`, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0}}>{mark}</span>;
   const row = {display:'flex', alignItems:'center', gap:12};
   return ReactDOM.createPortal(
-    <StModal title={saved ? 'Form saved' : `Connections · ${form.name}`} width={600} onCancel={onClose} hideCancel>
+    <StModal title={saved ? 'Form Saved' : 'Connections'} width={600} onCancel={onClose} hideCancel>
       {saved && (
         <div style={{display:'flex', alignItems:'center', gap:10, padding:'10px 12px', borderRadius:8, background:'#ECFDF3', border:'1px solid #ABEFC6'}}>
           <span style={{width:20, height:20, borderRadius:9999, background:T.good, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0}}><Icon name="check" size={12} color="#fff"/></span>
@@ -369,15 +370,14 @@ function FormConnectionsModal({form, saved, onClose, onToggle, onSetLink, onSimu
         </div>
       )}
       <div style={{display:'flex', flexDirection:'column'}}>
-        {/* Copy link: the form for anyone to fill in, in their browser. */}
+        {/* Copy Link: the form for anyone to fill in, in their browser. */}
         <div style={{...row, padding:'12px 0'}}>
           {tile(<LinkMark/>)}
           <div style={{flex:1, minWidth:0}}>
-            <div style={{fontSize:13.5, fontWeight:500, color:T.attioText}}>Copy link</div>
+            <div style={{fontSize:13.5, fontWeight:500, color:T.attioText}}>Copy Link</div>
             <div style={{fontSize:12, color:T.attioMuted, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{formLink(form)}</div>
-            {!formPublished(form) && <div style={{fontSize:12, color:T.attioMuted, marginTop:2}}>Draft · publish the form so the link takes responses</div>}
           </div>
-          <StSecondary label={copied === 'link' ? 'Copied' : 'Copy link'} onClick={()=>copy('link', formLink(form))}/>
+          <StSecondary label={copied === 'link' ? 'Copied' : 'Copy Link'} onClick={()=>copy('link', formLink(form))}/>
         </div>
         {FORM_CONNECTIONS.map(c => {
           const on = form.connections && form.connections[c.id];
@@ -391,12 +391,12 @@ function FormConnectionsModal({form, saved, onClose, onToggle, onSetLink, onSimu
                   {on && (
                     <div style={{display:'flex', alignItems:'baseline', gap:8, marginTop:2, minWidth:0}}>
                       {on.link && <span title={on.link} style={{fontSize:12, color:T.attioMuted, minWidth:0, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{on.link}</span>}
-                      {!(linking && linking.id === c.id) && <button onClick={()=>setLinking({id:c.id, value:on.link || ''})} style={{...formTextAction, fontSize:12, flexShrink:0}}>{on.link ? 'Edit link' : 'Add link'}</button>}
+                      {!(linking && linking.id === c.id) && <button onClick={()=>setLinking({id:c.id, value:on.link || ''})} style={{...formTextAction, fontSize:12, flexShrink:0}}>{on.link ? 'Edit Link' : 'Add Link'}</button>}
                     </div>
                   )}
                 </div>
-                {on && <StSecondary label="Simulate lead" onClick={()=>onSimulate(c.id)}/>}
-                <StSecondary label={on ? 'Disconnect' : 'Connect'} onClick={()=>{ if(on){ onToggle(c.id, false); setLinking(null); } else setLinking({id:c.id, value:''}); }}/>
+                {on && <StSecondary label="Simulate Lead" onClick={()=>onSimulate(c.id)}/>}
+                <StSecondary label={on ? 'Disconnect' : 'Connect'} onClick={()=>{ if(on){ setDisconnecting(c); setLinking(null); } else setLinking({id:c.id, value:''}); }}/>
               </div>
               {/* The link: asked for on Connect; added or changed for a connected source. */}
               {linking && linking.id === c.id && (() => {
@@ -424,6 +424,8 @@ function FormConnectionsModal({form, saved, onClose, onToggle, onSetLink, onSimu
           );
         })}
       </div>
+      {disconnecting && <StModal title={`Disconnect ${disconnecting.name}?`} primary="Disconnect" danger onCancel={()=>setDisconnecting(null)}
+        onSubmit={()=>{ onToggle(disconnecting.id, false); setDisconnecting(null); }}/>}
     </StModal>, document.body);
 }
 
@@ -434,7 +436,7 @@ function FormSubmissionModal({form, via, onClose, onSubmit}){
   const missing = form.fields.some(f => propertyValueError(formFieldProperty(f), values[f.id], f.required));
   const source = FORM_CONNECTIONS.find(c => c.id === via);
   return ReactDOM.createPortal(
-    <StModal title={source ? `Simulate lead · ${source.name}` : 'Test submission'} width={560} primary="Submit"
+    <StModal title={source ? 'Simulate Lead' : 'Test Submission'} width={560} primary="Submit"
       onCancel={onClose} onSubmit={()=>{ setTried(true); if(!missing) onSubmit(values); }}>
       <div style={{maxHeight:'60vh', overflowY:'auto'}}>
         <FormPreview form={form} values={values} tried={tried} onChange={(id, v)=>setValues(x => ({...x, [id]:v}))}/>
@@ -480,18 +482,18 @@ function FormDetailPanel({form, menuItems, onClose, onEdit, onConnections, onPre
           <Field label="Connections">
             <div style={{display:'flex', flexWrap:'wrap', alignItems:'baseline', gap:'4px 10px', paddingTop:7}}>
               {connected.length > 0 && <span style={{fontSize:13, color:T.attioText}}>{connected.join(', ')}</span>}
-              <button onClick={onConnections} style={formTextAction}>{connected.length ? 'Edit connection' : 'Add connection'}</button>
+              <button onClick={onConnections} style={formTextAction}>{connected.length ? 'Edit Connection' : 'Add Connection'}</button>
             </div>
           </Field>
           <Field label="Created by"><ReadValue>{form.createdBy}</ReadValue></Field>
-          <Field label="Created at"><ReadValue>{fmtActStamp(new Date(form.createdAt))}</ReadValue></Field>
-          <Field label="Total submissions">
+          <Field label="Created"><ReadValue>{fmtActStamp(new Date(form.createdAt))}</ReadValue></Field>
+          <Field label="Total Submissions">
             <div style={{paddingTop:7}}><FormSubmissionsValue form={form}/></div>
           </Field>
         </>)}
       </div>
       <div style={{display:'flex', alignItems:'center', justifyContent:'flex-end', gap:8, padding:'12px 20px', borderTop:`1px solid ${T.border}`, flexShrink:0}}>
-        <RowActionsMenu title="Form actions" width={MENU_W} items={menuItems}/>
+        <RowActionsMenu title="Form Actions" width={MENU_W} items={menuItems}/>
         <button title="Share — copy the form's link" onClick={share} style={iconBtn}><ShareMark size={15}/></button>
         <StSecondary label="Preview Form" onClick={onPreview}/>
         <StCta label="Edit Form" onClick={onEdit}/>
@@ -502,7 +504,7 @@ function FormDetailPanel({form, menuItems, onClose, onEdit, onConnections, onPre
 // The form as it appears to the person filling it in — read-only: nothing can be entered or submitted.
 function FormPreviewModal({form, onClose}){
   return ReactDOM.createPortal(
-    <StModal title={`Preview · ${form.name}`} width={560} onCancel={onClose}>
+    <StModal title="Preview Form" width={560} onCancel={onClose}>
       <div style={{maxHeight:'65vh', overflowY:'auto'}}><FormPreview form={form}/></div>
     </StModal>, document.body);
 }
@@ -510,7 +512,7 @@ function FormPreviewModal({form, onClose}){
 /* ── Marketing → Forms ── */
 const FORM_COLUMNS = [
   {key:'name', label:'Form Name', width:240}, {key:'statusLabel', label:'Status', width:120}, {key:'description', label:'Description', width:280}, {key:'targetLabel', label:'Creates', width:120},
-  {key:'fieldCount', label:'Fields', width:90}, {key:'connectionsText', label:'Connections', width:220}, {key:'submissionCount', label:'Submissions', width:120},
+  {key:'fieldCount', label:'Fields', width:90}, {key:'connectionsText', label:'Edit Connections', width:220}, {key:'submissionCount', label:'Submissions', width:120},
   {key:'link', label:'Link', width:260},
   {key:'createdBy', label:'Created By', width:160}, {key:'createdText', label:'Created', width:150},
 ];
@@ -530,13 +532,13 @@ function FormsPage(){
   const rows = forms.map(f => ({...f, statusLabel:FORM_STATUS[formStatus(f)].label, targetLabel:formNoun(f.target), fieldCount:f.fields.length, connectionsText:formConnectedNames(f).join(', '),
     submissionCount:(f.submissions || []).length, link:formLinks(f).map(l => l.url).join(', '), createdText:fmtActStamp(new Date(f.createdAt))}));
   // Publish / Unpublish: the workflow list's Turn on / Turn off.
-  const setPublished = (f, on) => { update(f.id, {published:on}); hub.toast(on ? 'Form published · its link takes responses' : 'Form unpublished · its link is closed'); };
+  const setPublished = (f, on) => { update(f.id, {published:on}); hub.toast(on ? 'Form published' : 'Form unpublished'); };
   const actionsFor = (f) => [
-    {label:'View form', onClick:()=>setOpenId(f.id)},
-    {label:'Edit form', onClick:()=>setEditor({id:f.id})},
-    {label: formPublished(f) ? 'Unpublish form' : 'Publish form', onClick:()=>setPublished(f, !formPublished(f))},
-    ...(f.fields.length ? [{label:'Connections', onClick:()=>setConnectId(f.id)}, {label:'Test submission', onClick:()=>setSubmitting({id:f.id, via:null})}] : []),
-    {label:'Delete form', danger:true, onClick:()=>setDeleting(f.id)},
+    {label:'View Form', onClick:()=>setOpenId(f.id)},
+    {label:'Edit Form', onClick:()=>setEditor({id:f.id})},
+    {label: formPublished(f) ? 'Unpublish Form' : 'Publish Form', onClick:()=>setPublished(f, !formPublished(f))},
+    ...(f.fields.length ? [{label:'Edit Connections', onClick:()=>setConnectId(f.id)}, {label:'Test Submission', onClick:()=>setSubmitting({id:f.id, via:null})}] : []),
+    {label:'Delete Form', danger:true, onClick:()=>setDeleting(f.id)},
   ];
   // Bulk Actions: Delete (as a form's Delete: the records they created stay).
   const formBulk = useTableBulkDelete({rows:forms, noun:'form', note:'Records they created stay.',
@@ -552,7 +554,7 @@ function FormsPage(){
       : key === 'link' ? (() => { const ls = formLinks(byId(r.id));
           return <AssociatedRecordsValue records={ls.map(l => ({id:l.id, url:l.url, name: ls.length > 1 ? `${l.source} · ${l.url}` : l.url}))} noun="link" inTable truncate width={360} onOpen={(l)=>openFormUrl(l.url)}/>; })()
       : key === 'fieldCount' ? <span style={{fontVariantNumeric:'tabular-nums'}}>{r[key]}</span> : undefined,
-    renderActions:(r) => <RowActionsMenu title="Form actions" width={MENU_W} items={actionsFor(byId(r.id))}/>,
+    renderActions:(r) => <RowActionsMenu title="Form Actions" width={MENU_W} items={actionsFor(byId(r.id))}/>,
   };
   // Save and Connect: a new form is created (its creator and when), an existing one updated; then its connections.
   const saveForm = (v) => {
@@ -572,7 +574,7 @@ function FormsPage(){
     <div style={{flex:1, minWidth:0, minHeight:0, display:'flex', flexDirection:'column', position:'relative', overflow:'hidden'}}>
       <RecordViewsModule inset="page" schema={schema} rows={rows} columns={FORM_COLUMNS.map(c => c.key)} storeKey="views:marketing-forms"
         defaultViews={[{id:'fv-all', name:'All Forms', sort:{key:'name', dir:'asc'}}]}
-        actions={() => <button onClick={()=>setEditor({})} title="New form" style={toolbarIconButton}><Icon name="plus" size={14} color={T.gray800}/></button>}
+        actions={() => <button onClick={()=>setEditor({})} title="Add Form" style={toolbarIconButton}><Icon name="plus" size={14} color={T.gray800}/></button>}
         overlay={open && <FormDetailPanel key={open.id} form={open} menuItems={actionsFor(open).filter(it => it.label !== 'View form')} onClose={()=>setOpenId(null)}
             onEdit={()=>setEditor({id:open.id})} onConnections={()=>setConnectId(open.id)} onPreview={()=>setPreviewId(open.id)} onPublish={(on)=>setPublished(open, on)}/>}/>
       {previewId && byId(previewId) && <FormPreviewModal form={byId(previewId)} onClose={()=>setPreviewId(null)}/>}
@@ -585,9 +587,9 @@ function FormsPage(){
       {submitting && byId(submitting.id) && <FormSubmissionModal form={byId(submitting.id)} via={submitting.via} onClose={()=>setSubmitting(null)}
         onSubmit={(values)=>submit(byId(submitting.id), submitting.via, values)}/>}
       {formBulk.bulkModal}
-      {deletingForm && <StModal title="Delete form" primary="Delete form" danger onCancel={()=>setDeleting(null)}
+      {deletingForm && <StModal title="Delete Form" primary="Delete Form" danger onCancel={()=>setDeleting(null)}
         onSubmit={()=>{ setForms(fs => fs.map(f => f.id === deletingForm.id ? deletedForm(f) : f)); if(openId === deletingForm.id) setOpenId(null); setDeleting(null); hub.toast('Form deleted'); }}>
-        <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>{deletingForm.name} will be deleted and disconnected from its sources. Records it created stay.</div>
+        <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>{deletingForm.name} will be deleted and disconnected from its sources. Records it created stay. This can't be undone.</div>
       </StModal>}
     </div>
   );

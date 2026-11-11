@@ -24,7 +24,7 @@ const SAMPLE_PLAYBOOKS = () => [
 const playbooksOf = (data) => (data && data.playbooks) || (ACTIVE_CRM.sample ? SAMPLE_PLAYBOOKS() : []);
 
 /* A playbook's sections as they read: header, then its text (line breaks kept). */
-function PlaybookSections({playbook, empty = 'No sections yet.'}){
+function PlaybookSections({playbook, empty = 'No sections yet'}){
   const sections = (playbook && playbook.sections) || [];
   if(!sections.length) return <div style={{fontSize:13, color:T.attioMuted}}>{empty}</div>;
   return (
@@ -32,7 +32,7 @@ function PlaybookSections({playbook, empty = 'No sections yet.'}){
       {sections.map((s, i) => (
         <div key={s.id || i} style={{display:'flex', flexDirection:'column', gap:6}}>
           <div style={{fontSize:14, fontWeight:600, color: s.header ? T.attioText : T.attioFaint}}>{s.header || `Section ${i + 1}`}</div>
-          <div style={{fontSize:13, lineHeight:1.6, color: s.text ? T.attioText : T.attioFaint, whiteSpace:'pre-wrap', overflowWrap:'anywhere'}}>{s.text || 'No text yet.'}</div>
+          <div style={{fontSize:13, lineHeight:1.6, color: s.text ? T.attioText : T.attioFaint, whiteSpace:'pre-wrap', overflowWrap:'anywhere'}}>{s.text || 'No text yet'}</div>
         </div>
       ))}
     </div>
@@ -59,15 +59,15 @@ function PlaybookEditorPanel({playbook, onCancel, onSave}){
   const label = {fontSize:12.5, color:T.attioMuted};
   const sectionLabel = {fontSize:11, fontWeight:600, color:T.attioFaint, textTransform:'uppercase', letterSpacing:.4};
   return (
-    <CreatePanelFrame title={playbook ? 'Edit Playbook' : 'New Playbook'} onClose={onCancel} placement="fixed" width="min(1120px, calc(100vw - 72px))" flush more={false}
+    <CreatePanelFrame title={playbook ? 'Edit Playbook' : 'Add Playbook'} onClose={onCancel} placement="fixed" width="min(1120px, calc(100vw - 72px))" flush
       actions={<>
         <StSecondary label="Cancel" onClick={onCancel}/>
-        <StCta label={playbook ? 'Save changes' : 'Create playbook'} disabled={!ok} onClick={save}/>
+        <StCta label={playbook ? 'Save Changes' : 'Add Playbook'} disabled={!ok} onClick={save}/>
       </>}>
       {/* Left — the playbook's name, then its sections. */}
       <div style={{flex:1, minWidth:0, overflowY:'auto', padding:20, display:'flex', flexDirection:'column', gap:16}}>
         <span style={sectionLabel}>Playbook details</span>
-        <Field label="Playbook name" wide><input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Discovery Call" style={fieldText}/></Field>
+        <Field label="Playbook Name" wide><input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Discovery Call" style={fieldText}/></Field>
         <div style={{borderTop:`1px solid ${T.border}`, margin:'4px -20px 0'}}/>
         <span style={sectionLabel}>Sections · {sections.length} of {PLAYBOOK_MAX_SECTIONS}</span>
         {sections.map((s, i) => (
@@ -92,7 +92,7 @@ function PlaybookEditorPanel({playbook, onCancel, onSave}){
         <button type="button" disabled={full} onClick={()=>!full && setSections(ss => [...ss, {id:playbookId('pbs'), header:'', text:''}])}
           title={full ? `A playbook has at most ${PLAYBOOK_MAX_SECTIONS} sections` : undefined}
           style={{...btnSecondarySm, alignSelf:'flex-start', opacity: full ? .45 : 1, cursor: full ? 'default' : 'pointer'}}>
-          <Icon name="plus" size={12} color={T.gray600}/> Add section
+          <Icon name="plus" size={12} color={T.gray600}/> Add Section
         </button>
         {full && <span style={{fontSize:12.5, color:T.attioMuted}}>A playbook has at most {PLAYBOOK_MAX_SECTIONS} sections.</span>}
       </div>
@@ -120,8 +120,8 @@ function PlaybooksTab({data, setData, say}){
   const open = shown.find(p => p.id === openId) || null;
   const cols = [{key:'name', label:'Playbook Name', width:260}, {key:'sections', label:'Sections', width:420}, {key:'created', label:'Created', width:150}, {key:'createdBy', label:'Created By', width:170}];
   const rows = shown.map(p => ({id:p.id, createdBy:creatorOf(p), name:p.name, sections:p.sections.map(s => s.header).join(' · '), created:p.createdAt ? fmtQuoteDate(p.createdAt) : ''}));
-  const actions = (p) => [{label:'View playbook', onClick:()=>setOpenId(p.id)}, ...(can('edit', p) ? [{label:'Edit playbook', onClick:()=>setEditing({playbook:p})}] : []),
-    ...(can('delete', p) ? [{label:'Delete playbook', danger:true, onClick:()=>setDeleting(p)}] : [])];
+  const actions = (p) => [{label:'View Playbook', onClick:()=>setOpenId(p.id)}, ...(can('edit', p) ? [{label:'Edit Playbook', onClick:()=>setEditing({playbook:p})}] : []),
+    ...(can('delete', p) ? [{label:'Delete Playbook', danger:true, onClick:()=>setDeleting(p)}] : [])];
   // Bulk Actions → Delete, as the row's (the ones the person may delete).
   const pbBulk = useTableBulkDelete({rows, noun:'playbook', canDelete:(r) => can('delete', list.find(p => p.id === r.id)), skipNote:'not yours to delete',
     remove:(ids) => { setList(ps => ps.filter(p => !ids.includes(p.id))); if(ids.includes(openId)) setOpenId(null); }, onDone:(n) => say(`${bulkPlural(n, 'playbook')} deleted`)});
@@ -129,7 +129,7 @@ function PlaybooksTab({data, setData, say}){
     properties:cols, noun:'playbook', searchKeys:['name', 'sections'], canCreateProperty:false, boards:false, bulkActions:pbBulk.bulkActions,
     filterProps:[{key:'name', label:'Name', type:'text'}], selectValues:{},
     renderCell:(key, r) => key === 'name' ? <ContactName name={r.name} onOpen={()=>setOpenId(r.id)} style={{fontSize:'inherit', fontWeight:500}}/> : undefined,
-    renderActions:(r) => <RowActionsMenu title="Actions" width={MENU_W} items={actions(list.find(p => p.id === r.id))}/>,
+    renderActions:(r) => <RowActionsMenu title="Playbook Actions" width={MENU_W} items={actions(list.find(p => p.id === r.id))}/>,
   };
   const save = (vals) => {
     const p = editing.playbook;
@@ -142,16 +142,16 @@ function PlaybooksTab({data, setData, say}){
     <div style={{display:'flex', flexDirection:'column', flex:1, minHeight:0}}>
       <RecordViewsModule schema={schema} rows={rows} columns={cols.map(c => c.key)} storeKey="views:templates-playbooks"
         defaultViews={[{id:'tv-playbooks', name:'All Playbooks', sort:{key:'name', dir:'asc'}}]}
-        actions={() => can('create') && <StCta icon="plus" title="New playbook" onClick={()=>{ setOpenId(null); setEditing({}); }}/>}
-        overlay={open && <DetailPanel width={520} title={open.name} onClose={()=>setOpenId(null)} menuItems={actions(open).filter(it => !/^View/.test(it.label))}
+        actions={() => can('create') && <button onClick={()=>{ setOpenId(null); setEditing({}); }} title="Add Playbook" aria-label="Add Playbook" style={toolbarIconButton}><Icon name="plus" size={14} color={T.gray800}/></button>}
+        overlay={open && <DetailPanel title={open.name} onClose={()=>setOpenId(null)} menuItems={actions(open).filter(it => !/^View/.test(it.label))}
           fields={[['Sections', String(open.sections.length)], ['Created', open.createdAt ? fmtQuoteDate(open.createdAt) : ''], ['Created by', creatorOf(open)]]}>
           <PlaybookSections playbook={open}/>
         </DetailPanel>}/>
       {editing && <PlaybookEditorPanel playbook={editing.playbook} onCancel={()=>setEditing(null)} onSave={save}/>}
       {pbBulk.bulkModal}
-      {deleting && <StModal title="Delete playbook" primary="Delete" danger onCancel={()=>setDeleting(null)}
-        onSubmit={()=>{ setList(ps => ps.filter(p => p.id !== deleting.id)); if(openId === deleting.id) setOpenId(null); setDeleting(null); say('Deleted'); }}>
-        <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>{deleting.name} will be deleted. It won't be offered on calls any more.</div>
+      {deleting && <StModal title="Delete Playbook" primary="Delete Playbook" danger onCancel={()=>setDeleting(null)}
+        onSubmit={()=>{ setList(ps => ps.filter(p => p.id !== deleting.id)); if(openId === deleting.id) setOpenId(null); setDeleting(null); say('Playbook deleted'); }}>
+        <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>{deleting.name} will be deleted. It won't be offered on calls any more. This can't be undone.</div>
       </StModal>}
     </div>
   );

@@ -161,7 +161,7 @@ function LogoField({value, onChange, disabled, fallback}){
         </div>
         {!disabled && <>
           <input ref={input} type="file" accept="image/*" onChange={pick} style={{display:'none'}}/>
-          <StSecondary label={value ? 'Replace' : 'Upload logo'} onClick={()=>input.current && input.current.click()}/>
+          <StSecondary label={value ? 'Replace' : 'Upload Logo'} onClick={()=>input.current && input.current.click()}/>
           {value && <StTextAction label="Remove" onClick={()=>onChange(null)}/>}
         </>}
       </div>
@@ -354,18 +354,16 @@ function OrganizationSettingsPage(){
   const {org} = useOrg();
   const [name, setName] = React.useState(org.name);
   const [logo, setLogo] = React.useState(org.logo || null);
-  const [saved, setSaved] = React.useState(false);
   const dirty = name.trim() !== org.name || (logo || null) !== (org.logo || null);
   const ok = !!name.trim();
-  const save = () => { if(!ok) return; updateOrg({name:name.trim(), logo}); setSaved(true); };
-  React.useEffect(() => { if(dirty) setSaved(false); }, [dirty]);
+  const save = () => { if(!ok) return; updateOrg({name:name.trim(), logo}); };
   return (
     <SettingsPage
-      actions={dirty ? <><StSecondary label="Cancel" onClick={()=>{ setName(org.name); setLogo(org.logo || null); }}/><StCta label="Save changes" disabled={!ok} onClick={save}/></>
-        : saved ? <span style={{fontSize:12.5, color:T.attioMuted}}>Saved</span> : null}>
+      // As every Settings page: Cancel while there are changes, then Save.
+      actions={<>{dirty && <StSecondary label="Cancel" onClick={()=>{ setName(org.name); setLogo(org.logo || null); }}/>}<StCta label="Save" disabled={!dirty || !ok} onClick={save}/></>}>
       <div style={{maxWidth:560, display:'flex', flexDirection:'column', gap:20}}>
         <div>
-          <label style={fieldLabel} htmlFor="org-name">Organization name</label>
+          <label style={fieldLabel} htmlFor="org-name">Organization Name</label>
           <input id="org-name" value={name} onChange={e=>setName(e.target.value)} style={fieldInput}/>
         </div>
         <div>
@@ -403,7 +401,7 @@ function ErpUsersPage({data, setData, focus}){
     renderCell:(key, r) => key === 'name' ? <span style={{display:'flex', alignItems:'center', gap:8, minWidth:0}}>
         <Avatar name={r.name} size={22}/><span style={{fontWeight:500, color:T.attioText, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{r.name}</span></span>
       : undefined,
-    renderActions:(r) => <RowActionsMenu title="User actions" width={MENU_W} items={[{label:'Access', onClick:()=>setPanel({userId:r.id})}]}/>,
+    renderActions:(r) => <RowActionsMenu title="User Actions" width={MENU_W} items={[{label:'Edit Access', onClick:()=>setPanel({userId:r.id})}]}/>,
   };
   const saved = (crmUsers) => { if(crmUsers.length) setData(d => ({...d, users:[...d.users, ...crmUsers.filter(u => !d.users.some(x => x.id === u.id))]})); setPanel(null); };
   /* The CRM's record list (usersTeams.jsx RecordViewsModule): its toolbar — the view, Add user
@@ -413,7 +411,7 @@ function ErpUsersPage({data, setData, focus}){
     <SettingsPage fill>
       <RecordViewsModule flushTop savedViews={false} storeKey="views:erp-users-v1" schema={schema} rows={rows} columns={ERP_USER_COLUMNS.map(c => c.key)}
         defaultViews={[{id:'erp-users-all', name:'All Users', sort:{key:'name', dir:'asc'}}]} focus={focus}
-        actions={() => <button onClick={()=>setPanel({userId:null})} title="Add user" style={iconBtn}><Icon name="plus" size={14} color={T.gray800}/></button>}/>
+        actions={() => <button onClick={()=>setPanel({userId:null})} title="Add User" style={iconBtn}><Icon name="plus" size={14} color={T.gray800}/></button>}/>
       {panel && <UserAccessPanel userId={panel.userId} onClose={()=>setPanel(null)} onSaved={saved} crmUsers={data.users}/>}
     </SettingsPage>
   );
@@ -459,9 +457,9 @@ function UserAccessPanel({userId, onClose, onSaved, crmUsers}){
     onSaved(crm.includes(ACTIVE_CRM.id) ? crmUsersToAdd(crmUsers) : []);
   };
   return (
-    <CreatePanelFrame title={isNew ? 'Add user' : 'Access'} onClose={onClose} more={false} placement="fixed" width={480} actions={<>
+    <CreatePanelFrame title={isNew ? 'Add User' : 'Edit Access'} onClose={onClose} placement="fixed" width={480} actions={<>
       <StSecondary label="Cancel" onClick={onClose}/>
-      <StCta label={isNew ? 'Add user' : 'Save changes'} disabled={!ok} onClick={save}/>
+      <StCta label={isNew ? 'Add User' : 'Save Changes'} disabled={!ok} onClick={save}/>
     </>}>
       {stack(<>
         {isNew ? <>
@@ -478,7 +476,7 @@ function UserAccessPanel({userId, onClose, onSaved, crmUsers}){
         <Field label="Role"><Select value={role} options={ORG_ROLES.map(r => ({value:r, label:r}))} onChange={v=>v && setRole(v)}/>
           {lastSuperAdmin && <div style={{fontSize:12, color:T.red, marginTop:4}}>The Organization needs at least one Super Admin.</div>}</Field>
         <Field label="People"><Select value={peopleId} options={reg.people.map(p => ({value:p.id, label:p.name}))} onChange={v=>v && setPeopleId(v)}/></Field>
-        {role === 'Super Admin' && <Field label="People access">
+        {role === 'Super Admin' && <Field label="People Access">
           {checkRows(reg.people.map(p => (
             <div key={p.id} style={p.id === peopleId ? {pointerEvents:'none'} : undefined}>
               <SettingsCheckRow checked={p.id === peopleId || peopleAccess.includes(p.id)} onToggle={()=>toggle(setPeopleAccess)(p.id)} label={p.name}/>
@@ -533,17 +531,17 @@ function BranchesPage({module, onMembers}){
     setPanel(null);
   };
   return (<>
-    <SettingsPage description={`Each ${label} branch has its own data, users and settings.`}
-      actions={<StCta icon="plus" title={`New ${label} branch`} onClick={()=>setPanel({})}/>}>
+    <SettingsPage
+      actions={<button onClick={()=>setPanel({})} title={`Add ${label} Branch`} aria-label={`Add ${label} Branch`} style={toolbarIconButton}><Icon name="plus" size={14} color={T.gray800}/></button>}>
       {list.length ? (
         <div style={mtTable}>
-          <div style={mtHeadRow}><span style={{...mtHead, flex:1}}>Name</span><span style={{...mtHead, width:96}}>Members</span><span style={{...mtHead, width:120}}>Created</span><span style={{width:28}}/></div>
+          <div style={mtHeadRow}><span style={{...mtHead, flex:1}}>Name</span><span style={{...mtHead, width:96}}>Users</span><span style={{...mtHead, width:120}}>Created</span><span style={{width:28}}/></div>
           {list.map(br => (
             <div key={br.id} style={mtRow}>
               <span style={{flex:1, minWidth:0, fontWeight:500, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{br.name}</span>
               <span style={{width:96, fontVariantNumeric:'tabular-nums'}}>{countLink(members(br), ()=>onMembers(module, br))}</span>
-              <span style={{width:120, color:T.attioMuted, whiteSpace:'nowrap'}}>{createdLabel(br.createdAt)}</span>
-              <RowActionsMenu title="Branch actions" width={MENU_W} items={[{label:'Rename', onClick:()=>setPanel({branch:br})}]}/>
+              <span style={{width:120, color:T.attioMuted, whiteSpace:'nowrap'}}>{dateShown(createdLabel(br.createdAt)) || '—'}</span>
+              <RowActionsMenu title="Branch Actions" width={MENU_W} items={[{label:'Rename Branch', onClick:()=>setPanel({branch:br})}]}/>
             </div>
           ))}
         </div>
@@ -559,9 +557,9 @@ function BranchPanel({label, module, branch, others, onClose, onSave}){
   const taken = others.some(x => (!branch || x.id !== branch.id) && x.name.trim().toLowerCase() === name.trim().toLowerCase());
   const ok = !!name.trim() && !taken && (!branch || name.trim() !== branch.name);
   return (
-    <CreatePanelFrame title={branch ? `Rename ${label} branch` : `New ${label} branch`} onClose={onClose} more={false} placement="fixed" width={480} actions={<>
+    <CreatePanelFrame title={branch ? `Rename ${label} Branch` : `Add ${label} Branch`} onClose={onClose} placement="fixed" width={480} actions={<>
       <StSecondary label="Cancel" onClick={onClose}/>
-      <StCta label={branch ? 'Save changes' : 'Add branch'} disabled={!ok} onClick={()=>onSave(name.trim(), branch)}/>
+      <StCta label={branch ? 'Save Changes' : 'Add Branch'} disabled={!ok} onClick={()=>onSave(name.trim(), branch)}/>
     </>}>
       {stack(<Field label="Name">
         <input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder={BRANCH_NAME_HINTS[module] || 'e.g. Dubai'} style={{...fieldText, borderColor: taken ? T.red : undefined}}/>
@@ -631,15 +629,12 @@ const BRAND_SECTIONS = [
 ];
 const BRAND_COLOR_FIELDS = [{key:'primary', label:'Primary color'}, {key:'secondary', label:'Secondary color'}];
 const validHex = (v) => /^#[0-9a-f]{6}$/i.test(v);
-const brandRow = (label, content) => (
-  <div key={label} style={{display:'flex', alignItems:'flex-start', gap:24, padding:'16px 0', borderBottom:`1px solid ${T.attioLine}`}}>
-    <div style={{width:180, flexShrink:0, fontSize:13, color:T.attioText, paddingTop:6}}>{label}</div>
-    <div style={{flex:1, minWidth:0}}>{content}</div>
-  </div>
-);
+// A labelled row as the other Brand tabs (Field: the label beside the control).
+const brandRow = (label, content) => <Field key={label} label={label} wide>{content}</Field>;
 // A section's Cancel / Save (administrators), enabled once something changed.
+// As every Settings page: Cancel while there are changes, then Save.
 const BrandActions = ({admin, dirty, valid = true, onCancel, onSave}) => !admin ? null : (
-  <><StSecondary label="Cancel" disabled={!dirty} onClick={onCancel}/><StCta label="Save" disabled={!dirty || !valid} onClick={onSave}/></>
+  <>{dirty && <StSecondary label="Cancel" onClick={onCancel}/>}<StCta label="Save" disabled={!dirty || !valid} onClick={onSave}/></>
 );
 
 /* Logo: the uploaded company logo, or the HOF lockup until one is uploaded; Replace and Remove
@@ -654,7 +649,7 @@ function BrandLogoSection({brand, admin, toast, setActions}){
     readImageFile(f).then(url => { setError(''); setDraft(url); }).catch(err => setError(err.message)); };
   React.useEffect(() => setActions(<BrandActions admin={admin} dirty={dirty} onCancel={()=>setDraft(saved)}
     onSave={()=>{ updateBrand({logo:draft}); toast('Logo saved'); }}/>), [draft, saved, admin]);
-  return brandRow('Company logo', (
+  return brandRow('Company Logo', (
     <div style={{display:'flex', flexDirection:'column', gap:10}}>
       <div style={{width:260, height:104, borderRadius:10, border:`1px dashed ${T.borderStrong}`, background:'#fff', display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden', padding:12}}>
         {draft ? <img src={draft} alt="Company logo" style={{maxWidth:'100%', maxHeight:'100%', objectFit:'contain'}}/> : <Logo variant="main" height={30}/>}
@@ -708,7 +703,7 @@ function BrandColorsSection({brand, admin, toast, setActions}){
             style={{border:'none', background:'transparent', cursor:'pointer', display:'flex', padding:6, borderRadius:6}}><Icon name="trash" size={14} color={T.gray600}/></button>}
         </div>
       ))}
-      {!draft.length && <div style={{padding:'16px 0', fontSize:13, color:T.attioMuted}}>No brand colors yet.</div>}
+      {!draft.length && <div style={{padding:'16px 0', fontSize:13, color:T.attioMuted}}>No brand colors yet</div>}
       {admin && <div style={{paddingTop:14}}><StSecondary label={<span style={{display:'inline-flex', alignItems:'center', gap:6}}><Icon name="plus" size={12} color={T.gray800}/>Add Color</span>} onClick={add}/></div>}
     </div>
   );
@@ -754,10 +749,10 @@ function useBrandDraft({brand, admin, toast, setActions, key, blank, label, vali
    beneath a Simple Text Body, at the end of the Default HTML Template, added to a custom HTML
    email when asked). */
 const SIGNATURE_FIELDS = [
-  {key:'name', label:'Name', placeholder:'e.g. Asim Ali'}, {key:'designation', label:'Designation', placeholder:'e.g. Senior Migration Consultant'},
+  {key:'name', label:'Name', placeholder:'e.g. Asim Ali', required:true}, {key:'designation', label:'Designation', placeholder:'e.g. Senior Migration Consultant'},
   {key:'email', label:'Email', placeholder:'name@hofmigration.com'}, {key:'phone', label:'Phone', placeholder:'+971 4 000 0000'},
-  {key:'website', label:'Website', placeholder:'https://hofmigration.com'}, {key:'address', label:'Company address', multiline:true},
-  {key:'additional', label:'Additional info', multiline:true},
+  {key:'website', label:'Website', placeholder:'https://hofmigration.com'}, {key:'address', label:'Company Address', multiline:true},
+  {key:'additional', label:'Additional Info', multiline:true},
 ];
 const SIGNATURE_BLANK = {includeLogo:true, name:'', designation:'', email:'', phone:'', website:'', address:'', additional:''};
 function EmailSignatureBlock({sig, brand}){
@@ -789,7 +784,7 @@ function BrandSignatureSection(props){
           </label>
         </Field>
         {SIGNATURE_FIELDS.map(f => (
-          <Field key={f.key} label={f.label}>{brandTextField(sig[f.key], (v)=>set(f.key, v), f.placeholder, {multiline:f.multiline, disabled:!admin, invalid: f.key === 'email' && !brandEmailOk(sig.email)})}</Field>
+          <Field key={f.key} label={f.label} required={f.required}>{brandTextField(sig[f.key], (v)=>set(f.key, v), f.placeholder, {multiline:f.multiline, disabled:!admin, invalid: f.key === 'email' && !brandEmailOk(sig.email)})}</Field>
         ))}
       </>}
       preview={
@@ -804,10 +799,10 @@ function BrandSignatureSection(props){
 /* Digital Letterhead: the company information on the letterhead, with the company logo (Logo);
    the preview is a page with that header and footer. "Additional info" reads under the address. */
 const LETTERHEAD_FIELDS = [
-  {key:'companyName', label:'Company name', placeholder:'e.g. HOF Migration'}, {key:'address', label:'Address', multiline:true},
-  {key:'additional', label:'Additional info', multiline:true},
+  {key:'companyName', label:'Company Name', placeholder:'e.g. HOF Migration', required:true}, {key:'address', label:'Address', multiline:true},
+  {key:'additional', label:'Additional Info', multiline:true},
   {key:'phone', label:'Phone', placeholder:'+971 4 000 0000'}, {key:'email', label:'Email', placeholder:'info@hofmigration.com'},
-  {key:'website', label:'Website', placeholder:'https://hofmigration.com'}, {key:'footer', label:'Footer note', placeholder:'e.g. Licensed immigration consultants'},
+  {key:'website', label:'Website', placeholder:'https://hofmigration.com'}, {key:'footer', label:'Footer Note', placeholder:'e.g. Licensed immigration consultants'},
 ];
 function BrandLetterheadSection(props){
   const {brand, admin} = props;
@@ -819,7 +814,7 @@ function BrandLetterheadSection(props){
   return (
     <BrandSplit
       form={LETTERHEAD_FIELDS.map(f => (
-        <Field key={f.key} label={f.label}>{brandTextField(lh[f.key], (v)=>set(f.key, v), f.placeholder, {multiline:f.multiline, disabled:!admin, invalid: f.key === 'email' && !brandEmailOk(lh.email)})}</Field>
+        <Field key={f.key} label={f.label} required={f.required}>{brandTextField(lh[f.key], (v)=>set(f.key, v), f.placeholder, {multiline:f.multiline, disabled:!admin, invalid: f.key === 'email' && !brandEmailOk(lh.email)})}</Field>
       ))}
       preview={
         <div style={{background:'#fff', border:`1px solid ${T.attioLine}`, borderRadius:4, width:'100%', maxWidth:460, aspectRatio:'1 / 1.414', alignSelf:'center',
@@ -853,7 +848,7 @@ function BrandPage(){
   const [section, setSection] = React.useState('logo');
   const [actions, setActions] = React.useState(null);
   const [message, setMessage] = React.useState(null);
-  const toast = (m) => { setMessage(m); setTimeout(()=>setMessage(null), 1800); };
+  const toast = (m) => { setMessage(m); setTimeout(()=>setMessage(null), TOAST_MS); };
   const Section = {logo:BrandLogoSection, colors:BrandColorsSection, signature:BrandSignatureSection, letterhead:BrandLetterheadSection}[section];
   return (
     <SettingsPage>
@@ -864,7 +859,6 @@ function BrandPage(){
       </div>
       <div style={{maxWidth: section === 'signature' || section === 'letterhead' ? 'none' : 820, marginTop:4}}>
         <Section key={section} brand={brand} admin={admin} toast={toast} setActions={setActions}/>
-        {!admin && <div style={{...stTextB, marginTop:12}}>Only CRM administrators can change the brand.</div>}
       </div>
       <CopyToast message={message}/>
     </SettingsPage>

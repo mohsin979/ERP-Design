@@ -96,21 +96,22 @@ function GoalsSettings({data, setData}){
   const cols = `minmax(0, 1fr) 200px 200px 220px`;
   const cell = {padding:'8px 12px', minWidth:0, display:'flex', alignItems:'center', fontSize:13, color:T.attioText, minHeight:46};
   const header = {...cell, padding:'8px 12px', fontSize:12.5, fontWeight:500, color:T.gray600, minHeight:0};
-  const num = {...cell, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap'};
+  // Money reads right-aligned (as every table).
+  const num = {...cell, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', justifyContent:'flex-end', textAlign:'right'};
   const row = (key, cells, style) => <div key={key} role="row" style={{display:'grid', gridTemplateColumns:cols, borderTop:`1px solid ${T.attioLine}`, ...style}}>{cells}</div>;
   const allocated = (ids, target) => { const sum = ids.reduce((s, uid) => s + (t.userTarget(uid).value || 0), 0); return target == null ? fmtMoney(sum) : `${fmtMoney(sum)} of ${fmtMoney(target)}`; };
   const table = (label, rows, key) => (
     <div key={key || label} role="table" aria-label={label} style={{border:`1px solid ${T.attioLine}`, borderRadius:8, overflow:'hidden'}}>
       <div role="row" style={{display:'grid', gridTemplateColumns:cols, background:T.headerBg}}>
         <div role="columnheader" style={header}>{label}</div><div role="columnheader" style={header}>Target · {goalPeriod(p).now}</div>
-        <div role="columnheader" style={header}>Allocated to users</div><div role="columnheader" style={header}>Received</div>
+        <div role="columnheader" style={{...header, justifyContent:'flex-end'}}>Allocated to Users</div><div role="columnheader" style={{...header, justifyContent:'flex-end'}}>Received</div>
       </div>
       {rows}
     </div>
   );
   const teamsWithUsers = [...t.teams.map(tm => ({id:tm.id, name:tm.name, users:t.members(tm.id)})), ...(t.users.some(u => !u.teamId) ? [{id:null, name:'No team', users:t.users.filter(u => !u.teamId)}] : [])];
   return (
-    <SettingsPage description="Cash Received targets for the company, each team and each user." actions={can && actions}>
+    <SettingsPage actions={can && actions}>
       <ReadOnlySettings on={can}>
       <div style={{display:'flex', flexDirection:'column', gap:20}}>
         <StField label="Period" width={200}><StSelect value={p} options={GOAL_PERIODS.map(x => ({value:x.id, label:x.label}))} onChange={v=>set({period:v})}/></StField>
@@ -130,10 +131,10 @@ function GoalsSettings({data, setData}){
           ...tm.users.map(u => row(u.id, <>
             <div role="cell" style={{...cell, paddingLeft: tm.id ? 28 : 12}}>{u.name}</div>
             <div role="cell" style={cell}>{input('users', u.id, t.userTarget(u.id), `${u.name} target`)}</div>
-            <div role="cell" style={num}/>
+            <div role="cell" style={{...num, color:T.attioFaint}}>—</div>
             <div role="cell" style={num}>{progress(t.userTarget(u.id).value, [u.id])}</div>
           </>)),
-          ...(!tm.users.length ? [row('none', <div role="cell" style={{...cell, color:T.attioMuted, gridColumn:'1 / -1'}}>No users in this team.</div>)] : []),
+          ...(!tm.users.length ? [row('none', <div role="cell" style={{...cell, color:T.attioMuted, gridColumn:'1 / -1'}}>No users in this team</div>)] : []),
         ], tm.id || 'no-team'))}
       </div>
       </ReadOnlySettings>

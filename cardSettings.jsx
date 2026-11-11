@@ -47,11 +47,11 @@ const CLICKABLE_PROPERTIES = {
 
 /* Activity dropdowns, in card order. `type` null = every kind of activity. */
 const CARD_DROPDOWNS = [
-  {key:'all',   setting:'All Activity', label:'View Activity', icon:'archive',  type:null,    link:'View all activity', empty:'No activity yet.'},
-  {key:'email', setting:'Emails',       label:'Emails',        icon:'envelope', type:'email', link:'View all emails',   empty:'No emails yet.'},
-  {key:'task',  setting:'Tasks',        label:'Tasks',         icon:'tasks',    type:'task',  link:'View all tasks',    empty:'No tasks yet.'},
-  {key:'note',  setting:'Notes',        label:'Notes',         icon:'notepad',  type:'note',  link:'View all notes',    empty:'No notes yet.'},
-  {key:'call',  setting:'Calls',        label:'Calls',         icon:'call',     type:'call',  link:'View all calls',    empty:'No calls yet.'},
+  {key:'all',   setting:'All Activity', label:'View Activity', icon:'archive',  type:null,    link:'View all activity', empty:'No activity yet'},
+  {key:'email', setting:'Emails',       label:'Emails',        icon:'envelope', type:'email', link:'View all emails',   empty:'No emails yet'},
+  {key:'task',  setting:'Tasks',        label:'Tasks',         icon:'tasks',    type:'task',  link:'View all tasks',    empty:'No tasks yet'},
+  {key:'note',  setting:'Notes',        label:'Notes',         icon:'notepad',  type:'note',  link:'View all notes',    empty:'No notes yet'},
+  {key:'call',  setting:'Calls',        label:'Calls',         icon:'call',     type:'call',  link:'View all calls',    empty:'No calls yet'},
 ];
 
 /* Defaults: available in Card Settings is not the same as shown. The default card shows Call,
@@ -97,14 +97,9 @@ const settingsSelect = {
 
 function FieldSelect({value, onChange, options = RELATED_FIELDS}){
   return (
-    <div style={{position:'relative', flex:1, minWidth:0}}>
-      <select value={value || ''} onChange={e=>onChange(e.target.value || null)} style={{...settingsSelect, color: value ? T.attioText : T.gray400}}>
-        <option value="">Select property</option>
-        {options.map(f => <option key={f.key} value={f.key}>{f.label}</option>)}
-      </select>
-      <div style={{position:'absolute', right:9, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', display:'flex'}}>
-        <Icon name="chevDown" size={12} color={T.gray600}/>
-      </div>
+    <div style={{flex:1, minWidth:0}}>
+      <Dropdown value={value || ''} onChange={(v)=>onChange(v || null)} placeholder="Select property" controlStyle={settingsSelect}
+        options={options.map(f => ({value:f.key, label:f.label}))}/>
     </div>
   );
 }
@@ -137,7 +132,7 @@ function RelatedPropertiesEditor({rows, setRows, options}){
           </button>
         </div>
       ))}
-      {!rows.length && <div style={{fontSize:12.5, color:T.gray400}}>No related properties.</div>}
+      {!rows.length && <div style={{fontSize:12.5, color:T.gray400}}>No related properties</div>}
     </div>
   );
 }
@@ -183,7 +178,7 @@ function CardSettingsModal({draft:draftRaw, setDraft:setDraftRaw, properties, sa
   const rp = draft.relatedProperties;
 
   return (
-    <SettingsModalShell title="Card settings" sections={kind.sections} order={draft.order}
+    <SettingsModalShell title="Card Settings" sections={kind.sections} order={draft.order}
       onReorder={(from, to)=>setDraft(d => ({...d, order: moveItem(d.order, from, to)}))}
       section={section} onSection={(id)=>{ setSection(id); setQuery(''); }}
       onApply={onApply} onClose={onClose}
@@ -193,7 +188,7 @@ function CardSettingsModal({draft:draftRaw, setDraft:setDraftRaw, properties, sa
             <div style={{position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', display:'flex'}}>
               <Icon name="search" size={13} color={T.gray400}/>
             </div>
-            <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search properties…"
+            <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search properties"
               style={{width:'100%', padding:'8px 10px 8px 30px', fontSize:13, fontFamily:'inherit',
                       border:`1px solid ${T.borderStrong}`, borderRadius:8}}/>
           </div>
@@ -228,7 +223,7 @@ function CardSettingsModal({draft:draftRaw, setDraft:setDraftRaw, properties, sa
         <ExtendedPropertyGroups query={query} renderItem={(it) => row(it.key, it.label, pinnedExt(it.key), ()=>flipExt(it.key))}/>
       )}
       {section === 'properties' && shownProps.length === 0 && !(query.trim() && properties.some(p => p.extended && [p.label, p.group].some(x => x && x.toLowerCase().includes(query.trim().toLowerCase())))) && (
-        <div style={{fontSize:12.5, color:T.gray400, padding:'8px 6px'}}>No properties match “{query}”.</div>
+        <div style={{fontSize:12.5, color:T.gray400, padding:'8px 6px'}}>No properties match "{query}"</div>
       )}
 
       {section === 'relatedProperties' && <RelatedPropertiesEditor rows={rp.rows} setRows={setRows} options={kind.relatedOptions(properties)}/>}

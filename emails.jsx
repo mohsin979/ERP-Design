@@ -205,10 +205,10 @@ function EmailContentFields({value:c, setValue}){
   return <>
     <Field label="Email Format"><FormSelect value={c.format} options={EMAIL_FORMATS} onChange={(v)=>v && v !== c.format && setValue(x => switchEmailFormat(x, v))}/></Field>
     {c.format === 'custom' ? <>
-      <Field label="HTML file"><EmailHtmlUpload c={c} setValue={setValue}/></Field>
+      <Field label="HTML File"><EmailHtmlUpload c={c} setValue={setValue}/></Field>
       <Field label="">
         <div onClick={toggleSig} style={{display:'inline-flex', alignItems:'center', gap:8, paddingTop:7, fontSize:13, color:T.attioText, cursor:'pointer', userSelect:'none'}}>
-          <RowCheckbox checked={!!c.includeSignature} onChange={toggleSig}/> Include email signature in body
+          <span onClick={e=>e.stopPropagation()} style={{display:'flex'}}><UtToggle on={!!c.includeSignature} onChange={toggleSig}/></span> Include Email Signature in Body
         </div>
       </Field>
     </> : <>
@@ -332,7 +332,7 @@ function EmailComposer({object, id, replyTo, forward, recipients, onSent, onClos
     if(many){
       reach.forEach((r, i) => hub.add(r.object, r.id, emailOf(`${newIdOf}-${i}`, r.person.email.trim(), r.person)));
       const skipped = many.length - reach.length;
-      hub.toast(`Email ${later ? 'scheduled for' : 'sent to'} ${bulkPlural(reach.length, manyNoun)}${skipped ? ` · ${skipped} skipped (no email address)` : ''}`);
+      hub.toast(`Email ${later ? 'scheduled for' : 'sent to'} ${bulkPlural(reach.length, manyNoun)}${skipped ? ` · ${skipped} skipped` : ''}`);
       if(onSent) onSent();
       return onClose(later ? 'scheduled' : 'sent');
     }
@@ -341,17 +341,17 @@ function EmailComposer({object, id, replyTo, forward, recipients, onSent, onClos
     onClose(later ? 'scheduled' : 'sent', newIdOf, target);
   };
   return (
-    <CreatePanelFrame title={many ? `New Email · ${bulkPlural(many.length, manyNoun)}` : replyTo ? 'Reply' : forward ? 'Forward' : 'New Email'} onClose={()=>onClose()} placement={placement} width={EMAIL_PANEL_W} flush
+    <CreatePanelFrame title={replyTo ? 'Reply' : forward ? 'Forward' : 'Add Email'} onClose={()=>onClose()} placement={placement} width={EMAIL_PANEL_W} flush
       top={!fixed && !many && <CreateRecordField value={target} onChange={setTarget}/>}
       actions={<>
         <StSecondary label="Cancel" onClick={()=>onClose()}/>
-        <StSecondary label={scheduling ? 'Send now instead' : 'Schedule'} onClick={()=>{ setScheduling(s => !s); setError(''); }}/>
-        <StCta label={scheduling ? 'Schedule send' : 'Send'} disabled={!ready} onClick={()=>send(scheduling)}/>
+        <StSecondary label={scheduling ? 'Send Now Instead' : 'Schedule'} onClick={()=>{ setScheduling(s => !s); setError(''); }}/>
+        <StCta label={scheduling ? 'Schedule Send' : 'Send'} disabled={!ready} onClick={()=>send(scheduling)}/>
       </>}>
       <EmailSplit form={<>
         <Field label="To">{many
           ? <div aria-label="To" style={{...fieldText, background:T.pageBg, color:T.gray600, cursor:'default'}}>
-              {bulkPlural(reach.length, manyNoun)}{many.length - reach.length ? ` · ${many.length - reach.length} without an email address skipped` : ''}</div>
+              {bulkPlural(reach.length, manyNoun)}{many.length - reach.length ? ` · ${many.length - reach.length} skipped` : ''}</div>
           : <input value={to} onChange={e=>setTo(e.target.value)} placeholder="name@email.com" aria-label="To"
               style={{...fieldText, borderColor: to && !validTo ? T.red : T.borderStrong}}/>}</Field>
         <Field label="Cc"><EmailListInput label="Cc" value={cc} onChange={setCc}/></Field>

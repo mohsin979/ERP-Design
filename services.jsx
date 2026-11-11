@@ -60,12 +60,16 @@ const servicePrice = (s) => (s.milestones || []).length ? s.milestones.reduce((s
 const richPlain = (html) => { const d = document.createElement('div'); d.innerHTML = richHtmlOf(html); return d.textContent.replace(/\s+/g, ' ').trim(); };
 const serviceRow = (s) => ({...s, createdBy:creatorOf(s), price:servicePrice(s), priceText:fmtMoney(servicePrice(s), s.currency), milestoneCount:(s.milestones || []).length, description:richPlain(s.description)});
 
-/* A side panel over the page (a service, a quotation, an activity on the Tools pages): the
-   Contact side panel's header, its content scrolling below. `divided`: a separator under the header. */
-function PageSidePanel({title, subtitle, onClose, menuItems, children, width = 460, divided}){
+/* A side panel over the page (a service, a quote, an activity on the Tools pages): the Contact
+   side panel's header — its title only, no subtitle (panels carry none) — its content scrolling
+   below. `divided`: a separator under the header. Escape closes it. */
+// One width for every detail panel (DETAIL_SIDE_W).
+const DETAIL_SIDE_W = 560;
+function PageSidePanel({title, onClose, menuItems, children, width = DETAIL_SIDE_W, divided}){
+  useEscapeClose(onClose);
   return (
     <ContentSidePanel width={width} zIndex={75} style={{background:'#fff', borderLeft:`1px solid ${T.border}`, boxShadow:'-8px 0 24px rgba(16,24,40,.08)', display:'flex', flexDirection:'column'}}>
-      <div style={divided ? {borderBottom:`1px solid ${T.border}`, flexShrink:0} : {flexShrink:0}}><SidePanelHeader title={title} subtitle={subtitle} onClose={onClose} menuItems={menuItems}/></div>
+      <div style={divided ? {borderBottom:`1px solid ${T.border}`, flexShrink:0} : {flexShrink:0}}><SidePanelHeader title={title} onClose={onClose} menuItems={menuItems}/></div>
       <div style={{flex:1, minHeight:0, display:'flex', flexDirection:'column', overflow:'hidden'}}>{children}</div>
     </ContentSidePanel>
   );
@@ -77,7 +81,7 @@ function PanelFields({rows}){
       {rows.filter(Boolean).map(([label, value]) => (
         <div key={label} style={{display:'flex', alignItems:'baseline', gap:12, padding:'7px 0', borderBottom:`1px solid ${T.attioLine}`, minHeight:32}}>
           <span style={{width:120, flexShrink:0, fontSize:12.5, color:T.attioMuted}}>{label}</span>
-          <span style={{fontSize:13, color:T.attioText, minWidth:0, overflowWrap:'anywhere', fontVariantNumeric:'tabular-nums'}}>{value === '' || value == null ? '—' : value}</span>
+          <span style={{fontSize:13, color:T.attioText, minWidth:0, overflowWrap:'anywhere', fontVariantNumeric:'tabular-nums'}}>{value === '' || value == null ? '—' : dateShown(value)}</span>
         </div>
       ))}
     </div>
@@ -125,7 +129,7 @@ function MilestonesEditor({value, onChange, currency}){
       ))}
       <button type="button" onClick={()=>onChange([...list, {id:`ms-${Date.now().toString(36)}`, name:'', description:'', price:''}])}
         style={{alignSelf:'flex-start', display:'inline-flex', alignItems:'center', gap:6, border:'none', background:'transparent', padding:'4px 0', fontSize:13, fontWeight:500, color:T.attioText, cursor:'pointer', fontFamily:'inherit'}}>
-        <Icon name="plus" size={13} color={T.gray600}/> Add milestone
+        <Icon name="plus" size={13} color={T.gray600}/> Add Milestone
       </button>
     </div>
   );
@@ -145,7 +149,7 @@ function ServiceFormPanel({initial, onCancel, onSave, zIndex}){
   const save = () => onSave({...s, name:s.name.trim(), description:s.description || '', price:total, currency:s.currency,
     milestones: withMilestones ? s.milestones.map(m => ({...m, name:m.name.trim(), description:(m.description || '').trim(), price:Number(m.price)})) : []});
   return (
-    <CreatePanelFrame title={initial ? 'Edit Service' : 'New Service'} onClose={onCancel} zIndex={zIndex} actions={<>
+    <CreatePanelFrame title={initial ? 'Edit Service' : 'Add Service'} onClose={onCancel} zIndex={zIndex} actions={<>
       <StSecondary label="Cancel" onClick={onCancel}/>
       <StCta label="Save" disabled={!ok} onClick={()=>ok && save()}/>
     </>}>
@@ -153,7 +157,7 @@ function ServiceFormPanel({initial, onCancel, onSave, zIndex}){
         <Field label="Name"><input autoFocus value={s.name} onChange={e=>set({name:e.target.value})} placeholder="e.g. US NIW Petition" style={fieldText}/></Field>
         <Field label="Description"><RichTextEditor value={s.description} onChange={(v)=>set({description:v})} ariaLabel="Service description"/></Field>
         <Field label="Currency"><FormSelect value={s.currency} options={currencyOptions()} onChange={(c)=>c && set({currency:c})}/></Field>
-        <Field label="Enable milestones"><label style={{display:'inline-flex', alignItems:'center', minHeight:34, cursor:'pointer'}}><UtToggle on={withMilestones} onChange={setWithMilestones}/></label></Field>
+        <Field label="Enable Milestones"><label style={{display:'inline-flex', alignItems:'center', minHeight:34, cursor:'pointer'}}><UtToggle on={withMilestones} onChange={setWithMilestones}/></label></Field>
         {withMilestones && <Field label="Milestones"><div style={{paddingTop:2}}><MilestonesEditor value={s.milestones} currency={s.currency} onChange={(v)=>set({milestones:v})}/></div></Field>}
         {withMilestones
           ? <Field label="Price"><ReadValue>{fmtMoney(total, s.currency)}</ReadValue></Field>
@@ -174,7 +178,7 @@ function ServiceDetail({service: raw}){
   const service = withMilestonePrices(raw);
   return (<>
     <PanelFields rows={[['Price', fmtMoney(servicePrice(service), service.currency)], ['Milestones', service.milestones.length ? String(service.milestones.length) : 'Off'],
-      ['Created', service.created], ['Created by', creatorOf(service)]]}/>
+      ['Created', service.created], ['Created By', creatorOf(service)]]}/>
     {!richIsEmpty(richHtmlOf(service.description)) && <RichTextView html={service.description} style={{lineHeight:1.6}}/>}
     {service.milestones.length > 0 && <div>
         <div style={{fontSize:11, fontWeight:600, color:T.attioFaint, textTransform:'uppercase', letterSpacing:.4, marginBottom:8}}>Milestones · {service.milestones.length}</div>
@@ -196,7 +200,7 @@ function ServiceDetail({service: raw}){
 }
 
 const SERVICE_COLUMNS = [
-  {key:'name', label:'Service Name', width:240}, {key:'priceText', label:'Price', width:150}, {key:'milestoneCount', label:'Milestones', width:120},
+  {key:'name', label:'Service Name', width:240}, {key:'priceText', label:'Price', width:150, money:true}, {key:'milestoneCount', label:'Milestones', width:120},
   {key:'description', label:'Description', width:360}, {key:'created', label:'Created', width:140}, {key:'createdBy', label:'Created By', width:170},
 ];
 function ServicesPage(){
@@ -218,9 +222,9 @@ function ServicesPage(){
     selectValues:{},
     renderCell:(key, r) => key === 'name' ? <ContactName name={r.name} onOpen={()=>setOpenId(r.id)} style={{fontSize:'inherit', fontWeight:500}}/> : undefined,
     renderActions:(r) => { const s = services.find(x => x.id === r.id);
-      return <RowActionsMenu title="Service actions" width={MENU_W} items={[
-        {label:'View service', onClick:()=>setOpenId(r.id)}, ...(can('edit', s) ? [{label:'Edit service', onClick:()=>setForm({initial:s})}] : []),
-        ...(can('delete', s) ? [{label:'Delete service', danger:true, onClick:()=>setDeleting(s)}] : [])]}/>; },
+      return <RowActionsMenu title="Service Actions" width={MENU_W} items={[
+        {label:'View Service', onClick:()=>setOpenId(r.id)}, ...(can('edit', s) ? [{label:'Edit Service', onClick:()=>setForm({initial:s})}] : []),
+        ...(can('delete', s) ? [{label:'Delete Service', danger:true, onClick:()=>setDeleting(s)}] : [])]}/>; },
   };
   const save = (vals) => {
     if(form.initial) setServices(ss => ss.map(s => s.id === form.initial.id ? {...s, ...vals} : s));
@@ -232,21 +236,21 @@ function ServicesPage(){
     <div style={{flex:1, minWidth:0, minHeight:0, display:'flex', flexDirection:'column', position:'relative', overflow:'hidden'}}>
       <RecordViewsModule schema={schema} rows={shown.map(serviceRow)} columns={SERVICE_COLUMNS.map(c => c.key)}
         defaultViews={[{id:'svcv-all', name:'All Services', sort:{key:'name', dir:'asc'}}]}
-        actions={() => can('create') && <StCta icon="plus" title="New service" onClick={()=>{ setOpenId(null); setForm({}); }}/>}
+        actions={() => can('create') && <button onClick={()=>{ setOpenId(null); setForm({}); }} title="Add Service" aria-label="Add Service" style={toolbarIconButton}><Icon name="plus" size={14} color={T.gray800}/></button>}
         overlay={form ? <ServiceFormPanel key={form.initial ? form.initial.id : 'new'} initial={form.initial} onCancel={()=>setForm(null)} onSave={save}/>
           : open && <DetailPanel title={open.name} onClose={()=>setOpenId(null)}
-          menuItems={[...(can('edit', open) ? [{label:'Edit service', onClick:()=>setForm({initial:open})}] : []), ...(can('delete', open) ? [{label:'Delete service', danger:true, onClick:()=>setDeleting(open)}] : [])]}>
+          menuItems={[...(can('edit', open) ? [{label:'Edit Service', onClick:()=>setForm({initial:open})}] : []), ...(can('delete', open) ? [{label:'Delete Service', danger:true, onClick:()=>setDeleting(open)}] : [])]}>
           <ServiceDetail service={open}/>
         </DetailPanel>}/>
       {serviceBulk.bulkModal}
-      {deleting && <StModal title="Delete service" primary="Delete service" danger onCancel={()=>setDeleting(null)}
+      {deleting && <StModal title="Delete Service" primary="Delete Service" danger onCancel={()=>setDeleting(null)}
         onSubmit={()=>{ setServices(ss => ss.filter(s => s.id !== deleting.id)); if(openId === deleting.id) setOpenId(null); setDeleting(null); hub.toast('Service deleted'); }}>
         <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>
-          {deleting.name} will be removed from the catalog.{quotedIn(deleting.id) ? ` ${plural(quotedIn(deleting.id), 'quotation')} that include it keep it as it was quoted.` : ''}
+          {deleting.name} will be removed from the catalog.{quotedIn(deleting.id) ? ` ${plural(quotedIn(deleting.id), 'quote')} that include it keep it as it was quoted.` : ''} This can't be undone.
         </div>
       </StModal>}
     </div>
   );
 }
 
-Object.assign(window, {SAMPLE_SERVICES, withMilestonePrices, servicePrice, ServicesPage, ServiceFormPanel, newServiceRecord, MilestonesEditor, PageSidePanel, PanelFields, DetailPanel, fmtMoney});
+Object.assign(window, {DETAIL_SIDE_W, SAMPLE_SERVICES, withMilestonePrices, servicePrice, ServicesPage, ServiceFormPanel, newServiceRecord, MilestonesEditor, PageSidePanel, PanelFields, DetailPanel, fmtMoney});

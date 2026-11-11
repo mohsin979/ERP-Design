@@ -35,7 +35,7 @@ const SPEECH_LANGS = [
 const SR_ERRORS = {
   'not-allowed':        'Microphone permission was blocked. Allow microphone access for this site and try again.',
   'service-not-allowed':'This browser does not allow speech recognition here. Use Chrome or Edge, opened directly on this page.',
-  'audio-capture':      'No microphone was found.',
+  'audio-capture':      'No microphone was found',
   'network':            'The speech service could not be reached (network required in Chrome/Edge).',
   'language-not-supported': 'This language is not supported by the speech service.',
 };
@@ -189,10 +189,7 @@ function CallPanel({contact, onEnded, onClose, onRunProfile}){
       <div style={{display:'flex', alignItems:'center', gap:12, padding:'16px 20px', borderBottom:`1px solid ${T.border}`}}>{who}</div>
       <div style={{flex:1, minHeight:0, overflowY:'auto', display:'flex', justifyContent:'center', padding:'40px 20px'}}>
         <div style={{width:'100%', maxWidth:520, display:'flex', flexDirection:'column', gap:14}}>
-          <div>
-            <div style={{fontSize:16, fontWeight:600, color:T.attioText}}>Choose a playbook</div>
-            <div style={{fontSize:13, color:T.attioMuted, marginTop:4}}>It stays open beside the call for reference.</div>
-          </div>
+          <div style={{fontSize:15, fontWeight:600, color:T.attioText}}>Choose a Playbook</div>
           <div role="radiogroup" aria-label="Playbook" style={{display:'flex', flexDirection:'column', gap:8}}>
             {[...playbooks.map(p => ({id:p.id, name:p.name, sub:p.sections.map(s => s.header).join(' · ')})), {id:'', name:'No playbook', sub:'Call without a playbook'}].map(o => {
               const on = playbookPick === o.id;
@@ -306,10 +303,9 @@ function CallPanel({contact, onEnded, onClose, onRunProfile}){
                 ))}
               </div>
               <div style={{flex:1}}/>
-              <select value={lang} onChange={e=>setLang(e.target.value)} disabled={!!error}
-                style={{fontSize:12, border:`1px solid ${T.borderStrong}`, borderRadius:6, padding:'3px 6px', background:'#fff', color:T.attioText, fontFamily:'inherit'}}>
-                {SPEECH_LANGS.map(l => <option key={l.id} value={l.id}>{l.label}</option>)}
-              </select>
+              <div style={{width:150}}><Dropdown value={lang} onChange={setLang} disabled={!!error} required ariaLabel="Transcription language"
+                options={SPEECH_LANGS.map(l => ({value:l.id, label:l.label}))}
+                controlStyle={{fontSize:12, border:`1px solid ${T.borderStrong}`, borderRadius:6, padding:'3px 6px', background:'#fff', color:T.attioText, fontFamily:'inherit'}}/></div>
             </>
           ) : (
             segments.length ? (
@@ -319,7 +315,7 @@ function CallPanel({contact, onEnded, onClose, onRunProfile}){
                 </span>
                 Transcript saved to this contact’s activity
               </span>
-            ) : <span style={{color:T.attioMuted}}>No transcript was captured.</span>
+            ) : <span style={{color:T.attioMuted}}>No transcript was captured</span>
           )}
         </div>
 
@@ -333,7 +329,7 @@ function CallPanel({contact, onEnded, onClose, onRunProfile}){
         <div ref={listRef} style={{flex:1, minHeight:0, overflowY:'auto', padding:'14px 20px'}}>
           {!segments.length && !interim && (
             <div style={{fontSize:13, color:T.attioMuted, textAlign:'center', marginTop:40}}>
-              {phase === 'ringing' ? 'Connecting the call…' : phase === 'live' && !error ? 'Start speaking — your words will appear here as they are recognised.' : phase === 'ended' ? '' : 'No live transcript.'}
+              {phase === 'ringing' ? 'Connecting the call…' : phase === 'live' && !error ? 'Start speaking — your words will appear here as they are recognised.' : phase === 'ended' ? '' : 'No live transcript'}
             </div>
           )}
           {segments.map((s, i) => (

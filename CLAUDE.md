@@ -463,17 +463,17 @@ Do not make product decisions that the product designer has not made. Technical 
 * recordHub.jsx (`hub`): the single read/write path for records and their activity across workspace-wide pages (Tools, emails, files, quotes). Deal/Customer activity goes through the workflow engine so workflows see it.
 
 24.3 Shared foundations (reuse these, do not re-implement)
-* shared.jsx — design tokens (`T`), icons, primitives. Visual source: Figma "HOF CRM Redesign" → Claude Feeder. Also the time zone: moments show in the person's zone (profile menu, else Settings → Defaults; `zonedParts` / `zonedDate`), calendar days ("YYYY-MM-DD") stay their day (`LOCAL_TZ`).
+* shared.jsx — design tokens (`T`), icons, primitives. Visual source: Figma "HOF CRM Redesign" → Claude Feeder. `Dropdown` is the one select control (no native `<select>`); `useEscapeClose` closes the topmost panel or modal on Escape. Also the time zone: moments show in the person's zone (profile menu, else Settings → Defaults; `zonedParts` / `zonedDate`), calendar days ("YYYY-MM-DD") stay their day (`LOCAL_TZ`).
 * propertyTypes.jsx — the single definition of every property type: input, stored value, display, validation. Also money: the default currency and exchange rates (Settings → Defaults), `toDefaultCurrency` for totals, `moneyText`.
 * dataModel.jsx — Objects (Contacts, Deals, Customers), Associations, Properties (Settings → Data Management).
 * contacts.jsx — the record views system (views, Save View, search, Filters, Table Settings, ContactsDataGrid / RecordSchema) used by every list in the app.
 * board.jsx — Board view and pipeline model (`source:'property'` vs `source:'record'`).
 * contactDetail.jsx — record shell (side panel ⇄ full screen), reused for Deals and Customers.
 * settingsKit.jsx — SettingsModalShell for card/panel/overview settings modals.
-* emptyState.jsx, richText.jsx, bulkActions.jsx, extendedProps.jsx (Customer Profile + Accounting properties wherever properties are picked).
+* emptyState.jsx (the illustrated EmptyState for every empty list, table, tab and page), richText.jsx, bulkActions.jsx, extendedProps.jsx (Customer Profile + Accounting properties wherever properties are picked).
 
 24.4 Modules
-* CRM navigation: nav.jsx (Dashboard; Marketing, Pre-Sales, Sales, Tools, Automation; Settings; Edit Nav).
+* CRM navigation: nav.jsx (Dashboard; Marketing, Pre-Sales, Sales, Tools, Administrative: Reports, Workflows, Settings; Edit Nav).
 * Records: contacts.jsx, deals.jsx + dealDetail.jsx, customers.jsx; contactActions.jsx; contactOverview.jsx + overviewSettings.jsx.
 * Activity: activities.jsx, activityCards.jsx, activityViews.jsx, files.jsx, emails.jsx (the composer and the email formats — Simple Text Body, Default HTML Template, Custom HTML Template — with the Brand signature, the renderer `emailHtmlOf` and the live preview; templates, sequences and workflow emails all use it), callPanel.jsx (real mic + Web Speech transcription, simulated telephony), tools.jsx (Tools → Calls/Tasks/Emails/Meetings/Notes).
 * Sales: services.jsx (catalog), quotes.jsx (6-step builder; quotes keep their own copy of services), accounting.jsx (payment structures per record, from a quote or manual).

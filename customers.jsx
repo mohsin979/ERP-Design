@@ -84,7 +84,7 @@ const CUSTOMER_TABS = [
   {id:'profile',  label:'Customer Profile', icon:'profile',     list:false},
   {id:'calls',    label:'Calls',            icon:'call',        list:true},
   {id:'notes',    label:'Notes',            icon:'notepad',     list:true},
-  {id:'email',    label:'Email',            icon:'envelope',    list:true},
+  {id:'email',    label:'Emails',            icon:'envelope',    list:true},
   {id:'tasks',    label:'Tasks',            icon:'tasks',       list:true},
   {id:'meetings', label:'Meetings',         icon:'videoCamera', list:true},
   {id:'files',    label:'Files',            icon:'folder',      list:true},
@@ -113,7 +113,8 @@ const ASSOCIATED_CUSTOMER_COLUMNS = [
 const customerCopyText = (c) => [c.name, c.phone, c.email].filter(Boolean).join('\n');
 function customerSchema(props, pipelines, users){
   return {
-    properties:props.map(p => ({key:p.key, label:p.label, width:p.width || 170})),
+    // Money (Deal Amount, a Currency property) reads right-aligned.
+    properties:props.map(p => ({key:p.key, label:p.label, width:p.width || 170, money:p.key === 'amount' || (propertyTypeId(p.type) === 'Currency' && !p.currencyOnly)})),
     filterProps:props.map(propertyFilterMeta),
     selectValues:{
       // The Pipeline property's values: the record's own (manual) pipelines.
@@ -296,7 +297,7 @@ function CustomerInfo({customer, view, acts, contact, deals, keys, props, onOpen
               : !r.value ? <span style={{fontSize:13, color:T.attioFaint}}>—</span>
               : r.list ? <AssociatedRecordsValue records={r.value} noun="deal" onOpen={(d)=>onOpenDeal(d)}/>
               : r.open ? <button onClick={r.open} style={linkButton}>{r.value}</button>
-              : <span style={{fontSize:13, color:T.attioText, minWidth:0, overflowWrap:'anywhere'}}>{String(r.value)}</span>}
+              : <span style={{fontSize:13, color:T.attioText, minWidth:0, overflowWrap:'anywhere'}}>{dateShown(String(r.value))}</span>}
           </div>
         );
       })}
@@ -325,9 +326,9 @@ function CustomerDetail({mode, customer, view, acts, contact, deals, data, profi
           onCreate={(templateId)=>onCreateProfile(profileOwner, templateId)} onStub={onStub}/>
       : <div style={{padding:'40px 24px', textAlign:'center', fontSize:13, color:T.gray400}}>This customer has no contact, so it has no Customer Profile.</div>;
     if(tab.id === 'deals') return <AssociatedRecords columns={ASSOCIATED_DEAL_COLUMNS} rows={deals.map(d => dealListRow(data, d))} q={q}
-      onOpen={(d)=>onOpenDeal(d)} empty={`No ${typePlural('deals', 'Deals').toLowerCase()} for this customer.`}/>;
+      onOpen={(d)=>onOpenDeal(d)} empty={`No ${typePlural('deals', 'Deals').toLowerCase()} for this customer`}/>;
     if(tab.id === 'contacts') return <AssociatedRecords columns={ASSOCIATED_CONTACT_COLUMNS} rows={contact ? [contactView(contact)] : []} q={q}
-      onOpen={(c)=>onOpenContact(c)} empty="No contacts for this customer."/>;
+      onOpen={(c)=>onOpenContact(c)} empty="No contacts for this customer"/>;
     return undefined;
   };
   return (
@@ -372,7 +373,7 @@ function CustomersModule({data, customers, setCustomers, activities, setActiviti
   const [stub, setStub] = React.useState(null);
   const [toast, setToast] = React.useState(null);
   const toastTimer = React.useRef(null);
-  const showToast = (message, action) => { setToast({message, action}); clearTimeout(toastTimer.current); toastTimer.current = setTimeout(()=>setToast(null), action ? 4000 : 1800); };
+  const showToast = (message, action) => { setToast({message, action}); clearTimeout(toastTimer.current); toastTimer.current = setTimeout(()=>setToast(null), action ? TOAST_ACTION_MS : TOAST_MS); };
   // Violation Mode: the customers' violations list over the right side, as on Deals.
   const engineCtx = useWorkflowEngineCtx();
   const hub = useRecordHub();
@@ -449,7 +450,8 @@ function CustomersModule({data, customers, setCustomers, activities, setActiviti
     }});
   const fullSchema = {...schema, pipelineLabel:(id) => (pipelineOf(id) || pipelines[0] || {}).label || '',
     renderCell:(key, r) => key === 'name' ? <span data-customer-id={r.id} style={{display:'inline-flex', alignItems:'center', gap:8, minWidth:0, maxWidth:'100%'}}>
-        <ContactName name={r.name} onOpen={()=>openCustomer(r)} style={{fontSize:'inherit', fontWeight:500}}/><DealPromptMarker dealId={r.id}/></span> : undefined,
+        <ContactName name={r.name} onOpen={()=>openCustomer(r)} style={{fontSize:'inherit', fontWeight:500}}/><DealPromptMarker dealId={r.id}/></span>
+      : key === 'status' && r.status ? <StatusPill status={r.status} map={STATUS_PILLS}/> : undefined,
     renderActions:(r) => menu(r),
     bulkActions: customerBulk.bulkActions,
   };
@@ -460,6 +462,7 @@ function CustomersModule({data, customers, setCustomers, activities, setActiviti
   const save = (vals, links) => {
     if(form.mode === 'edit') updateCustomer(form.id, {...vals, contactId:links.contactId, dealIds:links.dealIds});
     else onAddCustomer && onAddCustomer(vals, links);
+    showToast(form.mode === 'edit' ? 'Customer saved' : 'Customer added');
     setForm(null);
   };
 
@@ -494,7 +497,7 @@ function CustomersModule({data, customers, setCustomers, activities, setActiviti
           }} : undefined}
         actions={(btn, view) => <>
           <button onClick={view.exportCsv} style={btn}><Icon name="export" size={13} color={T.gray600}/> Export</button>
-          <button onClick={()=>setForm({mode:'add', initial:null})} title="Add customer" style={toolbarIconButton}><Icon name="plus" size={14} color={T.gray800}/></button>
+          <button onClick={()=>setForm({mode:'add', initial:null})} title="Add Customer" style={toolbarIconButton}><Icon name="plus" size={14} color={T.gray800}/></button>
         </>}
         filterControls={(v) => <ViolationsButton object="customers" pipelines={viewPipelines(v)} active={violationMode} onClick={()=>setViolationMode(!violationMode)}/>}
         overlay={(v) => violationMode && <ViolationPanel object="customers" pipelines={viewPipelines(v)} onClose={()=>setViolationMode(false)}/>}/>
@@ -515,6 +518,7 @@ function CustomersModule({data, customers, setCustomers, activities, setActiviti
           onRecordDeleted && onRecordDeleted('customers', id);
           if(detail && detail.id === id) setDetail(null);
           setPendingDelete(null);
+          showToast('Customer deleted');
         }}/>}
       {/* Create Deal: the Deal form, starting from the customer's name and owner, with the
           customer's contact (any existing contact, or none); the new deal joins the customer's deals. */}

@@ -88,27 +88,29 @@ function BulkEditPanel({data, object, records, onSave, onClose}){
     onSave(Object.fromEntries(Object.entries(edits).map(([k, v]) => [k, storePropertyValue(props.find(x => x.key === k), v)])));
   };
   return (
-    <CreatePanelFrame title={`Edit Properties · ${bulkPlural(records.length, HUB_NOUN[object] ? HUB_NOUN[object].toLowerCase() : 'record')}`} onClose={onClose} more={false} zIndex={90}
+    <CreatePanelFrame title="Edit Properties" onClose={onClose} zIndex={90}
       top={<input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search properties" aria-label="Search properties" style={fieldInput}/>}
       actions={<><StSecondary label="Cancel" onClick={onClose}/><StCta label={changed ? `Update ${bulkPlural(records.length, 'record')}` : 'Update'} disabled={!changed} onClick={save}/></>}>
       <div style={{display:'flex', flexDirection:'column', gap:16}}>
-        <div style={{fontSize:12.5, color:T.attioMuted, lineHeight:1.5}}>Only the properties you change are updated, on every selected record.</div>
         {shown.map(p => {
           const s = shared(p), dirty = p.key in edits;
           const value = dirty ? edits[p.key] : s.mixed ? loadPropertyValueOf(p, '') : loadPropertyValueOf(p, s.value);
           return (
-            <div key={p.key} style={{display:'flex', flexDirection:'column', gap:6}}>
+            // Its label beside the field (as every edit panel); Undo or "Mixed values" under the field.
+            <div key={p.key} style={{display:'flex', alignItems:'flex-start', gap:12}}>
+              <span title={p.label} style={{...actFieldLabel, paddingTop:9, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{p.label}</span>
+              <div style={{flex:1, minWidth:0, display:'flex', flexDirection:'column', gap:4}}>
+              <TypedPropertyInput prop={p} value={value} invalid={tried && !!errors[p.key]} onChange={(v)=>setEdits(e => ({...e, [p.key]:v}))}/>
               <div style={{display:'flex', alignItems:'baseline', gap:8}}>
-                <span title={p.label} style={{flex:1, minWidth:0, fontSize:13, fontWeight:500, color:T.attioText, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{p.label}</span>
                 {dirty ? <button onClick={()=>setEdits(e => { const n = {...e}; delete n[p.key]; return n; })} style={{border:'none', background:'transparent', padding:0, cursor:'pointer', fontSize:12, color:T.attioBlue, fontFamily:'inherit'}}>Undo</button>
                   : s.mixed && <span style={{fontSize:12, color:T.attioMuted}}>Mixed values</span>}
               </div>
-              <TypedPropertyInput prop={p} value={value} invalid={tried && !!errors[p.key]} onChange={(v)=>setEdits(e => ({...e, [p.key]:v}))}/>
               {tried && errors[p.key] && <span style={{fontSize:12, color:T.red}}>{errors[p.key]}</span>}
+              </div>
             </div>
           );
         })}
-        {!shown.length && <div style={{fontSize:13, color:T.attioMuted}}>No properties match.</div>}
+        {!shown.length && <div style={{fontSize:13, color:T.attioMuted}}>No properties match</div>}
       </div>
     </CreatePanelFrame>
   );
@@ -124,13 +126,10 @@ function BulkEnrollModal({data, records, onEnroll, onCancel}){
   return ReactDOM.createPortal(
     <StModal title="Enroll in Email Sequence" primary={`Enroll ${bulkPlural(withEmail, 'record')}`} canSubmit={!!seq && withEmail > 0 && emailListValid(cc) && emailListValid(bcc)} onCancel={onCancel} onSubmit={()=>onEnroll(seq, emailCopiesOf(cc, bcc))}>
       <div style={{display:'flex', flexDirection:'column', gap:12}}>
-        <div><label style={fieldLabel}>Email sequence</label>
+        <div><label style={fieldLabel}>Email Sequence</label>
           <FormSelect value={seq} placeholder="Select sequence" options={sequences.map(q => ({value:q.id, label:`${q.name} · ${bulkPlural(q.emails.length, 'email')}`}))} onChange={setSeq}/></div>
         <div><label style={fieldLabel}>Cc</label><EmailListInput label="Cc" value={cc} onChange={setCc} style={fieldInput}/></div>
         <div><label style={fieldLabel}>Bcc</label><EmailListInput label="Bcc" value={bcc} onChange={setBcc} style={fieldInput}/></div>
-        <div style={{fontSize:12.5, color:T.attioMuted, lineHeight:1.5}}>
-          The sequence’s emails are scheduled for each record from now.{without ? ` ${bulkPlural(without, 'record')} without an email address will be skipped.` : ''}
-        </div>
       </div>
     </StModal>, document.body);
 }

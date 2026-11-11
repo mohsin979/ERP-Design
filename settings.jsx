@@ -159,8 +159,9 @@ function StTextAction({label, onClick, danger}){
    below. A page with none of these goes straight to its content. */
 /* `fill` makes the content take the page's full height (the Users table: its rows scroll and its
    pagination stays at the bottom, as in Contacts). */
-function SettingsPage({title, description, actions, fill, children}){
-  const header = title || description || actions;
+// No description under the page's header: a settings page shows only its controls.
+function SettingsPage({title, actions, fill, children}){
+  const header = title || actions;
   return (
     <div style={{flex:1, minHeight:0, overflowY: fill ? 'hidden' : 'auto', background:'#fff', display: fill ? 'flex' : 'block', flexDirection:'column'}}>
       <div style={fill ? {padding:'12px 16px 16px', flex:1, minHeight:0, display:'flex', flexDirection:'column'} : {padding:'12px 16px 24px'}}>
@@ -168,7 +169,6 @@ function SettingsPage({title, description, actions, fill, children}){
           <div style={{display:'flex', alignItems: title ? 'flex-start' : 'center', justifyContent:'space-between', gap:16, minHeight:29}}>
             <div style={{minWidth:0, paddingTop: title ? 4 : 0}}>
               {title && <div style={{fontSize:15, fontWeight:500, color:T.black, lineHeight:1.4}}>{title}</div>}
-              {description && <div style={{...stTextB, marginTop: title ? 2 : 0}}>{description}</div>}
             </div>
             {actions && <div style={{display:'flex', alignItems:'center', gap:8, flexShrink:0}}>{actions}</div>}
           </div>
@@ -193,17 +193,9 @@ function StField({label, width = 310, children}){
     </div>
   );
 }
-function StSelect({value, options, onChange}){
-  return (
-    <div style={{position:'relative'}}>
-      <select value={value} onChange={e=>onChange(e.target.value)} style={stControl}>
-        {options.map(o => typeof o === 'string' ? <option key={o} value={o}>{o}</option> : <option key={o.value} value={o.value} disabled={o.disabled}>{o.label}</option>)}
-      </select>
-      <div style={{position:'absolute', right:12, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', display:'flex'}}>
-        <Icon name="chevDown" size={T.chevronSize} color={T.gray600}/>
-      </div>
-    </div>
-  );
+// The Settings pages' dropdown (Dropdown, shared.jsx), in the Figma Dropdown's control style.
+function StSelect({value, options, onChange, ariaLabel}){
+  return <Dropdown value={value} options={options} onChange={onChange} ariaLabel={ariaLabel} required controlStyle={stControl}/>;
 }
 const stInput = {...stControl, padding:'0 14px', cursor:'text'};
 
@@ -265,7 +257,7 @@ function ConnectMenuButton({label, providers, onPick}){
 /* Row ⋯ menu — the Contacts row-action trigger and menu, for a list of items. */
 /* Row actions from a list of items {label, onClick, danger, disabled, external} — the shared ⋯
    ActionsMenu (Settings tables keep their 180px panel; record pages pass the Contacts width). */
-function RowActionsMenu({items, title = 'Actions', width = 180}){
+function RowActionsMenu({items, title = 'Row Actions', width = 180}){
   // Nothing the signed-in user may do here (permissions): the menu's space stays, so rows line up.
   if(!items.length) return <span aria-hidden="true" style={{width:28, height:28, flexShrink:0}}/>;
   return (
@@ -294,13 +286,11 @@ function RecordGrid({schema, rows, defaultSort}){
 }
 const providerCell = (list) => (key, r) => key === 'provider'
   ? <span style={{display:'inline-flex', alignItems:'center', gap:8}}><ProviderLogo p={providerOf(list, r.provider)} size={14}/>{providerOf(list, r.provider).label}</span>
+  : key === 'status' && r.status ? <StatusPill status={r.status} map={STATUS_PILLS}/>   // a status pill, as Forms' Connected
   : undefined;
-function StEmpty({title, description}){
-  return (
-    <div style={{border:`1px solid ${T.border}`, borderRadius:8}}>
-      <EmptyState title={title} description={description}/>
-    </div>
-  );
+// A settings page's empty list: the illustrated EmptyState (no box around it, no helper line).
+function StEmpty({title}){
+  return <EmptyState title={title}/>;
 }
 
 /* Modal shell — the same box as Add / Edit contact. */
@@ -308,6 +298,7 @@ function StEmpty({title, description}){
 /* `secondary` ({label, icon, onClick}): an outlined action before the primary one; `hideCancel`: no
    Cancel button (the × still closes). */
 function StModal({title, children, primary, canSubmit = true, onSubmit, onCancel, danger, width = 440, textAction, cancelLabel, secondary, hideCancel}){
+  useEscapeClose(onCancel);
   return (
     <div style={{position:'fixed', inset:0, zIndex:100, display:'flex', alignItems:'center', justifyContent:'center'}} onMouseDown={onCancel}>
       <div style={{position:'absolute', inset:0, background:'rgba(16,24,40,.35)'}}/>
@@ -319,7 +310,8 @@ function StModal({title, children, primary, canSubmit = true, onSubmit, onCancel
             <Icon name="close" size={14} color={T.gray600}/>
           </button>
         </div>
-        <div style={{padding:'18px 20px', display:'flex', flexDirection:'column', gap:14}}>{children}</div>
+        {/* A confirmation whose title says it all has no body. */}
+        {React.Children.toArray(children).length > 0 && <div style={{padding:'18px 20px', display:'flex', flexDirection:'column', gap:14}}>{children}</div>}
         {/* The text-only CTA sits apart on the left; Cancel and the primary action stay together on the right.
             A modal with nothing to put there (no actions, Cancel hidden) has no footer. */}
         {(primary || secondary || textAction || !hideCancel) && <div style={{display:'flex', justifyContent:'flex-end', alignItems:'center', gap:8, padding:'14px 20px', borderTop:`1px solid ${T.border}`}}>
@@ -380,7 +372,7 @@ function SearchableSelect({value, options, onChange, placeholder = 'Select', sea
                 {o.value === value && <Icon name="check" size={11} color={T.blue}/>}
               </div>
             </React.Fragment>))}
-            {!shown.length && <div style={{padding:'8px 10px', fontSize:12.5, color:T.gray400}}>No matches.</div>}
+            {!shown.length && <div style={{padding:'8px 10px', fontSize:12.5, color:T.gray400}}>No matches</div>}
           </div>
         </div>
       )}
@@ -398,21 +390,15 @@ function ConnectAccountModal({provider, onCancel, onConnect}){
     <StModal title={<span style={{display:'inline-flex', alignItems:'center', gap:8}}><ProviderLogo p={provider} size={18}/>Connect {provider.label}</span>}
       primary="Connect" canSubmit={ok} onCancel={onCancel} onSubmit={()=>onConnect({provider:provider.key, email:email.trim()})}>
       <div>
-        <label style={fieldLabel}>Account email</label>
+        <label style={fieldLabel}>Account Email</label>
         <input autoFocus type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="name@company.com" style={fieldInput}/>
       </div>
     </StModal>
   );
 }
 
-// `many`: several at once (Bulk Actions).
-function DisconnectModal({what, many, onCancel, onConfirm}){
-  return (
-    <StModal title={`Disconnect ${what}?`} primary="Disconnect" danger onCancel={onCancel} onSubmit={onConfirm}>
-      <div style={{fontSize:13, color:T.gray600, lineHeight:1.5}}>{many ? 'They will no longer be connected to your CRM. You can connect them again at any time.'
-        : 'It will no longer be connected to your CRM. You can connect it again at any time.'}</div>
-    </StModal>
-  );
+function DisconnectModal({what, onCancel, onConfirm}){
+  return <StModal title={`Disconnect ${what}?`} primary="Disconnect" danger onCancel={onCancel} onSubmit={onConfirm}/>;
 }
 
 const providerOf = (list, key) => list.find(p => p.key === key) || list[0];
@@ -423,7 +409,7 @@ const providerOf = (list, key) => list.find(p => p.key === key) || list[0];
 
 // Which Tools Settings permission each page's connections need (Settings & Administration → Tools Settings).
 const TOOL_SETTING_OF = {emails:'email', meetings:'meetings', calendars:'calendar'};
-function ConnectedAccountsPage({title, description, providers, connectLabel, listKey, noun, emptyTitle, emptyText, data, setData}){
+function ConnectedAccountsPage({title, providers, connectLabel, listKey, noun, emptyTitle, emptyText, data, setData}){
   const can = toolSettingCan(TOOL_SETTING_OF[listKey]);
   const [connecting, setConnecting] = React.useState(null);
   const [removing, setRemoving] = React.useState(null);
@@ -434,13 +420,13 @@ function ConnectedAccountsPage({title, description, providers, connectLabel, lis
     bulkActions:(ids, clear) => [{label:'Disconnect', danger:true, onClick:()=>setBulk({ids, clear})}],
     properties:[
       {key:'email', label:'Account', width:280}, {key:'provider', label:'Provider', width:200},
-      {key:'status', label:'Status', width:150}, {key:'connected', label:'Connected on', width:170},
+      {key:'status', label:'Status', width:150}, {key:'connected', label:'Connected', width:170},
     ],
     renderCell: providerCell(providers),
     renderActions: (r) => <RowActionsMenu items={can ? [{label:'Disconnect', danger:true, onClick:()=>setRemoving(r)}] : []}/>,
   };
   return (
-    <SettingsPage title={title} description={description}
+    <SettingsPage title={title}
       actions={!can ? null : connectLabel
         ? <ConnectMenuButton label={connectLabel} providers={providers} onPick={setConnecting}/>
         : providers.map(p => <ProviderButton key={p.key} p={p} onClick={()=>setConnecting(p)}/>)}>
@@ -452,17 +438,17 @@ function ConnectedAccountsPage({title, description, providers, connectLabel, lis
         }}/>}
       {removing && <DisconnectModal what={removing.email} onCancel={()=>setRemoving(null)}
         onConfirm={()=>{ setData(d => ({...d, [listKey]:d[listKey].filter(x => x.id !== removing.id)})); setRemoving(null); }}/>}
-      {bulk && <DisconnectModal what={bulkPlural(bulk.ids.length, noun)} many={bulk.ids.length > 1} onCancel={()=>setBulk(null)}
+      {bulk && <DisconnectModal what={bulkPlural(bulk.ids.length, noun)} onCancel={()=>setBulk(null)}
         onConfirm={()=>{ setData(d => ({...d, [listKey]:d[listKey].filter(x => !bulk.ids.includes(x.id))})); bulk.clear(); setBulk(null); }}/>}
     </SettingsPage>
   );
 }
 
-const EmailSettings = (props) => <ConnectedAccountsPage {...props} description="Connect your work email to send and log emails from the CRM."
+const EmailSettings = (props) => <ConnectedAccountsPage {...props}
   providers={EMAIL_PROVIDERS} connectLabel="Connect Email" listKey="emails" noun="email account" emptyTitle="No email connected" emptyText="Choose your email provider to connect it."/>;
-const MeetingsSettings = (props) => <ConnectedAccountsPage {...props} description="Connect your meeting accounts to create meeting links from the CRM."
+const MeetingsSettings = (props) => <ConnectedAccountsPage {...props}
   providers={MEETING_PROVIDERS} connectLabel="Connect Meeting" listKey="meetings" noun="meeting account" emptyTitle="No meeting account connected" emptyText="Choose a meeting provider to connect it."/>;
-const CalendarSettings = (props) => <ConnectedAccountsPage {...props} description="Connect your calendar to see and schedule meetings in the CRM."
+const CalendarSettings = (props) => <ConnectedAccountsPage {...props}
   providers={CALENDAR_PROVIDERS} connectLabel="Connect Calendar" listKey="calendars" noun="calendar" emptyTitle="No calendar connected" emptyText="Choose your calendar provider to connect it."/>;
 
 /* ── Tools → Calls ─────────────────────────────────────────────────────────────────────── */
@@ -474,9 +460,8 @@ function ConnectNumberModal({onCancel, onAdd}){
   return (
     <StModal title="Connect Phone Number" primary="Connect" canSubmit={ok} onCancel={onCancel} onSubmit={()=>onAdd({number:number.trim(), label:label.trim()})}>
       <div>
-        <label style={fieldLabel}>Phone number</label>
+        <label style={fieldLabel}>Phone Number</label>
         <input autoFocus value={number} onChange={e=>setNumber(e.target.value)} placeholder="+92 300 0000000" style={fieldInput}/>
-        <div style={{fontSize:12, color:T.gray400, marginTop:4}}>Include the country code.</div>
       </div>
       <div>
         <label style={fieldLabel}>Label</label>
@@ -494,22 +479,23 @@ function CallsSettings({data, setData}){
   const rows = data.phones;
   const schema = {
     noun:'number', searchKeys:['number', 'label'], selectable:can,
+    renderCell:(key, r) => key === 'status' && r.status ? <StatusPill status={r.status} map={STATUS_PILLS}/> : undefined,
     bulkActions:(ids, clear) => [{label:'Disconnect', danger:true, onClick:()=>setBulk({ids, clear})}],
     properties:[
       {key:'number', label:'Number', width:220}, {key:'label', label:'Label', width:200},
-      {key:'status', label:'Status', width:150}, {key:'added', label:'Connected on', width:170},
+      {key:'status', label:'Status', width:150}, {key:'added', label:'Connected', width:170},
     ],
     renderActions: (r) => <RowActionsMenu items={can ? [{label:'Disconnect', danger:true, onClick:()=>setRemoving(r)}] : []}/>,
   };
   return (
-    <SettingsPage description="Connect the phone number you call from in the CRM."
+    <SettingsPage
       actions={can && <ProviderButton icon="call" label="Connect Phone Number" onClick={()=>setAdding(true)}/>}>
       {rows.length ? <RecordGrid schema={schema} rows={rows}/> : <StEmpty title="No phone number connected" description="Connect your number to make and log calls from the CRM."/>}
       {adding && <ConnectNumberModal onCancel={()=>setAdding(false)}
         onAdd={({number, label}) => { setData(d => ({...d, phones:[...d.phones, {id:stId('phone'), number, label, status:'Connected', added:stToday()}]})); setAdding(false); }}/>}
       {removing && <DisconnectModal what={removing.number} onCancel={()=>setRemoving(null)}
         onConfirm={()=>{ setData(d => ({...d, phones:d.phones.filter(x => x.id !== removing.id)})); setRemoving(null); }}/>}
-      {bulk && <DisconnectModal what={bulkPlural(bulk.ids.length, 'number')} many={bulk.ids.length > 1} onCancel={()=>setBulk(null)}
+      {bulk && <DisconnectModal what={bulkPlural(bulk.ids.length, 'number')} onCancel={()=>setBulk(null)}
         onConfirm={()=>{ setData(d => ({...d, phones:d.phones.filter(x => !bulk.ids.includes(x.id))})); bulk.clear(); setBulk(null); }}/>}
     </SettingsPage>
   );
@@ -533,19 +519,21 @@ function useSettingsForm(value, onSave, valid){
    first. Every pipeline has the same statuses — In Progress, Completed, and Overdue (worked out:
    past its due date and not completed) — the Tasks board's and a record's Tasks tab's. A pipeline
    can be deleted once no task uses it (never the default). */
+// Add / Edit a task pipeline: a side panel, as Add Pipeline (its label beside the field).
 function TaskPipelineModal({initial, onCancel, onSave}){
   const [name, setName] = React.useState(initial ? initial.name : '');
   const ok = !!name.trim();
+  const save = () => ok && onSave({name:name.trim(), stages:TASK_PIPELINE_STAGES()}, {});
   return (
-    <StModal title={initial ? 'Edit task pipeline' : 'New task pipeline'} primary="Save" canSubmit={ok} width={520} onCancel={onCancel}
-      onSubmit={()=>ok && onSave({name:name.trim(), stages:TASK_PIPELINE_STAGES()}, {})}>
-      <div><label style={fieldLabel}>Pipeline name</label><input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Document collection" style={fieldInput}/></div>
-      <div style={{display:'flex', flexDirection:'column', gap:8}}>
-        <label style={{...fieldLabel, marginBottom:0}}>Statuses</label>
-        <TaskStatesLine/>
-        <div style={stTextB}>Overdue is set automatically: a task past its due date that isn't completed.</div>
+    <CreatePanelFrame title={initial ? 'Edit Pipeline' : 'Add Pipeline'} onClose={onCancel} zIndex={110} actions={<>
+      <StSecondary label="Cancel" onClick={onCancel}/>
+      <StCta label={initial ? 'Save Changes' : 'Add Pipeline'} disabled={!ok} onClick={save}/>
+    </>}>
+      <div style={{display:'flex', flexDirection:'column', gap:16}}>
+        <Field label="Pipeline Name" wide><input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Document collection" style={fieldInput}/></Field>
+        <Field label="Statuses" wide><div style={{paddingTop:7}}><TaskStatesLine/></div></Field>
       </div>
-    </StModal>
+    </CreatePanelFrame>
   );
 }
 // The three statuses as the section shows them.
@@ -580,11 +568,8 @@ function TaskPipelinesSection({data, setData}){
   return (
     <div style={{display:'flex', flexDirection:'column', gap:12, marginTop:32, paddingTop:24, borderTop:`1px solid ${T.border}`}}>
       <div style={{display:'flex', alignItems:'center', gap:12}}>
-        <div style={{flex:1}}>
-          <div style={{fontSize:14, fontWeight:600, color:T.attioText}}>Task pipelines</div>
-          <div style={{...stTextB, marginTop:2}}>Every pipeline's tasks are In Progress, Completed or Overdue (automatic).</div>
-        </div>
-        <StCta icon="plus" label="New pipeline" onClick={()=>setForm({})}/>
+        <div style={{flex:1, fontSize:14, fontWeight:600, color:T.attioText}}>Task Pipelines</div>
+        <StCta icon="plus" label="Add Pipeline" onClick={()=>setForm({})}/>
       </div>
       {pipelines.map(p => (
         <div key={p.id} style={{border:`1px solid ${T.attioLine}`, borderRadius:10, padding:'12px 14px', display:'flex', alignItems:'center', gap:12}}>
@@ -596,16 +581,15 @@ function TaskPipelinesSection({data, setData}){
             </div>
             <div style={{marginTop:6}}><TaskStatesLine/></div>
           </div>
-          <StSecondary label="Edit" onClick={()=>setForm({id:p.id})}/>
-          {!p.isDefault && <button type="button" title={total(p.id) ? 'Move its tasks to another pipeline first' : 'Delete pipeline'} disabled={total(p.id) > 0}
-            onClick={()=>setDeleting(p)} style={{border:'none', background:'transparent', cursor: total(p.id) ? 'default' : 'pointer', display:'flex', padding:4, opacity: total(p.id) ? .35 : 1}}>
-            <Icon name="trash" size={14} color={T.gray600}/></button>}
+          {/* Its actions in the row ⋯, as every Settings list (a pipeline with tasks can't be deleted). */}
+          <RowActionsMenu title="Pipeline Actions" items={[{label:'Edit Pipeline', onClick:()=>setForm({id:p.id})},
+            ...(p.isDefault ? [] : [{label:'Delete Pipeline', danger:!total(p.id), disabled:total(p.id) > 0, onClick:()=>!total(p.id) && setDeleting(p)}])]}/>
         </div>
       ))}
       {form && <TaskPipelineModal initial={editing} onCancel={()=>setForm(null)} onSave={save}/>}
-      {deleting && <StModal title="Delete task pipeline" primary="Delete" danger onCancel={()=>setDeleting(null)}
+      {deleting && <StModal title="Delete Pipeline" primary="Delete Pipeline" danger onCancel={()=>setDeleting(null)}
         onSubmit={()=>{ setPipelines(ps => ps.filter(p => p.id !== deleting.id)); setDeleting(null); }}>
-        <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>{deleting.name} will be deleted.</div>
+        <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>{deleting.name} will be deleted. This can't be undone.</div>
       </StModal>}
     </div>
   );
@@ -619,14 +603,14 @@ function TasksSettings({data, setData}){
   const can = toolSettingCan('tasks');
   const {draft:d, set, actions} = useSettingsForm(data.tasks, v => setData(x => ({...x, tasks:v})));
   return (
-    <SettingsPage description="Your defaults for new tasks." actions={can && actions}>
+    <SettingsPage actions={can && actions}>
       <ReadOnlySettings on={can}>
       <div style={{display:'flex', flexDirection:'column', gap:20}}>
-        <StField label="Default due date"><StSelect value={d.dueDate} options={TASK_DUE_DATES} onChange={v=>set({dueDate:v})}/></StField>
-        <StField label="Default due time">
+        <StField label="Default Due Date"><StSelect value={d.dueDate} options={TASK_DUE_DATES} onChange={v=>set({dueDate:v})}/></StField>
+        <StField label="Default Due Time">
           <TimeField required value={d.dueTime} onChange={v=>set({dueTime:v})} ariaLabel="Default due time" inputStyle={stInput}/>
         </StField>
-        <StField label="Default reminder"><StSelect value={d.reminder} options={TASK_REMINDERS} onChange={v=>set({reminder:v})}/></StField>
+        <StField label="Default Reminder"><StSelect value={d.reminder} options={TASK_REMINDERS} onChange={v=>set({reminder:v})}/></StField>
         {d.reminder === 'custom' && (
           <div style={{display:'flex', alignItems:'center', gap:8, width:310, marginTop:-8}}>
             <input type="number" min={1} value={d.customAmount} aria-label="Reminder amount"
@@ -656,7 +640,7 @@ function DefaultsSettings({data, setData}){
   const setCurrency = (cur) => { if(cur === d.currency) return; const per = Number(rates[cur]) || 1;
     set({currency:cur, rates:Object.fromEntries(CURRENCY_LIST.map(c => [c.code, c.code === cur ? 1 : Number(((Number(rates[c.code]) || 0) / per).toPrecision(6))]))}); };
   return (
-    <SettingsPage description="Company-wide preferences for everyone in the CRM."
+    <SettingsPage
       actions={can && actions}>
       <ReadOnlySettings on={can}>
       <div style={{display:'flex', flexDirection:'column', gap:20}}>

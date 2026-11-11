@@ -14,7 +14,8 @@
 const ACTIVITY_TAB_NOUNS = {activity:'activity', calls:'calls', email:'emails', notes:'notes', tasks:'tasks', meetings:'meetings'};
 const ACTIVITY_FEED_OBJECTS = ['contacts', 'deals', 'customers'];
 // The feeds of a tab, one per record type of the workspace (HOF Partners: Lead and Customer).
-const activityFeeds = (tabId) => ACTIVITY_FEED_OBJECTS.filter(workspaceHasType).map(o => ({id:o, name:`${HUB_NOUN[o]} ${ACTIVITY_TAB_NOUNS[tabId]}`}));
+// Title Case: "Contact Calls", "Deal Activity".
+const activityFeeds = (tabId) => ACTIVITY_FEED_OBJECTS.filter(workspaceHasType).map(o => ({id:o, name:`${HUB_NOUN[o]} ${ACTIVITY_TAB_NOUNS[tabId].replace(/^./, c => c.toUpperCase())}`}));
 /* A record's associated records of each type (its own type: none — that feed is its own activity). */
 function associatedRecords(hub, object, record){
   const all = (o) => (hub && hub.records[o]) || [];
@@ -134,7 +135,7 @@ function ActivityViewsArea({tabId, store, sources, schema, controls, render}){
           filters={st.filters} setFilters={(f)=>patch({filters:typeof f === 'function' ? f(st.filters) : f})}
           appliedFilterCount={countAppliedFilters(st.filters, schema.filterProps)}/>
         {primary && !primary.tabs && <SubPills items={feeds} active={feedId} onSelect={setFeed}/>}
-        {render(shown, base.length && !shown.length ? 'No activity matches these filters.' : null, own ? null : (a) => recOf.get(a.id) || null)}
+        {render(shown, base.length && !shown.length ? 'No activity matches these filters' : null, own ? null : (a) => recOf.get(a.id) || null)}
       </div>
     </RecordSchema.Provider>
   );

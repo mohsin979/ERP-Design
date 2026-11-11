@@ -52,6 +52,7 @@ function SettingsCheckRow({label, checked, onToggle, hint, right, drag, dragOver
 /* `applyDisabled` / `footerNote`: Apply held back until the settings are complete, with a note why. */
 function SettingsModalShell({title, sections, order, onReorder, section, onSection, toolbar, children, preview, onApply, onClose, fixed = [], applyDisabled, footerNote}){
   const drag = useDragReorder(onReorder);
+  useEscapeClose(onClose);
   return (
     <div style={{position:'fixed', inset:0, zIndex:120, display:'flex', alignItems:'center', justifyContent:'center'}}>
       <div onClick={onClose} style={{position:'absolute', inset:0, background:'rgba(16,24,40,.35)'}}/>
@@ -62,7 +63,7 @@ function SettingsModalShell({title, sections, order, onReorder, section, onSecti
         borderRadius:12, boxShadow:'0 16px 40px rgba(16,24,40,.24)', display:'flex', flexDirection:'column',
       }}>
         <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', padding:'16px 20px', borderBottom:`1px solid ${T.border}`}}>
-          <span style={{fontSize:16, fontWeight:600, color:T.attioText}}>{title}</span>
+          <span style={{fontSize:15, fontWeight:600, color:T.attioText}}>{title}</span>
           <button onClick={onClose} style={{border:'none', background:'transparent', cursor:'pointer', display:'flex'}}>
             <Icon name="close" size={16} color={T.gray600}/>
           </button>
@@ -114,9 +115,11 @@ function SettingsModalShell({title, sections, order, onReorder, section, onSecti
           )}
         </div>
 
-        <div style={{display:'flex', alignItems:'center', gap:10, padding:'14px 20px', borderTop:`1px solid ${T.border}`}}>
-          <button onClick={onApply} disabled={!!applyDisabled} style={{border:'none', background: applyDisabled ? T.gray400 : T.black, color:'#fff', borderRadius:8, padding:'9px 20px', fontSize:13, fontWeight:600, cursor: applyDisabled ? 'default' : 'pointer'}}>Apply</button>
-          {footerNote && <span style={{fontSize:12.5, color:T.attioMuted}}>{footerNote}</span>}
+        {/* As every modal: a note at the left, then Cancel and Apply at the right. */}
+        <div style={{display:'flex', alignItems:'center', justifyContent:'flex-end', gap:8, padding:'14px 20px', borderTop:`1px solid ${T.border}`}}>
+          {footerNote && <span style={{marginRight:'auto', fontSize:12.5, color:T.attioMuted}}>{footerNote}</span>}
+          <StSecondary label="Cancel" onClick={onClose}/>
+          <StCta label="Apply" disabled={!!applyDisabled} onClick={onApply}/>
         </div>
       </div>
     </div>

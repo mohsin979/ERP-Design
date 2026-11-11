@@ -385,11 +385,14 @@ function pfExtract(form, sources){
 function PfFieldInput({field, value, onChange, invalid, extra}){
   const p = pfProp(field);
   return (
-    <div style={{display:'flex', flexDirection:'column', minWidth:0}}>
-      <label style={fieldLabel}>{field.label}</label>
-      <TypedPropertyInput prop={p} value={value ?? loadPropertyValueOf(p, '')} invalid={!!invalid} onChange={onChange}/>
-      {invalid && <span style={{fontSize:12, color:T.red, marginTop:4}}>{invalid}</span>}
-      {extra}
+    // Its label beside the field, as every create and edit panel.
+    <div style={{display:'flex', alignItems:'flex-start', gap:12, minWidth:0}}>
+      <label style={{...actFieldLabel, paddingTop:9}}>{field.label}</label>
+      <div style={{flex:1, minWidth:0, display:'flex', flexDirection:'column'}}>
+        <TypedPropertyInput prop={p} value={value ?? loadPropertyValueOf(p, '')} invalid={!!invalid} onChange={onChange}/>
+        {invalid && <span style={{fontSize:12, color:T.red, marginTop:4}}>{invalid}</span>}
+        {extra}
+      </div>
     </div>
   );
 }
@@ -397,11 +400,11 @@ function PfFieldInput({field, value, onChange, invalid, extra}){
 /* ── Fill in (by hand, or from sources): one side panel ────────────────────────────────────── */
 /* `found`: values read from sources (pfExtract) — they fill empty fields; where a field already
    has a different answer, the found one is offered beside it. Saving keeps each answer's source. */
-/* `title` / `primary`: Create customer profile · Create, or Edit customer profile · Save changes.
+/* `title` / `primary`: Add Customer Profile, or Edit Customer Profile · Save Changes.
    `search`: a field search at the top (as Edit contact has). */
 /* Only the properties the signed-in user may edit are offered (Customer Profile Properties); the
    others keep their answers. */
-function ProfileFormFillPanel({contact, form, current, found = {}, sourcesRead, onBack, onCancel, onSave, top: topExtra, title, primary = 'Save', search}){
+function ProfileFormFillPanel({contact, form, current, found = {}, onBack, onCancel, onSave, top: topExtra, title, primary = 'Save', search}){
   const cur = (current && current.values) || {}, curMeta = (current && current.meta) || {};
   const blank = (x) => x == null || x === '';
   const [values, setValues] = React.useState(() => {
@@ -423,7 +426,6 @@ function ProfileFormFillPanel({contact, form, current, found = {}, sourcesRead, 
   const listed = q ? editable.filter(f => String(f.label).toLowerCase().includes(q)) : editable;
   const errorOf = (f) => propertyValueError(pfProp(f), values[f.id], false);
   const problems = visible.filter(f => errorOf(f));
-  const foundCount = Object.keys(found).length;
   const save = () => {
     setTried(true);
     if(problems.length){ setQuery(''); return; }
@@ -449,15 +451,10 @@ function ProfileFormFillPanel({contact, form, current, found = {}, sourcesRead, 
           </div>
         )}
       </div>
-    ) : (sourcesRead ? (
-      <div style={{fontSize:12.5, color:T.attioText, lineHeight:1.5}}>
-        {foundCount ? `Found ${foundCount} answer${foundCount === 1 ? '' : 's'} in ${sourcesRead} source${sourcesRead === 1 ? '' : 's'}. Review them, correct anything that's wrong and complete the rest.`
-          : `Nothing for this form was found in ${sourcesRead} source${sourcesRead === 1 ? '' : 's'}. Fill it in by hand.`}
-      </div>
-    ) : null)}>
+    ) : null}>
       <div style={{display:'flex', flexDirection:'column', gap:16}}>
         {tried && problems.length > 0 && <div style={{fontSize:12.5, color:T.red}}>Fix the answers marked below.</div>}
-        {q && !listed.length && <div style={{fontSize:13, color:T.attioMuted}}>No fields match “{query.trim()}”</div>}
+        {q && !listed.length && <div style={{fontSize:13, color:T.attioMuted}}>No fields match "{query.trim()}"</div>}
         {listed.map(f => {
           const h = found[f.id];
           const offers = h ? [h, ...(h.also || [])].filter(o => !same(o.value, values[f.id])) : [];
@@ -501,14 +498,16 @@ const pfBlank = (v) => v == null || v === '' || (Array.isArray(v) && !v.length);
 const pfSame = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const pfDay = (d) => d ? new Date(d).toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'}) : '';
 // The wizard's frame (the reference design): title, a divider, the body, a divider, the actions.
+// StModal's frame (header, ×, Escape, Cancel and the primary at the right), with a fixed height that scrolls.
 function PfRunModal({onClose, actions, children}){
+  useEscapeClose(onClose);
   return ReactDOM.createPortal(
     <div style={{position:'fixed', inset:0, zIndex:100, display:'flex', alignItems:'center', justifyContent:'center'}}>
       <div onClick={onClose} style={{position:'absolute', inset:0, background:'rgba(16,24,40,.35)'}}/>
       <div role="dialog" aria-label="Customer Profile" style={{position:'relative', width:600, maxWidth:'calc(100vw - 32px)', height:'min(600px, calc(100vh - 48px))', background:'#fff',
         borderRadius:12, boxShadow:'0 16px 40px rgba(16,24,40,.2)', display:'flex', flexDirection:'column'}}>
-        <div style={{display:'flex', alignItems:'center', gap:12, padding:'20px 24px', borderBottom:`1px solid ${T.border}`}}>
-          <span style={{flex:1, fontSize:16, fontWeight:600, color:T.attioText}}>Customer Profile</span>
+        <div style={{display:'flex', alignItems:'center', gap:12, padding:'16px 20px', borderBottom:`1px solid ${T.border}`}}>
+          <span style={{flex:1, fontSize:15, fontWeight:600, color:T.attioText}}>Customer Profile</span>
           <button title="Close" onClick={onClose} style={{border:'none', background:'transparent', cursor:'pointer', display:'flex', padding:4}}><Icon name="close" size={14} color={T.gray600}/></button>
         </div>
         <div style={{flex:1, minHeight:0, overflowY:'auto', padding:'24px'}}>{children}</div>
@@ -551,7 +550,7 @@ function PfRunSources({profiles, profileId, setProfileId, calls, emails, notes, 
         {choice.add && (
           <div style={{display:'flex', flexDirection:'column', gap:8, paddingLeft:28, paddingTop:4}}>
             <div style={{display:'flex', alignItems:'center', gap:10}}>
-              <StSecondary label="Choose file" onClick={()=>fileRef.current && fileRef.current.click()}/>
+              <StSecondary label="Choose File" onClick={()=>fileRef.current && fileRef.current.click()}/>
               <span style={{fontSize:12.5, color:T.attioMuted, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{choice.fileName || '.txt, .vtt or .srt'}</span>
               <input ref={fileRef} type="file" accept=".txt,.vtt,.srt,.md,text/plain" style={{display:'none'}} onChange={e=>readFile(e.target.files && e.target.files[0])}/>
             </div>
@@ -667,7 +666,7 @@ function ProfileRunWizard({contact, form: startForm, call, onCancel, onSave}){
     </PfRunModal>
   );
   return (
-    <PfRunModal onClose={onCancel} actions={field ? <><StSecondary label="Leave empty" onClick={()=>decide('')}/><StCta label="Confirm" disabled={pfBlank(draft) || !!err} onClick={()=>decide(draft)}/></>
+    <PfRunModal onClose={onCancel} actions={field ? <><StSecondary label="Leave Empty" onClick={()=>decide('')}/><StCta label="Confirm" disabled={pfBlank(draft) || !!err} onClick={()=>decide(draft)}/></>
       : <StSecondary label="Close" onClick={onCancel}/>}>
       {field ? (
         <div style={{display:'flex', flexDirection:'column', gap:24}}>
@@ -716,7 +715,7 @@ function ProfileByHand({contact, startForm, onCancel, onSave, editing}){
   const profile = profiles.find(f => f.id === profileId) || profiles[0];
   const {parts, form} = pfWithAlways(store, profile);
   return <ProfileFormFillPanel key={profile.id} contact={contact} form={form} current={pfCurrentOf(store, contact.id, parts)} onCancel={onCancel}
-    title={editing ? `Edit customer profile · ${profile.name}` : 'Create customer profile'} primary={editing ? 'Save changes' : 'Create'} search={editing}
+    title={editing ? 'Edit Customer Profile' : 'Add Customer Profile'} primary={editing ? 'Save Changes' : 'Add Customer Profile'} search={editing}
     top={!editing && !startForm && profiles.length > 1 ? <Field label="Profile"><Select value={profile.id} options={profiles.map(f => ({value:f.id, label:f.name}))} onChange={(v)=>v && setProfileId(v)}/></Field> : null}
     onSave={(out)=>{ pfSaveParts(store, contact.id, parts, out); store.setType(contact.id, profile.id); onSave && onSave(); }}/>;
 }
@@ -750,7 +749,7 @@ function EnableProfilesModal({forms, onCancel, onEnable}){
   const [picked, setPicked] = React.useState([]);
   const toggle = (id) => setPicked(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
   return (
-    <StModal title="Enable Customer Profile" primary="Enable" canSubmit={picked.length > 0} onCancel={onCancel}
+    <StModal title="Enable Customer Profile" primary="Enable Customer Profile" canSubmit={picked.length > 0} onCancel={onCancel}
       onSubmit={()=>picked.length && onEnable(forms.filter(f => picked.includes(f.id)).map(f => f.id))}>
       <div style={{display:'flex', flexDirection:'column'}}>
         {forms.map(f => (
@@ -890,9 +889,9 @@ function ProfileFormsSettings({data, setData}){
   const rows = shownForms.map(f => ({...f, createdBy:creatorOf(f), fieldCount:f.fields.length, customerCount:usedBy(f.id),
     createdText: f.createdAt ? fmtActStamp(new Date(f.createdAt)) : ''}));
   const actionsFor = (f) => [
-    ...(can('edit', f) ? [{label:'Edit form', onClick:()=>setEditor({id:f.id})}] : []),
-    {label:'Preview form', onClick:()=>setPreviewId(f.id)},
-    ...(can('delete', f) ? [{label:'Delete form', danger:true, onClick:()=>setDeleting(f.id)}] : []),
+    ...(can('edit', f) ? [{label:'Edit Form', onClick:()=>setEditor({id:f.id})}] : []),
+    {label:'Preview Form', onClick:()=>setPreviewId(f.id)},
+    ...(can('delete', f) ? [{label:'Delete Form', danger:true, onClick:()=>setDeleting(f.id)}] : []),
   ];
   // Bulk Actions: Delete — a form with customers' information is skipped, as its Delete refuses.
   const pfBulk = useTableBulkDelete({rows:shownForms, noun:'form', canDelete:(f) => can('delete', f) && !usedBy(f.id), skipNote:'with customers’ information or not yours to delete',
@@ -903,7 +902,7 @@ function ProfileFormsSettings({data, setData}){
     selectValues:{createdBy:[...new Set(forms.map(f => f.createdBy).filter(Boolean))]},
     renderCell:(key, r) => key === 'name' ? <ContactName name={r.name} onOpen={()=>can('edit', r) ? setEditor({id:r.id}) : setPreviewId(r.id)} style={{fontSize:'inherit', fontWeight:500}}/>
       : key === 'fieldCount' || key === 'customerCount' ? <span style={{fontVariantNumeric:'tabular-nums'}}>{r[key]}</span> : undefined,
-    renderActions:(r) => <RowActionsMenu title="Form actions" width={MENU_W} items={actionsFor(byId(r.id))}/>,
+    renderActions:(r) => <RowActionsMenu title="Form Actions" width={MENU_W} items={actionsFor(byId(r.id))}/>,
   };
   const save = (v) => {
     if(editor && editor.id) setForms(fs => fs.map(f => f.id === editor.id ? {...f, ...v, updatedAt:new Date().toISOString()} : f));
@@ -917,7 +916,7 @@ function ProfileFormsSettings({data, setData}){
         <div style={{display:'flex', flexDirection:'column', flex:1, minHeight:0}}>
           <RecordViewsModule flushTop storeKey="views:profile-forms-v1" schema={schema} rows={rows} columns={PF_COLUMNS.map(c => c.key)} saveView={false}
             defaultViews={[{id:'pfv-all', name:'All Forms', sort:{key:'name', dir:'asc'}}]}
-            actions={() => can('create') && <button onClick={()=>setEditor({})} title="New form" aria-label="New form" style={iconBtn}><Icon name="plus" size={14} color={T.gray800}/></button>}/>
+            actions={() => can('create') && <button onClick={()=>setEditor({})} title="Add Form" aria-label="New form" style={iconBtn}><Icon name="plus" size={14} color={T.gray800}/></button>}/>
         </div>
       </SettingsPage>
       {editor && <ProfileFormEditor key={editor.id || 'new'} form={editor.id ? byId(editor.id) : null} taken={forms.filter(f => f.id !== editor.id).map(f => f.name.trim().toLowerCase())}
@@ -929,7 +928,7 @@ function ProfileFormsSettings({data, setData}){
             <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>{deletingForm.name} has information for {usedBy(deletingForm.id)} customer{usedBy(deletingForm.id) === 1 ? '' : 's'}, so it can't be deleted.</div>
           </StModal>
         : <StModal title="Delete form" primary="Delete form" danger onCancel={()=>setDeleting(null)} onSubmit={()=>{ setForms(fs => fs.filter(f => f.id !== deletingForm.id)); setDeleting(null); }}>
-            <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>{deletingForm.name} will be deleted.</div>
+            <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>{deletingForm.name} will be deleted. This can't be undone.</div>
           </StModal>)}
     </div>
   );
@@ -981,7 +980,7 @@ function ProfileFormEditor({form, taken = [], onCancel, onSave}){
     );
   };
   return (
-    <CreatePanelFrame title={form ? 'Edit Form' : 'New Form'} onClose={onCancel} placement="fixed" width="min(1120px, calc(100vw - 72px))" flush more={false}
+    <CreatePanelFrame title={form ? 'Edit Form' : 'Add Form'} onClose={onCancel} placement="fixed" width="min(1120px, calc(100vw - 72px))" flush
       actions={<>
         {!ok && <span style={{flex:1, fontSize:12, color:T.attioMuted}}>{problems[0]}</span>}
         <StSecondary label="Cancel" onClick={onCancel}/>
@@ -990,7 +989,7 @@ function ProfileFormEditor({form, taken = [], onCancel, onSave}){
       <div style={{flex:1, minWidth:0, overflowY:'auto', padding:20, display:'flex', flexDirection:'column', gap:16}}>
         <span style={section}>Form details</span>
         {stack(<>
-          <Field label="Form name" wide><input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Canada CRS Assessment" style={fieldText}/></Field>
+          <Field label="Form Name" wide><input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Canada CRS Assessment" style={fieldText}/></Field>
           <Field label="Description" wide><textarea value={description} onChange={e=>setDescription(e.target.value)} rows={3} style={{...fieldText, resize:'vertical', lineHeight:1.5}}/></Field>
         </>)}
         <div style={{borderTop:`1px solid ${T.border}`, margin:'4px -20px 0'}}/>

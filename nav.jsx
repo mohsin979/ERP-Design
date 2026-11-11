@@ -1,13 +1,14 @@
 /* HOF Pulse ERP — CRM navigation.
 
-   Default structure (product definition): Dashboard, five expandable/collapsible groups —
-   Marketing, Pre-Sales, Sales, Tools, Automation — then Settings. In Marketing only Forms and
+   Default structure (product definition): Dashboard, then five expandable/collapsible groups —
+   Marketing, Pre-Sales, Sales, Tools, Administrative (Reports, Workflows, Settings). Settings is
+   always shown: it can't be hidden, nor can the Administrative group. In Marketing only Forms and
    Brand show by default (Campaigns, SEO, Socials and Ads are hidden until an
    admin shows them — Edit Nav, or Settings → Navigation). Groups are set apart by
    generous negative space so the sidebar reads as calm, distinct sections. Edit Nav, pinned at the
    bottom, opens Navigation Management: hide / unhide any entry or item, and reorder the
    top-level entries and the items inside each group (items stay in their group, so the
-   hierarchy holds). Changes apply on Apply. The collapsed sidebar is the standard icons-only
+   hierarchy holds). Changes apply on Save, as in Settings → Navigation. The collapsed sidebar is the standard icons-only
    rail with tooltips.
 
    Every item navigates; pages whose content isn't specified say so on the canvas. */
@@ -38,12 +39,14 @@ const CRM_NAV_DEFAULT = () => ([
     {id:'quotes',   label:'Quotes',   icon:'quote',       hidden:false},
   ]},
   // Services moved to Settings → Templates (a kind of template).
-  {id:'automation', label:'Workflows', group:true, hidden:false, items:[
-    {id:'reports',   label:'Reports',   icon:'analytical', hidden:false},
-    {id:'workflows', label:'Workflows', icon:'workflows',  hidden:false},
+  {id:'automation', label:'Administrative', group:true, hidden:false, items:[
+    {id:'reports',   label:'Reports',   icon:'analytical',   hidden:false},
+    {id:'workflows', label:'Workflows', icon:'workflows',    hidden:false},
+    {id:'settings',  label:'Settings',  icon:'settingsGear', hidden:false},
   ]},
-  {id:'settings', label:'Settings', icon:'settingsGear', hidden:false},
 ]);
+// Always in the navigation: Settings, and the group it's in.
+const NAV_ALWAYS_SHOWN = ['settings', 'automation'];
 
 /* Settings' secondary navigation (product definition): three collapsible groups, in this
    order. Ids are prefixed so they never collide with main-nav ids (Tasks, Calls, …). */
@@ -85,7 +88,7 @@ const isSettingsPage = (id) => id === 'settings' || (typeof id === 'string' && i
 /* Objects (Settings → Objects) appear in the navigation group they're assigned to: an Object's
    entry moves into its group (keeping its icon and visibility), takes the Object's name, and a
    new Object is added at the end of its group. Everything else in the nav is unchanged. */
-const NAV_GROUP_IDS = {'Marketing':'marketing', 'Pre-Sales':'preSales', 'Sales':'sales', 'Tools':'tools', 'Automation':'automation'};
+const NAV_GROUP_IDS = {'Marketing':'marketing', 'Pre-Sales':'preSales', 'Sales':'sales', 'Tools':'tools', 'Administrative':'automation', 'Automation':'automation'};
 // Forms is a Marketing page (forms.jsx), not a record type, so it isn't listed here.
 const OBJECT_NAV_ICONS = {contacts:'contacts', deals:'deals', customers:'customers', service:'services'};
 /* Items of record types that no longer exist (deleted, or removed defaults such as Services)
@@ -95,12 +98,21 @@ const isObjectNavItem = (id) => !!OBJECT_NAV_ICONS[id] || String(id).startsWith(
 const REMOVED_NAV_IDS = ['leadScoring', 'services'];   // Services: now Settings → Templates → Services
 // Entries added to the product since a navigation was saved join their group, after `after`.
 const ADDED_NAV_ITEMS = [{group:'marketing', after:'ads', item:{id:'forms', label:'Forms', icon:'forms', hidden:false}}];
-// Groups renamed since a navigation was saved: the Automation group is Workflows.
-const RENAMED_NAV_GROUPS = {automation:'Workflows'};
+// Groups renamed since a navigation was saved: the Automation group (once Workflows) is Administrative.
+const RENAMED_NAV_GROUPS = {automation:'Administrative'};
 function navWithObjects(nav, objects){
   const ids = new Set((objects || []).map(o => o.id));
   const next = nav.map(e => e.group ? {...e, label:RENAMED_NAV_GROUPS[e.id] || e.label, items:e.items.filter(x => !REMOVED_NAV_IDS.includes(x.id) && (!isObjectNavItem(x.id) || ids.has(x.id)))} : e)
     .filter(e => e.group || !isObjectNavItem(e.id) || ids.has(e.id));
+  /* Settings is in the Administrative group (a navigation saved before had it on its own, last)
+     and is always shown, as is that group. */
+  const admin = next.find(e => e.group && e.id === 'automation'), top = next.findIndex(e => !e.group && e.id === 'settings');
+  if(admin){
+    if(top >= 0) next.splice(top, 1);
+    admin.hidden = false;
+    admin.items = admin.items.some(x => x.id === 'settings') ? admin.items.map(x => x.id === 'settings' ? {...x, hidden:false} : x)
+      : [...admin.items, {id:'settings', label:'Settings', icon:'settingsGear', hidden:false}];
+  } else if(top >= 0) next[top] = {...next[top], hidden:false};
   ADDED_NAV_ITEMS.forEach(({group, after, item}) => {
     const g = next.find(e => e.id === group);
     if(!g || next.some(e => e.group && e.items.some(x => x.id === item.id))) return;
@@ -356,6 +368,7 @@ function CrmSettingsNav({active, setActive, onClose, data, onOpenEntity}){
 
 /* One row: drag handle, icon, label, and the eye toggle (the same hide / unhide control the
    View Settings drawer uses). Hidden rows read muted. */
+// `onToggle` null: the entry is always shown (Settings) — no eye.
 function NavManageRow({label, icon, hidden, onToggle, drag, dragOver, group, indent}){
   return (
     <div {...drag} style={{display:'flex', alignItems:'center', gap:8, padding:'7px 8px', paddingLeft: indent ? 34 : 8, borderRadius:6, cursor:'grab',
@@ -364,10 +377,10 @@ function NavManageRow({label, icon, hidden, onToggle, drag, dragOver, group, ind
       {icon && <Icon name={icon} size={14} color={hidden ? T.gray400 : T.gray600}/>}
       <span style={{flex:1, minWidth:0, fontSize: group ? 12.5 : 13, fontWeight: group ? 600 : 400, color: hidden ? T.gray400 : T.attioText,
                     textTransform: group ? 'uppercase' : 'none', letterSpacing: group ? .3 : 0}}>{label}</span>
-      <button title={hidden ? 'Show' : 'Hide'} onClick={onToggle}
+      {onToggle ? <button title={hidden ? 'Show' : 'Hide'} onClick={onToggle}
         style={{border:'none', background:'transparent', cursor:'pointer', display:'flex', padding:4, borderRadius:4}}>
         <Icon name={hidden ? 'eyeOff' : 'eye'} size={15} color={hidden ? T.gray400 : T.gray600}/>
-      </button>
+      </button> : <span style={{width:23, flexShrink:0}}/>}
     </div>
   );
 }
@@ -379,7 +392,7 @@ function NavGroupItems({group, onChange}){
     <NavManageRow key={it.id} label={it.label} icon={it.icon} hidden={it.hidden || group.hidden} indent
       drag={{...drag.props(i), onDragStart:(e)=>{ e.stopPropagation(); drag.props(i).onDragStart(); }, onDrop:(e)=>{ e.stopPropagation(); drag.props(i).onDrop(); }}}
       dragOver={drag.over === i}
-      onToggle={()=>onChange({...group, items: group.items.map(x => x.id === it.id ? {...x, hidden:!x.hidden} : x)})}/>
+      onToggle={NAV_ALWAYS_SHOWN.includes(it.id) ? null : ()=>onChange({...group, items: group.items.map(x => x.id === it.id ? {...x, hidden:!x.hidden} : x)})}/>
   ));
 }
 
@@ -391,7 +404,7 @@ function NavManagementList({draft, setDraft}){
     <div key={e.id} style={{marginBottom: e.group ? 6 : 2}}>
       <NavManageRow label={e.label} icon={e.group ? null : e.icon} group={e.group} hidden={e.hidden}
         drag={drag.props(i)} dragOver={drag.over === i}
-        onToggle={()=>setEntry(e.id, {...e, hidden:!e.hidden})}/>
+        onToggle={NAV_ALWAYS_SHOWN.includes(e.id) ? null : ()=>setEntry(e.id, {...e, hidden:!e.hidden})}/>
       {e.group && <NavGroupItems group={e} onChange={(g)=>setEntry(e.id, g)}/>}
     </div>
   ));
@@ -413,7 +426,7 @@ function NavigationSettings({nav, setNav}){
     <StCta label="Save" disabled={!dirty} onClick={()=>setNav(draft)}/>
   </>;
   return (
-    <SettingsPage description="The CRM navigation for everyone: drag to reorder, hide what isn't needed." actions={actions}>
+    <SettingsPage actions={actions}>
       {/* The rows run the page's width, each row's eye (show / hide) at its far right. */}
       <NavManagementList draft={draft} setDraft={setDraft}/>
     </SettingsPage>
@@ -421,26 +434,25 @@ function NavigationSettings({nav, setNav}){
 }
 
 function NavManagementModal({draft, setDraft, onApply, onClose}){
+  useEscapeClose(onClose);
   return (
     <div style={{position:'fixed', inset:0, zIndex:120, display:'flex', alignItems:'center', justifyContent:'center'}}>
       <div onClick={onClose} style={{position:'absolute', inset:0, background:'rgba(16,24,40,.35)'}}/>
       <div style={{position:'relative', width:460, maxWidth:'94vw', maxHeight:'88vh', background:'#fff', borderRadius:12,
                    boxShadow:'0 16px 40px rgba(16,24,40,.24)', display:'flex', flexDirection:'column'}}>
         <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', padding:'16px 20px', borderBottom:`1px solid ${T.border}`}}>
-          <div>
-            <div style={{fontSize:16, fontWeight:600, color:T.attioText}}>Edit navigation</div>
-            <div style={{fontSize:12.5, color:T.attioMuted, marginTop:2}}>Drag to reorder. Hide what you don't need.</div>
-          </div>
-          <button onClick={onClose} style={{border:'none', background:'transparent', cursor:'pointer', display:'flex'}}>
+          <div style={{fontSize:15, fontWeight:600, color:T.attioText}}>Edit Navigation</div>
+          <button onClick={onClose} title="Close" aria-label="Close" style={{border:'none', background:'transparent', cursor:'pointer', display:'flex'}}>
             <Icon name="close" size={16} color={T.gray600}/>
           </button>
         </div>
         <div style={{flex:1, minHeight:0, overflowY:'auto', padding:'10px 12px'}}>
           <NavManagementList draft={draft} setDraft={setDraft}/>
         </div>
-        <div style={{display:'flex', alignItems:'center', gap:10, padding:'14px 20px', borderTop:`1px solid ${T.border}`}}>
-          <button onClick={onApply} style={{border:'none', background:T.black, color:'#fff', borderRadius:8, padding:'9px 20px', fontSize:13, fontWeight:600, cursor:'pointer'}}>Apply</button>
-          <button onClick={onClose} style={{border:`1px solid ${T.borderStrong}`, background:'#fff', color:T.attioText, borderRadius:8, padding:'9px 16px', fontSize:13, cursor:'pointer'}}>Cancel</button>
+        {/* As Settings → Navigation: Cancel, then Save, on the right. */}
+        <div style={{display:'flex', alignItems:'center', justifyContent:'flex-end', gap:8, padding:'14px 20px', borderTop:`1px solid ${T.border}`}}>
+          <StSecondary label="Cancel" onClick={onClose}/>
+          <StCta label="Save" onClick={onApply}/>
         </div>
       </div>
     </div>

@@ -314,7 +314,7 @@ function buildActivitySummary(contact, acts, lead){
   // The next task: the soonest due (tasks without a due date after those with one).
   else if(open.length){ const next = [...open].sort((x, y) => (x.due ? new Date(x.due).getTime() : Infinity) - (y.due ? new Date(y.due).getTime() : Infinity))[0];
     parts.push(`Next task: ${next.title}${next.due ? `, due ${fmtActDate(next.due)}` : ''}.`); }
-  else if(acts.length) parts.push('No open tasks.');
+  else if(acts.length) parts.push('No open tasks');
   return parts.join(' ');
 }
 
@@ -374,7 +374,8 @@ function activityActor(a, contact){
 
 /* Every activity kind that summarised lists show (meetings included). */
 const listedActivities = (acts) => acts;
-const fmtActStamp = (d) => `${d.toLocaleDateString('en-US', {month:'short', day:'numeric'})} · ${fmtActTime(d)}`;
+// One date-and-time form everywhere: "Oct 20, 3:00 PM" (the year too outside the current year).
+const fmtActStamp = (d) => `${fmtActDate(d)}, ${fmtActTime(d)}`;
 
 /* A call's type: Inbound (the customer called in) or Outbound. Older calls without a direction
    are inbound when the customer made them. */
@@ -667,7 +668,7 @@ function HistoryItem({a, last}){
 
 /* Complete history, newest first, grouped by month. */
 function ActivityHistory({acts}){
-  if(!acts.length) return <div style={{fontSize:12.5, color:T.attioFaint}}>No activity yet.</div>;
+  if(!acts.length) return <div style={{fontSize:12.5, color:T.attioFaint}}>No activity yet</div>;
   const groups = [];
   acts.forEach(a => {
     const key = a.at.toLocaleDateString('en-US', {month:'long', year:'numeric'});

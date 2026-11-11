@@ -84,7 +84,7 @@ function RecordHubProvider({value, children}){
   const [quote, setQuote] = React.useState(null);         // {mode:'new', object, id} | {mode:'edit', id}
   const [toast, setToast] = React.useState(null);
   const toastTimer = React.useRef(null);
-  const showToast = (m) => { setToast(m); clearTimeout(toastTimer.current); toastTimer.current = setTimeout(()=>setToast(null), 2200); };
+  const showToast = (m) => { setToast(m); clearTimeout(toastTimer.current); toastTimer.current = setTimeout(()=>setToast(null), TOAST_MS); };
   const hub = {...value,
     composeEmail:(opts) => setComposer(opts || {}),
     // One call at a time: another can't start while a call's panel is open (it would be saved on the wrong record).

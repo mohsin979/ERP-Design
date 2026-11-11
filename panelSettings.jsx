@@ -111,7 +111,7 @@ function PanelSettingsModal({draft, setDraft, sample, onApply, onClose, kind = C
   const preview = kind.renderPreview(draft, sample);
 
   return (
-    <SettingsModalShell title="View settings" sections={kind.sections} order={draft.order}
+    <SettingsModalShell title="Side Panel Settings" sections={kind.sections} order={draft.order}
       onReorder={(from, to)=>set('order', o => moveItem(o, from, to))}
       section={section} onSection={setSection} onApply={onApply} onClose={onClose} fixed={['avatarSubtitle']}
       preview={preview && (
@@ -120,8 +120,8 @@ function PanelSettingsModal({draft, setDraft, sample, onApply, onClose, kind = C
 
       {section === 'avatarSubtitle' && (
         <div style={{padding:'4px 6px', maxWidth:320}}>
-          <label style={fieldLabel}>Shown under the name</label>
-          <FormSelect value={draft.subtitle ?? ''} placeholder="None" options={kind.subtitleOptions} onChange={v=>set('subtitle', v)}/>
+          <label style={fieldLabel}>Subtitle</label>
+          <FormSelect value={draft.subtitle ?? ''} placeholder="Select subtitle" options={kind.subtitleOptions} onChange={v=>set('subtitle', v)}/>
         </div>
       )}
 
@@ -145,7 +145,7 @@ function PanelSettingsModal({draft, setDraft, sample, onApply, onClose, kind = C
               <Icon name="trash" size={15} color={T.gray600}/>
             </button>
           </>)}/>
-        {draft.dropdowns.length === 0 && <div style={{fontSize:12.5, color:T.gray400, padding:'8px 6px'}}>No dropdowns.</div>}
+        {draft.dropdowns.length === 0 && <div style={{fontSize:12.5, color:T.gray400, padding:'8px 6px'}}>No dropdowns yet</div>}
         {/* Add one of the dropdown types not already in the list. */}
         <div style={{position:'relative', alignSelf:'flex-start', padding:'4px 6px'}}>
           <button disabled={!missing.length} onClick={()=>setAddOpen(o=>!o)}

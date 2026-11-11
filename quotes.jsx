@@ -16,7 +16,7 @@
      4. Terms & Conditions — rich text;
      5. E-Signature — Require e-signature adds a signature section for the customer;
      6. Branding — the quotation as the customer sees it, in the workspace's brand (Marketing →
-        Brand: its full logo); Save as template, Save as draft, Send.
+        Brand: its full logo); Save as Template, Save as Draft, Send Quote.
    A quote keeps its own copy of each service as quoted. Its number (Q-<year>-<nnnn>) comes from a
    counter that only goes up, so a deleted quote's number isn't reused. An installment's amount
    typed on the Payment Terms step is kept as typed; amounts set by percentage round to the cent,
@@ -222,7 +222,7 @@ function QuoteDocument({quote}){
               ))}
             </div>
           ); })}
-          {!(quote.items || []).length && <div style={{fontSize:13, color:T.attioMuted, padding:'12px 0'}}>No services yet.</div>}
+          {!(quote.items || []).length && <div style={{fontSize:13, color:T.attioMuted, padding:'12px 0'}}>No services yet</div>}
         </div>
 
         {/* The money: subtotal, discount, discounted subtotal, VAT, total. */}
@@ -340,14 +340,14 @@ function QuoteServicesFields({q, set, checks, templates, onUseTemplate}){
     <div style={{display:'grid', gridTemplateColumns: templates ? '200px minmax(0, 1fr) minmax(0, 1fr)' : '200px minmax(0, 1fr)', gap:12, alignItems:'end'}}>
       <div style={{minWidth:0}}><label style={label}>Currency</label><FormSelect value={cur} options={currencyOptions()} onChange={setCurrency}/></div>
       {templates && <div style={{minWidth:0}}><label style={label}>Quote template</label>
-        <FormSelect value={q.templateId || ''} placeholder={templates.length ? 'Select a quote template' : 'No quote templates yet'}
+        <FormSelect value={q.templateId || ''} placeholder={templates.length ? 'Select quote template' : 'No quote templates yet'}
           options={templates.map(t => ({value:t.id, label:`${t.code} · ${t.name}`}))} onChange={onUseTemplate}/></div>}
       <div style={{display:'flex', alignItems:'flex-end', gap:8, minWidth:0}}>
         <div style={{flex:1, minWidth:0}}><label style={label}>Add a service</label>
           <SearchableSelect value={pick} options={catalog.map(s => ({value:s.id, label:`${s.name} · ${fmtMoney(servicePrice(withMilestonePrices(s)), s.currency)}`}))} onChange={setPick}
-            placeholder={hub.services.length ? 'Select a service' : 'No services yet'} searchPlaceholder="Search services"/></div>
+            placeholder={hub.services.length ? 'Select service' : 'No services yet'} searchPlaceholder="Search services"/></div>
         <StCta label="Add" disabled={!pick} onClick={()=>addService(pick)}/>
-        {templateCan('services', 'create') && <StSecondary label="New service" onClick={()=>setCreating(true)}/>}
+        {templateCan('services', 'create') && <StSecondary label="New Service" onClick={()=>setCreating(true)}/>}
       </div>
     </div>
     {q.items.map(it => (
@@ -473,13 +473,13 @@ function QuoteBuilder({mode, id, object, onClose, placement = 'fixed'}){
   const brand = orgBrand();
   const last = QUOTE_STEPS.length - 1;
   return (
-    <CreatePanelFrame title={existing ? `Edit Quote ${existing.number}` : 'New Quote'} onClose={()=>onClose()} placement={placement} width={QUOTE_PANEL_W} flush
+    <CreatePanelFrame title={existing ? 'Edit Quote' : 'Add Quote'} onClose={()=>onClose()} placement={placement} width={QUOTE_PANEL_W} flush
       actions={<>
         {step > 0 && <StSecondary label="Back" onClick={()=>setStep(s => s - 1)}/>}
         <StSecondary label="Cancel" onClick={()=>onClose()}/>
         {step < last ? <StCta label="Next" disabled={!stepOk[step]} onClick={()=>setStep(s => s + 1)}/>
-          : <>{templateCan('quoteTemplates', 'create') && <StSecondary label="Save as template" onClick={()=>setTemplating(q.title.trim() || (q.items[0] && q.items[0].name) || '')}/>}
-              <StSecondary label={existing ? 'Save changes' : 'Save as draft'} onClick={()=>save(false)}/><StCta label="Send quote" disabled={!!q.validUntil && q.validUntil < ymdOf(new Date())} onClick={()=>save(true)}/></>}
+          : <>{templateCan('quoteTemplates', 'create') && <StSecondary label="Save as Template" onClick={()=>setTemplating(q.title.trim() || (q.items[0] && q.items[0].name) || '')}/>}
+              <StSecondary label={existing ? 'Save Changes' : 'Save as Draft'} onClick={()=>save(false)}/><StCta label="Send Quote" disabled={!!q.validUntil && q.validUntil < ymdOf(new Date())} onClick={()=>save(true)}/></>}
       </>}>
       {/* The steps, in their own column on the left. */}
       <div style={{width:QUOTE_STEPPER_W, flexShrink:0, borderRight:`1px solid ${T.border}`, padding:'16px 12px', display:'flex', flexDirection:'column', gap:2}}>
@@ -503,12 +503,12 @@ function QuoteBuilder({mode, id, object, onClose, placement = 'fixed'}){
 
           {/* 1 · Basics */}
           {step === 0 && stack(<>
-            <Field label="Recipient name"><input value={q.recipient.name} onChange={e=>set({recipient:{...q.recipient, name:e.target.value}})} style={fieldText}/></Field>
-            <Field label="Recipient email"><input value={q.recipient.email} onChange={e=>set({recipient:{...q.recipient, email:e.target.value}})}
+            <Field label="Recipient Name"><input value={q.recipient.name} onChange={e=>set({recipient:{...q.recipient, name:e.target.value}})} style={fieldText}/></Field>
+            <Field label="Recipient Email"><input value={q.recipient.email} onChange={e=>set({recipient:{...q.recipient, email:e.target.value}})}
               style={{...fieldText, borderColor: q.recipient.email && !validEmail ? T.red : T.borderStrong}}/></Field>
-            <Field label="Quote title"><input value={q.title} onChange={e=>set({title:e.target.value})} placeholder="The first service's name, unless you name it" style={fieldText}/></Field>
+            <Field label="Quote Title"><input value={q.title} onChange={e=>set({title:e.target.value})} placeholder="e.g. US NIW Petition" style={fieldText}/></Field>
             <Field label="Description"><RichTextEditor value={q.description} onChange={(v)=>set({description:v})} ariaLabel="Quote description"/></Field>
-            <Field label="Valid until"><DateField value={q.validUntil} onChange={(v)=>set({validUntil:v})}/></Field>
+            <Field label="Valid Until"><DateField value={q.validUntil} onChange={(v)=>set({validUntil:v})}/></Field>
           </>)}
 
           {/* 2 · Services */}
@@ -548,8 +548,8 @@ function QuoteBuilder({mode, id, object, onClose, placement = 'fixed'}){
           <div style={{maxHeight:'70vh', overflowY:'auto'}}><QuoteDocument quote={preview}/></div>
         </StModal>, document.body)}
       {templating != null && ReactDOM.createPortal(
-        <StModal title="Save as template" primary="Save template" canSubmit={!!templating.trim()} onCancel={()=>setTemplating(null)} onSubmit={()=>saveTemplate(templating.trim())}>
-          <div><label style={fieldLabel}>Template name</label><input autoFocus value={templating} onChange={e=>setTemplating(e.target.value)} style={fieldInput}/></div>
+        <StModal title="Save as Template" primary="Save as Template" canSubmit={!!templating.trim()} onCancel={()=>setTemplating(null)} onSubmit={()=>saveTemplate(templating.trim())}>
+          <div><label style={fieldLabel}>Template Name</label><input autoFocus value={templating} onChange={e=>setTemplating(e.target.value)} style={fieldInput}/></div>
           <div style={{fontSize:12.5, color:T.attioMuted}}>Code {nextTemplateCode(templates)}</div>
         </StModal>, document.body)}
     </CreatePanelFrame>
@@ -665,7 +665,7 @@ function InstallmentsEditor({rows, onChange, total, newId, title = 'Installments
       <div>
         <button type="button" onClick={()=>onChange([...rows, {id:newId(), description:'', percent: rows.length ? String(Math.max(0, Math.round((100 - sum) * 100) / 100)) : '100',
           due: rows.length ? {type:'days', days:''} : {type:'days', days:0}}])} style={btnSecondarySm}>
-          <Icon name="plus" size={12} color={T.gray600}/> Add installment</button>
+          <Icon name="plus" size={12} color={T.gray600}/> Add Installment</button>
       </div>
     </div>
   );
@@ -695,10 +695,10 @@ function QuoteSignaturePreview({name, brand = orgBrand()}){
 function quoteActions(hub, q, {onDelete, onEdit, onSign} = {}){
   const expired = quoteExpired(q);
   return [
-    ...(q.status === 'sent' && !expired && onSign ? [{label:'Mark as signed', onClick:()=>onSign(q)}] : []),
-    ...(q.status === 'draft' ? [{label:'Edit quote', onClick:()=>onEdit ? onEdit(q.id) : hub.editQuote(q.id)}] : []),
-    ...(q.status === 'draft' && !expired ? [{label:'Send quote', onClick:()=>sendQuoteVia(hub, q)}] : []),
-    ...(q.status !== 'signed' ? [{label:'Delete quote', danger:true, onClick:()=>onDelete && onDelete(q)}] : []),
+    ...(q.status === 'sent' && !expired && onSign ? [{label:'Mark as Signed', onClick:()=>onSign(q)}] : []),
+    ...(q.status === 'draft' ? [{label:'Edit Quote', onClick:()=>onEdit ? onEdit(q.id) : hub.editQuote(q.id)}] : []),
+    ...(q.status === 'draft' && !expired ? [{label:'Send Quote', onClick:()=>sendQuoteVia(hub, q)}] : []),
+    ...(q.status !== 'signed' ? [{label:'Delete Quote', danger:true, onClick:()=>onDelete && onDelete(q)}] : []),
   ];
 }
 /* A sent quote's signed copy came back: when it was signed, and the copy (optional, ≤2 MB). The
@@ -724,11 +724,11 @@ function SignQuoteModal({quote, onCancel, onSigned}){
     onSigned && onSigned();
   };
   return ReactDOM.createPortal(
-    <StModal title={`Mark ${quote.number} as signed`} primary="Mark as signed" canSubmit={dateOk} onCancel={onCancel} onSubmit={()=>dateOk && save()}>
+    <StModal title="Mark as Signed" primary="Mark as Signed" canSubmit={dateOk} onCancel={onCancel} onSubmit={()=>dateOk && save()}>
       <div><label style={fieldLabel}>Signed on</label><DateField required value={date} onChange={setDate}/>
         {date && !dateOk && <div style={{fontSize:12, color:T.red, marginTop:4}}>Choose a date from {fmtQuoteDate(sentOn || today)} to today.</div>}</div>
       <div>
-        <label style={fieldLabel}>Signed copy</label>
+        <label style={fieldLabel}>Signed Copy</label>
         <EvidenceFile value={copy} onChange={pickFile} onClear={()=>setCopy(null)} accept=".pdf,image/*"/>
         {error && <div style={{fontSize:12, color:T.red, marginTop:4}}>{error}</div>}
       </div>
@@ -749,15 +749,15 @@ function EvidenceFile({value, onChange, onClear, accept, tall}){
     <input ref={ref} type="file" accept={accept} style={{display:'none'}} onChange={e=>{ onChange(e.target.files[0]); e.target.value = ''; }}/>
     <button type="button" onClick={()=>ref.current.click()} style={tall
       ? {...btnSecondarySm, width:'100%', height:74, justifyContent:'center', fontSize:13, border:`1px solid ${T.borderStrong}`}
-      : btnSecondarySm}><Icon name="paperclip" size={13} color={T.gray600}/> Upload file</button>
+      : btnSecondarySm}><Icon name="paperclip" size={13} color={T.gray600}/> Upload File</button>
   </>);
 }
 function DeleteQuoteModal({quote, onCancel, onDeleted}){
   const hub = useRecordHub();
   return (
-    <StModal title="Delete quote" primary="Delete quote" danger onCancel={onCancel}
+    <StModal title="Delete Quote" primary="Delete Quote" danger onCancel={onCancel}
       onSubmit={()=>{ hub.setQuotes(qs => qs.filter(x => x.id !== quote.id)); hub.toast(`Quote ${quote.number} deleted`); onDeleted && onDeleted(); }}>
-      <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>{quote.number} · {quote.title} will be deleted. The record's activity keeps that it was {quote.status === 'sent' ? 'sent' : 'created'}.</div>
+      <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>{quote.number} · {quote.title} will be deleted. The record's activity keeps that it was {quote.status === 'sent' ? 'sent' : 'created'}. This can't be undone.</div>
     </StModal>
   );
 }
@@ -797,12 +797,12 @@ function RecordQuotesTab({contact}){
       <div style={{display:'flex', alignItems:'center', gap:10, padding:'12px 20px', borderBottom:`1px solid ${T.border}`, flexShrink:0}}>
         <span style={{fontSize:13, color:T.attioMuted}}>{plural(list.length, 'quote')}</span>
         <div style={{flex:1}}/>
-        {can('create') && <button onClick={()=>setBuilder({mode:'new'})} style={{...btnPrimarySm(), display:'inline-flex', alignItems:'center', gap:6}}><Icon name="plus" size={13} color="#fff"/> New quote</button>}
+        {can('create') && <button onClick={()=>setBuilder({mode:'new'})} style={{...btnPrimarySm(), display:'inline-flex', alignItems:'center', gap:6}}><Icon name="plus" size={13} color="#fff"/> Add Quote</button>}
       </div>
       <div style={{flex:1, minHeight:0, display:'flex', overflow:'hidden', position:'relative'}}>
         <div style={{width:380, flexShrink:0, overflowY:'auto', borderRight:`1px solid ${T.border}`, padding:'8px 0'}}>
           {list.map(q => <QuoteNavItem key={q.id} q={q} selected={selected && selected.id === q.id} onSelect={()=>setSelectedId(q.id)}/>)}
-          {!list.length && <div style={{fontSize:13, color:T.attioMuted, padding:'24px 20px', textAlign:'center'}}>No quotes yet.</div>}
+          {!list.length && <EmptyState compact title="No quotes yet"/>}
         </div>
         <div style={{flex:1, minWidth:0, minHeight:0, display:'flex', flexDirection:'column'}}>
           {selected && (
@@ -840,7 +840,7 @@ function QuoteActivityDetail({a, contact}){
 /* ── Tools → Quotes ── every quotation in the workspace. */
 const QUOTE_COLUMNS = [
   {key:'number', label:'Quote', width:130}, {key:'title', label:'Title', width:240}, {key:'recordName', label:'Record', width:200}, {key:'objectLabel', label:'Record Type', width:130},
-  {key:'recipientName', label:'Recipient', width:180}, {key:'totalText', label:'Total', width:140}, {key:'statusLabel', label:'Status', width:110},
+  {key:'recipientName', label:'Recipient', width:180}, {key:'totalText', label:'Total', width:140, money:true}, {key:'statusLabel', label:'Status', width:130},
   {key:'createdText', label:'Created', width:140}, {key:'createdBy', label:'Created By', width:160},
 ];
 function QuotesPage(){
@@ -865,7 +865,7 @@ function QuotesPage(){
     renderCell:(key, r) => key === 'number' ? <ContactName name={r.number} onOpen={()=>setOpenId(r.id)} style={{fontSize:'inherit', fontWeight:500}}/>
       : key === 'recordName' && r.recordName !== '—' ? <HubRecordLink object={r.object} id={r.recordId} name={r.recordName}/>
       : key === 'statusLabel' ? <QuoteStatusPill status={quoteStatusOf(r)}/> : undefined,
-    renderActions:(r) => <RowActionsMenu title="Quote actions" width={MENU_W} items={[{label:'View quote', onClick:()=>setOpenId(r.id)}, ...quoteActions(hub, hub.quotes.find(q => q.id === r.id), {onDelete:setDeleting, onEdit:edit, onSign:setSigning})]}/>,
+    renderActions:(r) => <RowActionsMenu title="Quote Actions" width={MENU_W} items={[{label:'View Quote', onClick:()=>setOpenId(r.id)}, ...quoteActions(hub, hub.quotes.find(q => q.id === r.id), {onDelete:setDeleting, onEdit:edit, onSign:setSigning})]}/>,
   };
   return (
     <div style={{flex:1, minWidth:0, minHeight:0, display:'flex', flexDirection:'column', position:'relative', overflow:'hidden'}}>
@@ -875,11 +875,11 @@ function QuotesPage(){
           {id:'qv-sent', name:'Sent', filters:{nodes:[{id:'f-qs', kind:'row', joinOp:'AND', prop:'statusLabel', op:'is', value:'Sent', value2:'', values:[]}]}}]}
         actions={() => <>
           {templateCan('services', 'create') && <button onClick={()=>setNewService(true)} style={toolbarButton}><Icon name="services" size={13} color={T.gray600}/> New service</button>}
-          <button onClick={()=>{ setOpenId(null); setBuilder({mode:'new'}); }} title="New quote" style={toolbarIconButton}><Icon name="plus" size={14} color={T.gray800}/></button>
+          <button onClick={()=>{ setOpenId(null); setBuilder({mode:'new'}); }} title="Add Quote" style={toolbarIconButton}><Icon name="plus" size={14} color={T.gray800}/></button>
         </>}
         overlay={newService ? <ServiceFormPanel onCancel={()=>setNewService(false)} onSave={(vals)=>{ hub.setServices(ss => [...ss, newServiceRecord(vals)]); setNewService(false); hub.toast('Service created'); }}/>
           : builder ? <QuoteBuilder key={builder.id || 'new'} {...builder} onClose={(saved)=>{ setBuilder(null); if(saved) setOpenId(saved.id); }}/>
-          : open && <PageSidePanel width={560} title={`${open.number} · ${open.title}`} subtitle={`${QUOTE_STATUS[quoteStatusOf(open)].label} · ${fmtMoney(quoteTotal(open), quoteCurrency(open))}`}
+          : open && <PageSidePanel title={open.number}
           onClose={()=>setOpenId(null)} menuItems={quoteActions(hub, open, {onDelete:setDeleting, onEdit:edit, onSign:setSigning})}>
           <div style={{flex:1, overflowY:'auto', padding:'4px 20px 24px'}}><QuoteDocument quote={open}/></div>
         </PageSidePanel>}/>

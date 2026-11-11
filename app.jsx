@@ -510,7 +510,7 @@ function MainScreen({onOpenCrm, onOpenPeople, onOpenSettings}){
           border:`1px solid ${T.borderStrong}`, borderRadius:12, background:'#fff',
           padding:'18px 20px 12px', marginTop: notice ? 0 : 16,
         }}>
-          <div style={{fontSize:14, color:'#9A9A9A', minHeight:80}}>Tell me what you want to find or do today?</div>
+          <div style={{fontSize:14, color:'#9A9A9A', minHeight:80}}>What do you want to find or do?</div>
           <div style={{display:'flex', alignItems:'center', justifyContent:'flex-end', gap:8, paddingTop:12, borderTop:`1px solid ${T.border}`}}>
             <button style={iconBtnStyle}><Icon name="paperclip" size={16} color={T.gray600}/></button>
             <button style={{...iconBtnStyle, width:64, gap:4, fontSize:13, color:T.gray800}}>Auto <Icon name="chevDown" size={T.chevronSize} color={T.gray600}/></button>
@@ -530,22 +530,11 @@ function MainScreen({onOpenCrm, onOpenPeople, onOpenSettings}){
    beyond that — these pages are placeholders until their requirements arrive. */
 function EmptyCrmCanvas({activeId, label:objectLabel}){
   // Settings itself is a section, not a page: like the CRM root, it asks for a selection.
-  if(activeId === 'settings') return (
-    <div style={{flex:1, display:'flex', alignItems:'center', justifyContent:'center'}}>
-      <div style={{fontSize:13, color:T.gray400}}>Select an item from Settings</div>
-    </div>
-  );
-  const label = activeId ? (objectLabel || CRM_NAV_LABELS[activeId] || activeId) : null;
+  const label = activeId && activeId !== 'settings' ? (objectLabel || CRM_NAV_LABELS[activeId] || activeId) : null;
+  // A page that isn't defined yet (Reports, Notifications, Import & Export): the illustrated empty state.
   return (
-    <div style={{flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:6}}>
-      {label ? (
-        <>
-          <div style={{fontSize:15, fontWeight:600, color:T.gray800}}>{label}</div>
-          <div style={{fontSize:13, color:T.gray400}}>Functionality for this page hasn't been defined yet.</div>
-        </>
-      ) : (
-        <div style={{fontSize:13, color:T.gray400}}>Select an item from the CRM navigation</div>
-      )}
+    <div style={{flex:1, display:'flex', alignItems:'center', justifyContent:'center'}}>
+      <EmptyState title={label ? `${label} isn't defined yet` : activeId === 'settings' ? 'Select an item from Settings' : 'Select an item from the CRM navigation'}/>
     </div>
   );
 }
@@ -749,6 +738,7 @@ function App(){
   setContactPipelines(objectPipelines(settingsData, 'contacts'));
   setStagePipelines(settingsData.pipelines);
   setObjectNames(settingsData.objects);
+  setOwnerLabels(settingsData.properties);   // owners named by each record type's owner property (board.jsx)
   setAccessContext({user:signedInUser, users:settingsData.users, data:settingsData,
     history:(object, id) => object === 'contacts' ? contactActivities[id] : object === 'deals' ? dealActivities[id] : object === 'customers' ? customerActivities[id] : []});
   /* The workflow engine: every deal and customer change goes through engine.setDeals /
@@ -855,7 +845,7 @@ function App(){
   const [customerForm, setCustomerForm] = React.useState(null);   // {initial, links:{contactId, dealIds}}
   const [appToast, setAppToast] = React.useState(null);
   const appToastTimer = React.useRef(null);
-  const showAppToast = (message, action) => { setAppToast({message, action}); clearTimeout(appToastTimer.current); appToastTimer.current = setTimeout(()=>setAppToast(null), 4000); };
+  const showAppToast = (message, action) => { setAppToast({message, action}); clearTimeout(appToastTimer.current); appToastTimer.current = setTimeout(()=>setAppToast(null), action ? TOAST_ACTION_MS : TOAST_MS); };
   /* Saving (store.jsx DB): data changed in another tab — this one stops saving and offers a reload;
      a failed save — said while it's tried again, then "Changes saved". Shown until resolved. */
   const [saveNotice, setSaveNotice] = React.useState(null);   // {kind:'stale'|'failed', message, action?}

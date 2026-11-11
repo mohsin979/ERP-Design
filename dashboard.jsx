@@ -227,7 +227,7 @@ function companyVelocity(data, range){
 /* ── Formatting ─────────────────────────────────────────────────────────────────────────── */
 // A duration in hours: minutes under an hour, hours under two days, else days.
 const fmtHours = (h) => h == null ? '—' : h < 1 ? `${Math.round(h * 60)} min` : h < 48 ? `${Math.round(h)} h` : `${(h / 24).toFixed(1)} days`;
-const fmtDays = (d) => d == null ? '—' : `${d.toFixed(1)} d`;
+const fmtDays = (d) => d == null ? '—' : `${d.toFixed(1)} days`;   // one duration format (as fmtHours past two days)
 
 /* ── Pieces ─────────────────────────────────────────────────────────────────────────────── */
 const dashCard = {background:'#fff', border:`1px solid ${T.attioLine}`, borderRadius:12};
@@ -430,7 +430,7 @@ function DashKpiRow({ids, ctx, replay, arrange}){
             <Icon name={t.icon} size={11} color={hero ? DASH_BLUE : '#fff'}/>
           </span>
           {/* A label that doesn't fit wraps (narrow windows) rather than being cut. */}
-          <span style={{minWidth:0, overflowWrap:'anywhere', flex:1}}>{t.label}</span>
+          <span style={{minWidth:0, overflowWrap:'break-word', hyphens:'auto', flex:1}}>{t.label}</span>
           {movable && <Icon name="dragHandle" size={14} color={T.gray400}/>}
         </span>
         {movable && (
@@ -637,7 +637,8 @@ function fameRows(data, range, sort, violations = []){
 }
 // The tab's ranking: its ranking column, best first.
 const fameDefaultSort = (tab) => ({key:tab.rankBy, dir: tab.best === 'high' ? 'desc' : 'asc'});
-const fameColumns = (tab) => [{key:'name', label:'Sales Professional', name:true}, ...tab.columns];
+// The person column is named as the deals' owner property (Deal Owner).
+const fameColumns = (tab) => [{key:'name', label:ownerLabel('deals'), name:true}, ...tab.columns];
 
 /* A count that opens a list — the association dropdown's menu (MenuShell / MenuItem), placed over
    the page so the table's scroll area doesn't clip it; picking an item opens it. `labelOf` / `icon`:
@@ -762,7 +763,7 @@ function KeyIndicators({data, range, rangeKey, violations, onOpenUser, onOpenDea
           <span style={{...dashTitle, fontSize:15, flex:1}}>Key Indicator User</span>
           <div style={{position:'relative', width:'min(240px, 100%)'}}>
             <div style={{position:'absolute', left:9, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', display:'flex'}}><Icon name="search" size={13} color={T.gray400}/></div>
-            <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search" aria-label="Search sales professionals"
+            <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search users" aria-label="Search users"
               style={{width:'100%', height:32, padding:'0 10px 0 28px', fontSize:12.5, fontFamily:'inherit', color:T.attioText, border:`1px solid ${T.borderStrong}`, borderRadius:8, background:'#fff', outline:'none'}}/>
           </div>
         </div>
@@ -771,9 +772,9 @@ function KeyIndicators({data, range, rangeKey, violations, onOpenUser, onOpenDea
         </div>
         <FameTable tab={tab} rows={rows.slice((at - 1) * FAME_PAGE, at * FAME_PAGE)} order={order} sort={sort}
           onSort={(s)=>setSorts(x => ({...x, [tabId]:s}))} onMove={move} onOpenUser={onOpenUser} onOpenDeal={onOpenDeal} onOpenViolation={onOpenViolation}/>
-        {q && !rows.length && <div style={{fontSize:13, color:T.attioMuted, padding:'0 4px 12px'}}>No sales professional matches “{query.trim()}”.</div>}
+        {q && !rows.length && <div style={{fontSize:13, color:T.attioMuted, padding:'0 4px 12px'}}>No users match "{query.trim()}"</div>}
       </div>
-      <Pagination page={at} totalPages={pages} onChange={setPage} totalRows={rows.length} noun="sales professional"/>
+      <Pagination page={at} totalPages={pages} onChange={setPage} totalRows={rows.length} noun="user"/>
     </section>
   );
 }
@@ -853,7 +854,7 @@ function DueTasksWidget({hub}){
     .sort((x, y) => new Date(x.act.due) - new Date(y.act.due));
   const entry = open ? hubActivities(hub, 'task').find(e => e.act.id === open.actId) || null : null;
   const team = (hub.data.users || []).filter(u => u.status === 'Activated').map(u => u.name);
-  const empty = {today:'No tasks due today.', overdue:'No overdue tasks.', week:'No tasks due this week.'}[quick];
+  const empty = {today:'No tasks due today', overdue:'No overdue tasks', week:'No tasks due this week'}[quick];
   return (
     <DashWidgetCard title={<span>Total Tasks <span style={{fontSize:12.5, fontWeight:400, color:T.attioMuted, fontVariantNumeric:'tabular-nums', marginLeft:4}}>{tasks.length}</span></span>}>
       <div role="radiogroup" aria-label="Quick filter" style={{display:'flex', gap:6, flexWrap:'wrap'}}>
@@ -869,8 +870,8 @@ function DueTasksWidget({hub}){
         </div>
       ) : <div style={{fontSize:13, color:T.attioMuted}}>{empty}</div>}
       {open && (
-        <PageSidePanel width={560} title={(entry && entry.act.title) || 'Task'} subtitle={entry ? `${HUB_NOUN[entry.object]} · ${entry.record.name}` : ''}
-          onClose={()=>setOpen(null)} menuItems={entry ? [{label:`Open ${HUB_NOUN[entry.object].toLowerCase()}`, onClick:()=>hub.openRecord(entry.object, entry.recordId, 'panel')}] : undefined}>
+        <PageSidePanel title={(entry && entry.act.title) || 'Task'}
+          onClose={()=>setOpen(null)} menuItems={entry ? [{label:`Open ${HUB_NOUN[entry.object]}`, onClick:()=>hub.openRecord(entry.object, entry.recordId, 'panel')}] : undefined}>
           <div style={{flex:1, minHeight:0, display:'flex', flexDirection:'column'}}>
             {entry ? <RecordAccessCtx.Provider value={{object:entry.object, record:entry.record}}>
               <ActivityDetail key={entry.act.id} a={entry.act} contact={{...entry.record, owner:userLabel(entry.record.owner) || entry.record.owner}} team={team}
@@ -1001,7 +1002,7 @@ function AllKpisPanel({ctx, filter: initial, onClose}){
   const at = {...ctx, range:dashRangeOf(filter, new Date(ctx.data.now))};
   const cell = {padding:'10px 20px', fontSize:13, borderTop:`1px solid ${T.attioLine}`};
   return (
-    <PageSidePanel width={460} title="All KPIs" onClose={onClose}>
+    <PageSidePanel width={DETAIL_SIDE_W} title="All KPIs" onClose={onClose}>
       <div style={{flexShrink:0, padding:'12px 20px'}}><DateFilter value={filter} onChange={setFilter}/></div>
       <div style={{flex:1, minHeight:0, overflowY:'auto', paddingBottom:16}}>
         <table style={{width:'100%', borderCollapse:'collapse'}}>
@@ -1051,14 +1052,12 @@ function DashViewSettingsModal({config, onApply, onRearrange, onClose}){
   );
   const toolbar = (
     <div style={{padding:'0 20px 10px', display:'flex', alignItems:'center', gap:10}}>
-      <span style={{flex:1, fontSize:12.5, color:T.attioMuted}}>
-        {section === 'kpis' ? `One KPI pinned first and up to ${DASH_KPI_MAX_OTHERS} more · ${others.length} of ${DASH_KPI_MAX_OTHERS} selected` : 'Widgets arrange themselves in three columns by their width.'}
-      </span>
+      <span style={{flex:1, fontSize:12.5, color:T.attioMuted}}>{section === 'kpis' ? `${others.length} of ${DASH_KPI_MAX_OTHERS} selected` : ''}</span>
       <StSecondary label={<span style={{display:'inline-flex', alignItems:'center', gap:6}}><Icon name="dragHandle" size={12} color={T.gray800}/>Rearrange</span>} onClick={()=>onRearrange(draft)}/>
     </div>
   );
   return (
-    <SettingsModalShell title="Dashboard View Settings" sections={{kpis:'KPIs', widgets:'Widgets'}} order={[]} onReorder={()=>{}} fixed={['kpis', 'widgets']}
+    <SettingsModalShell title="Dashboard Settings" sections={{kpis:'KPIs', widgets:'Widgets'}} order={[]} onReorder={()=>{}} fixed={['kpis', 'widgets']}
       section={section} onSection={setSection} onClose={onClose} onApply={()=>onApply(draft)} toolbar={toolbar}
       footerNote={`Pinned first: ${(dashKpiDef(draft.prominent) || {}).label || '—'}`}>
       {section === 'kpis' ? DASH_KPI_GROUPS.map(g => (
@@ -1136,8 +1135,8 @@ function UserStatistics({person, userId, filter, setFilter, properties, values, 
         <div style={{display:'flex', alignItems:'center', gap:4}}>
           <span style={{flex:1, minWidth:0, fontSize:12.5, color:T.attioMuted}}>{userPinLabel(pool, pinned)}</span>
           {stat && <UserTrendButton label={stat.label} onClick={()=>onTrend(key)}/>}
-          <ActionsMenu title="Pinned item" width={250} height={50}>
-            {(close) => <MenuItem label="Pin another property or statistic" onClick={()=>{ close(); setPinning(true); }}/>}
+          <ActionsMenu title="Pinned Item Actions" width={250} height={50}>
+            {(close) => <MenuItem label="Pin Another Property or Statistic" onClick={()=>{ close(); setPinning(true); }}/>}
           </ActionsMenu>
         </div>
         <div style={{fontFamily:DASH_FIGURE_FONT, fontSize:30, fontWeight:700, color:T.attioText, lineHeight:1.1, fontVariantNumeric:'tabular-nums', overflowWrap:'anywhere'}}>{lead}</div>
@@ -1189,7 +1188,7 @@ function UserPinModal({pool, pinned, onApply, onClose}){
   const q = query.trim().toLowerCase();
   const shown = pool.map(g => ({...g, items:g.items.filter(it => !q || it.label.toLowerCase().includes(q) || g.label.toLowerCase().includes(q))})).filter(g => g.items.length);
   return (
-    <SettingsModalShell title="View settings" sections={{pinned:'Pinned Item'}} order={[]} onReorder={()=>{}} fixed={['pinned']}
+    <SettingsModalShell title="Pinned Item" sections={{pinned:'Pinned Item'}} order={[]} onReorder={()=>{}} fixed={['pinned']}
       section="pinned" onSection={()=>{}} onClose={onClose} onApply={()=>onApply(draft)}
       footerNote={`Pinned: ${userPinLabel(pool, draft)}`}
       toolbar={(
@@ -1198,7 +1197,7 @@ function UserPinModal({pool, pinned, onApply, onClose}){
             <div style={{position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', display:'flex'}}>
               <Icon name="search" size={13} color={T.gray400}/>
             </div>
-            <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search properties and statistics…"
+            <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search properties and statistics"
               style={{width:'100%', padding:'8px 10px 8px 30px', fontSize:13, fontFamily:'inherit', border:`1px solid ${T.borderStrong}`, borderRadius:8}}/>
           </div>
         </div>
@@ -1209,7 +1208,7 @@ function UserPinModal({pool, pinned, onApply, onClose}){
           {g.items.map(it => <SettingsCheckRow key={it.id} label={it.label} checked={draft === it.id} onToggle={()=>setDraft(it.id)}/>)}
         </div>
       ))}
-      {!shown.length && <div style={{fontSize:12.5, color:T.gray400, padding:'8px 6px'}}>Nothing matches “{query}”.</div>}
+      {!shown.length && <div style={{fontSize:12.5, color:T.gray400, padding:'8px 6px'}}>No matches for "{query}"</div>}
     </SettingsModalShell>
   );
 }
@@ -1280,7 +1279,7 @@ function DashboardPage(){
           {arranging && (
             <div style={{display:'flex', alignItems:'center', gap:10, padding:'10px 14px', borderRadius:12, background:'#fff', border:`1px solid ${T.borderStrong}`}}>
               <Icon name="dragHandle" size={14} color={T.gray600}/>
-              <span style={{flex:1, fontSize:13, color:T.attioText}}>Rearranging — drag the KPIs and widgets to reorder them; Pin as first changes the first KPI.</span>
+              <span style={{flex:1, fontSize:13, color:T.attioText}}>Rearranging</span>
               <StSecondary label="Cancel" onClick={()=>setArranging(null)}/>
               <StCta label="Done" onClick={()=>{ saveConfig(normalizeDashConfig(arranging)); setArranging(null); }}/>
             </div>

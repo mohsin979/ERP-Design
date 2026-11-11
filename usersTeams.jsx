@@ -16,7 +16,7 @@
    default views in the Contacts view system, with its View Settings, Save View, Filters, Table
    Settings and grid. Edit Permissions (row ⋯) writes the seat, preset and permissions back to
    the user. Edit User (row ⋯) opens the Edit User panel, as Edit contact: the User Properties,
-   saved with Save changes, and Edit User in HRMS (placeholder until HRMS exists). A
+   saved with Save Changes, and Edit User in HRMS (placeholder until HRMS exists). A
    user's name opens their profile panel: the same properties, then their statistics. Not
    defined yet (placeholder): Export, and the Seats, Teams and Permission Presets tabs.
    Edit Permissions follows the seat model (SEAT_TYPES): seat first (with remaining seats), then
@@ -744,7 +744,7 @@ function RecordViewsModule({schema, rows, defaultViews, columns, savedViews = tr
           onSubmit={()=>{ const next = views.filter(x => x.id !== v.id), d0 = defaultViews[0];
             const finalViews = next.length ? next : [makeRecordView(d0.id, d0.name, columns, {...d0, isDefault:true})];
             setViews(finalViews); if(activeViewId === v.id) setActiveViewId(finalViews[0].id); setDeletingView(null); }}>
-          <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>"{v.name}" will be deleted.</div>
+          <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>"{v.name}" will be deleted. This can't be undone.</div>
         </StModal> : null; })()}
       {tableSettingsDraft && (
         <TableSettingsModal draft={tableSettingsDraft} setDraft={setTableSettingsDraft} onClose={()=>setTableSettingsDraft(null)}
@@ -767,9 +767,10 @@ const teamName = (teams, tid) => (teams.find(t => t.id === tid) || {}).name || '
 /* ── Users ── the four status views; seat type and team are read from the seat and team records. */
 /* ── Edit User ── Users & Teams → a user's ⋯ → Edit User: the Edit contact panel (CreatePanelFrame +
    RecordFields) with the User Properties (Country, Language, Designation and any added). Footer:
-   Cancel, Edit User in HRMS (placeholder until HRMS exists), Save changes. */
+   Cancel, Edit User in HRMS (placeholder until HRMS exists), Save Changes. */
 const saveUserProfileIn = (setData, id, patch) => setData(d => ({...d, users:d.users.map(u => u.id === id ? {...u, profile:{...(u.profile || {}), ...patch}} : u)}));
 function UserEditPanel({data, setData, user, onClose, onStub}){
+  const hub = useRecordHub();
   const fields = (data.properties || []).filter(p => p.objectId === 'users' && !p.archived).map(p => ({...p, required:!!p.mandatory}));
   const current = ownerProfileMock(user.name, user).raw;
   const initial = Object.fromEntries(fields.map(p => [p.key, p.key in current ? current[p.key] : (user.profile || {})[p.key]]));
@@ -780,14 +781,15 @@ function UserEditPanel({data, setData, user, onClose, onStub}){
     setTried(true);
     if(Object.keys(formErrors(fields, v)).length) return;
     saveUserProfileIn(setData, user.id, storedValues(fields, v));
+    hub && hub.toast('User saved');
     onClose();
   };
   return (
-    <CreatePanelFrame title="Edit user" onClose={onClose} more={false} zIndex={130} actions={<>
+    <CreatePanelFrame title="Edit User" onClose={onClose} zIndex={130} actions={<>
       <StSecondary label="Cancel" onClick={onClose}/>
       <StSecondary label={<span style={{display:'inline-flex', alignItems:'center', gap:6}}>Edit User in HRMS <Icon name="externalLink" size={13} color={T.gray600}/></span>}
-        onClick={()=>onStub(`Edit User in HRMS · ${user.name}`)}/>
-      <StCta label="Save changes" onClick={submit}/>
+        onClick={()=>onStub('Edit User in HRMS')}/>
+      <StCta label="Save Changes" onClick={submit}/>
     </>}>
       <div style={{display:'grid', gridTemplateColumns:'minmax(0, 1fr)', gap:16}}>
         <RecordFields fields={fields} values={v} set={set} optionsFor={(p)=>p.options || []} tried={tried}/>
@@ -799,7 +801,7 @@ function UserEditPanel({data, setData, user, onClose, onStub}){
 /* Deactivate user: they lose access and their seat is freed; the records they own keep them as owner. */
 function DeactivateUserModal({user, onCancel, onConfirm}){
   return (
-    <StModal title="Deactivate user" primary="Deactivate user" danger onCancel={onCancel} onSubmit={onConfirm}>
+    <StModal title="Deactivate User" primary="Deactivate User" danger onCancel={onCancel} onSubmit={onConfirm}>
       <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>{user.name} will lose access to the CRM and their seat will be freed. The records they own stay theirs.</div>
     </StModal>
   );
@@ -810,11 +812,11 @@ function DeleteUserModal({user, owned, users, onCancel, onConfirm}){
   const [to, setTo] = React.useState('');
   const n = owned.length, needs = n > 0;
   return (
-    <StModal title="Delete user" primary="Delete user" danger canSubmit={!needs || !!to} onCancel={onCancel} onSubmit={()=>onConfirm(to || null)}>
+    <StModal title="Delete User" primary="Delete User" danger canSubmit={!needs || !!to} onCancel={onCancel} onSubmit={()=>onConfirm(to || null)}>
       <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>
-        {needs ? `${user.name} owns ${n} record${n === 1 ? '' : 's'}. Choose who takes them over, then delete ${user.name}.` : `${user.name} will be deleted.`} Their past activity keeps their name.
+        {needs ? `${user.name} owns ${n} record${n === 1 ? '' : 's'}. Choose who takes them over, then delete ${user.name}.` : `${user.name} will be deleted.`} Their past activity keeps their name. This can't be undone.
       </div>
-      {needs && <StField label="Reassign their records to">
+      {needs && <StField label="Reassign Their Records To">
         <PersonSelect value={to} people={users.filter(u => u.id !== user.id && u.status === 'Activated')} labelOf={(u)=>u.name} onChange={setTo} placeholder="Select user"/>
       </StField>}
     </StModal>
@@ -832,11 +834,11 @@ function BulkUsersModal({kind, users, skipped, owned, people, onCancel, onConfir
     <StModal title={`${del ? 'Delete' : 'Deactivate'} ${bulkPlural(n, 'User')}`} primary={del ? 'Delete' : 'Deactivate'} danger
       canSubmit={!del || ((!needs || !!to) && typed === 'Delete')} onCancel={onCancel} onSubmit={()=>onConfirm(to || null)}>
       <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>
-        {del ? `${needs ? `${n === 1 ? `${users[0].name} owns` : 'They own'} ${bulkPlural(owned, 'record')}. Choose who takes them over. ` : ''}${n === 1 ? 'Their past activity keeps their name.' : 'Their past activity keeps their names.'}`
+        {del ? `${needs ? `${n === 1 ? `${users[0].name} owns` : 'They own'} ${bulkPlural(owned, 'record')}. Choose who takes them over. ` : ''}${n === 1 ? "Their past activity keeps their name. This can't be undone." : "Their past activity keeps their names. This can't be undone."}`
           : n === 1 ? `${users[0].name} will lose access to the CRM and their seat will be freed. The records they own stay theirs.`
           : 'They lose access to the CRM and their seats are freed. The records they own stay theirs.'}{skip}
       </div>
-      {needs && <StField label="Reassign their records to">
+      {needs && <StField label="Reassign Their Records To">
         <PersonSelect value={to} people={people} labelOf={(u)=>u.name} onChange={setTo} placeholder="Select user"/>
       </StField>}
       {del && <input value={typed} onChange={e=>setTyped(e.target.value)} placeholder="Type Delete to confirm" aria-label="Type Delete to confirm" style={fieldInput}/>}
@@ -895,19 +897,20 @@ function UsersModule({data, setData, onStub, focus}){
     renderCell: (key, u) => key === 'name'
       // An active user opens their details (the Record Owner profile, editable here).
       ? <ContactName name={u.name} onOpen={()=>u.status === 'Activated' ? setViewingId(u.id) : onStub(u.name)} style={{fontSize:'inherit', fontWeight:500}}/>
+      : key === 'status' && u.status ? <StatusPill status={u.status} map={STATUS_PILLS}/>
       : undefined,
     /* Settings & Administration: Edit Permissions with Permission Management (Assign or Edit);
        Edit User, Change Seat and Change Team with Users & Teams → Edit; Deactivate and Delete with
        their own — each for Their Team users or All users. */
     renderActions: (u) => { const can = (action) => userAdminCan('users', action, u);
-      return <RowActionsMenu title="User actions" items={[
+      return <RowActionsMenu title="User Actions" items={[
         // Seats and permissions are for activated users (a deactivated user holds none); Reactivate brings one back, with no seat until given one.
         ...(u.status === 'Activated' && (userAdminCan('permissions', 'assign', u) || userAdminCan('permissions', 'edit', u)) ? [{label:'Edit Permissions', onClick:()=>setEditing(u)}] : []),
         ...(can('edit') ? [{label:'Edit User', onClick:()=>setEditingUser(u.id)}, ...(u.status === 'Activated' ? [{label:'Change Seat', onClick:()=>setChangingSeat(u)}] : []), {label:'Change Team', onClick:()=>setChangingTeam(u)}] : []),
         ...(can('deactivate') && u.status !== 'Activated' ? [{label:'Reactivate User', onClick:()=>setData(d => ({...d, users:d.users.map(x => x.id === u.id ? {...x, status:'Activated'} : x)}))}] : []),
         // Not yourself, and not the last Super Admin: someone must be able to run the CRM.
-        ...(can('deactivate') && u.status === 'Activated' ? [{label:'Deactivate user', disabled:protectedUser(u), onClick:()=>!protectedUser(u) && setDeactivating(u)}] : []),
-        ...(can('delete') ? [{label:'Delete user', danger:!protectedUser(u), disabled:protectedUser(u), onClick:()=>!protectedUser(u) && setDeleting(u)}] : []),
+        ...(can('deactivate') && u.status === 'Activated' ? [{label:'Deactivate User', disabled:protectedUser(u), onClick:()=>!protectedUser(u) && setDeactivating(u)}] : []),
+        ...(can('delete') ? [{label:'Delete User', danger:!protectedUser(u), disabled:protectedUser(u), onClick:()=>!protectedUser(u) && setDeleting(u)}] : []),
       ]}/>; },
   };
   const ownedBy = (uid) => ['contacts', 'deals', 'customers'].flatMap(o => (((hub && hub.records) || {})[o] || []).filter(r => r.owner === uid).map(r => ({object:o, id:r.id})));
@@ -919,7 +922,7 @@ function UsersModule({data, setData, onStub, focus}){
       actions={(btn) => <>
         <button onClick={()=>onStub('Export')} style={btn}><Icon name="export" size={13} color={T.gray600}/> Export</button>
         {/* Add user — the Contacts toolbar's icon-only + after Export (Users & Teams → Add users). */}
-        {userAdminCan('users', 'add') && <button onClick={()=>setAddingUser(true)} title="Add user" style={iconBtn}><Icon name="plus" size={14} color={T.gray800}/></button>}
+        {userAdminCan('users', 'add') && <button onClick={()=>setAddingUser(true)} title="Add User" style={iconBtn}><Icon name="plus" size={14} color={T.gray800}/></button>}
       </>}>
       {viewing && <OwnerProfilePanel key={viewing.id} name={viewing.id} user={viewing} editable fixed properties={data.properties.filter(p => p.objectId === 'users' && !p.archived)} onClose={()=>setViewingId(null)} onSaveProfile={(patch)=>saveProfile(viewing.id, patch)}/>}
       {editingUser && data.users.some(u => u.id === editingUser) && <UserEditPanel data={data} setData={setData} user={data.users.find(u => u.id === editingUser)}
@@ -936,6 +939,7 @@ function UsersModule({data, setData, onStub, focus}){
           // A CRM user is one of the Organization's users, with this CRM instance (workspaces.jsx).
           joinOrganization(u);
           setAddingUser(false);
+          hub && hub.toast('User added');
           // Save and Set Permission: straight into Edit Permissions for the new user.
           if(setPermissions) setEditing({...u, seat:'', team:teamName(data.teams, u.teamId)});
         }}/>}
@@ -989,7 +993,7 @@ function AddUserModal({data, onClose, onAdd, onStub}){
       <div style={{display:'grid', gridTemplateColumns:'minmax(0, 1fr) minmax(0, 1fr)', alignItems:'stretch'}}>
         <div style={{display:'flex', flexDirection:'column', gap:14, minWidth:0, paddingRight:24}}>
           <div>
-            <label style={fieldLabel} htmlFor="add-user-search">Search employees in HRMS</label>
+            <label style={fieldLabel} htmlFor="add-user-search">Search Employees in HRMS</label>
             <div style={{position:'relative'}}>
               <div style={{position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', display:'flex'}}><Icon name="search" size={13} color={T.gray400}/></div>
               <input id="add-user-search" autoFocus value={query} onChange={e=>{ setQuery(e.target.value); setPicked(null); }} placeholder="Name or email" style={{...fieldInput, paddingLeft:30}}/>
@@ -1045,10 +1049,10 @@ function ChangeSeatModal({data, user, onClose, onSave}){
   const [type, setType] = React.useState(current || SEAT_TYPES[0].key);
   const n = seatsAvailable(data.seats, type, user.id);
   return (
-    <StModal title="Change Seat" primary="Change seat" canSubmit={type !== current && n > 0} onCancel={onClose} onSubmit={()=>onSave(type)}>
+    <StModal title="Change Seat" primary="Change Seat" canSubmit={type !== current && n > 0} onCancel={onClose} onSubmit={()=>onSave(type)}>
       <div style={stTextB}>{user.name} · {current ? `Currently ${current}` : 'No seat'}</div>
       <div>
-        <label style={fieldLabel}>Seat type</label>
+        <label style={fieldLabel}>Seat Type</label>
         <StSelect value={type} onChange={setType} options={SEAT_TYPES.map(st => {
           const left = seatsAvailable(data.seats, st.key, user.id);
           return {value:st.key, label:`${st.key}: ${availableLabel(left)}`, disabled: left <= 0 && st.key !== current};
@@ -1062,7 +1066,7 @@ function ChangeSeatModal({data, user, onClose, onSave}){
 function ChangeTeamModal({data, user, onClose, onSave}){
   const [teamId, setTeamId] = React.useState(user.teamId || '');
   return (
-    <StModal title="Change Team" primary="Change team" canSubmit={!!teamId && teamId !== user.teamId} onCancel={onClose} onSubmit={()=>onSave(teamId)}>
+    <StModal title="Change Team" primary="Change Team" canSubmit={!!teamId && teamId !== user.teamId} onCancel={onClose} onSubmit={()=>onSave(teamId)}>
       <div style={stTextB}>{user.name} · {user.teamId ? `Currently ${teamName(data.teams, user.teamId)}` : 'No team'}</div>
       <div>
         <label style={fieldLabel}>Team</label>
@@ -1074,11 +1078,11 @@ function ChangeTeamModal({data, user, onClose, onSave}){
 
 /* ── Seats ── every seat, assigned or not. Views: one per seat type, then Empty (unassigned). */
 const SEAT_PROPERTIES = [
-  {key:'id', label:'Seat ID', width:140}, {key:'type', label:'Seat type', width:200},
+  {key:'id', label:'Seat ID', width:140}, {key:'type', label:'Seat Type', width:200},
   {key:'person', label:'Assigned User', width:240}, {key:'status', label:'Status', width:160},
 ];
 const SEAT_FILTER_PROPS = [
-  {key:'id', label:'Seat ID', type:'text'}, {key:'type', label:'Seat type', type:'select'},
+  {key:'id', label:'Seat ID', type:'text'}, {key:'type', label:'Seat Type', type:'select'},
   {key:'person', label:'Assigned User', type:'text'}, {key:'status', label:'Status', type:'select'},
 ];
 const SEAT_VIEWS = [
@@ -1097,9 +1101,10 @@ function SeatsModule({data, setData, onStub}){
     properties:SEAT_PROPERTIES, filterProps:SEAT_FILTER_PROPS, selectValues:{type:USER_SEATS, status:['Assigned', 'Unassigned']},
     noun:'seat', searchKeys:['id', 'person'], fillWidth:true, canCreateProperty:false,
     renderCell: (key, r) => key === 'person' && r.person
-      ? <ContactName name={r.person} onOpen={()=>onStub(r.person)} style={{fontSize:'inherit', fontWeight:500}}/> : undefined,
+      ? <ContactName name={r.person} onOpen={()=>onStub(r.person)} style={{fontSize:'inherit', fontWeight:500}}/>
+      : key === 'status' && r.status ? <StatusPill status={r.status} map={STATUS_PILLS}/> : undefined,
     // One ⋯ menu on every seat: Assign seat when it's empty, Reassign seat when it's held.
-    renderActions: (r) => <RowActionsMenu title="Seat actions" items={[{label: r.assigneeId ? 'Reassign seat' : 'Assign seat', onClick:()=>setReassigning(r)}]}/>,
+    renderActions: (r) => <RowActionsMenu title="Seat Actions" items={[{label: r.assigneeId ? 'Reassign Seat' : 'Assign Seat', onClick:()=>setReassigning(r)}]}/>,
   };
   return (
     <RecordViewsModule schema={schema} rows={rows} columns={SEAT_PROPERTIES.map(p => p.key)} defaultViews={SEAT_VIEWS}
@@ -1113,17 +1118,7 @@ function SeatsModule({data, setData, onStub}){
 
 /* The contact form's select, for people (value = user id). */
 function PersonSelect({value, people, labelOf, onChange, placeholder = 'Select person'}){
-  return (
-    <div style={{position:'relative'}}>
-      <select value={value} onChange={e=>onChange(e.target.value)} style={{...fieldInput, appearance:'none', WebkitAppearance:'none', paddingRight:32, cursor:'pointer', color: value ? T.attioText : T.gray400}}>
-        <option value="">{placeholder}</option>
-        {people.map(u => <option key={u.id} value={u.id}>{labelOf(u)}</option>)}
-      </select>
-      <div style={{position:'absolute', right:10, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', display:'flex'}}>
-        <Icon name="chevDown" size={T.chevronSize} color={T.gray600}/>
-      </div>
-    </div>
-  );
+  return <Dropdown value={value} onChange={onChange} placeholder={placeholder} controlStyle={fieldInput} options={people.map(u => ({value:u.id, label:labelOf(u)}))}/>;
 }
 
 /* Assign / Reassign a seat: pick the person; assigning moves them off their current seat. */
@@ -1131,7 +1126,7 @@ function ReassignSeatModal({data, seat, onClose, onAssign}){
   const [person, setPerson] = React.useState('');
   const people = assignablePeople(data).filter(u => u.id !== seat.assigneeId);
   return (
-    <StModal title={`${seat.assigneeId ? 'Reassign' : 'Assign'} ${seat.id}`} primary={seat.assigneeId ? 'Reassign seat' : 'Assign seat'} canSubmit={!!person} onCancel={onClose} onSubmit={()=>onAssign(person)}>
+    <StModal title={seat.assigneeId ? 'Reassign Seat' : 'Assign Seat'} primary={seat.assigneeId ? 'Reassign Seat' : 'Assign Seat'} canSubmit={!!person} onCancel={onClose} onSubmit={()=>onAssign(person)}>
       <div style={stTextB}>{seat.type} · {seat.assigneeId ? `Currently ${personName(data.users, seat.assigneeId)}` : 'Unassigned'}</div>
       <div>
         <label style={fieldLabel}>Assign to</label>
@@ -1163,7 +1158,7 @@ function TeamsModule({data, setData, onStub, openUsers}){
     properties:TEAM_PROPERTIES, filterProps:TEAM_FILTER_PROPS, selectValues:{}, noun:'team', searchKeys:['name', 'lead'], fillWidth:true, canCreateProperty:false,
     // The user count opens Users filtered to this team.
     renderCell: (key, r) => key === 'users' ? countLink(r.count, ()=>openUsers({prop:'team', op:'is', value:r.name})) : undefined,
-    renderActions: (r) => <RowActionsMenu title="Team actions" items={[{label:'Edit team', onClick:()=>onStub(`Edit ${r.name}`)}]}/>,
+    renderActions: (r) => <RowActionsMenu title="Team Actions" items={[{label:'Edit Team', onClick:()=>onStub(`Edit ${r.name}`)}]}/>,
   };
   return (
     <RecordViewsModule schema={schema} rows={rows} columns={TEAM_PROPERTIES.map(p => p.key)}
@@ -1192,7 +1187,7 @@ function AddTeamModal({data, onClose, onAdd}){
   const listed = activated.filter(u => u.id !== leadId && (!f || u.name.toLowerCase().includes(f) || u.email.toLowerCase().includes(f)));
   const toggle = (id) => setMembers(m => m.includes(id) ? m.filter(x => x !== id) : [...m, id]);
   return (
-    <StModal title="Add Team" primary="Add team" canSubmit={!!n && !taken && !!leadId} onCancel={onClose} width={820}
+    <StModal title="Add Team" primary="Add Team" canSubmit={!!n && !taken && !!leadId} onCancel={onClose} width={820}
       onSubmit={()=>{ const id = `team-${Date.now()}`; onAdd({id, name:n, leadId}, [...new Set([leadId, ...members])]); }}>
       {/* The Properties configuration pattern: two columns, one vertical separator, no boxes. */}
       <div style={{display:'grid', gridTemplateColumns:'minmax(0, 1fr) minmax(0, 1fr)', alignItems:'stretch'}}>
@@ -1254,7 +1249,7 @@ function PresetsModule({data, setData, onStub, openUsers}){
     // The assigned-user count opens Users filtered to this preset.
     renderCell: (key, r) => key === 'assigned' ? countLink(r.count, ()=>openUsers({prop:'preset', op:'is', value:r.name})) : undefined,
     // Presets are changed with Permission Management → Edit.
-    renderActions: (r) => <RowActionsMenu title="Preset actions" items={userAdminCan('permissions', 'edit') ? [{label:'Edit preset', onClick:()=>setEditingPreset(data.presets.find(p => p.id === r.id))}] : []}/>,
+    renderActions: (r) => <RowActionsMenu title="Preset Actions" items={userAdminCan('permissions', 'edit') ? [{label:'Edit Preset', onClick:()=>setEditingPreset(data.presets.find(p => p.id === r.id))}] : []}/>,
   };
   return <RecordViewsModule schema={schema} rows={rows} columns={PRESET_PROPERTIES.map(p => p.key)}
     defaultViews={[{id:'pv-all', name:'All Presets'}]}
@@ -1267,27 +1262,25 @@ function PresetsModule({data, setData, onStub, openUsers}){
 /* ── Edit Permissions drawer (Figma 64:4132) ─────────────────────────────────────────── */
 
 /* The drawer frame shared by Edit Permissions and Edit preset: header, scrolling body, Cancel / Save. */
-function PermissionsDrawerFrame({title, subtitle, onClose, onSave, children}){
+/* The permission editors' frame: a side panel like every other (beneath the app header, the title
+   at the left and × at the right, Cancel and Save at the bottom; Escape closes it) — wider than
+   the others for the permission tables (Permission | Type | Permission Life). */
+function PermissionsDrawerFrame({title, onClose, onSave, children}){
+  useEscapeClose(onClose);
   return (
-    <div style={{position:'fixed', inset:0, zIndex:100}}>
-      <div onClick={onClose} style={{position:'absolute', inset:0, background:'rgba(16,24,40,.35)'}}/>
-      {/* Wider than the Figma frame (958): the permission tables (Permission | Type | Permission Life) need the room. */}
-      <div style={{position:'absolute', top:0, right:0, bottom:0, width:1180, maxWidth:'100vw', background:'#fff', display:'flex', flexDirection:'column',
-                   boxShadow:'-8px 0 24px rgba(16,24,40,.12)'}}>
-        <div style={{height:45, flexShrink:0, display:'flex', alignItems:'center', gap:12, padding:'0 12px', borderBottom:`1px solid ${T.borderStrong}`}}>
-          <button onClick={onClose} title="Close" style={{border:'none', background:'transparent', cursor:'pointer', display:'flex', padding:0}}>
-            <Icon name="close" size={14} color={T.gray600}/>
-          </button>
-          <span style={{fontSize:14, fontWeight:500, color:T.black}}>{title}</span>
-          <span style={{...stTextB, marginLeft:4}}>{subtitle}</span>
-        </div>
-        <div style={{flex:1, minHeight:0, overflowY:'auto', padding:16, display:'flex', flexDirection:'column', gap:24}}>{children}</div>
-        <div style={{height:46, flexShrink:0, display:'flex', alignItems:'center', justifyContent:'flex-end', gap:12, padding:'0 12px', borderTop:`1px solid ${T.borderStrong}`}}>
-          <button onClick={onClose} style={{height:29, padding:'0 12px', borderRadius:8, border:`1px solid ${T.borderStrong}`, background:T.headerBg, color:T.gray600, fontSize:14, fontFamily:'inherit', cursor:'pointer'}}>Cancel</button>
-          <StCta icon="arrowDown" label="Save" onClick={onSave}/>
-        </div>
+    <ContentSidePanel width={1180} zIndex={100} style={{background:'#fff', borderLeft:`1px solid ${T.border}`, boxShadow:'-8px 0 24px rgba(16,24,40,.08)', display:'flex', flexDirection:'column'}}>
+      <div style={{display:'flex', alignItems:'center', gap:10, padding:'16px 20px', borderBottom:`1px solid ${T.border}`, flexShrink:0}}>
+        <span style={{flex:1, minWidth:0, fontSize:15, fontWeight:600, color:T.attioText}}>{title}</span>
+        <button onClick={onClose} title="Close" style={{border:'none', background:'transparent', cursor:'pointer', display:'flex', padding:4}}>
+          <Icon name="close" size={14} color={T.gray600}/>
+        </button>
       </div>
-    </div>
+      <div style={{flex:1, minHeight:0, overflowY:'auto', padding:16, display:'flex', flexDirection:'column', gap:24}}>{children}</div>
+      <div style={{display:'flex', alignItems:'center', justifyContent:'flex-end', gap:8, padding:'12px 20px', borderTop:`1px solid ${T.border}`, flexShrink:0}}>
+        <StSecondary label="Cancel" onClick={onClose}/>
+        <StCta label="Save" onClick={onSave}/>
+      </div>
+    </ContentSidePanel>
   );
 }
 
@@ -1357,7 +1350,7 @@ function EditOptions({obj, value, properties, onChange}){
       <span style={{fontSize:13, fontWeight:500, color:T.gray600}}>Edit options</span>
       <div style={{border:`1px solid ${T.attioLine}`, borderRadius:8, padding:'10px 12px', display:'flex', flexDirection:'column', gap:12}}>
         <label onClick={()=>onChange({editStages:!value.editStages})} style={{display:'flex', alignItems:'center', gap:10, fontSize:13.5, fontWeight:500, color:T.black, cursor:'pointer'}}>
-          <RowCheckbox checked={value.editStages} onChange={()=>onChange({editStages:!value.editStages})}/>Move between pipeline stages
+          <span onClick={e=>e.stopPropagation()} style={{display:'flex'}}><UtToggle on={!!value.editStages} onChange={()=>onChange({editStages:!value.editStages})}/></span>Move Between Pipeline Stages
         </label>
         <div style={{display:'flex', flexDirection:'column', gap:6}}>
           <span style={{fontSize:13.5, fontWeight:500, color:T.black}}>Edit property values</span>
@@ -1639,7 +1632,7 @@ function EditPermissionsDrawer({user, seats, presets, onClose, onSave, onStub, o
     : onSave({seat, access, preset, permissions:perms});
 
   return (<>
-    <PermissionsDrawerFrame title="Edit Permissions" subtitle={user.name} onClose={onClose} onSave={save}>
+    <PermissionsDrawerFrame title="Edit Permissions" onClose={onClose} onSave={save}>
       <Locked on={assignOk} note="You can't assign this user's seat, access or preset.">
       <div style={{display:'flex', flexDirection:'column', gap:24}}>
       {/* 1 — the seat type, with what's left of it; everything below follows from it. */}
@@ -1695,7 +1688,7 @@ function EditPermissionsDrawer({user, seats, presets, onClose, onSave, onStub, o
 function EditPresetDrawer({preset, onClose, onSave}){
   const [perms, setPerms] = React.useState(() => normalizePermissions(copyMatrix(preset.permissions)));
   return (
-    <PermissionsDrawerFrame title="Edit Permission Preset" subtitle={`${preset.name} · ${preset.seat}`} onClose={onClose} onSave={()=>onSave(perms)}>
+    <PermissionsDrawerFrame title="Edit Permission Preset" onClose={onClose} onSave={()=>onSave(perms)}>
       <PermissionMatrixEditor seat={preset.seat} perms={perms} setPerms={setPerms}/>
     </PermissionsDrawerFrame>
   );
@@ -1707,10 +1700,9 @@ function SavePresetModal({seat, presets, onCancel, onSave}){
   const n = name.trim();
   const taken = presets.some(p => p.name.toLowerCase() === n.toLowerCase());
   return (
-    <StModal title="Save Permission Preset" primary="Save preset" canSubmit={!!n && !taken} onCancel={onCancel} onSubmit={()=>onSave(n)}>
-      <div style={stTextB}>Saves these permissions as a new {seat} preset, available in Permission Presets.</div>
+    <StModal title="Save Permission Preset" primary="Save Permission Preset" canSubmit={!!n && !taken} onCancel={onCancel} onSubmit={()=>onSave(n)}>
       <div>
-        <label style={fieldLabel} htmlFor="preset-name">Preset name</label>
+        <label style={fieldLabel} htmlFor="preset-name">Preset Name</label>
         <input id="preset-name" autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Senior Consultant" style={fieldInput}
           onKeyDown={e=>{ if(e.key === 'Enter' && n && !taken) onSave(n); }}/>
         {taken && <div style={{fontSize:12, color:T.red, marginTop:4}}>A preset with this name already exists.</div>}

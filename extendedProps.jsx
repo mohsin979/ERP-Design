@@ -62,6 +62,8 @@ function extendedValue(key, record){
   const v = ((((WF_LIVE.profiles || {})[cid] || {})[formId] || {}).values || {})[fieldId];
   return v == null ? '' : v;
 }
+// Accounting figures are money (right-aligned in tables, with their currency).
+const extendedIsMoney = (key) => String(key).startsWith('acc:') && (ACCOUNTING_TRIGGER_FIELDS.find(a => a.key === key.slice(4)) || {}).kind === 'number';
 // As shown: money in its payment terms' currency, dates as dates, profile answers as the Customer Profile shows them.
 function extendedValueText(key, record){
   const v = extendedValue(key, record);
@@ -117,5 +119,5 @@ function ExtendedPropertyGroups({query, renderItem, keep}){
   });
 }
 
-Object.assign(window, {EXT_PROFILE_LABEL, EXT_ACCOUNTING_LABEL, isExtendedKey, extendedPropertyGroups, extendedItems, extendedPropOf, extendedProps, extendedFullLabel,
+Object.assign(window, {extendedIsMoney, EXT_PROFILE_LABEL, EXT_ACCOUNTING_LABEL, isExtendedKey, extendedPropertyGroups, extendedItems, extendedPropOf, extendedProps, extendedFullLabel,
   extendedValue, extendedValueText, ExtendedPropertyGroups});

@@ -72,7 +72,7 @@ function FileDetail({a, contact, canEdit, canDelete, onUpdate, onDelete, onStub}
   const dirty = d.name.trim() !== a.name || d.description.trim() !== (a.description || '');
   const save = () => { onUpdate(a.id, {name:d.name.trim(), description:d.description.trim()}); setEditing(false); };
   const menu = [
-    {label:'Download', icon:'export', onClick:()=>{ if(!downloadFile(a)) onStub('Download · this sample file has no content'); }},
+    {label:'Download File', icon:'export', onClick:()=>{ if(!downloadFile(a)) onStub('Download · this sample file has no content'); }},
     ...(canDelete ? [{label:'Delete File', icon:'trash', danger:true, onClick:()=>setConfirm(true)}] : []),
   ];
   const isImage = fileKindOf(a) === 'Image' && a.dataUrl;
@@ -88,7 +88,7 @@ function FileDetail({a, contact, canEdit, canDelete, onUpdate, onDelete, onStub}
           </div>
         )}
         {stack(<>
-          <Field label="File name">{editing ? <input autoFocus value={d.name} onChange={e=>setD(x => ({...x, name:e.target.value}))} style={fieldText}/> : <ReadValue>{a.name}</ReadValue>}</Field>
+          <Field label="File Name">{editing ? <input autoFocus value={d.name} onChange={e=>setD(x => ({...x, name:e.target.value}))} style={fieldText}/> : <ReadValue>{a.name}</ReadValue>}</Field>
           <Field label="Description">{editing
             ? <textarea value={d.description} onChange={e=>setD(x => ({...x, description:e.target.value}))} rows={3} placeholder="What this file is" style={{...fieldText, resize:'vertical', lineHeight:1.5}}/>
             : <ReadValue>{a.description}</ReadValue>}</Field>
@@ -97,14 +97,14 @@ function FileDetail({a, contact, canEdit, canDelete, onUpdate, onDelete, onStub}
             <Field label="Size"><ReadValue>{fmtBytes(a.size)}</ReadValue></Field>
             {a.origin === 'received'
               ? <><Field label="Received from"><ReadValue>{a.emailFrom || 'Customer'}</ReadValue></Field>
-                  <Field label="With email"><ReadValue>{a.emailSubject}</ReadValue></Field></>
+                  <Field label="With Email"><ReadValue>{a.emailSubject}</ReadValue></Field></>
               : <Field label="Added by"><PersonValue person={activityActor(a, contact)}/></Field>}
             <Field label={a.origin === 'received' ? 'Received' : 'Added'}><ReadValue>{fmtActStamp(new Date(a.at))}</ReadValue></Field>
           </>}
         </>)}
       </div>
-      {confirm && <StModal title="Delete file" primary="Delete file" danger onCancel={()=>setConfirm(false)} onSubmit={()=>{ setConfirm(false); onDelete(a); }}>
-        <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>{a.name} will be removed from this record. Its activity will show that it was deleted.</div>
+      {confirm && <StModal title="Delete File" primary="Delete File" danger onCancel={()=>setConfirm(false)} onSubmit={()=>{ setConfirm(false); onDelete(a); }}>
+        <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>{a.name} will be removed from this record. Its activity will show that it was deleted. This can't be undone.</div>
       </StModal>}
     </DetailFrame>
   );
@@ -152,7 +152,7 @@ function FilesTab({acts, contact, team, onStub}){
     hub.add(object, record.id, {type:'fileChange', action:'deleted', fileName:a.name, source:'you', by:null});
     setSelectedId(null);
   };
-  const empty = files.length ? 'No files match these filters.' : view === 'added' ? 'No files added yet.' : 'No files received yet.';
+  const empty = files.length ? 'No files match these filters' : view === 'added' ? 'No files added yet' : 'No files received yet';
   return (
     <RecordSchema.Provider value={schema}>
       <div style={{flex:1, minHeight:0, display:'flex', flexDirection:'column'}}>
@@ -160,7 +160,7 @@ function FilesTab({acts, contact, team, onStub}){
           controls={view === 'added' && can('create') && <>
             <input ref={input} type="file" multiple onChange={upload} style={{display:'none'}}/>
             <button onClick={()=>input.current && input.current.click()} style={{...btnPrimarySm(), display:'inline-flex', alignItems:'center', gap:6}}>
-              <Icon name="plus" size={13} color="#fff"/> Upload file
+              <Icon name="plus" size={13} color="#fff"/> Upload File
             </button>
           </>}
           search={st.search} onSearch={(v)=>patch({search:v})}
@@ -170,7 +170,7 @@ function FilesTab({acts, contact, team, onStub}){
         <div style={{flex:1, minHeight:0, display:'flex', overflow:'hidden'}}>
           <div style={{width:380, flexShrink:0, overflowY:'auto', borderRight:`1px solid ${T.border}`, padding:'8px 0'}}>
             {shown.map(a => <FileNavItem key={a.id} a={a} selected={selected && selected.id === a.id} onSelect={()=>setSelectedId(a.id)}/>)}
-            {!shown.length && <div style={{fontSize:13, color:T.attioMuted, padding:'24px 20px', textAlign:'center'}}>{empty}</div>}
+            {!shown.length && <EmptyState compact title={empty}/>}
           </div>
           <div style={{flex:1, minWidth:0, minHeight:0, display:'flex', flexDirection:'column'}}>
             {selected && <FileDetail key={selected.id} a={selected} contact={contact} canEdit={can('edit')} canDelete={can('delete')} onStub={onStub}

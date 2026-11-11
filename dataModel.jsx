@@ -3,7 +3,7 @@
    Object      — a CRM business entity (a table with its own CRUD): Contacts, Deals and Customers
                  for now (Forms and Services were removed; Leads isn't an Object). Settings / system entities (Users, Seats, Teams, Permission
                  Presets) are not Objects. Each Object belongs to a navigation GROUP (Marketing,
-                 Pre-Sales, Sales, Automation), which decides where it appears in the main CRM
+                 Pre-Sales, Sales, Tools, Administrative), which decides where it appears in the main CRM
                  navigation (navWithObjects, nav.jsx).
    Association — a relationship between two Objects, typed One-to-many / Many-to-one /
                  Many-to-many. Stored once ({a, b, type}, the type read from a's side); b sees the
@@ -33,7 +33,7 @@ const CHOICE_TYPES = ['Single Selection', 'Multi-Selection'];
 const SYSTEM_PROPERTY_TYPES = ['Pipeline', 'Pipeline stage'];
 const RELATIONSHIP_TYPES = ['One-to-many', 'Many-to-one', 'Many-to-many'];
 const inverseRelationship = (t) => t === 'One-to-many' ? 'Many-to-one' : t === 'Many-to-one' ? 'One-to-many' : t;
-const OBJECT_GROUPS = ['Marketing', 'Pre-Sales', 'Sales', 'Tools', 'Automation'];
+const OBJECT_GROUPS = ['Marketing', 'Pre-Sales', 'Sales', 'Tools', 'Administrative'];
 
 const DEFAULT_OBJECTS = [
   {id:'contacts',  name:'Contacts',  group:'Pre-Sales'},
@@ -70,7 +70,7 @@ const CONTACT_PROPERTY_SETUP = {
   phone:         {type:'Phone Number',     onCreate:true, half:true},
   country:       {type:'Country'},
   city:          {type:'Single-Line Text'},
-  contactType:   {type:'Single Selection', onCreate:true, placeholder:'No stage', options:CONTACT_TYPE_STAGES.map(s => s.value)},
+  contactType:   {type:'Single Selection', onCreate:true, placeholder:'Select contact type', options:CONTACT_TYPE_STAGES.map(s => s.value)},
   jobTitle:      {type:'Single-Line Text'},
   company:       {type:'Single-Line Text'},
   industry:      {type:'Single Selection', options:CONTACT_INDUSTRIES},
@@ -170,7 +170,8 @@ const DEFAULT_PROPERTIES = () => [
 // The version of the defined Contact, Deal and Customer properties (migrateDataModel applies it once).
 const PROPERTY_SET_VERSION = 2;
 const migrateDataModel = (d) => {
-  const objects = (d.objects || []).filter(o => !REMOVED_DEFAULT_OBJECTS.includes(o.id));
+  // The Automation navigation group is Administrative.
+  const objects = (d.objects || []).filter(o => !REMOVED_DEFAULT_OBJECTS.includes(o.id)).map(o => o.group === 'Automation' ? {...o, group:'Administrative'} : o);
   const has = (id) => objects.some(o => o.id === id);
   const associations = (d.associations || [])
     .map(a => a.id === 'as-customers-deals' ? {id:'as-deals-customers', a:'deals', b:'customers', type:'Many-to-many'} : a)
@@ -184,6 +185,8 @@ const migrateDataModel = (d) => {
   const restored = DEFAULT_PROPERTIES().filter(dp => damaged.has(dp.objectId) && !(d.properties || []).some(p => p.key && p.objectId === dp.objectId && p.key === dp.key));
   let properties = [...(d.properties || []).filter(p => p.key), ...restored].filter(p => has(p.objectId) || p.objectId === 'users')
     .map(p => p.objectId === 'contacts' && p.key === 'contactType' && p.options ? {...p, options:p.options.filter(o => !REMOVED_CONTACT_STAGES.includes(o))} : p)
+    // Placeholders read "Select <thing>" (Types of Contact's was "No stage").
+    .map(p => p.placeholder === 'No stage' ? {...p, placeholder:'Select contact type'} : p)
     // Owner Assignment Date is one name across Contacts, Deals and Customers (was Contact Owner / Deal / Customer Assignment Date).
     .map(p => p.key === 'ownerAssigned' && ['Contact Owner Assignment Date', 'Deal Assignment Date', 'Customer Assignment Date'].includes(p.label) ? {...p, label:'Owner Assignment Date'} : p);
   /* Once, for settings saved before the defined Contact, Deal and Customer properties: each record
@@ -330,7 +333,7 @@ const customContactSchema = (props) => {
   const all = props || [];
   const width = (k) => (CONTACT_PROPERTIES.find(p => p.key === k) || {}).width || 170;
   return {
-    properties:all.map(p => ({key:p.key, label:p.label, width:width(p.key)})),
+    properties:all.map(p => ({key:p.key, label:p.label, width:width(p.key), money:propertyTypeId(p.type) === 'Currency' && !p.currencyOnly})),
     filterProps:all.map(propertyFilterMeta),
     selectValues:{...Object.fromEntries(all.filter(p => p.options).map(p => [p.key, p.options])),
       ...Object.fromEntries(all.filter(p => p.type === 'User').map(p => [p.key, USER_DIRECTORY.filter(u => !u.deleted).map(u => u.name)]))},
@@ -345,7 +348,7 @@ function PropertyTypeConfig({type, options, setOptions, range, setRange}){
     const r = range || {}, set = (patch) => setRange && setRange({...r, ...patch});
     return (
       <div style={{display:'flex', gap:8}}>
-        <div style={{flex:2, minWidth:0}}><label style={fieldLabel}>Range label</label><input value={r.label || ''} onChange={e=>set({label:e.target.value})} placeholder="e.g. Budget (AED)" style={fieldInput}/></div>
+        <div style={{flex:2, minWidth:0}}><label style={fieldLabel}>Range Label</label><input value={r.label || ''} onChange={e=>set({label:e.target.value})} placeholder="e.g. Budget (AED)" style={fieldInput}/></div>
         <div style={{flex:1, minWidth:0}}><label style={fieldLabel}>Minimum</label><input type="number" value={r.min ?? ''} onChange={e=>set({min:e.target.value})} placeholder="Any" style={fieldInput}/></div>
         <div style={{flex:1, minWidth:0}}><label style={fieldLabel}>Maximum</label><input type="number" value={r.max ?? ''} onChange={e=>set({max:e.target.value})} placeholder="Any" style={fieldInput}/></div>
       </div>
@@ -366,7 +369,7 @@ function PropertyTypeConfig({type, options, setOptions, range, setRange}){
         ))}
       </div>
       <button onClick={()=>setOptions([...options, ''])} style={{marginTop:6, display:'inline-flex', alignItems:'center', gap:6, border:'none', background:'transparent', padding:'4px 0', cursor:'pointer', fontFamily:'inherit', fontSize:13, color:T.attioBlue}}>
-        <Icon name="plus" size={13} color={T.attioBlue}/> Add option
+        <Icon name="plus" size={13} color={T.attioBlue}/> Add Option
       </button>
     </div>
   );
@@ -412,11 +415,11 @@ function DraftPropertyFields({p, duplicate, setProp, onRemove, onArchive}){
       <div style={{flex:1, minWidth:0}}>
         <label style={fieldLabel}>Property Type</label>
         {fixed ? <div style={{...fieldInput, ...readOnly}}>{propertyTypeId(p.type)}</div>
-          : <FormSelect value={propertyTypeId(p.type)} placeholder="Select type" options={PROPERTY_TYPES} onChange={v=>v && setProp({type:v})}/>}
+          : <FormSelect value={propertyTypeId(p.type)} placeholder="Select property type" options={PROPERTY_TYPES} onChange={v=>v && setProp({type:v})}/>}
       </div>
       {onRemove ? <button title="Remove property" onClick={onRemove} style={{border:'none', background:'transparent', cursor:'pointer', display:'flex', padding:'0 2px 9px'}}>
         <Icon name="trash" size={14} color={T.gray600}/>
-      </button> : onArchive && !fixed ? <button title="Archive property" aria-label={`Archive ${p.label}`} onClick={onArchive} style={{border:'none', background:'transparent', cursor:'pointer', display:'flex', padding:'0 2px 9px'}}>
+      </button> : onArchive && !fixed ? <button title="Archive Property" aria-label={`Archive ${p.label}`} onClick={onArchive} style={{border:'none', background:'transparent', cursor:'pointer', display:'flex', padding:'0 2px 9px'}}>
         <Icon name="archive" size={14} color={T.gray600}/>
       </button> : <span style={{width:18, flexShrink:0}}/>}
     </div>
@@ -518,7 +521,7 @@ function useRecordEffects(setData, updateRecords){
   });
 }
 // The confirmation: what the changes will do; blocked ones can't be saved.
-function ConsequencesModal({title = 'Review changes', lines, blockers, confirmLabel = 'Save changes', danger, onCancel, onConfirm}){
+function ConsequencesModal({title = 'Review Changes', lines, blockers, confirmLabel = 'Save Changes', danger, onCancel, onConfirm}){
   const blocked = (blockers || []).length > 0;
   return (
     <StModal title={title} primary={blocked ? undefined : confirmLabel} danger={danger} canSubmit={!blocked} onCancel={onCancel} onSubmit={onConfirm} width={520}>
@@ -574,7 +577,7 @@ function ObjectsSettings({data, setData, navigate, records = {}, updateRecords, 
         ...(adminRecordsCan('delete', o) ? [{label:'Delete Record', danger:true, onClick:()=>setDeleting(data.objects.find(o => o.id === r.id))}] : []),
       ];
       return actionsWithWorkflow(workflowsAvailableFor(r.id) && workflowCan('create'), ()=>setWorkflow(newWorkflowDraft({object:r.id}, {type:'record', objectId:r.id})),
-        items.length ? <RowActionsMenu title="Record actions" items={items}/> : null); },
+        items.length ? <RowActionsMenu title="Record Actions" items={items}/> : null); },
   };
   return (
     <div style={{position:'relative', flex:1, minHeight:0, display:'flex', flexDirection:'column', overflow:'hidden'}}>
@@ -582,7 +585,7 @@ function ObjectsSettings({data, setData, navigate, records = {}, updateRecords, 
       <div style={{display:'flex', flexDirection:'column', flex:1, minHeight:0}}>
         {/* Its own store: views saved before the rename were called All Objects, without Total Entries. */}
         <RecordViewsModule flushTop storeKey="views:ov-all-v2" schema={schema} rows={rows} columns={OBJECT_COLS.map(c => c.key)} defaultViews={[{id:'ov-all', name:'All Records'}]}
-          actions={() => adminRecordsCan('create') && <button onClick={()=>setCreating(true)} title="Create Record" style={iconBtn}><Icon name="plus" size={14} color={T.gray800}/></button>}/>
+          actions={() => adminRecordsCan('create') && <button onClick={()=>setCreating(true)} title="Add Record" style={iconBtn}><Icon name="plus" size={14} color={T.gray800}/></button>}/>
       </div>
       {creating && <CreateObjectPanel data={data} onClose={()=>setCreating(false)}
         onCreate={(obj, assocs, props) => {
@@ -635,11 +638,13 @@ const deleteObjectFrom = (d, id) => {
     workflows:(d.workflows || []).filter(w => (w.context || {}).object !== id),
     propertiesObjectId: d.propertiesObjectId === id ? null : d.propertiesObjectId};
 };
+// A record type is deleted with typed "Delete" (as records and bulk deletes); one that has records can't be.
 function DeleteObjectModal({data, object, recordCount, onClose, onDelete}){
+  const [typed, setTyped] = React.useState('');
   const dep = objectDependents(data, object.id);
   const other = (a) => objectName(data, a.a === object.id ? a.b : a.a);
   if(recordCount > 0) return (
-    <StModal title={`Delete ${object.name}`} onCancel={onClose}>
+    <StModal title="Can't Delete Record" cancelLabel="Close" onCancel={onClose}>
       <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>
         {object.name} has {recordCount} {recordCount === 1 ? 'record' : 'records'}. Delete its records first; a record type can be deleted only when it has none.
       </div>
@@ -653,12 +658,13 @@ function DeleteObjectModal({data, object, recordCount, onClose, onDelete}){
     'Its item in the CRM navigation',
   ].filter(Boolean);
   return (
-    <StModal title={`Delete ${object.name}`} primary="Delete Record" danger onCancel={onClose} onSubmit={onDelete}>
+    <StModal title="Delete Record" primary="Delete Record" danger canSubmit={typed === 'Delete'} onCancel={onClose} onSubmit={()=>typed === 'Delete' && onDelete()}>
       <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>{object.name} has no records. Deleting it also deletes:</div>
       <ul style={{margin:0, paddingLeft:18, display:'flex', flexDirection:'column', gap:4}}>
         {lines.map(l => <li key={l} style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>{l}</li>)}
       </ul>
-      <div style={stTextB}>This can't be undone.</div>
+      <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>This can't be undone. Type <strong>Delete</strong> to confirm.</div>
+      <input autoFocus value={typed} onChange={e=>setTyped(e.target.value)} placeholder="Type Delete to confirm" aria-label="Type Delete to confirm" style={fieldInput}/>
     </StModal>
   );
 }
@@ -750,13 +756,13 @@ function RecordTypePanel({data, objectId, onClose, onSave, records = {}}){
     else onSave(result, changes);
   };
   const sectionLabel = {fontSize:13, fontWeight:500, color:T.attioText};
+  useEscapeClose(onClose);
+  // A side panel like the others (beneath the app header, title left, × right; Escape closes it), wide for its two columns.
   return (
-    <div style={{position:'fixed', inset:0, zIndex:100}}>
-      <div onClick={onClose} style={{position:'absolute', inset:0, background:'rgba(16,24,40,.35)'}}/>
-      <div style={{position:'absolute', top:0, right:0, bottom:0, width:960, maxWidth:'100vw', background:'#fff', display:'flex', flexDirection:'column', boxShadow:'-8px 0 24px rgba(16,24,40,.12)'}}>
-        <div style={{height:45, flexShrink:0, display:'flex', alignItems:'center', gap:12, padding:'0 16px', borderBottom:`1px solid ${T.borderStrong}`}}>
-          <button onClick={onClose} title="Close" style={{border:'none', background:'transparent', cursor:'pointer', display:'flex', padding:0}}><Icon name="close" size={14} color={T.gray600}/></button>
-          <span style={{fontSize:14, fontWeight:500, color:T.black}}>{editing ? obj.name : 'Create Record'}</span>
+    <ContentSidePanel width={960} zIndex={100} style={{background:'#fff', borderLeft:`1px solid ${T.border}`, boxShadow:'-8px 0 24px rgba(16,24,40,.08)', display:'flex', flexDirection:'column'}}>
+        <div style={{display:'flex', alignItems:'center', gap:10, padding:'16px 20px', borderBottom:`1px solid ${T.border}`, flexShrink:0}}>
+          <span style={{flex:1, fontSize:15, fontWeight:600, color:T.attioText}}>{editing ? 'Edit Record' : 'Add Record'}</span>
+          <button onClick={onClose} title="Close" style={{border:'none', background:'transparent', cursor:'pointer', display:'flex', padding:4}}><Icon name="close" size={14} color={T.gray600}/></button>
         </div>
 
         {/* Two sections (the Add Property / Add User / Add Team pattern): one vertical separator,
@@ -764,17 +770,13 @@ function RecordTypePanel({data, objectId, onClose, onSave, records = {}}){
         <div style={{flex:1, minHeight:0, display:'flex'}}>
           {/* Left — Record Name, Group (stacked), Associated Records. */}
           <div style={{flex:1, minWidth:0, overflowY:'auto', padding:'16px 24px', display:'flex', flexDirection:'column', gap:14}}>
-            <div>
-              <label style={fieldLabel} htmlFor="object-name">Record Name</label>
+            {/* Labels beside the fields, as every create and edit panel. */}
+            <Field label="Record Name" wide>
               <input id="object-name" autoFocus={!editing} value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Projects" style={fieldInput}/>
               {taken && <div style={{fontSize:12, color:T.red, marginTop:4}}>A record with this name already exists.</div>}
-            </div>
-            <div>
-              <label style={fieldLabel}>Group</label>
-              <FormSelect value={group} placeholder="Select group" options={OBJECT_GROUPS} onChange={setGroup}/>
-            </div>
-            <div>
-              <label style={fieldLabel}>Associated Records</label>
+            </Field>
+            <Field label="Group" wide><FormSelect value={group} placeholder="Select group" options={OBJECT_GROUPS} onChange={setGroup}/></Field>
+            <Field label="Associated Records" wide><div>
               {/* Fixed-height rows (as the Add Team user list) — selecting doesn't change the height;
                   the relationship shows as text + chevron. A defined association stays as it is. */}
               {data.objects.filter(o => o.id !== objectId).map((o, i) => { const l = links[o.id], fixed = l && l.defined; return (
@@ -787,7 +789,7 @@ function RecordTypePanel({data, objectId, onClose, onSave, records = {}}){
                     : <RelationshipPicker value={l.type} onChange={v=>setLinks(x => ({...x, [o.id]:{...x[o.id], type:v}}))}/>)}
                 </div>
               ); })}
-            </div>
+            </div></Field>
           </div>
 
           {/* Right — Properties: Add Property top-right; each property's Label and Type, its settings below. */}
@@ -798,7 +800,7 @@ function RecordTypePanel({data, objectId, onClose, onSave, records = {}}){
                 <Icon name="plus" size={13} color={T.attioBlue}/> Add Property
               </button>
             </div>
-            {!active.length && <div style={{fontSize:12.5, color:T.gray400, padding:'6px 0'}}>No properties yet.</div>}
+            {!active.length && <div style={{fontSize:12.5, color:T.gray400, padding:'6px 0'}}>No properties yet</div>}
             {active.map((p, i) => (
               <div key={p.id} style={{padding:'12px 0', borderTop: i ? `1px solid ${T.border}` : 'none', display:'flex', flexDirection:'column', gap:10}}>
                 <DraftPropertyFields p={p} duplicate={dupLabel(p)} setProp={(patch)=>setProp(p.id, patch)}
@@ -820,15 +822,13 @@ function RecordTypePanel({data, objectId, onClose, onSave, records = {}}){
           </div>
         </div>
 
-        <div style={{height:52, flexShrink:0, display:'flex', alignItems:'center', justifyContent:'flex-end', gap:8, padding:'0 16px', borderTop:`1px solid ${T.borderStrong}`}}>
-          <button onClick={onClose} style={{padding:'8px 14px', borderRadius:8, border:`1px solid ${T.borderStrong}`, background:'#fff', fontSize:13, cursor:'pointer', fontFamily:'inherit'}}>Cancel</button>
-          <button onClick={()=>ok && save()} disabled={!ok} style={{padding:'8px 14px', borderRadius:8, border:'none', fontSize:13, fontWeight:500, fontFamily:'inherit',
-            background: ok ? T.black : T.gray400, color:'#fff', cursor: ok ? 'pointer' : 'default'}}>{editing ? 'Save changes' : 'Create record'}</button>
+        <div style={{display:'flex', alignItems:'center', justifyContent:'flex-end', gap:8, padding:'12px 20px', borderTop:`1px solid ${T.border}`, flexShrink:0}}>
+          <StSecondary label="Cancel" onClick={onClose}/>
+          <StCta label={editing ? 'Save Changes' : 'Add Record'} disabled={!ok} onClick={()=>ok && save()}/>
         </div>
-      </div>
       {review && <ConsequencesModal lines={review.lines} blockers={review.blockers} onCancel={()=>setReview(null)}
         onConfirm={()=>{ const r = review; setReview(null); onSave(r.result, r.changes); }}/>}
-    </div>
+    </ContentSidePanel>
   );
 }
 const CreateObjectPanel = ({data, onClose, onCreate}) => <RecordTypePanel data={data} onClose={onClose} onSave={(r)=>onCreate(r.object, r.associations, r.properties)}/>;
@@ -849,8 +849,8 @@ function PropertiesSettings({data, setData, records = {}, updateRecords, onWorkf
     setReview({title, ...c, confirmLabel, danger, apply});
   };
   const setArchived = (p, archived) => setData(d => ({...d, properties:d.properties.map(x => x.key === p.key && x.objectId === p.objectId ? (archived ? {...x, archived:true} : (({archived:_, ...rest}) => rest)(x)) : x)}));
-  const archive = (p) => reviewThen({kind:'archive', before:p}, `Archive ${p.label}`, 'Archive property', false, () => setArchived(p, true));
-  const remove = (p) => reviewThen({kind:'delete', before:p}, `Delete ${p.label}`, 'Delete property', true, () => {
+  const archive = (p) => reviewThen({kind:'archive', before:p}, `Archive ${p.label}`, 'Archive Property', false, () => setArchived(p, true));
+  const remove = (p) => reviewThen({kind:'delete', before:p}, `Delete ${p.label}`, 'Delete Property', true, () => {
     applyEffects([{kind:'delete', before:p}]);
     setData(d => ({...d, properties:d.properties.filter(x => !(x.key === p.key && x.objectId === p.objectId))}));
   });
@@ -903,14 +903,14 @@ function PropertiesSettings({data, setData, records = {}, updateRecords, onWorkf
        included) and Delete, property by property. User Properties aren't covered by them. */
     renderActions: (r) => { const canEdit = propCan(r.objectId, 'edit', findProp(r)), canDelete = propCan(r.objectId, 'delete', findProp(r));
       const items = [
-        ...(canEdit ? [{label:'Edit property', onClick:()=>setEditing(findProp(r))}] : []),
+        ...(canEdit ? [{label:'Edit Property', onClick:()=>setEditing(findProp(r))}] : []),
         // The record's name, owner, pipeline and stage stay (the record relies on them).
-        ...(r.locked ? [] : [...(canEdit ? [r.archived ? {label:'Restore property', onClick:()=>setArchived(findProp(r), false)} : {label:'Archive property', onClick:()=>archive(findProp(r))}] : []),
-          ...(canDelete ? [{label:'Delete property', danger:true, onClick:()=>remove(findProp(r))}] : [])]),
+        ...(r.locked ? [] : [...(canEdit ? [r.archived ? {label:'Restore Property', onClick:()=>setArchived(findProp(r), false)} : {label:'Archive Property', onClick:()=>archive(findProp(r))}] : []),
+          ...(canDelete ? [{label:'Delete Property', danger:true, onClick:()=>remove(findProp(r))}] : [])]),
       ];
       return actionsWithWorkflow(workflowsAvailableFor(r.objectId) && workflowCan('create') && triggerProperties(data, r.objectId).some(p => p.key === r.key),
         ()=>setWorkflow(newWorkflowDraft({object:r.objectId, property:r.key}, {type:'property', objectId:r.objectId, propertyKey:r.key})),
-        items.length ? <RowActionsMenu title="Property actions" items={items}/> : null); },
+        items.length ? <RowActionsMenu title="Property Actions" items={items}/> : null); },
     renderCell: (key, r) => key === 'label' && r.archived ? <span style={{color:T.gray600}}>{r.label}{archivedTag}</span> : undefined,
   };
   /* Views: All Properties, Contact / Deal / Customer Properties (by default). From a record type's
@@ -942,7 +942,7 @@ function PropertiesSettings({data, setData, records = {}, updateRecords, onWorkf
             setData(d => ({...d, properties: !before ? [...d.properties, {...p, createdBy:CURRENT_USER.name}] : d.properties.map(x => same(x, before) ? p : x)}));
             setEditing(null);
           };
-          if(before) reviewThen({kind:'edit', before, after:p}, `Change ${before.label}`, 'Save changes', false, apply); else apply();
+          if(before) reviewThen({kind:'edit', before, after:p}, `Change ${before.label}`, 'Save Changes', false, apply); else apply();
         }}/>}
       {review && <ConsequencesModal title={review.title} lines={review.lines} blockers={review.blockers} confirmLabel={review.confirmLabel} danger={review.danger}
         onCancel={()=>setReview(null)} onConfirm={()=>{ const r = review; setReview(null); r.apply(); }}/>}
@@ -984,7 +984,7 @@ function PropertyModal({data, property, defaultObjectId, onClose, onSave, holder
   });
   const colLabel = {fontSize:13, fontWeight:500, color:T.attioText, marginBottom:8, display:'block'};
   return (
-    <StModal title={editing ? 'Edit Property' : 'Add Property'} primary={editing ? 'Save property' : 'Add property'} canSubmit={ok} onCancel={onClose} onSubmit={save} width={820}>
+    <StModal title={editing ? 'Edit Property' : 'Add Property'} primary={editing ? 'Save Property' : 'Add Property'} canSubmit={ok} onCancel={onClose} onSubmit={save} width={820}>
       {/* Two columns divided by a single vertical separator (no boxes). */}
       <div style={{display:'grid', gridTemplateColumns:'minmax(0, 1fr) minmax(0, 1fr)', alignItems:'stretch'}}>
         <div style={{display:'flex', flexDirection:'column', gap:14, minWidth:0, paddingRight:24}}>
@@ -997,7 +997,7 @@ function PropertyModal({data, property, defaultObjectId, onClose, onSave, holder
             <label style={fieldLabel}>Property Type</label>
             {locked
               ? <div title="The record relies on it" style={{...fieldInput, background:T.pageBg, color:T.gray600}}>{type}</div>
-              : <FormSelect value={type} placeholder="Select type" options={PROPERTY_TYPES} onChange={v=>v && setType(v)}/>}
+              : <FormSelect value={type} placeholder="Select property type" options={PROPERTY_TYPES} onChange={v=>v && setType(v)}/>}
           </div>
           <PropertyTypeConfig type={type} options={options} setOptions={setOptions} range={range} setRange={setRange}/>
         </div>
@@ -1083,12 +1083,12 @@ function NewPipelinePanel({data, records = {}, onCancel, onSave}){
     style={{border:'none', background:'transparent', cursor: disabled ? 'default' : 'pointer', display:'flex', padding:4, opacity: disabled ? .35 : 1}}>
     <Icon name={icon} size={13} color={T.gray600}/></button>;
   return (
-    <CreatePanelFrame title="New Pipeline" onClose={onCancel} more={false} actions={<>
+    <CreatePanelFrame title="Add Pipeline" onClose={onCancel} actions={<>
       <StSecondary label="Cancel" onClick={onCancel}/>
       <StCta label="Save" disabled={!ok} onClick={save}/>
     </>}>
       {stack(<>
-        <Field label="Pipeline name">
+        <Field label="Pipeline Name">
           <input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Canada PR" style={{...fieldText, borderColor: taken ? T.red : undefined}}/>
           {taken && <div style={{fontSize:12, color:T.red, marginTop:4}}>This record already has a pipeline with this name.</div>}
         </Field>
@@ -1117,7 +1117,7 @@ function NewPipelinePanel({data, records = {}, onCancel, onSave}){
                 </div>
               ))}
               {dupes && <div style={{fontSize:12, color:T.red}}>Two stages can't have the same name.</div>}
-              <div><StSecondary label={<span style={{display:'inline-flex', alignItems:'center', gap:6}}><Icon name="plus" size={12} color={T.gray800}/>Add stage</span>}
+              <div><StSecondary label={<span style={{display:'inline-flex', alignItems:'center', gap:6}}><Icon name="plus" size={12} color={T.gray800}/>Add Stage</span>}
                 onClick={()=>setStages(list => [...list, {id:`ns-${Date.now()}-${list.length}`, label:'', type:'open'}])}/></div>
             </div>
           </Field>
@@ -1195,17 +1195,17 @@ function PipelinesSettings({data, setData, records = {}, onWorkflowOpen, target,
       : key === 'workflowCount' ? (workflowsAvailableFor(r.objectId) ? countLink(r.workflowCount, ()=>setOpenId(r.id)) : '—')   // no workflows on this Object yet
       : key === 'label' ? <ContactName name={r.label} onOpen={()=>setOpenId(r.id)} style={{fontSize:'inherit', fontWeight:500}}/>
       : undefined,
-    // The workflow quick action, then ⋯ Add Workflow (a new workflow for this pipeline), Edit, Delete.
-    renderActions: (r) => actionsWithWorkflow(workflowsAvailableFor(r.objectId) && workflowCan('create'), ()=>setOpen({id:r.id, workflow:true}), <RowActionsMenu title="Pipeline actions" width={MENU_W}
-      items={[...(workflowsAvailableFor(r.objectId) && workflowCan('create') ? [{label:'Add Workflow', onClick:()=>setOpen({id:r.id, workflow:true})}] : []), ...pipelineMenuItems(r, records[r.objectId], ()=>setEditingId(r.id), r.objectName.replace(/s$/, '').toLowerCase(), data, ()=>setDeletingId(r.id))]}/>),
+    // The workflow quick action (Add Workflow), then ⋯ Edit Pipeline, Delete Pipeline.
+    renderActions: (r) => actionsWithWorkflow(workflowsAvailableFor(r.objectId) && workflowCan('create'), ()=>setOpen({id:r.id, workflow:true}), <RowActionsMenu title="Pipeline Actions" width={MENU_W}
+      items={[...pipelineMenuItems(r, records[r.objectId], ()=>setEditingId(r.id), r.objectName.replace(/s$/, '').toLowerCase(), data, ()=>setDeletingId(r.id))]}/>),
   };
   return (
     <div style={{position:'relative', flex:1, minHeight:0, display:'flex', flexDirection:'column', overflow:'hidden'}}>
     <SettingsPage fill>
       <div style={{display:'flex', flexDirection:'column', flex:1, minHeight:0}}>
-        {/* New pipeline: the "+" beside View Settings (no Save View here), as Create Record on Records. */}
-        <RecordViewsModule flushTop storeKey="views:plv-all-v2" schema={schema} rows={rows} columns={PIPELINE_COLS.map(c => c.key)} defaultViews={[{id:'plv-all', name:'All Pipelines'}]} saveView={false}
-          actions={() => RECORD_OBJECTS.some(o => pipelineAdminCan(o, 'create')) && <button onClick={()=>setCreating(true)} title="New pipeline" aria-label="New pipeline" style={iconBtn}><Icon name="plus" size={14} color={T.gray800}/></button>}/>
+        {/* Add Pipeline: the "+" after View Settings and Save View, as Add Record on Records. */}
+        <RecordViewsModule flushTop storeKey="views:plv-all-v2" schema={schema} rows={rows} columns={PIPELINE_COLS.map(c => c.key)} defaultViews={[{id:'plv-all', name:'All Pipelines'}]}
+          actions={() => RECORD_OBJECTS.some(o => pipelineAdminCan(o, 'create')) && <button onClick={()=>setCreating(true)} title="Add Pipeline" aria-label="Add Pipeline" style={iconBtn}><Icon name="plus" size={14} color={T.gray800}/></button>}/>
       </div>
     </SettingsPage>
     {open && <PipelinePanel key={`${open.id}-${open.workflow ? 'wf' : 'stages'}`} data={data} setData={setData} pipelineId={open.id} deals={records[((data.pipelines || []).find(p => p.id === open.id) || {}).objectId] || []}

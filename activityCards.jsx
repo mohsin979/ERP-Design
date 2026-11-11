@@ -37,10 +37,11 @@ const btnSecondarySm = {border:`1px solid ${T.borderStrong}`, background:'#fff',
   padding:'7px 12px', fontSize:12.5, cursor:'pointer', fontFamily:'inherit', display:'inline-flex', alignItems:'center', gap:6};
 
 /* `wide`: the control takes the full width (no 420px cap), e.g. the form editor's details. */
-function Field({label, children, wide}){
+// `required`: an asterisk after the label (as the record forms).
+function Field({label, children, wide, required}){
   return (
     <div style={{display:'flex', alignItems:'flex-start', gap:12, minHeight:34}}>
-      <span style={actFieldLabel}>{label}</span>
+      <span style={actFieldLabel}>{label}{required && <span style={{color:T.red}}> *</span>}</span>
       <div style={{flex:1, minWidth:0, maxWidth: wide ? 'none' : 420}}>{children}</div>
     </div>
   );
@@ -48,20 +49,9 @@ function Field({label, children, wide}){
 function ReadValue({children}){
   return <div style={{fontSize:13, color:T.attioText, paddingTop:7, lineHeight:1.5, whiteSpace:'pre-line'}}>{children || '—'}</div>;
 }
-function Select({value, options, onChange, placeholder}){
-  return (
-    <div style={{position:'relative'}}>
-      <select value={value || ''} onChange={e=>onChange(e.target.value || null)} style={{...fieldControl, color: value ? T.attioText : T.gray400}}>
-        {placeholder && <option value="">{placeholder}</option>}
-        {options.map(o => typeof o === 'string'
-          ? <option key={o} value={o}>{o}</option>
-          : <option key={o.value} value={o.value}>{o.label}</option>)}
-      </select>
-      <div style={{position:'absolute', right:9, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', display:'flex'}}>
-        <Icon name="chevDown" size={12} color={T.gray600}/>
-      </div>
-    </div>
-  );
+// The activity forms' dropdown (Dropdown, shared.jsx); nothing picked is null.
+function Select({value, options, onChange, placeholder, ariaLabel}){
+  return <Dropdown value={value || ''} options={options} onChange={(v)=>onChange(v || null)} placeholder={placeholder} ariaLabel={ariaLabel} controlStyle={fieldControl}/>;
 }
 /* A person as the activity rows show them: avatar, name, "(Owner)". */
 function PersonValue({person}){
@@ -196,8 +186,8 @@ const detailHead = (a, contact, across) => across && !personLed(across) ? across
 /* `across.hideType` (a record's Contact / Deal / Customer feed, whose tab already gives the type):
    the record is the first detail, as "Record" (recordFirst), and isn't repeated below. */
 const recordFields = (across) => across && across.record && !across.hideType && <>
-  <Field label="Record name"><div style={{paddingTop:7, fontSize:13, display:'flex'}}><HubRecordLink object={across.object} id={across.record.id} name={across.record.name}/></div></Field>
-  <Field label="Record type"><ReadValue>{HUB_NOUN[across.object]}</ReadValue></Field>
+  <Field label="Record Name"><div style={{paddingTop:7, fontSize:13, display:'flex'}}><HubRecordLink object={across.object} id={across.record.id} name={across.record.name}/></div></Field>
+  <Field label="Record Type"><ReadValue>{HUB_NOUN[across.object]}</ReadValue></Field>
 </>;
 const recordFirst = (across) => across && across.hideType && across.record &&
   <Field label="Record"><div style={{paddingTop:7, fontSize:13, display:'flex'}}><HubRecordLink object={across.object} id={across.record.id} name={across.record.name}/></div></Field>;
@@ -214,25 +204,25 @@ function DetailMoreMenu({items}){
   return (<>
     {confirm && <StModal title={confirm.label} primary={confirm.label} danger onCancel={()=>setConfirm(null)}
       onSubmit={()=>{ const it = confirm; setConfirm(null); del(it.deleteAct); }}>
-      <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>This removes it from the record. It can't be undone.</div>
+      <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>It will be removed from the record. This can't be undone.</div>
     </StModal>}
     <div style={{position:'relative'}}>
-      <button title="More actions" onClick={()=>setOpen(o=>!o)} style={{...btnSecondarySm, padding:'7px 9px', background: open ? T.headerBg : '#fff'}}>
-        <Icon name="moreDots" size={14} color={T.attioText}/>
+      {/* The ⋯ every other menu uses: a plain 28px trigger, items without icons. */}
+      <button title="Activity Actions" onClick={()=>setOpen(o=>!o)} style={{width:28, height:28, borderRadius:8, border:'none', cursor:'pointer',
+        display:'flex', alignItems:'center', justifyContent:'center', background: open ? T.headerBg : 'transparent'}}>
+        <Icon name="moreDots" size={15} color={T.gray600}/>
       </button>
       <MenuShell open={open} onClose={()=>setOpen(false)} anchorRight width={210}>
-        {items.map(it => <MenuItem key={it.label} label={it.label} danger={it.danger}
-          icon={it.icon && <Icon name={it.icon} size={13} color={it.danger ? T.red : T.gray600}/>}
-          onClick={()=>{ setOpen(false); run(it); }}/>)}
+        {items.map(it => <MenuItem key={it.label} label={it.label} danger={it.danger} onClick={()=>{ setOpen(false); run(it); }}/>)}
       </MenuShell>
     </div>
   </>);
 }
 const pinItem = (a, onUpdate) => a.pinned
-  ? {label:'Unpin', icon:'unfreeze', onClick:()=>onUpdate(a.id, {pinned:false})}
-  : {label:'Pin',   icon:'freeze',   onClick:()=>onUpdate(a.id, {pinned:true})};
+  ? {label:'Unpin Activity', onClick:()=>onUpdate(a.id, {pinned:false})}
+  : {label:'Pin Activity',   onClick:()=>onUpdate(a.id, {pinned:true})};
 const stubItem = (label, onStub, icon, danger) => ({label, icon, danger, onClick:()=>onStub(label)});
-/* One arrangement for every activity's ⋯ menu, all with icons: the type's own actions, then
+/* One arrangement for every activity's ⋯ menu: the type's own actions, then
    Run Customer Profile (where offered), Pin / Unpin, and Delete last. Only Pin works yet. */
 const detailMenu = ({a, onUpdate, onStub, own = [], runProfile = false, deleteLabel = null}) => [
   ...own,
@@ -321,8 +311,7 @@ function NoteDetail({a, contact, calls, onUpdate, onStub, across}){
    too; logging a call or meeting doesn't ask for one. Adding, editing and deleting follow the
    record's Notes permissions. `own`: an older call's own notes (its `body`), shown first and
    following the call's permissions. */
-const fmtNoteStamp = (at) => { const d = new Date(at), p = (n) => String(n).padStart(2, '0');
-  const z = zonedParts(d); return `${fmtActTime(d).replace(/\s+/g, '')} | ${p(z.d)}/${p(z.m + 1)}/${z.y}`; };
+const fmtNoteStamp = (at) => fmtActStamp(new Date(at));
 function ActivityNoteItem({n, contact, canEdit, canDelete, onSave, onDelete}){
   const [editing, setEditing] = React.useState(false);
   const [text, setText] = React.useState('');
@@ -386,7 +375,7 @@ function ActivityNotes({a, contact, notes, link, onUpdate, onAdd, own}){
             onSave={body=>onUpdate(a.id, {body})} onDelete={()=>onUpdate(a.id, {body:''})}/>
         : <ActivityNoteItem key={n.id} n={n} contact={contact} canEdit={can(n, 'edit')} canDelete={can(n, 'delete')}
             onSave={body=>onUpdate(n.id, {body})} onDelete={()=>del && del(n)}/>)}
-      {!list.length && !adding && <div style={{fontSize:13, color:T.attioMuted}}>No notes yet.</div>}
+      {!list.length && !adding && <div style={{fontSize:13, color:T.attioMuted}}>No notes yet</div>}
     </div>
   );
 }
@@ -427,17 +416,17 @@ function CallDetail({a, contact, team, comments, onUpdate, onAdd, onStub, across
         {!editing && recordFirst(across)}
         {/* Edit mode shows only what can be edited: call type, point of contact and outcome on
             a call log. */}
-        {editing ? (a.logged && <Field label="Call type"><Select value={d.type} options={CALL_TYPES} onChange={v=>v && set({type:v})}/></Field>)
-                 : <Field label="Call type"><ReadValue>{callTypeOf(a)}</ReadValue></Field>}
+        {editing ? (a.logged && <Field label="Call Type"><Select value={d.type} options={CALL_TYPES} onChange={v=>v && set({type:v})}/></Field>)
+                 : <Field label="Call Type"><ReadValue>{callTypeOf(a)}</ReadValue></Field>}
         {/* Tools → Calls is the current user's view: no point of contact there. */}
-        {(!across || personLed(across)) && (editing ? (a.logged && <Field label="Point of contact"><Select value={d.poc} options={pocOptions(team, contact)} placeholder="Select person" onChange={v=>v && set({poc:v})}/></Field>)
-                 : <Field label="Point of contact"><PersonValue person={callPointOfContact(a, contact)}/></Field>)}
+        {(!across || personLed(across)) && (editing ? (a.logged && <Field label="Point of Contact"><Select value={d.poc} options={pocOptions(team, contact)} placeholder="Select person" onChange={v=>v && set({poc:v})}/></Field>)
+                 : <Field label="Point of Contact"><PersonValue person={callPointOfContact(a, contact)}/></Field>)}
         {!editing && across && !across.hideType && <>
-          <Field label="Record name"><div style={{paddingTop:7, fontSize:13, display:'flex'}}>{record ? <HubRecordLink object={across.object} id={record.id} name={record.name}/> : '—'}</div></Field>
-          {!across.hideType && <Field label="Record type"><ReadValue>{HUB_NOUN[across.object]}</ReadValue></Field>}
+          <Field label="Record Name"><div style={{paddingTop:7, fontSize:13, display:'flex'}}>{record ? <HubRecordLink object={across.object} id={record.id} name={record.name}/> : '—'}</div></Field>
+          {!across.hideType && <Field label="Record Type"><ReadValue>{HUB_NOUN[across.object]}</ReadValue></Field>}
         </>}
-        {editing ? (a.logged && <Field label="Call outcome"><Select value={d.outcome} options={LOG_CALL_OUTCOMES} placeholder="Select outcome" onChange={v=>set({outcome:v})}/></Field>)
-                 : <Field label="Call outcome"><ReadValue>{a.outcome}</ReadValue></Field>}
+        {editing ? (a.logged && <Field label="Call Outcome"><Select value={d.outcome} options={LOG_CALL_OUTCOMES} placeholder="Select outcome" onChange={v=>set({outcome:v})}/></Field>)
+                 : <Field label="Call Outcome"><ReadValue>{a.outcome}</ReadValue></Field>}
         {!editing && across && timeStampField(a.at)}
       </>)}
       {!editing && <ActivityNotes a={a} contact={contact} notes={comments} link="callId" onUpdate={onUpdate} onAdd={onAdd}
@@ -460,7 +449,7 @@ function EmailDetail({a, contact, acts, onStub, onUpdate, across}){
     // Emails stay read-only; Reply and Forward open the composer.
     <DetailFrame head={detailHead(a, contact, across)} actions={<>
       {headerBtn('Reply', ()=>compose('replyTo'))}
-      <DetailMoreMenu items={detailMenu({a, onUpdate, onStub, own:[{label:'Forward', icon:'forward', onClick:()=>compose('forward')}], runProfile:true, deleteLabel:'Delete Email'})}/>
+      <DetailMoreMenu items={detailMenu({a, onUpdate, onStub, own:[{label:'Forward Email', icon:'forward', onClick:()=>compose('forward')}], runProfile:true, deleteLabel:'Delete Email'})}/>
     </>}>
       {stack(<>
         {recordFirst(across)}
@@ -499,7 +488,7 @@ function TaskDetail({a, contact, team, onUpdate, onStub, across}){
       : activityEditBar(a, ()=>{ setD(blank()); setEditing(true); }, detailMenu({a, onUpdate, onStub, own:[stubItem('Reassign Task', onStub, 'userSwitch'), stubItem('Copy Task Description', onStub, 'copy')], deleteLabel:'Delete Task'}))}>
       {stack(<>
         {!editing && recordFirst(across)}
-        <Field label="Task name">{editing ? <input value={d.title} onChange={e=>set({title:e.target.value})} style={fieldText}/> : <ReadValue>{a.title}</ReadValue>}</Field>
+        <Field label="Task Name">{editing ? <input value={d.title} onChange={e=>set({title:e.target.value})} style={fieldText}/> : <ReadValue>{a.title}</ReadValue>}</Field>
         <Field label="Description">{editing
           ? <textarea value={d.description} onChange={e=>set({description:e.target.value})} rows={3} style={{...fieldText, resize:'vertical', lineHeight:1.5}}/>
           : <ReadValue>{a.description}</ReadValue>}</Field>
@@ -507,7 +496,7 @@ function TaskDetail({a, contact, team, onUpdate, onStub, across}){
           : <ReadValue>{(taskPipelineOf(a) || {}).name}</ReadValue>}</Field>
         <Field label="Status">{editing ? <TaskStatusRadios name={`status-${a.id}`} pipelineId={d.pipelineId} value={d.status} overdue={d.status !== 'completed' && isPastDue(taskDueValue(d.dueDate, d.dueTimeOfDay))} onChange={v=>set({status:v})}/>
           : <span style={{fontSize:13, paddingTop:7, display:'block', color: taskState(a) === 'overdue' ? T.red : T.attioText}}>{taskStateLabel(a)}</span>}</Field>
-        <Field label="Task type">{editing ? <Select value={d.taskType} options={TASK_TYPES} onChange={v=>v && set({taskType:v})}/> : <ReadValue>{a.taskType}</ReadValue>}</Field>
+        <Field label="Task Type">{editing ? <Select value={d.taskType} options={TASK_TYPES} onChange={v=>v && set({taskType:v})}/> : <ReadValue>{a.taskType}</ReadValue>}</Field>
         <Field label="Assigned to">{editing ? <Select value={d.assignee} options={team} placeholder="Select person" onChange={v=>v && set({assignee:v})}/> : <ReadValue>{a.assignee}</ReadValue>}</Field>
         {editing ? <TaskDueFields date={d.dueDate} time={d.dueTimeOfDay} onChange={(date, time)=>set({dueDate:date, dueTimeOfDay:time})}/>
           : <Field label="Due">{a.due ? <ReadValue>{fmtTaskDue(a)}{isOverdue(a) ? ' · Overdue' : ''}</ReadValue> : <ReadValue>No due date</ReadValue>}</Field>}
@@ -542,7 +531,7 @@ function MeetingTranscript({a, onUpdate}){
   const close = () => { setOpen(null); setText(''); };
   const lines = open === 'read' ? parseTranscript(a.transcript) : [];
   return (<>
-    <button onClick={()=>setOpen(has ? 'read' : 'add')} style={linkBtn}>{has ? 'Read transcript' : 'Add transcript'}</button>
+    <button onClick={()=>setOpen(has ? 'read' : 'add')} style={linkBtn}>{has ? 'Read Transcript' : 'Add Transcript'}</button>
     {open === 'read' && ReactDOM.createPortal(
       <StModal title="Transcript" width={600} onCancel={close}>
         <div style={{maxHeight:'60vh', overflowY:'auto', display:'flex', flexDirection:'column', gap:12}}>
@@ -555,7 +544,7 @@ function MeetingTranscript({a, onUpdate}){
         </div>
       </StModal>, document.body)}
     {open === 'add' && ReactDOM.createPortal(
-      <StModal title="Add transcript" width={600} primary="Save" canSubmit={!!text.trim()} onCancel={close}
+      <StModal title="Add Transcript" width={600} primary="Save" canSubmit={!!text.trim()} onCancel={close}
         onSubmit={()=>{ onUpdate(a.id, {transcript:text.trim()}); close(); }}>
         <textarea autoFocus value={text} onChange={e=>setText(e.target.value)} rows={12} aria-label="Transcript"
           placeholder={'00:00 Name: What was said\n00:42 Name: …'} style={{...fieldText, resize:'vertical', lineHeight:1.55}}/>
@@ -597,7 +586,7 @@ function MeetingDetail({a, contact, team, comments, onUpdate, onAdd, onStub, acr
             header; Notes follow. Edit: organiser, platform, title (logs only) and link. */}
         {!editing && <Field label="Title"><ReadValue>{a.title}</ReadValue></Field>}
         {!editing && (a.attendees || []).length > 0 && <Field label="Attendees"><ReadValue>{attendeesText(a.attendees)}</ReadValue></Field>}
-        {editing && a.logged && <Field label="Organiser"><Select value={d.organiser} options={teamOptions} onChange={v=>v && set({organiser:v})}/></Field>}
+        {editing && a.logged && <Field label="Organizer"><Select value={d.organiser} options={teamOptions} onChange={v=>v && set({organiser:v})}/></Field>}
         {editing ? (a.logged && <Field label="Platform"><Select value={d.platform} options={MEETING_PLATFORMS} placeholder="Select platform" onChange={v=>set({platform:v})}/></Field>)
                  : <Field label="Platform"><ReadValue>{a.platform}</ReadValue></Field>}
         {!editing && <Field label="Transcript"><MeetingTranscript a={a} onUpdate={onUpdate}/></Field>}
@@ -638,10 +627,10 @@ function OwnerChangeDetail({a, contact, team, onReassign}){
     <DetailFrame head={activityHead(a, contact)} actions={editing ? saveBar(cancel, save, !!owner && owner !== contact.owner) : editBar(()=>{ setOwner(contact.owner || null); setEditing(true); })}>
       {stack(<>
         {editing
-          ? <Field label="Reassign owner"><Select value={owner} options={team} placeholder="Select owner" onChange={setOwner}/></Field>
+          ? <Field label="Reassign Owner"><Select value={owner} options={team} placeholder="Select owner" onChange={setOwner}/></Field>
           : <>
-              <Field label="Previous owner"><ReadValue>{userLabel(a.from)}</ReadValue></Field>
-              <Field label="New owner"><ReadValue>{userLabel(a.to)}</ReadValue></Field>
+              <Field label="Previous Owner"><ReadValue>{userLabel(a.from)}</ReadValue></Field>
+              <Field label="New Owner"><ReadValue>{userLabel(a.to)}</ReadValue></Field>
             </>}
       </>)}
     </DetailFrame>
@@ -665,8 +654,8 @@ function ActivityDetail({a, contact, team, acts, onUpdate, onAdd, onStub, onReas
 /* A task's due date and, optionally, a time on it (the time needs a date). */
 function TaskDueFields({date, time, onChange}){
   return (<>
-    <Field label="Due date"><DateField value={date} onChange={(v)=>onChange(v, v ? time : '')} ariaLabel="Due date"/></Field>
-    <Field label="Due time"><div style={{opacity: date ? 1 : .5, pointerEvents: date ? 'auto' : 'none'}}>
+    <Field label="Due Date"><DateField value={date} onChange={(v)=>onChange(v, v ? time : '')} ariaLabel="Due date"/></Field>
+    <Field label="Due Time"><div style={{opacity: date ? 1 : .5, pointerEvents: date ? 'auto' : 'none'}}>
       <TimeField value={time} onChange={(v)=>onChange(date, v)} ariaLabel="Due time"/></div></Field>
   </>);
 }
@@ -700,10 +689,10 @@ function ContentSidePanel({width, zIndex = 80, style, children}){
     document.body);
 }
 /* `width`: wider for a builder with a stepper (Quotes); `flush`: the body lays itself out (its own columns and scrolling). */
-/* `more:false` leaves out the ⋯ button. Every creation panel opens in the same place
-   (ContentSidePanel); `placement` is kept for its callers but no longer moves it. */
-function CreatePanelFrame({title, onClose, top, children, actions, placement, width = CREATE_PANEL_W, flush = false, more = true, zIndex}){
-  const [stub, setStub] = React.useState(null);
+/* Every creation panel opens in the same place (ContentSidePanel); `placement` and `more` are
+   kept for their callers but no longer change it (the footer's ⋯ stub is gone). Escape closes it. */
+function CreatePanelFrame({title, onClose, top, children, actions, placement, width = CREATE_PANEL_W, flush = false, more, zIndex}){
+  useEscapeClose(onClose);
   return (
     <ContentSidePanel width={width} zIndex={zIndex} style={{background:'#fff', borderLeft:`1px solid ${T.border}`, boxShadow:'-8px 0 24px rgba(16,24,40,.08)', display:'flex', flexDirection:'column'}}>
       <div style={{display:'flex', alignItems:'center', gap:10, padding:'16px 20px', borderBottom:`1px solid ${T.border}`, flexShrink:0}}>
@@ -714,22 +703,15 @@ function CreatePanelFrame({title, onClose, top, children, actions, placement, wi
       {flush ? <div style={{flex:1, minHeight:0, display:'flex'}}>{children}</div>
         : <div style={{flex:1, minHeight:0, overflowY:'auto', padding:'20px'}}>{children}</div>}
       <div style={{display:'flex', alignItems:'center', justifyContent:'flex-end', gap:8, padding:'12px 20px', borderTop:`1px solid ${T.border}`, flexShrink:0}}>
-        {/* ⋯ — what it holds isn't defined yet. */}
-        {more && <button title="More actions" onClick={()=>setStub('More actions')} style={{border:'none', background:'transparent', cursor:'pointer', display:'flex', padding:6}}>
-          <Icon name="moreDots" size={14} color={T.gray600}/></button>}
         {actions}
       </div>
-      {stub && <StubPanel title={stub} onClose={()=>setStub(null)} zIndex={120}/>}
     </ContentSidePanel>
   );
 }
 // The record a new activity is for (Tools pages): Record Type, then the record.
 function CreateRecordField({value, onChange}){
   return (
-    <div style={{display:'flex', flexDirection:'column', gap:8}}>
-      <span style={{fontSize:12.5, color:T.attioMuted}}>Record Type</span>
-      <RecordPicker value={value} onChange={onChange}/>
-    </div>
+    <Field label="Record Type" wide><RecordPicker value={value} onChange={onChange}/></Field>
   );
 }
 function NewItemPanel({title, children, canSave, onSave, onCancel, primary = 'Save'}){
@@ -750,7 +732,7 @@ function NewItemPanel({title, children, canSave, onSave, onCancel, primary = 'Sa
 function NewNote({onAdd, onDone}){
   const [html, setHtml] = React.useState('');
   return (
-    <NewItemPanel title="New Note" canSave={!richIsEmpty(html)} onCancel={()=>onDone(null)}
+    <NewItemPanel title="Add Note" primary="Add Note" canSave={!richIsEmpty(html)} onCancel={()=>onDone(null)}
       onSave={()=>{ const id = newId('note'); onAdd({id, type:'note', source:'you', by:null, body:sanitizeRichText(html)}); onDone(id); }}>
       <Field label="Note"><RichTextEditor value={html} onChange={setHtml} placeholder="Write a note" minHeight={180} ariaLabel="Note"/></Field>
     </NewItemPanel>
@@ -771,9 +753,9 @@ function NewLogCall({contact, team, onAdd, onDone, fixedPoc}){
   };
   return (
     <NewItemPanel title="Log Call" canSave={ok} onSave={save} onCancel={()=>onDone(null)}>
-      <Field label="Call type"><Select value={type} options={CALL_TYPES} placeholder="Select call type" onChange={setType}/></Field>
-      {!fixedPoc && <Field label="Point of contact"><PersonPicker value={poc} team={team} contact={contact} onChange={setPoc}/></Field>}
-      <Field label="Call outcome"><Select value={outcome} options={LOG_CALL_OUTCOMES} placeholder="Select outcome" onChange={setOutcome}/></Field>
+      <Field label="Call Type"><Select value={type} options={CALL_TYPES} placeholder="Select call type" onChange={setType}/></Field>
+      {!fixedPoc && <Field label="Point of Contact"><PersonPicker value={poc} team={team} contact={contact} onChange={setPoc}/></Field>}
+      <Field label="Call Outcome"><Select value={outcome} options={LOG_CALL_OUTCOMES} placeholder="Select outcome" onChange={setOutcome}/></Field>
     </NewItemPanel>
   );
 }
@@ -790,7 +772,7 @@ function NewLogMeeting({contact, team, onAdd, onDone}){
   };
   return (
     <NewItemPanel title="Log Meeting" canSave={ok} onSave={save} onCancel={()=>onDone(null)}>
-      <Field label="Organiser"><PersonPicker value={organiser} team={team} contact={contact} placeholder="Select organiser" onChange={setOrganiser}/></Field>
+      <Field label="Organizer"><PersonPicker value={organiser} team={team} contact={contact} placeholder="Select organizer" onChange={setOrganiser}/></Field>
       <Field label="Attendees"><AttendeesField value={m.attendees} team={team} contact={contact} onChange={v=>set({attendees:v})}/></Field>
       <Field label="Platform"><Select value={m.platform} options={MEETING_PLATFORMS} placeholder="Select platform" onChange={v=>set({platform:v})}/></Field>
       <Field label="Title"><input value={m.title} onChange={e=>set({title:e.target.value})} placeholder="Meeting title" style={fieldText}/></Field>
@@ -823,7 +805,7 @@ function NewScheduleMeeting({contact, team, onAdd, onDone}){
       <Field label="Time"><TimeField required value={m.time} onChange={v=>set({time:v})} ariaLabel="Meeting time"/>
         {when && !future && <div style={{fontSize:12, color:T.red, marginTop:4}}>Choose a time in the future.</div>}</Field>
       <Field label="Duration"><Select value={m.duration} options={SCHEDULE_DURATIONS.map(d => d[0])} onChange={v=>v && set({duration:v})}/></Field>
-      <Field label="Organiser"><PersonPicker value={organiser} team={team} contact={contact} placeholder="Select organiser" onChange={setOrganiser}/></Field>
+      <Field label="Organizer"><PersonPicker value={organiser} team={team} contact={contact} placeholder="Select organizer" onChange={setOrganiser}/></Field>
       <Field label="Attendees"><AttendeesField value={m.attendees} team={team} contact={contact} onChange={v=>set({attendees:v})}/></Field>
       <Field label="Description"><textarea value={m.description} onChange={e=>set({description:e.target.value})} rows={3} style={{...fieldText, resize:'vertical', lineHeight:1.5}}/></Field>
     </NewItemPanel>
@@ -841,16 +823,16 @@ function NewTask({team, contact, onAdd, onDone, initial}){
   const set = (p) => setT(x => ({...x, ...p}));
   const ok = !!t.title.trim() && !!assignee;
   return (
-    <NewItemPanel title="New Task" canSave={ok} onCancel={()=>onDone(null)}
+    <NewItemPanel title="Add Task" primary="Add Task" canSave={ok} onCancel={()=>onDone(null)}
       onSave={()=>{ const id = newId('task'); const {dueDate, dueTimeOfDay, ...rest} = t;
         onAdd({id, type:'task', source:'you', by:null, ...rest, assignee, ...taskDueValue(dueDate, dueTimeOfDay), title:t.title.trim(), description:t.description.trim()}); onDone(id); }}>
-      <Field label="Task name"><input autoFocus value={t.title} onChange={e=>set({title:e.target.value})} placeholder="What needs doing" style={fieldText}/></Field>
+      <Field label="Task Name"><input autoFocus value={t.title} onChange={e=>set({title:e.target.value})} placeholder="What needs doing" style={fieldText}/></Field>
       <Field label="Description">
         <textarea value={t.description} onChange={e=>set({description:e.target.value})} rows={3} style={{...fieldText, resize:'vertical', lineHeight:1.5}}/>
       </Field>
       <Field label="Pipeline"><Select value={t.pipelineId} options={taskPipelineOptions()} onChange={v=>v && set({pipelineId:v, status:firstStageOf(v)})}/></Field>
       <Field label="Status"><TaskStatusRadios name="status-new" pipelineId={t.pipelineId} value={t.status} onChange={v=>set({status:v})}/></Field>
-      <Field label="Task type"><Select value={t.taskType} options={TASK_TYPES} onChange={v=>v && set({taskType:v})}/></Field>
+      <Field label="Task Type"><Select value={t.taskType} options={TASK_TYPES} onChange={v=>v && set({taskType:v})}/></Field>
       <Field label="Assigned to"><PersonPicker value={assignee} team={team} contact={contact} onChange={setAssignee}/></Field>
       <TaskDueFields date={t.dueDate} time={t.dueTimeOfDay} onChange={(date, time)=>set({dueDate:date, dueTimeOfDay:time})}/>
     </NewItemPanel>
@@ -865,11 +847,11 @@ const ACTIVITY_TAB_TYPES = {activity:null, calls:'call', email:'email', tasks:'t
    than one type, it still opens the list of types. */
 const ACTIVITY_ADD = {
   activity: {label:'Add',       menu:['Note', 'Call', 'Log Call', 'Start Meeting', 'Schedule Meeting', 'Log Meeting', 'Task', 'Email']},
-  calls:    {label:'Add call',  menu:['Call', 'Log Call']},
-  notes:    {label:'Add note',  pick:'Note'},
-  email:    {label:'Add email', pick:'Email'},
-  tasks:    {label:'Add task',  pick:'Task'},
-  meetings: {label:'Add meeting', menu:['Start Meeting', 'Schedule Meeting', 'Log Meeting']},
+  calls:    {label:'Add Call',  menu:['Call', 'Log Call']},
+  notes:    {label:'Add Note',  pick:'Note'},
+  email:    {label:'Add Email', pick:'Email'},
+  tasks:    {label:'Add Task',  pick:'Task'},
+  meetings: {label:'Add Meeting', menu:['Start Meeting', 'Schedule Meeting', 'Log Meeting']},
 };
 /* `iconOnly`: just the + (the toolbar icon button, its name as the tooltip) — the Tools pages. */
 function ActivityAddButton({tabId, onPick, iconOnly}){
@@ -932,7 +914,7 @@ function ActivityTab({tabId, contact, acts, allActs, team, adding, setAdding, pr
   const [compose, setCompose] = React.useState(null);   // Reply / Forward: the composer's options
   const selected = list.find(a => a.id === selectedId) || list[0] || null;
   const done = (id) => { setAdding(null); if(id) setSelectedId(id); };
-  const empty = emptyText || {activity:'No activity yet.', calls:'No calls yet.', email:'No emails yet.', tasks:'No tasks yet.', notes:'No notes yet.', meetings:'No meetings yet.'}[tabId];
+  const empty = emptyText || {activity:'No activity yet', calls:'No calls yet', email:'No emails yet', tasks:'No tasks yet', notes:'No notes yet', meetings:'No meetings yet'}[tabId];
   // A new email from this record, or a reply / forward of one shown here.
   const emailOpts = adding === 'Email' && ra ? {object:ra.object, id:ra.record.id} : compose;
   const closeEmail = (result, id) => { setAdding(a => a === 'Email' ? null : a); setCompose(null); if(id) setSelectedId(id); };
@@ -951,7 +933,7 @@ function ActivityTab({tabId, contact, acts, allActs, team, adding, setAdding, pr
         const view = (r) => r && {...r, owner:userLabel(r.owner) || r.owner};
         return <>
           <TaskStatusBoard entries={entries} onUpdate={update} onOpen={(e)=>setSelectedId(e.act.id)} showAssignee/>
-          {open && <PageSidePanel width={560} title={open.act.title || 'Task'} subtitle={`${HUB_NOUN[open.object]} · ${open.record.name}`} onClose={()=>setSelectedId(null)}>
+          {open && <PageSidePanel title={open.act.title || 'Task'} onClose={()=>setSelectedId(null)}>
             <div style={{flex:1, minHeight:0, display:'flex', flexDirection:'column'}}>
               {own(open) ? <ActivityDetail key={open.act.id} a={open.act} contact={contact} team={team} acts={allActs || acts} onUpdate={onUpdate} onAdd={onAdd} onStub={onStub} onReassign={onReassign}/>
                 : <RecordAccessCtx.Provider value={{object:open.object, record:open.record}}>
@@ -971,7 +953,7 @@ function ActivityTab({tabId, contact, acts, allActs, team, adding, setAdding, pr
             record={recordOf && recordOf(a) && (({object, record}) => ({object, id:record.id, name:record.name}))(recordOf(a))}
             selected={selected && selected.id === a.id} onSelect={()=>setSelectedId(a.id)}/>
         ))}
-        {!list.length && <div style={{fontSize:13, color:T.attioMuted, padding:'24px 20px', textAlign:'center'}}>{empty}</div>}
+        {!list.length && <EmptyState compact title={empty}/>}
       </div>
 
       {/* Right — the selected item's content (DetailFrame). */}

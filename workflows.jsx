@@ -311,7 +311,7 @@ const associatedParamHelp = (data, ctx, c) => {
     created:`A new ${x} is linked to this ${me}.`,
     notCreated:`This ${me} has no ${x}.`,
     changed:`A linked ${x} changes.`,
-    notChanged:`No linked ${x} changes.`,
+    notChanged:`No linked ${x} changes`,
   })[c.assocParam] || '';
 };
 /* Each save is a new version of the workflow (runs record the version they ran); a new workflow
@@ -414,7 +414,7 @@ function WorkflowOverlapModal({data, name, overlaps, onCancel, onResolve}){
     </label>
   );
   return (
-    <StModal title="People in two identical workflows" primary="Continue" width={560} canSubmit={all.every(k => pick[k])} onCancel={onCancel} onSubmit={()=>onResolve(pick)}>
+    <StModal title="People in Two Identical Workflows" primary="Continue" width={560} canSubmit={all.every(k => pick[k])} onCancel={onCancel} onSubmit={()=>onResolve(pick)}>
       <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>
         This workflow matches another one, and some people are in both. Choose which workflow applies to each of them. The other one stops applying to them from now on; its run history is kept.
       </div>
@@ -1030,16 +1030,16 @@ const sidePanelIconBtn = {width:30, height:30, borderRadius:8, border:'none', ba
   display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0};
 /* `titleStyle` overrides the title's type (e.g. the pipeline panel's navigation-level heading);
    `subtitle` may be any node. */
-function SidePanelHeader({title, subtitle, onClose, menuItems, titleStyle}){
+// A panel's header: its title (15px, as every panel and modal — no subtitle), its ⋯, then × at the far right.
+function SidePanelHeader({title, onClose, menuItems, titleStyle}){
   return (
     <div style={{display:'flex', alignItems:'center', gap:10, minWidth:0, padding:'16px 14px 12px 20px', flexShrink:0}}>
       <div style={{minWidth:0, flex:1}}>
-        <div style={{fontSize:17, fontWeight:600, color:T.attioText, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', ...titleStyle}}>{title}</div>
-        {subtitle && <div style={{fontSize:12.5, color:T.attioMuted, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{subtitle}</div>}
+        <div style={{fontSize:15, fontWeight:600, color:T.attioText, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', ...titleStyle}}>{title}</div>
       </div>
       <div style={{display:'flex', alignItems:'center', gap:2, flexShrink:0}}>
+        {menuItems && menuItems.length > 0 && <RowActionsMenu title="More Actions" width={MENU_W} items={menuItems}/>}
         <button title="Close" onClick={onClose} style={sidePanelIconBtn}><Icon name="close" size={13} color={T.gray600}/></button>
-        {menuItems && menuItems.length > 0 && <RowActionsMenu title="More actions" width={MENU_W} items={menuItems}/>}
       </div>
     </div>
   );
@@ -1114,7 +1114,7 @@ function DurationInput({value, onChange, units = WORKFLOW_TIME_UNITS}){
     <div style={{display:'flex', gap:8}}>
       {/* The number and the unit share the row equally. */}
       <div style={{flex:'1 1 0', minWidth:0}}><input type="number" min="1" value={v.amount} onChange={e=>onChange({...v, amount:e.target.value})} placeholder="0" style={{...fieldInput, width:'100%'}}/></div>
-      <div style={{flex:'1 1 0', minWidth:0}}><FormSelect value={v.unit} placeholder="Unit" options={units} onChange={u=>onChange({...v, unit:u || 'Days'})}/></div>
+      <div style={{flex:'1 1 0', minWidth:0}}><FormSelect value={v.unit} placeholder="Select unit" options={units} onChange={u=>onChange({...v, unit:u || 'Days'})}/></div>
     </div>
   );
 }
@@ -1307,7 +1307,7 @@ function ViewEmailModal({name, email, onClose, onSave}){
     onSave({subject:subject.trim() || email.subject, html:copy.innerHTML});
   };
   return ReactDOM.createPortal(
-    <StModal title={name} primary={editing ? 'Save Changes' : null} onCancel={onClose} onSubmit={save} width={960}
+    <StModal title="View Email" primary={editing ? 'Save Changes' : null} onCancel={onClose} onSubmit={save} width={960}
       textAction={editing ? null : {label:'Edit Text', onClick:()=>setEditing(true)}}>
       <style>{`.hof-email-edit [contenteditable]{outline:1px dashed ${T.borderStrong};outline-offset:3px;border-radius:2px;cursor:text}
         .hof-email-edit [contenteditable]:hover{outline-color:${T.attioMuted}}
@@ -1317,7 +1317,6 @@ function ViewEmailModal({name, email, onClose, onSave}){
         {editing ? <input value={subject} onChange={e=>setSubject(e.target.value)} style={fieldInput}/>
                  : <div style={{fontSize:14, fontWeight:500, color:T.attioText}}>{subject}</div>}
       </div>
-      {editing && <div style={stTextB}>Only the text can be edited. Changes apply to this email only; the template stays as it is.</div>}
       <div style={{background:T.headerBg, border:`1px solid ${T.border}`, borderRadius:10, padding:'28px 24px', maxHeight:'calc(100vh - 300px)', overflowY:'auto'}}>
         <div ref={ref} className={editing ? 'hof-email-edit' : ''} dangerouslySetInnerHTML={html}
           onClick={e=>{ if(e.target.closest('a')) e.preventDefault(); }}
@@ -1344,7 +1343,7 @@ function EmailChoice({entry, setEntry, data, onStub}){
       </div>
     ) : <UnderlineAction label="Choose email template" onClick={()=>setModal('choose')}/>}
     {modal === 'choose' && <EmailPickerModal title="Choose Email Template" empty="No email templates yet" searchPlaceholder="Search email templates"
-      createLabel="Create email template" onCreate={()=>onStub('Create email template')} onClose={()=>setModal(null)}
+      createLabel="Add Email Template" onCreate={()=>onStub('Add Email Template')} onClose={()=>setModal(null)}
       items={templates.map(t => ({id:t.id, title:t.name, detail:t.subject}))}
       onPick={(id)=>{ setEntry({...entry, templateId:id, email:null}); setModal(null); }}/>}
     {modal === 'view' && tpl && <ViewEmailModal name={tpl.name} email={entry.email || {subject:tpl.subject, html:tpl.html}} onClose={()=>setModal(null)}
@@ -1387,7 +1386,7 @@ function ScheduleEmailConfig({config, setConfig, data, onStub}){
         </>)}/>
       {behaviorField('scheduleEmail', config, setConfig)}
       {choosing && <EmailPickerModal title="Choose Email Sequence Template" empty="No email sequences yet" searchPlaceholder="Search email sequences"
-        createLabel="Create email sequence" onCreate={()=>onStub('Create email sequence')} onClose={()=>setChoosing(false)}
+        createLabel="Add Email Sequence" onCreate={()=>onStub('Add Email Sequence')} onClose={()=>setChoosing(false)}
         items={sequences.map(q => ({id:q.id, title:q.name, detail:`${plural(q.emails.length, 'email')} | ${sequenceSpan(q)}`}))} onPick={useSequence}/>}
     </div>
   );
@@ -1448,7 +1447,7 @@ function AddNoteConfig({config, setConfig}){
     <div style={{padding:'4px 20px 20px', display:'flex', flexDirection:'column', gap:20}}>
       <div style={{display:'flex', flexDirection:'column', gap:10}}>
         <label onClick={()=>setConfig({...c, specific:!c.specific})} style={{display:'flex', alignItems:'center', gap:10, fontSize:13, color:T.attioText, cursor:'pointer'}}>
-          <RowCheckbox checked={c.specific} onChange={()=>setConfig({...c, specific:!c.specific})}/>Add a specific note
+          <span onClick={e=>e.stopPropagation()} style={{display:'flex'}}><UtToggle on={!!c.specific} onChange={()=>setConfig({...c, specific:!c.specific})}/></span>Add a Specific Note
         </label>
         {c.specific && <textarea rows={10} value={c.body} onChange={e=>setConfig({...c, body:e.target.value})} placeholder="Write a note" aria-label="Note"
           style={{...fieldInput, resize:'vertical', lineHeight:1.5}}/>}
@@ -1639,7 +1638,7 @@ function MoveToPipelineConfig({config, setConfig, data, context}){
   const pipelines = objectPipelines(data, ctx.object).filter(p => p.source !== 'property'), pl = pipelines.find(p => p.id === c.pipeline);
   return cfgPad(<>
     {cfgField('Pipeline', <FormSelect value={c.pipeline || ''} placeholder="Select pipeline" options={pipelines.map(p => ({value:p.id, label:p.label}))} onChange={(v)=>setConfig({...c, pipeline:v, stage:''})}/>)}
-    {pl && cfgField('Destination stage', <FormSelect value={c.stage || ''} placeholder={`First stage (${(pl.stages.find(s => !isClosedStage(s)) || pl.stages[0] || {}).label || '—'})`}
+    {pl && cfgField('Destination Stage', <FormSelect value={c.stage || ''} placeholder={`First stage (${(pl.stages.find(s => !isClosedStage(s)) || pl.stages[0] || {}).label || '—'})`}
       options={pl.stages.map(s => ({value:s.id, label:s.label}))} onChange={(v)=>setConfig({...c, stage:v})}/>)}
     {behaviorField('moveToPipeline', c, setConfig)}
   </>);
@@ -1658,7 +1657,7 @@ function CreateEmailActivityConfig({config, setConfig, data, onStub}){
 function ExitSequenceConfig({config, setConfig, data}){
   const c = config || {};
   return cfgPad(<>
-    {cfgField('Email sequence', <FormSelect value={c.sequenceId || ''} placeholder="Select sequence" options={emailSequencesOf(data).map(q => ({value:q.id, label:q.name}))} onChange={(v)=>setConfig({...c, sequenceId:v})}/>)}
+    {cfgField('Email Sequence', <FormSelect value={c.sequenceId || ''} placeholder="Select sequence" options={emailSequencesOf(data).map(q => ({value:q.id, label:q.name}))} onChange={(v)=>setConfig({...c, sequenceId:v})}/>)}
     {cfgHelp('The record’s emails still scheduled from this sequence are cancelled.')}
     {behaviorField('exitEmailSequence', c, setConfig)}
   </>);
@@ -1680,8 +1679,8 @@ function AddCallLogConfig({config, setConfig}){
   const c = {outcome:'', callType:'Outbound', comment:'', ...config};
   const set = (patch) => setConfig({...c, ...patch});
   return cfgPad(<>
-    {cfgField('Call type', <FormSelect value={c.callType} placeholder="Select call type" options={CALL_TYPES} onChange={(v)=>set({callType:v || 'Outbound'})}/>)}
-    {cfgField('Call outcome', <FormSelect value={c.outcome} placeholder="Select outcome" options={LOG_CALL_OUTCOMES} onChange={(v)=>set({outcome:v})}/>)}
+    {cfgField('Call Type', <FormSelect value={c.callType} placeholder="Select call type" options={CALL_TYPES} onChange={(v)=>set({callType:v || 'Outbound'})}/>)}
+    {cfgField('Call Outcome', <FormSelect value={c.outcome} placeholder="Select outcome" options={LOG_CALL_OUTCOMES} onChange={(v)=>set({outcome:v})}/>)}
     {cfgField('Note', <textarea rows={3} value={c.comment} onChange={e=>set({comment:e.target.value})} style={{...fieldInput, resize:'vertical', lineHeight:1.5}}/>)}
     {behaviorField('addCallLog', c, setConfig)}
   </>);
@@ -1702,7 +1701,7 @@ function UpdateAssociatedConfig({config, setConfig, data, context}){
   if(!ctx.object) return needsRecord(ctx);
   const targets = (ASSOCIATED_OBJECTS[ctx.object] || []).filter(workspaceHasType);
   return cfgPad(<>
-    {cfgField('Associated record', <FormSelect value={c.object || ''} placeholder="Select record" options={targets.map(o => ({value:o, label:objectName(data, o).replace(/s$/, '')}))}
+    {cfgField('Associated Record', <FormSelect value={c.object || ''} placeholder="Select record" options={targets.map(o => ({value:o, label:objectName(data, o).replace(/s$/, '')}))}
       onChange={(v)=>setConfig({...c, object:v, properties:[]})}/>)}
     {c.object && <PropertyEntries config={c} setConfig={setConfig} data={data} context={{object:c.object}} withValue/>}
     {c.object && cfgHelp(`Every associated ${objectName(data, c.object).replace(/s$/, '').toLowerCase()} of the record is updated; the triggering record isn't.`)}
@@ -1767,11 +1766,11 @@ function AssignOwnerConfig({config, setConfig, data, context}){
       {c.rules.map((r, i) => { const f = fieldOf(r.property); const setR = (patch) => set({rules:c.rules.map(x => x.id === r.id ? {...x, ...patch} : x)}); return (
         <div key={r.id} style={{display:'flex', flexDirection:'column', gap:6, padding:10, border:`1px solid ${T.attioLine}`, borderRadius:8}}>
           <div style={{display:'flex', gap:6, alignItems:'center'}}>
-            <div style={{flex:1, minWidth:0}}><FormSelect value={r.property || ''} placeholder="User property" options={userFields.map(x => ({value:x.key, label:x.label}))} onChange={(v)=>setR({property:v, op:'', value:''})}/></div>
+            <div style={{flex:1, minWidth:0}}><FormSelect value={r.property || ''} placeholder="Select user property" options={userFields.map(x => ({value:x.key, label:x.label}))} onChange={(v)=>setR({property:v, op:'', value:''})}/></div>
             {iconBtn('trash', 'Remove condition', ()=>set({rules:c.rules.filter(x => x.id !== r.id)}))}
           </div>
           {f && <div style={{display:'flex', gap:6}}>
-            <div style={{flex:'1 1 0', minWidth:0}}><FormSelect value={r.op || ''} placeholder="Condition" options={opsFor(f)} onChange={(v)=>setR({op:v, value:''})}/></div>
+            <div style={{flex:'1 1 0', minWidth:0}}><FormSelect value={r.op || ''} placeholder="Select condition" options={opsFor(f)} onChange={(v)=>setR({op:v, value:''})}/></div>
             <div style={{flex:'1 1 0', minWidth:0}}><ConditionValueInput compact prop={fieldProperty(f)} op={fieldOperatorOf(f, r.op)} value={r.value ?? ''} onChange={(v)=>setR({value:v})}/></div>
           </div>}
         </div>
@@ -1984,7 +1983,7 @@ function TriggerSettings({data, trig, context, config, onChange}){
       // The count condition; Equals turns Repeat off (it goes with Is more than / Is less than).
       case 'countCondition': return <React.Fragment key={f}>{cfgField('Condition', (
         <div style={{display:'flex', gap:8}}>
-          <div style={{flex:'1 1 0', minWidth:0}}><FormSelect value={c.op || ''} placeholder="Operator" options={COUNT_OPERATORS.map(o => ({value:o.value, label:o.label}))}
+          <div style={{flex:'1 1 0', minWidth:0}}><FormSelect value={c.op || ''} placeholder="Select operator" options={COUNT_OPERATORS.map(o => ({value:o.value, label:o.label}))}
             onChange={(v)=>set(countRepeatable({op:v}) ? {op:v} : {op:v, repeat:false})}/></div>
           <input type="number" min="0" value={c.value ?? ''} onChange={e=>set({value:e.target.value})} placeholder="0" aria-label="Count"
             style={{...fieldInput, flex:'1 1 0', width:0, minWidth:0}}/>
@@ -2017,8 +2016,8 @@ function TriggerSettings({data, trig, context, config, onChange}){
 function RenameWorkflowModal({name, onSave, onCancel}){
   const [value, setValue] = React.useState(name || '');
   return (
-    <StModal title="Rename workflow" primary="Save" canSubmit={!!value.trim()} onCancel={onCancel} onSubmit={()=>onSave(value.trim())}>
-      <div><label style={fieldLabel}>Workflow name</label><input autoFocus value={value} onChange={e=>setValue(e.target.value)} style={fieldInput}/></div>
+    <StModal title="Rename Workflow" primary="Save" canSubmit={!!value.trim()} onCancel={onCancel} onSubmit={()=>onSave(value.trim())}>
+      <div><label style={fieldLabel}>Workflow Name</label><input autoFocus value={value} onChange={e=>setValue(e.target.value)} style={fieldInput}/></div>
     </StModal>
   );
 }
@@ -2267,8 +2266,8 @@ function WorkflowEditor({data, initial, onCancel, onSave, onDelete, onRename, on
           beside it, Close at the top right. */}
       <div style={{display:'flex', alignItems:'center', gap:8, height:56, padding:'0 14px 0 20px', borderBottom:`1px solid ${T.border}`, flexShrink:0}}>
         <span style={{fontSize:15, fontWeight:600, color:T.attioText}}>{draft.name || 'Workflow'}</span>
-        {((onRename && canEdit) || onDelete) && <RowActionsMenu title="Workflow actions" width={MENU_W} items={[
-          ...(onRename && canEdit ? [{label:'Rename workflow', onClick:()=>setRenaming(true)}] : []),
+        {((onRename && canEdit) || onDelete) && <RowActionsMenu title="Workflow Actions" width={MENU_W} items={[
+          ...(onRename && canEdit ? [{label:'Rename Workflow', onClick:()=>setRenaming(true)}] : []),
           ...(onDelete ? [{label:'Delete workflow', danger:true, onClick:onDelete}] : [])]}/>}
         {/* A saved workflow is renamed at once (the draft keeps the new name for its next save). */}
         {discarding && <StModal title="Discard Changes" primary="Discard" danger onCancel={()=>setDiscarding(false)} onSubmit={()=>{ setDiscarding(false); onCancel(); }}>
@@ -2477,7 +2476,7 @@ function WorkflowEditorHost({data, setData, workflow, onClose, onStub}){
     {/* Delete asks first, as it does from the Workflows list. */}
     {confirmDelete && <StModal title="Delete Workflow" primary="Delete Workflow" danger onCancel={()=>setConfirmDelete(false)}
       onSubmit={()=>{ setConfirmDelete(false); deleteWorkflowIn(setData, workflow.id); onClose(); }}>
-      <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>Delete "{(live || workflow).name || 'this workflow'}"? It stops running; its run history stays.</div>
+      <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>Delete "{(live || workflow).name || 'this workflow'}"? It stops running; its run history stays. This can't be undone.</div>
     </StModal>}
   </>;
 }
@@ -2500,8 +2499,8 @@ function WorkflowVersions({workflow, canRevert, onRestore}){
       ))}
       {!canRevert && list.length > 1 && <div style={{...stTextB, padding:'8px 4px'}}>You don’t have permission to revert this workflow.</div>}
       {restoring && (
-        <StModal title="Restore version" primary="Restore" onCancel={()=>setRestoring(null)} onSubmit={()=>{ onRestore(restoring); setRestoring(null); }}>
-          <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>Restore v{restoring}? Its configuration becomes v{(workflow.version || 1) + 1}; the current version stays in the history. The name, permissions and on / off stay as they are.</div>
+        <StModal title="Restore Version" primary="Restore Version" onCancel={()=>setRestoring(null)} onSubmit={()=>{ onRestore(restoring); setRestoring(null); }}>
+          <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>Restore v{restoring}?</div>
         </StModal>
       )}
     </div>
