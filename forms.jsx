@@ -47,7 +47,8 @@ const FORM_TARGETS = ['contacts', 'deals', 'customers'];
 const formFieldId = () => `ff-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 const formNoun = (object) => HUB_NOUN[object] || 'Record';
 // The properties a field can fill in: the record type's own, editable ones of the same type.
-const formMappable = (data, object, fieldType) => objectFormProperties(data, object).filter(p => !p.auto && propertyTypeId(p.type) === formFieldType(fieldType));
+// Not the owner: a record a form creates gets its owner by hand or from an Assign Owner workflow.
+const formMappable = (data, object, fieldType) => objectFormProperties(data, object).filter(p => !p.auto && !p.archived && p.key !== 'owner' && propertyTypeId(p.type) === formFieldType(fieldType));
 const formConnectedNames = (f) => FORM_CONNECTIONS.filter(c => f.connections && f.connections[c.id]).map(c => c.name);
 // The link a connection asks for, kept on it (connections[id].link).
 const FORM_CONNECTION_LINKS = {meta:'Meta form link', website:'Website RFQ page link'};
@@ -82,13 +83,15 @@ const FORM_STATUS = {draft:{label:'Draft', tone:'neutral'}, published:{label:'Pu
 /* A submission, however it came (Test submission, a simulated lead, the public link): the mapped
    answers become the new record's values; Form Submitted reaches its workflows; the submission is
    kept on the form with the record it created. Returns the new record's id and its values. */
-function submitFormValues(hub, engineCtx, form, via, values){
+/* `at`: when it was submitted (a public-link response taken in later keeps its own time). A field
+   mapped to a property that's since archived or deleted writes nothing (the editor flags it). */
+function submitFormValues(hub, engineCtx, form, via, values, at){
   const vals = {};
-  const props = objectProperties(hub.data, form.target);
-  form.fields.forEach(f => { if(!f.mapTo) return; const p = props.find(x => x.key === f.mapTo) || formFieldProperty(f); vals[f.mapTo] = storePropertyValue(p, values[f.id] ?? ''); });
+  const props = objectProperties(hub.data, form.target).filter(p => !p.archived);
+  form.fields.forEach(f => { if(!f.mapTo) return; const p = props.find(x => x.key === f.mapTo); if(p) vals[f.mapTo] = storePropertyValue(p, values[f.id] ?? ''); });
   // The answers are kept with the submission (each field's value, as its property type stores it).
   const answers = Object.fromEntries(form.fields.map(f => [f.id, storePropertyValue(formFieldProperty(f), values[f.id] ?? '')]));
-  const sub = {id:`sub-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`, at:new Date(), via:via || null, object:form.target, answers};
+  const sub = {id:`sub-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`, at:at ? new Date(at) : new Date(), via:via || null, object:form.target, answers};
   /* Workflows see the submission as the record is created (New Record, entering its pipeline or
      stage) and on Form Submitted — before the form's list is saved. */
   if(engineCtx) engineCtx.api.beginFormSubmission(form, sub);
@@ -97,6 +100,9 @@ function submitFormValues(hub, engineCtx, form, via, values){
   hub.setForms(fs => fs.map(f => f.id === form.id ? {...f, submissions:[...(f.submissions || []), {...sub, recordId:id}], updatedAt:new Date()} : f));
   return {id, vals};
 }
+/* A deleted form: gone from the Forms page, its link and its sources, but its name and submissions
+   are kept, so the records it created keep their Form Name and Form Submission Date (history). */
+const deletedForm = (f) => ({id:f.id, name:f.name, target:f.target, fields:[], sources:[], submissions:f.submissions || [], deleted:true, deletedAt:new Date()});
 /* The submission that created each record ("<object>:<id>" → {form, submission}): Form Name and
    Form Submission Date on the record, and the Form properties in workflows. */
 const formSubmissionIndex = (forms) => {
@@ -274,6 +280,11 @@ function FormEditorPanel({form, onCancel, onSave}){
   if(fields.some(f => fieldHasOptions(f.type) && f.options.filter(o => o.trim()).length < 1)) problems.push('Selection fields need at least one option.');
   if(fields.some(f => !typeConfigOk(f.type, f.options, f.range))) problems.push('A Custom Range’s minimum can’t exceed its maximum.');
   if(fields.length && !fields.some(f => f.mapTo === 'name')) problems.push(`Map one field to Name — it names the ${formNoun(target).toLowerCase()}.`);
+  // The field that names the record is always answered.
+  if(fields.some(f => f.mapTo === 'name' && !f.required)) problems.push('The field mapped to Name must be Required.');
+  // A mapping to a property that's been archived or deleted since (or the owner, which forms don't set).
+  const mappable = (f) => formMappable(hub.data, target, f.type).some(p => p.key === f.mapTo);
+  if(fields.some(f => f.mapTo && !mappable(f))) problems.push(`${fields.filter(f => f.mapTo && !mappable(f)).map(f => f.label || 'A field').join(', ')} maps to a property that's no longer available. Map it again.`);
   const mapped = fields.map(f => f.mapTo).filter(Boolean);
   if(new Set(mapped).size !== mapped.length) problems.push('Each property can be filled in by one field only.');
   const ok = !problems.length;
@@ -505,7 +516,7 @@ const FORM_COLUMNS = [
 ];
 function FormsPage(){
   const hub = useRecordHub();
-  const forms = hub.forms, setForms = hub.setForms;
+  const forms = (hub.forms || []).filter(f => !f.deleted), setForms = hub.setForms;   // deleted ones aren't listed
   const [editor, setEditor] = React.useState(null);      // {id?}: the New / Edit form side panel
   const [openId, setOpenId] = React.useState(null);
   const [connectId, setConnectId] = React.useState(null);
@@ -529,11 +540,11 @@ function FormsPage(){
   ];
   // Bulk Actions: Delete (as a form's Delete: the records they created stay).
   const formBulk = useTableBulkDelete({rows:forms, noun:'form', note:'Records they created stay.',
-    remove:(ids) => { setForms(fs => fs.filter(f => !ids.includes(f.id))); if(ids.includes(openId)) setOpenId(null); }, onDone:(n) => hub.toast(`${bulkPlural(n, 'form')} deleted`)});
+    remove:(ids) => { setForms(fs => fs.map(f => ids.includes(f.id) ? deletedForm(f) : f)); if(ids.includes(openId)) setOpenId(null); }, onDone:(n) => hub.toast(`${bulkPlural(n, 'form')} deleted`)});
   const schema = {
     properties:FORM_COLUMNS, noun:'form', searchKeys:['name', 'description', 'createdBy'], canCreateProperty:false, bulkActions:formBulk.bulkActions,
     filterProps:[{key:'statusLabel', label:'Status', type:'select'}, {key:'targetLabel', label:'Creates', type:'select'}, {key:'createdBy', label:'Created By', type:'select'}, {key:'submissionCount', label:'Submissions', type:'number'}],
-    selectValues:{statusLabel:Object.values(FORM_STATUS).map(x => x.label), targetLabel:['Contact', 'Deal', 'Customer'], createdBy:[...new Set(forms.map(f => f.createdBy).filter(Boolean))]},
+    selectValues:{statusLabel:Object.values(FORM_STATUS).map(x => x.label), targetLabel:['contacts', 'deals', 'customers'].filter(o => workspaceHasType(o)).map(formNoun), createdBy:[...new Set(forms.map(f => f.createdBy).filter(Boolean))]},
     renderCell:(key, r) => key === 'name' ? <ContactName name={r.name} onOpen={()=>setOpenId(r.id)} style={{fontSize:'inherit', fontWeight:500}}/>
       : key === 'statusLabel' ? <StatusPill status={formStatus(byId(r.id))} map={FORM_STATUS}/>
       : key === 'submissionCount' ? <FormSubmissionsValue form={byId(r.id)} inTable/>
@@ -575,7 +586,7 @@ function FormsPage(){
         onSubmit={(values)=>submit(byId(submitting.id), submitting.via, values)}/>}
       {formBulk.bulkModal}
       {deletingForm && <StModal title="Delete form" primary="Delete form" danger onCancel={()=>setDeleting(null)}
-        onSubmit={()=>{ setForms(fs => fs.filter(f => f.id !== deletingForm.id)); if(openId === deletingForm.id) setOpenId(null); setDeleting(null); hub.toast('Form deleted'); }}>
+        onSubmit={()=>{ setForms(fs => fs.map(f => f.id === deletingForm.id ? deletedForm(f) : f)); if(openId === deletingForm.id) setOpenId(null); setDeleting(null); hub.toast('Form deleted'); }}>
         <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>{deletingForm.name} will be deleted and disconnected from its sources. Records it created stay.</div>
       </StModal>}
     </div>
@@ -601,7 +612,7 @@ function publicCrmForms(crmId){
   return {crm, forms: crm.sample ? SAMPLE_FORMS() : []};
 }
 function PublicFormPage({route}){
-  const found = publicCrmForms(route.crmId), form = found && found.forms.find(f => f.id === route.formId);
+  const found = publicCrmForms(route.crmId), form = found && found.forms.find(f => f.id === route.formId && !f.deleted);
   const [values, setValues] = React.useState({});
   const [tried, setTried] = React.useState(false);
   const [done, setDone] = React.useState(false);
@@ -646,13 +657,16 @@ function PublicFormInbox(){
   React.useEffect(() => {
     const crmId = ACTIVE_CRM.id;
     const take = () => {
+      if(DB.isStale()) return;   // a tab whose data is out of date leaves them to the current one
       const pending = readFormInbox(crmId);
       if(!pending.length) return;
-      writeFormInbox(crmId, []);   // taken: each response once
-      const {hub, engineCtx} = live.current;
-      pending.forEach(r => { const form = (hub.forms || []).find(f => f.id === r.formId);
-        if(!form) return;
-        const {vals} = submitFormValues(hub, engineCtx, form, 'link', r.values || {});
+      const {hub, engineCtx} = live.current, forms = hub.forms || [];
+      // Taken once each. A response for a form this tab doesn't have (yet) stays in the inbox; one for a deleted form goes.
+      writeFormInbox(crmId, pending.filter(r => !forms.some(f => f.id === r.formId)));
+      pending.forEach(r => { const form = forms.find(f => f.id === r.formId);
+        if(!form || form.deleted) return;
+        // Sent while the form was published: taken in even if it's been unpublished since. It keeps the time it was submitted.
+        const {vals} = submitFormValues(hub, engineCtx, form, 'link', r.values || {}, r.at);
         if(hub.toast) hub.toast(`New response · ${form.name} · ${formNoun(form.target)} created${vals.name ? ` · ${vals.name}` : ''}`); });
     };
     take();

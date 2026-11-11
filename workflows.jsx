@@ -345,9 +345,12 @@ const restoreWorkflowVersionIn = (setData, id, version) => setData(d => ({...d, 
   if(!snap) return w;
   const config = Object.fromEntries(Object.entries(snap).filter(([k]) => !WORKFLOW_KEPT_ON_RESTORE.includes(k) && !['version', 'savedAt', 'savedBy', 'restoredFrom', 'scopeSince'].includes(k)));
   const kept = Object.fromEntries(WORKFLOW_KEPT_ON_RESTORE.map(k => [k, w[k]]));
-  return {...nextWorkflowVersion(w, {...config, ...kept}), restoredFrom:version};
+  const restored = {...nextWorkflowVersion(w, {...config, ...kept}), restoredFrom:version};
+  // A version that no longer fits (a stage, template or person gone) comes back turned off, to be fixed — as Save requires.
+  return workflowReady(normalizeWorkflow(restored), d) ? restored : {...restored, active:false};
 })}));
-const setWorkflowActiveIn = (setData, id, v) => setData(d => ({...d, workflows:(d.workflows || []).map(w => w.id === id ? {...w, active:v} : w)}));
+// Turning on needs the workflow ready, as Save does (one that needs attention stays off).
+const setWorkflowActiveIn = (setData, id, v) => setData(d => ({...d, workflows:(d.workflows || []).map(w => w.id === id && (!v || workflowReady(normalizeWorkflow(w), d)) ? {...w, active:v} : w)}));
 const deleteWorkflowIn = (setData, id) => setData(d => ({...d, workflows:(d.workflows || []).filter(w => w.id !== id)}));
 
 /* Workflow types — chosen first in the builder; every action of the workflow runs the type's way:
@@ -379,17 +382,23 @@ const canWorkflow = (data, w, key) => workflowCan(key === 'stop' ? 'edit' : key)
    but their name, Applies To and saved details matches: type, context, triggers (and how they
    relate), Trigger Scope and actions. Saving one whose people overlap an identical saved one asks
    who each overlapping person follows; the other workflow excludes them from then on (a new
-   version; its past runs stay in the history, and its steps still scheduled for them are cancelled). */
+   version; its past runs stay in the history, and its steps still scheduled for them are cancelled).
+   The exclusion lasts only while that other workflow is on, still identical and still applies to
+   them (workflowEngine.jsx appliesToOwner): otherwise this one applies to them again. */
 const stableJson = (v) => Array.isArray(v) ? `[${v.map(stableJson).join(',')}]`
   : v && typeof v === 'object' ? `{${Object.keys(v).sort().map(k => `${JSON.stringify(k)}:${stableJson(v[k])}`).join(',')}}` : JSON.stringify(v);
+// The ids every entry gets (each email, task, rule…) aren't part of what a workflow does.
+const withoutIds = (v) => Array.isArray(v) ? v.map(withoutIds) : v && typeof v === 'object' && !(v instanceof Date)
+  ? Object.fromEntries(Object.entries(v).filter(([k]) => k !== 'id').map(([k, x]) => [k, withoutIds(x)])) : v;
 const workflowSignature = (w) => { const n = normalizeWorkflow(w);
-  return stableJson({type:n.type, context:n.context, triggerMatch:n.triggerMatch, triggerScope:n.triggerScope,
-    triggers:(n.triggers || []).map(t => ({trigger:t.trigger, config:t.triggerConfig || {}})), actions:(n.actions || []).map(({id, ...a}) => a)}); };
+  return stableJson(withoutIds({type:n.type, context:n.context, triggerMatch:n.triggerMatch, triggerScope:n.triggerScope,
+    triggers:(n.triggers || []).map(t => ({trigger:t.trigger, config:t.triggerConfig || {}})), actions:n.actions || []})); };
 // The people a workflow applies to (activated users).
 const workflowTargets = (data, w) => (data.users || []).filter(u => u.status === 'Activated' && appliesToOwner(w, u.id)).map(u => u.id);
 const workflowOverlaps = (data, w) => {
   const mine = new Set(workflowTargets(data, w)), sig = workflowSignature(w);
-  return (data.workflows || []).filter(o => o.id !== w.id && workflowSignature(o) === sig)
+  // Only one that's on: a turned-off workflow runs for no one.
+  return (data.workflows || []).filter(o => o.id !== w.id && o.active !== false && workflowSignature(o) === sig)
     .map(o => ({workflow:o, users:workflowTargets(data, o).filter(id => mine.has(id))})).filter(x => x.users.length);
 };
 /* Who follows which workflow, for each overlapping person; Continue once every one is chosen.
@@ -566,6 +575,30 @@ const actionIssue = (data, a, context, typeKey) => {
   // Company-wide (no record): only Notify.
   if(!ctx.object && a.type !== 'notify') return {message:'Needs a Record in the context — Company-wide workflows can only notify.'};
   if(a.type === 'moveToPipeline' && !c.pipeline) return {message:'Choose the pipeline to move to.', explained:true};
+  /* Move to Specific Pipeline: a pipeline of the context's Record, and a destination stage still in it
+     (a deleted stage isn't silently swapped for the first one). */
+  if(a.type === 'moveToPipeline'){
+    const pl = (data.pipelines || []).find(p => p.id === c.pipeline);
+    if(!pl || (ctx.object && pl.objectId !== ctx.object)) return {message:`That pipeline isn't one of ${objectName(data, ctx.object || '') || 'the Record'}'s. Choose a pipeline.`};
+    if(c.stage && !pl.stages.some(s => s.id === c.stage)) return {message:`The destination stage isn't in ${pl.label} any more. Choose a stage.`};
+  }
+  // Every action needs what it acts with — none saves empty (it would only ever be skipped).
+  if(a.type === 'notify' && !((c.recipients || []).length || (c.users || []).length)) return {message:'Choose who to notify.', explained:true};
+  if(a.type === 'moveToStage' && !c.stage) return {message:'Choose the stage to move to.', explained:true};
+  if(PROPERTY_ACTIONS.includes(a.type) && !(c.properties || []).some(e => e.property)) return {message:'Choose a property.', explained:true};
+  if(a.type === 'createTask' && !(c.tasks || []).some(t => (t.name || '').trim())) return {message:'Name the task.', explained:true};
+  if(a.type === 'scheduleEmail' && !(c.emails || []).some(e => e.templateId)) return {message:'Choose an email template.', explained:true};
+  if(a.type === 'createEmailActivity' && !(c.email || {}).templateId) return {message:'Choose an email template.', explained:true};
+  // An email needs someone to go to.
+  if(a.type === 'scheduleEmail' && (c.emails || []).some(e => e.templateId && !(e.recipients || []).length)) return {message:'Choose the recipients of each email.', explained:true};
+  if(a.type === 'createEmailActivity' && !((c.email || {}).recipients || []).length) return {message:'Choose the recipients.', explained:true};
+  if(a.type === 'exitEmailSequence' && !c.sequenceId) return {message:'Choose the email sequence.', explained:true};
+  if(a.type === 'createAssociatedObject' && !associatedToCreate(c).length) return {message:'Choose the record to create.', explained:true};
+  if(a.type === 'updateAssociatedRecord' && !(c.properties || []).some(e => e.property)) return {message:'Choose the properties to update.', explained:true};
+  if(a.type === 'addCallLog' && actionBehavior(a) === 'automatic' && !c.outcome) return {message:'Choose the call outcome.', explained:true};
+  // A person chosen who has since been deleted.
+  const userIds = new Set((data.users || []).map(u => u.id));
+  if(a.type === 'assignOwner' && c.method === 'person' && c.user && !userIds.has(c.user)) return {message:'The chosen owner was deleted. Choose another.', explained:true};
   if(a.type === 'updateAssociatedRecord' && !c.object) return {message:'Choose the associated record to update.', explained:true};
   if(a.type === 'classifyRecord' && !c.property) return {message:'Choose the property to classify.', explained:true};
   if(a.type === 'assignOwner' && !assignOwnerReady(c)) return {message:'Finish choosing how the owner is assigned.', explained:true};
@@ -1105,7 +1138,7 @@ const cfgPart = (title, children, right) => (
 const cfgRowLabel = (t) => <span style={{width:36, flexShrink:0, fontSize:13, color:T.attioText}}>{t}</span>;
 const cfgHelp = (text) => <div style={stTextB}>{text}</div>;
 const newEntryId = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-const SCHEDULE_EMAIL_UNITS = ['Days', 'Weeks', 'Months'];
+const SCHEDULE_EMAIL_UNITS = ['Hours', 'Days', 'Weeks', 'Months'];   // Hours: a sequence's steps can be hours apart
 const newSchedule = () => ({amount:'', unit:'Days', time:''});
 
 /* After N units + At a time. */
@@ -1306,6 +1339,8 @@ function EmailChoice({entry, setEntry, data, onStub}){
         <Icon name="envelope" size={14} color={T.gray600}/>
         <span style={{flex:1, minWidth:0, fontSize:13, color:T.attioText, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{tpl.name}</span>
         <UnderlineAction label="View Email" onClick={()=>setModal('view')}/>
+        {/* Another template can be picked in its place (the email's own edits go with the old one). */}
+        <UnderlineAction label="Change" onClick={()=>setModal('choose')}/>
       </div>
     ) : <UnderlineAction label="Choose email template" onClick={()=>setModal('choose')}/>}
     {modal === 'choose' && <EmailPickerModal title="Choose Email Template" empty="No email templates yet" searchPlaceholder="Search email templates"
@@ -1331,7 +1366,9 @@ function ScheduleEmailConfig({config, setConfig, data, onStub}){
   const useSequence = (id) => {
     const seq = sequences.find(x => x.id === id);
     const kept = emails.filter(e => !e.sequenceId && e.templateId);
-    setConfig({...config, sequenceId:id, emails:[...seq.emails.map(e => ({...newScheduledEmail(), sequenceId:id, templateId:e.templateId, schedule:{...newSchedule(), ...e.delay}})), ...kept]});
+    // Each email's schedule counts from the workflow running: the sequence's delays added up (workflowEngine.jsx).
+    const when = sequenceSchedules(seq);
+    setConfig({...config, sequenceId:id, emails:[...seq.emails.map((e, i) => ({...newScheduledEmail(), sequenceId:id, templateId:e.templateId, schedule:{...newSchedule(), ...when[i]}})), ...kept]});
     setChoosing(false);
   };
   return (
@@ -1888,7 +1925,7 @@ const attentionFlag = <div style={{fontSize:12, fontWeight:500, color:T.red, mar
 // Form Submitted: any form, or one (the forms are Marketing's — the record hub's).
 function TriggerFormField({value, onChange}){
   const hub = useRecordHub();
-  const forms = (hub && hub.forms) || [];
+  const forms = ((hub && hub.forms) || []).filter(f => !f.deleted);
   return cfgField('Form', <FormSelect value={value} placeholder="Any form" options={[{value:'', label:'Any form'}, ...forms.map(f => ({value:f.id, label:f.name}))]}
     onChange={(v)=>onChange(v, (forms.find(f => f.id === v) || {}).name || '')}/>);
 }
@@ -1996,8 +2033,14 @@ function WorkflowEditor({data, initial, onCancel, onSave, onDelete, onRename, on
   const [timingOpen, setTimingOpen] = React.useState({});      // action id → its timing shown
   const [tab, setTab] = React.useState('builder');               // 'builder' | 'runs' | 'versions'
   const active = draft.active !== false;
-  // A saved workflow turns on / off at once; a new one takes the setting when it's saved.
-  const setActive = (v) => { if(!canStop) return; setDraftRaw(d => ({...d, active:v})); if(onSetActive) onSetActive(v); };
+  // A saved workflow turns on / off at once (on only when it's ready, as Save requires); a new one takes the setting when it's saved.
+  const setActive = (v) => { if(!canStop || (v && onSetActive && !workflowReady(draft, data))) return; setDraftRaw(d => ({...d, active:v})); if(onSetActive) onSetActive(v); };
+  /* Close / Cancel with changes not saved asks first (the name and on / off are saved at once, so
+     they don't count). */
+  const configOf = (w) => { const {name, active:_a, ...rest} = w; return JSON.stringify(rest); };
+  const openedAs = React.useRef(configOf(draft)).current;
+  const [discarding, setDiscarding] = React.useState(false);
+  const requestClose = () => readOnly || configOf(draft) === openedAs ? onCancel() : setDiscarding(true);
   const [adding, setAdding] = React.useState(false);
   const [choosingTrigger, setChoosingTrigger] = React.useState(false);   // the Trigger node's trigger menu
   const [renaming, setRenaming] = React.useState(false);
@@ -2129,7 +2172,8 @@ function WorkflowEditor({data, initial, onCancel, onSave, onDelete, onRename, on
     }
     if(onControlStep){
       const teams = data.teams || [], users = (data.users || []).filter(u => u.status === 'Activated');
-      const who = (v) => { const [kind, id] = v.split(':'); const x = (kind === 'team' ? teams : data.users || []).find(y => y.id === id); return {kind, name:x ? x.name : id}; };
+      // Someone deleted since is named as such (not by their ID).
+      const who = (v) => { const [kind, id] = v.split(':'); const x = (kind === 'team' ? teams : data.users || []).find(y => y.id === id); return {kind, name:x ? x.name : kind === 'team' ? 'Deleted team' : 'Deleted user'}; };
       // One people / teams list each (Applies To, every permission) — the same picker for each.
       const picker = (chosen, onPick, emptyLabel) => (
         <div style={{display:'flex', flexDirection:'column', gap:8}}>
@@ -2227,6 +2271,9 @@ function WorkflowEditor({data, initial, onCancel, onSave, onDelete, onRename, on
           ...(onRename && canEdit ? [{label:'Rename workflow', onClick:()=>setRenaming(true)}] : []),
           ...(onDelete ? [{label:'Delete workflow', danger:true, onClick:onDelete}] : [])]}/>}
         {/* A saved workflow is renamed at once (the draft keeps the new name for its next save). */}
+        {discarding && <StModal title="Discard Changes" primary="Discard" danger onCancel={()=>setDiscarding(false)} onSubmit={()=>{ setDiscarding(false); onCancel(); }}>
+          <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>Changes to this workflow haven't been saved.</div>
+        </StModal>}
         {renaming && <RenameWorkflowModal name={draft.name || ''} onCancel={()=>setRenaming(false)}
           onSave={(name)=>{ set({name}); onRename(name); setRenaming(false); }}/>}
         {/* Builder | Runs | Versions — the configured workflow, its execution history, its saved versions. */}
@@ -2241,7 +2288,7 @@ function WorkflowEditor({data, initial, onCancel, onSave, onDelete, onRename, on
           style={{display:'flex', alignItems:'center', gap:8, fontSize:13, color:T.gray800, marginRight:8, cursor: canStop ? 'pointer' : 'default', opacity: canStop ? 1 : .5}}>
           Active<UtToggle on={active} onChange={setActive}/>
         </label>
-        <button title="Close" onClick={onCancel} style={sidePanelIconBtn}><Icon name="close" size={13} color={T.gray600}/></button>
+        <button title="Close" onClick={requestClose} style={sidePanelIconBtn}><Icon name="close" size={13} color={T.gray600}/></button>
       </div>
       {tab === 'runs' && <div style={{flex:1, minHeight:0, overflowY:'auto'}}><WorkflowRuns workflowId={draft.id}/></div>}
       {tab === 'versions' && <div style={{flex:1, minHeight:0, overflowY:'auto'}}><WorkflowVersions workflow={initial} canRevert={canRevert && !!onRestore} onRestore={onRestore}/></div>}
@@ -2360,7 +2407,7 @@ function WorkflowEditor({data, initial, onCancel, onSave, onDelete, onRename, on
       {/* Bottom action area — the Settings drawer footer. */}
       <div style={{height:46, flexShrink:0, display:'flex', alignItems:'center', justifyContent:'flex-end', gap:12, padding:'0 12px', borderTop:`1px solid ${T.borderStrong}`}}>
         {readOnly && <span style={{flex:1, fontSize:12.5, color:T.gray600, paddingLeft:8}}>View only · you don’t have permission to edit this workflow</span>}
-        <StSecondary label={readOnly ? 'Close' : 'Cancel'} onClick={onCancel}/>
+        <StSecondary label={readOnly ? 'Close' : 'Cancel'} onClick={requestClose}/>
         {/* Context and Triggers: Move to Action (once every trigger is ready). Actions: Go to Workflow
             Control (once there's an action and none needs attention). Workflow Control: Save. */}
         {readOnly ? null : onControlStep ? <StCta label="Save" disabled={!workflowReady(draft, data)} onClick={save}/>
@@ -2417,15 +2464,21 @@ function WorkflowEditorHost({data, setData, workflow, onClose, onStub}){
     finish({...w, excludedUsers:[...mine]}, newTemplates);
   };
   const isSaved = !!live, may = (key) => isSaved ? canWorkflow(data, live, key) : workflowCan('create');
+  const [confirmDelete, setConfirmDelete] = React.useState(false);
   return <>
     <WorkflowEditor key={`${workflow.id}:${isSaved ? live.version : 'new'}`} data={data} initial={live || workflow} onStub={onStub}
       canEdit={may('edit')} canStop={may('stop')} canRevert={may('revert')}
       onCancel={onClose} onSave={save}
       onSetActive={isSaved ? (v) => setWorkflowActiveIn(setData, workflow.id, v) : null}
-      onDelete={isSaved && may('delete') ? () => { deleteWorkflowIn(setData, workflow.id); onClose(); } : null}
+      onDelete={isSaved && may('delete') ? () => setConfirmDelete(true) : null}
       onRename={isSaved ? (name) => renameWorkflowIn(setData, workflow.id, name) : null}
       onRestore={isSaved ? (version) => restoreWorkflowVersionIn(setData, workflow.id, version) : null}/>
     {overlap && <WorkflowOverlapModal data={data} name={overlap.w.name} overlaps={overlap.overlaps} onCancel={()=>setOverlap(null)} onResolve={resolve}/>}
+    {/* Delete asks first, as it does from the Workflows list. */}
+    {confirmDelete && <StModal title="Delete Workflow" primary="Delete Workflow" danger onCancel={()=>setConfirmDelete(false)}
+      onSubmit={()=>{ setConfirmDelete(false); deleteWorkflowIn(setData, workflow.id); onClose(); }}>
+      <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>Delete "{(live || workflow).name || 'this workflow'}"? It stops running; its run history stays.</div>
+    </StModal>}
   </>;
 }
 /* Versions — every saved version, newest first: when and by whom it was saved (and the version it

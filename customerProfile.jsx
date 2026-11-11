@@ -230,13 +230,18 @@ const pfAnswerWords = (f, v) => {
 };
 // The fields asked for these answers: a field with "Show only when" is asked only while the field
 // it depends on is asked and has one of the chosen answers.
+/* A rule that no longer fits its field (the field removed or changed type, or none of its answers
+   still one of the field's options) is ignored: the field is asked, so its answers are never hidden
+   — or cleared on the next save — by a broken rule (the form editor flags it to fix). */
+const pfRuleBroken = (form, rule) => { const dep = (form.fields || []).find(x => x.id === rule.fieldId);
+  return !dep || !pfCanControl(dep) || !(rule.values || []).some(v => pfControlOptions(dep).some(o => (o.value ?? o) === v)); };
 function pfVisibleFields(form, values){
   const shown = new Set();
   return (form.fields || []).filter(f => {
     const rule = f.showIf;
-    if(rule && rule.fieldId){
+    if(rule && rule.fieldId && !pfRuleBroken(form, rule)){
       const dep = (form.fields || []).find(x => x.id === rule.fieldId);
-      if(!dep || !shown.has(dep.id) || !pfAnswerWords(dep, values[dep.id]).some(w => (rule.values || []).includes(w))) return false;
+      if(!shown.has(dep.id) || !pfAnswerWords(dep, values[dep.id]).some(w => (rule.values || []).includes(w))) return false;
     }
     shown.add(f.id);
     return true;
@@ -581,7 +586,8 @@ function ProfileRunWizard({contact, form: startForm, call, onCancel, onSave}){
   // The person's records: calls with a transcript (a call just ended first), emails, notes.
   const all = React.useMemo(() => pfSourcesOf(store.activitiesOf(contact.id)), [contact.id]);
   const calls = React.useMemo(() => {
-    const list = all.filter(x => x.kind === 'call' && x.act.transcript && x.act.transcript.length);
+    // A call is read for its transcript or its Sales Notes (a call with notes only counts too).
+    const list = all.filter(x => x.kind === 'call' && ((x.act.transcript && x.act.transcript.length) || String(x.act.notes || '').trim()));
     if(call && !list.some(x => x.id === call.id)) list.unshift({id:call.id || 'this-call', kind:'call', at:call.startedAt ? new Date(call.startedAt) : new Date(), label:'This call',
       act:{type:'call', transcript:call.segments || [], notes:call.notes || ''}});
     return list;
@@ -590,13 +596,14 @@ function ProfileRunWizard({contact, form: startForm, call, onCancel, onSave}){
   const [choice, setChoice] = React.useState(() => ({add:false, upload:'', fileName:'', emails:!!emails.length, notes:!!notes.length}));
   const [found, setFound] = React.useState(null);     // null: not read yet
   const [reading, setReading] = React.useState(false);
-  // Every call transcript (always), a transcript added here, and the emails and notes chosen.
+  /* Every call (always), a transcript added here, and the emails and notes chosen — newest first, so
+     a newer source's answer is the one found and an older one its alternative (as the fill panel reads them). */
   const chosen = () => [
     ...calls,
     ...(choice.add && String(choice.upload || '').trim() ? [{id:'upload', kind:'transcript', at:new Date(), label: choice.fileName ? `Transcript · ${choice.fileName}` : 'Added transcript',
           act:{type:'call', transcript:parseTranscriptText(choice.upload), notes:''}}] : []),
     ...(choice.emails ? emails : []), ...(choice.notes ? notes : []),
-  ];
+  ].sort((x, y) => new Date(y.at).getTime() - new Date(x.at).getTime());
   const analyze = () => { const list = chosen(); setReading(true); setTimeout(() => { setFound(pfExtract(form, list)); setReading(false); }, 1100); };
   const [answers, setAnswers] = React.useState({});   // fieldId → {value, meta}
   const [pos, setPos] = React.useState(0);
@@ -836,7 +843,11 @@ function ProfileFormsSettings({data, setData}){
   const [editor, setEditor] = React.useState(null);   // {} new | {id}
   const [previewId, setPreviewId] = React.useState(null);
   const [deleting, setDeleting] = React.useState(null);
-  const usedBy = (id) => Object.values((store && store.data) || {}).filter(m => m && m[id]).length;
+  /* Who holds answers for a form: people (or leads, customers) still there, with at least one answer —
+     a deleted record's or an emptied profile doesn't count (so the form can be deleted once none do). */
+  const hub = useRecordHub();
+  const holderExists = (k) => !hub || ['contacts', 'deals', 'customers'].some(o => ((hub.records || {})[o] || []).some(r => String(r.id) === String(k)));
+  const usedBy = (id) => Object.entries((store && store.data) || {}).filter(([k, m]) => m && m[id] && Object.keys(m[id].values || {}).length && holderExists(k)).length;
   const byId = (id) => forms.find(f => f.id === id);
   // Templates → Customer Profile: Create, Edit form fields, Delete, by who created each form; everyone sees them.
   const can = (action, f) => profileFormCan(action, f);
@@ -904,6 +915,9 @@ function ProfileFormEditor({form, taken = [], onCancel, onSave}){
   if(fields.some(f => !typeConfigOk(f.type, f.options, f.range))) problems.push('A Custom Range’s minimum can’t exceed its maximum.');
   if(fields.some((f, i) => f.showIf && f.showIf.fieldId && (!fields.slice(0, i).some(x => x.id === f.showIf.fieldId) || !(f.showIf.values || []).length)))
     problems.push('“Show only when” needs an earlier field and at least one answer.');
+  // A rule whose field changed type, or whose answers aren't the field's options any more (renamed or removed).
+  const broken = fields.filter(f => f.showIf && f.showIf.fieldId && fields.some(x => x.id === f.showIf.fieldId) && pfRuleBroken({fields}, f.showIf));
+  if(broken.length) problems.push(`“Show only when” on ${broken.map(f => f.label || 'a field').join(', ')} refers to answers its field no longer has. Choose them again.`);
   const ok = !problems.length;
   const save = () => ok && onSave({name:name.trim(), description:description.trim(),
     fields:fields.map(f => ({...f, label:f.label.trim(), ...typeSettings(f.type, f.options, f.range), options:fieldHasOptions(f.type) ? f.options.map(o => o.trim()).filter(Boolean) : [],
@@ -913,18 +927,19 @@ function ProfileFormEditor({form, taken = [], onCancel, onSave}){
   // Show only when, under each card.
   const below = (f, i, setField) => {
     const earlier = fields.slice(0, i).filter(pfCanControl);
-    const dep = f.showIf && earlier.find(x => x.id === f.showIf.fieldId);
+    // The rule's field as it stands — shown even when it can't control any more (so the rule can be seen and fixed).
+    const dep = f.showIf && (earlier.find(x => x.id === f.showIf.fieldId) || fields.slice(0, i).find(x => x.id === f.showIf.fieldId));
     return (
       <div style={{display:'grid', gridTemplateColumns:'minmax(0, 1fr) minmax(0, 1fr)', gap:'10px 16px', alignItems:'start', borderTop:`1px solid ${T.attioLine}`, paddingTop:12}}>
         <div style={{display:'flex', flexDirection:'column', gap:6, minWidth:0}}>
           <span style={label}>Show only when</span>
-          <Select value={dep ? dep.id : null} placeholder="Always shown" options={[{value:'', label:'Always shown'}, ...earlier.map(x => ({value:x.id, label:x.label || 'Untitled field'}))]}
+          <Select value={dep ? dep.id : null} placeholder="Always shown" options={[{value:'', label:'Always shown'}, ...[...earlier, ...(dep && !earlier.includes(dep) ? [dep] : [])].map(x => ({value:x.id, label:x.label || 'Untitled field'}))]}
             onChange={(v)=>setField({showIf: v ? {fieldId:v, values:[]} : null})}/>
         </div>
         {dep && (
           <div style={{display:'flex', flexDirection:'column', gap:6, minWidth:0}}>
             <span style={label}>is any of</span>
-            <MultiSelectMenu value={(f.showIf.values || [])} options={pfControlOptions(dep)} onChange={(vals)=>setField({showIf:{fieldId:dep.id, values:vals}})} placeholder="Choose answers"/>
+            <MultiSelectMenu value={(f.showIf.values || []).filter(v => pfControlOptions(dep).some(o => (o.value ?? o) === v))} options={pfControlOptions(dep)} onChange={(vals)=>setField({showIf:{fieldId:dep.id, values:vals}})} placeholder="Choose answers"/>
           </div>
         )}
       </div>

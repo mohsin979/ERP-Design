@@ -1134,9 +1134,11 @@ function PipelinesSettings({data, setData, records = {}, onWorkflowOpen, target,
     onTargetDone && onTargetDone();
   }, [target && target.nonce]);
   const [editingId, setEditingId] = React.useState(null);
+  const [deletingId, setDeletingId] = React.useState(null);   // a pipeline asked to be deleted
   const [stub, setStub] = React.useState(null);
   const [creating, setCreating] = React.useState(false);
-  const workflowsOf = (id) => (data.workflows || []).filter(w => (w.context && w.context.pipeline === id) || (w.origin && w.origin.pipelineId === id)).length;
+  // A pipeline's workflows: those whose context is the pipeline (as its panel lists them, stage by stage or pipeline-wide).
+  const workflowsOf = (id) => (data.workflows || []).filter(w => workflowCan('view', w) && w.context && w.context.pipeline === id).length;
   // Total Entries: the pipeline's record type's records that are in it (a stage of it — by their pipeline, or by the property it follows).
   const entriesOf = (p) => (records[p.objectId] || []).filter(r => stageIdOf(p, r)).length;
   // Settings & Administration → Pipelines (per record type): View shows its pipelines; Create, Edit, Delete.
@@ -1152,7 +1154,7 @@ function PipelinesSettings({data, setData, records = {}, onWorkflowOpen, target,
       : undefined,
     // The workflow quick action, then ⋯ Add Workflow (a new workflow for this pipeline), Edit, Delete.
     renderActions: (r) => actionsWithWorkflow(workflowsAvailableFor(r.objectId) && workflowCan('create'), ()=>setOpen({id:r.id, workflow:true}), <RowActionsMenu title="Pipeline actions" width={MENU_W}
-      items={[...(workflowsAvailableFor(r.objectId) && workflowCan('create') ? [{label:'Add Workflow', onClick:()=>setOpen({id:r.id, workflow:true})}] : []), ...pipelineMenuItems(r, records[r.objectId], ()=>setEditingId(r.id), r.objectName.replace(/s$/, '').toLowerCase())]}/>),
+      items={[...(workflowsAvailableFor(r.objectId) && workflowCan('create') ? [{label:'Add Workflow', onClick:()=>setOpen({id:r.id, workflow:true})}] : []), ...pipelineMenuItems(r, records[r.objectId], ()=>setEditingId(r.id), r.objectName.replace(/s$/, '').toLowerCase(), data, ()=>setDeletingId(r.id))]}/>),
   };
   return (
     <div style={{position:'relative', flex:1, minHeight:0, display:'flex', flexDirection:'column', overflow:'hidden'}}>
@@ -1167,7 +1169,10 @@ function PipelinesSettings({data, setData, records = {}, onWorkflowOpen, target,
       startWorkflow={!!open.workflow} onClose={()=>setOpen(null)} onStub={setStub} onWorkflowOpen={onWorkflowOpen}/>}
     {creating && <NewPipelinePanel data={data} records={records} onCancel={()=>setCreating(false)}
       onSave={(p)=>{ setData(d => ({...d, pipelines:[...(d.pipelines || []), {...p, createdBy:CURRENT_USER.name}]})); setCreating(false); }}/>}
-    {editingId && <EditPipelineModal pipeline={data.pipelines.find(p => p.id === editingId)} setData={setData} onClose={()=>setEditingId(null)}/>}
+    {editingId && (() => { const pl = data.pipelines.find(p => p.id === editingId);
+      return <EditPipelineModal pipeline={pl} setData={setData} onClose={()=>setEditingId(null)}
+        taken={(data.pipelines || []).filter(p => p.objectId === pl.objectId && p.id !== pl.id).map(p => p.label.toLowerCase())}/>; })()}
+    {deletingId && <DeletePipelineModal pipeline={data.pipelines.find(p => p.id === deletingId)} setData={setData} onCancel={()=>setDeletingId(null)} onDeleted={()=>setDeletingId(null)}/>}
     {stub && <StubPanel title={stub} onClose={()=>setStub(null)} zIndex={110}/>}
     </div>
   );

@@ -117,7 +117,13 @@ const workspaceHasType = (id) => !Object.keys(OBJECT_NAMES).length || id in OBJE
    profile); a customer with no lead keeps its own. */
 const profileHolderId = (object, record) => !record ? null : object === 'contacts' ? record.id
   : record.contactId != null ? record.contactId : workspaceHasType('contacts') ? null
-  : object === 'deals' ? record.id : ((record.dealIds || [])[0] ?? record.id);
+  : object === 'deals' ? record.id
+  /* A customer whose own profile was filled (before a lead was linked) keeps it; else its lead's —
+     so linking or deleting a lead later doesn't make the answers vanish from view. */
+  : PROFILE_HOLDERS_WITH_DATA.has(String(record.id)) ? record.id : ((record.dealIds || [])[0] ?? record.id);
+// The holders that have Customer Profile answers (App registers them; profileHolderId reads it).
+let PROFILE_HOLDERS_WITH_DATA = new Set();
+const setProfileHolders = (data) => { PROFILE_HOLDERS_WITH_DATA = new Set(Object.keys(data || {}).filter(k => Object.values((data || {})[k] || {}).some(v => v && Object.keys(v.values || {}).length))); };
 // A record type's noun in running text: "lead", "deal".
 const typeNoun = (id, fallback) => typeSingular(id, fallback).toLowerCase();
 
@@ -204,7 +210,10 @@ function relatedValue(key, contact, acts){
     return (key === 'ownerAssigned' ? d.assigned : d.changed) || null;
   }
   if(key === 'deals') return contact.dealCount ? String(contact.dealCount) : null;
-  return contact[key] || null;   // any other contact property
+  // Any other property, as text: a Location, Currency or range is stored as an object; Yes / No and 0 show too.
+  const v = contact[key];
+  if(v == null || v === '') return null;
+  return typeof v === 'object' || typeof v === 'boolean' || typeof v === 'number' ? (String(formatValue(v) ?? '') || null) : v;
 }
 function RelatedValue({field, contact, acts, right}){
   if(!field) return <span/>;
@@ -677,6 +686,6 @@ function PipelineSelector({pipelineId, onChange, pipelines = CONTACT_PIPELINES})
 Object.assign(window, {REMOVED_CONTACT_STAGES, withoutRemovedStage, 
   CONTACT_TYPE_STAGES, PIPELINES, pipelineById, setContactPipelines, stageIdOf, withStage,
   setObjectNames, typePlural, typeSingular, typeNoun, workspaceHasType, profileHolderId,
-  STAGE_TYPES, CLOSED_STAGE_TYPES, stageTypeOf, isClosedStage, stageTypeLabel, withStageType, setStagePipelines, recordStageType, StageTypeTag,
+  setProfileHolders, STAGE_TYPES, CLOSED_STAGE_TYPES, stageTypeOf, isClosedStage, stageTypeLabel, withStageType, setStagePipelines, recordStageType, StageTypeTag,
   ContactBoard, PipelineSelector, toolbarDropdownBtn, ContactName, ContactCard, COLUMN_BG,
 });

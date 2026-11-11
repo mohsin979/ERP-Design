@@ -64,7 +64,7 @@ const DB = (() => {
       setItem:(k, v) => { v = String(v); hold(k); if(frozen(k) || (!waiting.has(k) && ls.getItem(k) === v)) return;
         const again = waiting.has(k); waiting.set(k, v); if(!again) write(k); },
       removeItem:(k) => { if(!frozen(k)){ waiting.delete(k); ls.removeItem(k); } },
-      keys:() => Object.keys(ls), flush(){}, fresh:(k) => ls.getItem(k)};
+      keys:() => Object.keys(ls), flush(){}, fresh:(k) => ls.getItem(k), isStale:() => stale};
   }
   const IMPORTED = 'meta:imported-localstorage';
   if(!(IMPORTED in cache)){
@@ -96,6 +96,7 @@ const DB = (() => {
     setItem:(k, v) => { v = String(v); hold(k); if(frozen(k) || cache[k] === v) return; cache[k] = v; send('PUT', k, v); },
     removeItem:(k) => { if(frozen(k) || !(k in cache)) return; delete cache[k]; send('DELETE', k, null); },
     keys:() => Object.keys(cache),
+    isStale:() => stale,   // another tab saved data this page holds (see above)
     // Before a reload: anything not confirmed yet goes again, and waits.
     flush:() => { [...pending.keys()].forEach(k => { try { if(k in cache) send('PUT', k, cache[k], true); else send('DELETE', k, null, true); } catch(e){} }); },
     fresh:(k) => { try { const [x, go] = http('GET', `/api/kv/${encodeURIComponent(k)}`, null, false); go();

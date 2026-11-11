@@ -20,28 +20,32 @@ function WorkflowsPage({data, setData}){
   const [stub, setStub] = React.useState(null);
   const pipelineOf = (id) => (data.pipelines || []).find(p => p.id === id);
   const lastRunOf = (id) => ctx && ctx.state.runs.filter(r => r.workflowId === id && r.startedAt).sort((a, b) => b.startedAt - a.startedAt)[0];
+  // Active (green), Needs attention (on, but a stage, template or person it uses is gone — fixed in the builder), Off.
+  const WORKFLOW_LIST_STATUS = {'Active':{label:'Active', tone:'success'}, 'Needs attention':{label:'Needs attention', tone:'warn'}, 'Off':{label:'Off', tone:'neutral'}};
   const rows = (data.workflows || []).filter(raw => workflowCan('view', raw)).map(raw => {
     const w = normalizeWorkflow(raw), views = workflowTriggerViews(w);
-    const pl = pipelineOf(workflowPipeline(w) || (w.origin || {}).pipelineId), stage = workflowStage(w);
+    // Its context's pipeline and stage (else its stage trigger's stage) — not the place it was opened from.
+    const pl = pipelineOf(workflowPipeline(w)), stage = workflowStage(w) || (pl ? (views.find(v => v.triggerConfig.stage) || {triggerConfig:{}}).triggerConfig.stage : null);
+    const ready = workflowReady(w, data);
     const run = lastRunOf(w.id);
     return {id:w.id, raw, createdBy:creatorOf(w), name:w.name || workflowTitle(data, w) || 'Workflow', typeName:(workflowTypeOf(w.type) || {}).label || '—', objectName: w.context.object ? objectName(data, w.context.object) : 'Company-wide',
       pipelineName: pl ? pl.label : '—', stageName: stage && pl ? ((pl.stages.find(s => s.id === stage) || {}).label || '—') : '—',
       triggerText: views.map(v => triggerSummary(data, v) || (workflowTrigger(v.trigger) || {}).label).filter(Boolean).join(w.triggerMatch === 'any' ? ' · or · ' : ' · and · ') || '—',
-      actionCount:(w.actions || []).length, status: w.active === false ? 'Off' : 'Active', version:`v${w.version || 1}`,
+      actionCount:(w.actions || []).length, status: w.active === false ? 'Off' : ready ? 'Active' : 'Needs attention', ready, version:`v${w.version || 1}`,
       lastRun: run ? new Date(run.startedAt).toLocaleString('en-US', {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'}) : '—'};
   });
   const schema = {
     properties:WORKFLOW_LIST_COLS, noun:'workflow', searchKeys:['name', 'pipelineName', 'stageName'], fillWidth:true, canCreateProperty:false, selectable:false,
     filterProps:[{key:'name', label:'Workflow', type:'text'}, {key:'typeName', label:'Type', type:'select'}, {key:'pipelineName', label:'Pipeline', type:'select'}, {key:'stageName', label:'Stage', type:'select'}, {key:'status', label:'Status', type:'select'}],
-    selectValues:{typeName:WORKFLOW_TYPES.map(t => t.label), pipelineName:(data.pipelines || []).map(p => p.label), stageName:[...new Set((data.pipelines || []).flatMap(p => p.stages.map(s => s.label)))], status:['Active', 'Off']},
+    selectValues:{typeName:WORKFLOW_TYPES.map(t => t.label), pipelineName:(data.pipelines || []).map(p => p.label), stageName:[...new Set((data.pipelines || []).flatMap(p => p.stages.map(s => s.label)))], status:['Active', 'Needs attention', 'Off']},
     renderCell:(key, r) => key === 'name' ? <ContactName name={r.name} onOpen={()=>setEditing(r.raw)} style={{fontSize:'inherit', fontWeight:500}}/>
-      : key === 'status' ? <span style={{display:'inline-flex', alignItems:'center', height:20, padding:'0 8px', borderRadius:9999, fontSize:11.5, fontWeight:500,
-          color: r.status === 'Active' ? '#027A48' : T.gray600, background: r.status === 'Active' ? '#ECFDF3' : T.headerBg}}>{r.status}</span>
+      : key === 'status' ? <StatusPill status={r.status} map={WORKFLOW_LIST_STATUS}/>
       : undefined,
     // Turn on / off needs Stop; Rename and Delete need Edit (workflow permissions).
     renderActions:(r) => <RowActionsMenu title="Workflow actions" width={MENU_W} items={[
       {label:'Open', onClick:()=>setEditing(r.raw)},
-      ...(canWorkflow(data, r.raw, 'stop') ? [{label: r.status === 'Active' ? 'Turn off' : 'Turn on', onClick:()=>setWorkflowActiveIn(setData, r.id, r.status !== 'Active')}] : []),
+      // Turn on: only a workflow that's ready (one needing attention is opened and fixed first).
+      ...(canWorkflow(data, r.raw, 'stop') ? [{label: r.status === 'Off' ? 'Turn on' : 'Turn off', disabled: r.status === 'Off' && !r.ready, onClick:()=>setWorkflowActiveIn(setData, r.id, r.status === 'Off')}] : []),
       ...(canWorkflow(data, r.raw, 'edit') ? [{label:'Rename workflow', onClick:()=>setRenaming(r)}] : []),
       ...(canWorkflow(data, r.raw, 'delete') ? [{label:'Delete workflow', danger:true, onClick:()=>setDeleting(r.raw)}] : []),
     ]}/>,

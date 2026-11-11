@@ -49,6 +49,7 @@ function PipelinePanel({data, setData, pipelineId, deals = [], onClose, onStub, 
     return () => onWorkflowOpen(false);
   }, [!!editing]);
   const [editingPipeline, setEditingPipeline] = React.useState(false);
+  const [deletingPipeline, setDeletingPipeline] = React.useState(false);
   const [adding, setAdding] = React.useState(false);
   const [deleting, setDeleting] = React.useState(null);      // stage
   const [columnOrder, setColumnOrder] = React.useState(null);
@@ -70,11 +71,12 @@ function PipelinePanel({data, setData, pipelineId, deals = [], onClose, onStub, 
   const canWorkflow = workflowsAvailableFor(pipeline.objectId) && workflowCan('create');
   const showsWorkflows = workflowsAvailableFor(pipeline.objectId) && workflowCan('view');
   const dealsIn = (stageId) => deals.filter(d => d.pipeline === pipeline.id && d.stage === stageId).length;
-  // The stage a workflow belongs to here: its context stage, else its first stage trigger's stage
-  // (a pipeline-level workflow), else the stage it was opened from.
+  /* The stage a workflow belongs to here — only while its context is this pipeline: its context
+     stage, else its first stage trigger's stage, else (a pipeline-level workflow whose triggers need
+     no stage) the stage it was opened from. One moved to another pipeline or Record isn't here. */
   const triggerStage = (w) => (workflowTriggerViews(w).find(v => v.triggerConfig.stage) || {triggerConfig:{}}).triggerConfig.stage;
-  const stageOfWorkflow = (w) => w.context && w.context.pipeline === pipeline.id && w.context.stage ? w.context.stage
-    : w.context && w.context.pipeline === pipeline.id && triggerStage(w) ? triggerStage(w)
+  const stageOfWorkflow = (w) => !w.context || w.context.pipeline !== pipeline.id ? null
+    : w.context.stage ? w.context.stage : triggerStage(w) ? triggerStage(w)
     : w.origin && w.origin.type === 'pipelineStage' && w.origin.pipelineId === pipeline.id ? w.origin.stageId : null;
   const workflows = (data.workflows || []).filter(w => stageOfWorkflow(w) && workflowCan('view', w));
   const setStages = (fn) => setData(d => ({...d, pipelines:d.pipelines.map(p => p.id === pipeline.id ? {...p, stages:fn(p.stages)} : p)}));
@@ -146,7 +148,7 @@ function PipelinePanel({data, setData, pipelineId, deals = [], onClose, onStub, 
           <div style={{width:PIPELINE_INFO_W, flexShrink:0, display:'flex', flexDirection:'column', borderRight:`1px solid ${T.border}`, minHeight:0}}>
             <div style={pipelineColumnHeader}>
               <span style={{flex:1, minWidth:0, fontSize:15, fontWeight:600, color:T.attioText, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{pipeline.label}</span>
-              <RowActionsMenu title="Pipeline actions" width={MENU_W} items={pipelineMenuItems(pipeline, deals, ()=>setEditingPipeline(true))}/>
+              <RowActionsMenu title="Pipeline actions" width={MENU_W} items={pipelineMenuItems(pipeline, deals, ()=>setEditingPipeline(true), undefined, data, ()=>setDeletingPipeline(true))}/>
             </div>
             <div style={{flex:1, minHeight:0, overflowY:'auto', padding:'16px 20px 24px'}}>
               <div style={{marginBottom:6}}>
@@ -186,16 +188,19 @@ function PipelinePanel({data, setData, pipelineId, deals = [], onClose, onStub, 
         </div>
       </>)}
     </div>
-    {editingPipeline && <EditPipelineModal pipeline={pipeline} setData={setData} onClose={()=>setEditingPipeline(false)}/>}
+    {editingPipeline && <EditPipelineModal pipeline={pipeline} setData={setData} onClose={()=>setEditingPipeline(false)}
+      taken={(data.pipelines || []).filter(p => p.objectId === pipeline.objectId && p.id !== pipeline.id).map(p => p.label.toLowerCase())}/>}
+    {deletingPipeline && <DeletePipelineModal pipeline={pipeline} setData={setData} onCancel={()=>setDeletingPipeline(false)} onDeleted={onClose}/>}
     {adding && <AddStageModal stages={pipeline.stages} onCancel={()=>setAdding(false)}
       onAdd={(label, type) => { setStages(list => [...list, {id:`${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${Date.now().toString(36)}`, label, type}]); setAdding(false); }}/>}
     {deleting && (() => {
-      const n = workflows.filter(w => stageOfWorkflow(w) === deleting.id).length;
+      // Its workflows (shown here, and that the person may delete) go with it; others pointing at it are flagged in the builder.
+      const gone = workflows.filter(w => stageOfWorkflow(w) === deleting.id && workflowCan('delete', w)).map(w => w.id), n = gone.length;
       return (
         <StModal title="Delete Stage" primary="Delete stage" danger onCancel={()=>setDeleting(null)}
           onSubmit={()=>{
             setStages(list => list.filter(s => s.id !== deleting.id));
-            setData(d => ({...d, workflows:(d.workflows || []).filter(w => stageOfWorkflow(w) !== deleting.id)}));
+            setData(d => ({...d, workflows:(d.workflows || []).filter(w => !gone.includes(w.id))}));
             setDeleting(null);
           }}>
           <div style={stTextB}>Delete "{deleting.label}" from {pipeline.label}?{n ? ` Its ${n} workflow${n === 1 ? '' : 's'} will be deleted too.` : ''}</div>
@@ -205,16 +210,19 @@ function PipelinePanel({data, setData, pipelineId, deals = [], onClose, onStub, 
   </>);
 }
 
-/* Pipeline ⋯ menu (Pipelines table and the panel): Edit, and Delete — disabled while the
-   pipeline has deals (and for property-driven pipelines, whose stages are a property's values). */
+/* Pipeline ⋯ menu (Pipelines table and the panel): Edit, and Delete — only for a pipeline of its own
+   stages (not a property's values) with no records in it, no workflow in its context, and another
+   pipeline for its Record to keep; asked first (DeletePipelineModal). */
 const pipelineDealCount = (pipeline, deals) => (deals || []).filter(d => d.pipeline === pipeline.id).length;
-const pipelineMenuItems = (pipeline, deals, onEdit, noun = typeNoun('deals', 'deal')) => {
-  const n = pipelineDealCount(pipeline, deals);
-  const own = pipeline.source === 'record';
+const pipelineDeletable = (pipeline, deals, data) => pipeline.source === 'record' && !pipelineDealCount(pipeline, deals)
+  && !!data && !(data.workflows || []).some(w => w.context && w.context.pipeline === pipeline.id)
+  && (data.pipelines || []).some(p => p.objectId === pipeline.objectId && p.id !== pipeline.id);
+const pipelineMenuItems = (pipeline, deals, onEdit, noun = typeNoun('deals', 'deal'), data, onDelete) => {
+  const n = pipelineDealCount(pipeline, deals), can = !!onDelete && pipelineDeletable(pipeline, deals, data);
   // Settings & Administration → Pipelines: Edit and Delete, for the pipeline's record type.
   return [
     ...(pipelineAdminCan(pipeline.objectId, 'edit', pipeline) ? [{label:'Edit', onClick:onEdit}] : []),
-    ...(pipelineAdminCan(pipeline.objectId, 'delete', pipeline) ? [{label: n ? `Delete · ${n} ${noun}${n === 1 ? '' : 's'}` : 'Delete', danger: own && !n, disabled:true, onClick:()=>{}}] : []),
+    ...(pipelineAdminCan(pipeline.objectId, 'delete', pipeline) ? [{label: n ? `Delete · ${n} ${noun}${n === 1 ? '' : 's'}` : 'Delete', danger:can, disabled:!can, onClick:can ? onDelete : ()=>{}}] : []),
   ];
 };
 
@@ -223,14 +231,16 @@ const pipelineMenuItems = (pipeline, deals, onEdit, noun = typeNoun('deals', 'de
    the new name; nothing moves. Closed stages (Won, Lost, Undecided) sit outside the ordered stages
    that Stage Movement Forward / Backward and Move Stage Forward / Backward follow. A
    property-driven pipeline's stage names are its property's values: only their types change here. */
-function EditPipelineModal({pipeline, setData, onClose}){
+// `taken`: the other pipelines' names for the same Record (lower case) — a name is used once, as New Pipeline requires.
+function EditPipelineModal({pipeline, setData, onClose, taken = []}){
   const [label, setLabel] = React.useState(pipeline.label);
   const [names, setNames] = React.useState(() => Object.fromEntries(pipeline.stages.map(s => [s.id, s.label])));
   const [types, setTypes] = React.useState(() => Object.fromEntries(pipeline.stages.map(s => [s.id, stageTypeOf(s)])));
   const ownNames = pipeline.source === 'record';
   const trimmed = pipeline.stages.map(s => (names[s.id] || '').trim());
   const dupes = trimmed.some((n, i) => n && trimmed.findIndex(x => x.toLowerCase() === n.toLowerCase()) !== i);
-  const ok = !!label.trim() && trimmed.every(Boolean) && !dupes;
+  const nameTaken = taken.includes(label.trim().toLowerCase());
+  const ok = !!label.trim() && !nameTaken && trimmed.every(Boolean) && !dupes;
   const save = () => {
     setData(d => ({...d, pipelines:d.pipelines.map(p => p.id !== pipeline.id ? p
       : {...p, label:label.trim(), stages:p.stages.map(s => ({...withStageType(s), ...(ownNames ? {label:(names[s.id] || s.label).trim()} : {}), type:types[s.id] || 'open'}))})}));
@@ -241,6 +251,7 @@ function EditPipelineModal({pipeline, setData, onClose}){
       <div>
         <label style={fieldLabel} htmlFor="pipeline-name">Pipeline name</label>
         <input id="pipeline-name" value={label} onChange={e=>setLabel(e.target.value)} style={fieldInput}/>
+        {nameTaken && <div style={{fontSize:12, color:T.red, marginTop:6}}>Another pipeline has this name.</div>}
       </div>
       <div>
         <div style={{display:'flex', alignItems:'baseline'}}>
@@ -264,6 +275,14 @@ function EditPipelineModal({pipeline, setData, onClose}){
   );
 }
 
+function DeletePipelineModal({pipeline, setData, onCancel, onDeleted}){
+  return (
+    <StModal title="Delete Pipeline" primary="Delete Pipeline" danger onCancel={onCancel}
+      onSubmit={()=>{ setData(d => ({...d, pipelines:(d.pipelines || []).filter(p => p.id !== pipeline.id)})); onDeleted && onDeleted(); }}>
+      <div style={stTextB}>"{pipeline.label}" will be deleted.</div>
+    </StModal>
+  );
+}
 function AddStageModal({stages, onCancel, onAdd}){
   const [label, setLabel] = React.useState('');
   const [type, setType] = React.useState('open');
@@ -285,4 +304,4 @@ function AddStageModal({stages, onCancel, onAdd}){
   );
 }
 
-Object.assign(window, {PipelinePanel, PIPELINE_PANEL_LEFT, EditPipelineModal, pipelineMenuItems});
+Object.assign(window, {PipelinePanel, PIPELINE_PANEL_LEFT, EditPipelineModal, DeletePipelineModal, pipelineMenuItems});

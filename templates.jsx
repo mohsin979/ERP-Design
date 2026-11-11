@@ -28,7 +28,8 @@ const TEMPLATE_TABS = [{id:'templates', label:'Email Templates', icon:'envelope'
   {id:'services', label:'Services', icon:'services', kind:'services'}];
 const SEQUENCE_UNITS = ['Hours', 'Days', 'Weeks'];
 // Where a template or sequence is used: workflows (any of their settings) and, for templates, sequences.
-const usedInWorkflows = (data, id) => (data.workflows || []).filter(w => JSON.stringify(w).includes(`"${id}"`));
+// A workflow's current version only — one it was used in before (its version history) doesn't count.
+const usedInWorkflows = (data, id) => (data.workflows || []).filter(w => { const {history, ...now} = w; return JSON.stringify(now).includes(`"${id}"`); });
 
 // The creation panels' Cancel / Save pair.
 const panelActions = (onCancel, label, ok, onSave) => <><StSecondary label="Cancel" onClick={onCancel}/><StCta label={label} disabled={!ok} onClick={()=>ok && onSave()}/></>;
@@ -220,10 +221,16 @@ function TemplatesSettings({data, setData}){
   const setTemplates = (fn) => setData(d => ({...d, emailTemplates:fn(emailTemplatesOf(d))}));
   const setSequences = (fn) => setData(d => ({...d, emailSequences:fn(emailSequencesOf(d))}));
   const templateName = (id) => (templates.find(t => t.id === id) || {}).name || 'Deleted template';
+  /* A sequence is also in use while records are enrolled in it (its emails still scheduled for
+     them): it can't be deleted until they've gone out or the records exit it. */
+  const hub = useRecordHub();
+  const enrolledIn = (id) => !hub ? 0 : Object.values(hub.activities || {}).reduce((n, byRec) => n + Object.values(byRec || {})
+    .filter(list => (list || []).some(a => a.type === 'email' && a.status === 'scheduled' && a.sequenceId === id)).length, 0);
   const usage = (kind, id) => {
     const ws = usedInWorkflows(data, id);
     const seqs = kind === 'templates' ? sequences.filter(s => s.emails.some(e => e.templateId === id)) : [];
-    return [...ws.map(w => `${w.name || 'Workflow'} (workflow)`), ...seqs.map(s => `${s.name} (sequence)`)];
+    const enrolled = kind === 'sequences' ? enrolledIn(id) : 0;
+    return [...ws.map(w => `${w.name || 'Workflow'} (workflow)`), ...seqs.map(s => `${s.name} (sequence)`), ...(enrolled ? [`${enrolled} enrolled record${enrolled === 1 ? '' : 's'}`] : [])];
   };
   const isT = tab === 'templates';
   const list = (isT ? templates : sequences).filter(x => can('view', x));

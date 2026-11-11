@@ -216,9 +216,11 @@ function useRecordBulk({object, data, records, update, remove, move}){
           toast(`${bulkPlural(ok.length, noun)} deleted${noPerm ? ` · ${noPerm} skipped (no permission)` : ''}${paid ? ` · ${paid} kept (payments recorded)` : ''}`); done(); }}/>; }
     if(bulk.kind === 'enroll') modal = <BulkEnrollModal data={data} records={chosen} onCancel={()=>setBulk(null)}
       onEnroll={(seqId, copies)=>{ const withEmail = chosen.filter(r => String(r.email || '').trim());
-        const n = engineCtx ? withEmail.filter(r => engineCtx.api.enrollInSequence(object === 'contacts' ? String(r.id) : r.id, seqId, copies)).length : 0;
+        const results = engineCtx ? withEmail.map(r => engineCtx.api.enrollInSequence(object === 'contacts' ? String(r.id) : r.id, seqId, copies)) : [];
+        const n = results.filter(x => x === 'enrolled').length, already = results.filter(x => x === 'already').length, noEmail = chosen.length - withEmail.length;
         const seq = emailSequencesOf(data).find(q => q.id === seqId);
-        toast(`${bulkPlural(n, noun)} enrolled in ${seq ? seq.name : 'the sequence'}${chosen.length - n ? ` · ${chosen.length - n} skipped` : ''}`); done(); }}/>;
+        // Records already in the sequence are skipped (their emails aren't scheduled twice).
+        toast(`${bulkPlural(n, noun)} enrolled in ${seq ? seq.name : 'the sequence'}${already ? ` · ${already} already enrolled` : ''}${noEmail ? ` · ${noEmail} skipped (no email)` : ''}`); done(); }}/>;
   }
   return {bulkActions, board, bulkModal:<>{modal}{stub && <StubPanel title={stub} onClose={()=>setStub(null)}/>}</>};
 }

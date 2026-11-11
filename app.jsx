@@ -699,6 +699,7 @@ function App(){
      per form. */
   setProfileFormsLive(settingsData.profileForms);
   const [profileFormData, setProfileFormData] = usePersistedState('profileFormData', {});
+  setProfileHolders(profileFormData);   // whose profile a record shows (board.jsx profileHolderId)
   const saveProfileForm = (contactId, formId, {values, meta}) => setProfileFormData(m => ({...m, [contactId]:{...(m[contactId] || {}), [formId]:{values, meta, updatedAt:new Date().toISOString()}}}));
   // One answer edited in place (its source: Manual).
   const saveProfileField = (contactId, formId, fieldId, value) => setProfileFormData(m => {
@@ -715,7 +716,9 @@ function App(){
   React.useEffect(() => { if(SEED) setProfileFormData(m => withSampleProfileData(m, contacts)); }, []);
   const profileFormsStore = {forms:settingsData.profileForms || [], data:profileFormData, save:saveProfileForm, saveField:saveProfileField, typeOf:profileTypeOf, setType:setProfileType,
     // The profile holder's activity: a contact's — a lead's or customer's own where it holds the profile (HOF Partners).
-    activitiesOf:(cid) => contactActivities[cid] || dealActivities[cid] || customerActivities[cid] || []};
+    // What the person said anywhere: a contact's own activity and its deals' and customers' (a lead's or customer's own, without Contacts).
+    activitiesOf:(cid) => contactActivities[cid] ? [...contactActivities[cid], ...deals.filter(d => d.contactId === cid).flatMap(d => dealActivities[d.id] || []),
+      ...customers.filter(x => x.contactId === cid).flatMap(x => customerActivities[x.id] || [])] : dealActivities[cid] || customerActivities[cid] || []};
   // `profiles`: what each person has filled in (Create Deal offers a profile when there's none).
   const profileStore = {profiles:profileFormData, facts:profileFacts};
   /* Permissions apply to the signed-in user. Registered for every permission check (usersTeams.jsx)
@@ -963,11 +966,12 @@ function App(){
     const firstStage = (obj) => { const pl = recordPipelines(settingsData, obj)[0]; return pl ? {pipeline:pl.id, stage:(pl.stages[0] || {}).id || ''} : {}; };
     // Its source: Meta Form; Website Form (Website RFQ or the form's public link); else as before.
     const formSource = via === 'meta' ? 'Meta Form' : via === 'website' || via === 'link' ? 'Website Form' : null;
+    // No owner from a form: it's assigned by hand or by an Assign Owner workflow.
     if(object === 'contacts') return createContact({...vals, owner:'', source: formSource || ''});
-    if(object === 'deals') return createDeal({id:null}, {owner:'', amount:'', ...firstStage('deals'), ...vals, source: formSource || ''}).id;
+    if(object === 'deals') return createDeal({id:null}, {amount:'', ...firstStage('deals'), ...vals, owner:'', source: formSource || ''}).id;
     const id = newRecordId('customers');
     setCustomerActivities(m => ({...m, [id]:[]}));
-    setCustomers(cs => [...cs, {id, owner:'', ...firstStage('customers'), ...vals, source: formSource || 'Manual', contactId:null, dealIds:[], created:dealStamp(new Date())}]);
+    setCustomers(cs => [...cs, {id, ...firstStage('customers'), ...vals, owner:'', source: formSource || 'Manual', contactId:null, dealIds:[], created:dealStamp(new Date())}]);
     return id;
   };
   // A record's property edited in place (record side panels).

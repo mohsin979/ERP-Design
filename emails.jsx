@@ -273,14 +273,22 @@ function EmailComposer({object, id, replyTo, forward, recipients, onSent, onClos
   const person = target.id != null ? hubRecordPerson(hub, target.object, target.id) : null;
   const templates = emailTemplatesOf(hub.data);
   const base = replyTo || forward;
-  const [to, setTo] = React.useState(() => forward ? '' : (person && person.email) || '');
-  const [cc, setCc] = React.useState(''), [bcc, setBcc] = React.useState('');
+  /* A reply goes back to whoever wrote: an email the team sent is answered to its recipients (and
+     its Cc), one received to the record's address; a forward starts with no one. */
+  const replyAddress = replyTo && replyTo.direction === 'sent' && (replyTo.to || []).find(x => EMAIL_ADDRESS.test(String(x).trim()));
+  const [to, setTo] = React.useState(() => forward ? '' : replyAddress || (person && person.email) || '');
+  const [cc, setCc] = React.useState(() => replyTo && (replyTo.cc || []).length ? replyTo.cc.join(', ') : ''), [bcc, setBcc] = React.useState('');
   const [templateId, setTemplateId] = React.useState('');
   const [subject, setSubject] = React.useState(() => base ? `${forward ? 'Fwd' : 'Re'}: ${String(base.title || '').replace(/^(Re|Fwd):\s*/i, '')}` : '');
-  // A new email (Simple Text Body, the signature beneath); a forward carries the message under it.
+  /* A new email (Simple Text Body, the signature beneath); a forward carries the message under it —
+     who sent it, when, its subject, the message as written and its attachments. */
+  const forwarded = React.useMemo(() => !forward ? '' : sanitizeRichText(`<p>---------- Forwarded message ----------</p>`
+    + `<p>From: ${forward.direction === 'received' ? (person && (person.name || person.email)) || 'Client' : forward.by || CURRENT_USER.name}<br>`
+    + `Date: ${fmtActStamp(new Date(forward.at))}<br>Subject: ${String(forward.title || '').replace(/[<>]/g, '')}</p>`
+    + (forward.html ? forward.html : richHtmlOf(forward.body || ''))), []);
   const [content, setContent] = React.useState(() => {
     const c = newEmailContent();
-    return forward ? {...c, body:c.body + sanitizeRichText(`<p>---------- Forwarded message ----------</p>${richHtmlOf(forward.body || '')}`)} : c;
+    return forward ? {...c, body:c.body + forwarded, attachments:[...(c.attachments || []), ...(forward.attachments || [])]} : c;
   });
   const [scheduling, setScheduling] = React.useState(false);
   const [date, setDate] = React.useState(() => ymdOf(new Date(Date.now() + 86400000)));
@@ -288,17 +296,19 @@ function EmailComposer({object, id, replyTo, forward, recipients, onSent, onClos
   const [error, setError] = React.useState('');
   // A record picked here fills in its email.
   React.useEffect(() => { if(!fixed && !forward) setTo((person && person.email) || ''); }, [target.object, target.id]);
-  // A template brings its subject, format and content (its signature as it has it), {{first_name}}
-  // filled in — for several records it stays as written until each email is sent.
+  /* A template brings its subject, format and content (its signature as it has it). {{first_name}}
+     stays as written until the email is sent, then it's the recipient's — so changing the record
+     after picking the template still greets the right person (the preview shows it filled in). A
+     forward keeps the forwarded message under the template. */
   const pickTemplate = (tid) => {
     setTemplateId(tid || '');
     const tpl = templates.find(t => t.id === tid);
     if(!tpl) return;
     const c = templateContentOf(tpl);
-    if(many){ setSubject(tpl.subject || tpl.name || ''); return setContent(c); }
-    setSubject(fillFirstName(tpl.subject || tpl.name, person));
-    setContent({...c, body:fillFirstName(c.body, person), html:fillFirstName(c.html, person)});
+    setSubject(tpl.subject || tpl.name || '');
+    setContent(forward ? {...c, body:(c.body || '') + forwarded, attachments:[...(c.attachments || []), ...(forward.attachments || [])]} : c);
   };
+  const named = (v) => person && typeof v === 'string' ? fillFirstName(v, person) : v;
   const validTo = EMAIL_ADDRESS.test(to.trim());
   const ready = (many ? reach.length > 0 : target.id != null && validTo) && emailListValid(cc) && emailListValid(bcc) && !!subject.trim() && emailContentReady(content);
   const send = (later) => {
@@ -315,7 +325,7 @@ function EmailComposer({object, id, replyTo, forward, recipients, onSent, onClos
       const named = (v) => p && typeof v === 'string' ? fillFirstName(v, p) : v;
       const c = {...content, body:named(content.body), html:named(content.html)};
       return {id:newId, type:'email', direction:'sent', title:named(subject).trim(), body:emailTextOf(c), html:emailHtmlOf(c), format:content.format,
-        ...(attachments.length ? {attachments} : {}), to:[address], ...emailCopiesOf(cc, bcc), source:'you', by:null,
+        ...(attachments.length ? {attachments} : {}), to:[address], ...emailCopiesOf(cc, bcc), source:'you', by:CURRENT_USER.name,
         status: later ? 'scheduled' : 'sent', ...(later ? {at:when, scheduledFor:when} : {}), ...(templateId ? {templateId} : {}),
         ...(replyTo ? {replyToId:replyTo.id} : {}), ...(forward ? {forwardOfId:forward.id} : {})};
     };
@@ -326,7 +336,7 @@ function EmailComposer({object, id, replyTo, forward, recipients, onSent, onClos
       if(onSent) onSent();
       return onClose(later ? 'scheduled' : 'sent');
     }
-    hub.add(target.object, target.id, emailOf(newIdOf, to.trim()));
+    hub.add(target.object, target.id, emailOf(newIdOf, to.trim(), person));
     hub.toast(later ? 'Email scheduled' : 'Email sent');
     onClose(later ? 'scheduled' : 'sent', newIdOf, target);
   };
@@ -354,7 +364,7 @@ function EmailComposer({object, id, replyTo, forward, recipients, onSent, onClos
           <Field label="At"><TimeField required value={time} onChange={(v)=>{ setTime(v); setError(''); }}/></Field>
         </>}
         {error && <div style={{fontSize:12.5, color:T.red}}>{error}</div>}
-      </>} preview={<EmailPreview content={content} subject={subject}/>}/>
+      </>} preview={<EmailPreview content={many ? content : {...content, body:named(content.body), html:named(content.html)}} subject={many ? subject : named(subject)}/>}/>
     </CreatePanelFrame>
   );
 }

@@ -24,16 +24,31 @@
    result}]}. Delayed steps (an action's wait) and Stay at Stage checks are scheduled and run when
    due; "Run now" brings one forward. Either way the deal is re-checked first (still in the stage,
    conditions still true). A failed step is logged and the others continue; nothing retries on its
-   own (Retry is manual). Turning a workflow off cancels its scheduled steps; editing keeps them,
-   and they run against the new version.
+   own (Retry is manual). Turning a workflow off cancels its scheduled steps — and its emails still
+   scheduled; editing keeps them, and they run against the new version. A workflow's scheduled email
+   is sent only while it still applies (the workflow on, the record still in the stage / context).
+   The run history keeps the latest 400 finished runs; live ones are never dropped.
 
-   Prompts go to the record owner: shown on the deal's board card and in their notification bell;
-   each opens a small modal (complete or dismiss). Everything here — workflows, pipelines, deals,
-   their activities, events, runs, prompts, notifications — is saved in this browser. */
+   Prompts go to the record owner — the owner now (they move with a reassignment): shown on the
+   deal's board card and in their notification bell; each opens a small modal (complete or dismiss).
+   A deleted record's open prompts end, Not applicable. A record created straight into a stage Block
+   Stage Entry guards is created there, with a violation for its owner. Everything here — workflows,
+   pipelines, deals, their activities, events, runs, prompts, notifications — is saved in this
+   browser. */
 
 const WF_DAY = 86400000;
-const WF_UNIT_MS = {Days:WF_DAY, Weeks:7 * WF_DAY, Months:30 * WF_DAY, Years:365 * WF_DAY};
+const WF_UNIT_MS = {Hours:WF_DAY / 24, Days:WF_DAY, Weeks:7 * WF_DAY, Months:30 * WF_DAY, Years:365 * WF_DAY};
 const wfDurationMs = (d) => (Number(d && d.amount) || 0) * (WF_UNIT_MS[d && d.unit] || WF_DAY);
+/* A sequence's emails go one after another: each one's delay counts from the email before it, so
+   its schedule from enrolment is the sum of the delays so far (in hours when any step is in hours,
+   else days); a step's time of day stays its own. */
+const sequenceSchedules = (seq) => {
+  const steps = (seq && seq.emails) || [], inHours = steps.some(e => (e.delay || {}).unit === 'Hours');
+  const per = {Hours:1, Days:24, Weeks:168};
+  let total = 0;
+  return steps.map(e => { const d = e.delay || {}; total += (Number(d.amount) || 0) * (per[d.unit] || 24);
+    return {amount: inHours ? total : total / 24, unit: inHours ? 'Hours' : 'Days', time:d.time || ''}; });
+};
 const wfNewId = (p) => `${p}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 const WF_MAX_DEPTH = 5;
 const WF_STAGE_EVENTS = ['stageEntry', 'stageExit', 'stageForward', 'stageBackward'];
@@ -190,7 +205,7 @@ const FORM_TRIGGER_FIELDS = () => {
     {key:'formName', label:'Form Name', kind:'select', options:(WF_LIVE.forms || []).map(f => ({value:f.name, label:f.name})), get:(env) => { const s = sub(env); return s ? s.form.name : ''; }},
     {key:'formSubmittedAt', label:'Form Submission Date', kind:'date', get:(env) => { const s = sub(env); return s ? s.submission.at : ''; }},
     {key:'formSource', label:'Submission Source', kind:'select', options:FORM_SUBMISSION_SOURCES.map(x => ({value:x.value, label:x.value})), get:(env) => { const s = sub(env); return s ? formSubmissionSource(s.submission) : ''; }},
-    ...(WF_LIVE.forms || []).flatMap(f => (f.fields || []).map(fd => { const p = formFieldProperty(fd);
+    ...(WF_LIVE.forms || []).filter(f => !f.deleted).flatMap(f => (f.fields || []).map(fd => { const p = formFieldProperty(fd);
       return {key:`ans~${f.id}~${fd.id}`, label:`${f.name} · ${fd.label || 'Untitled field'}`, kind:conditionKind(p), prop:{...p, key:`ans~${f.id}~${fd.id}`}, options:(p.options || []).map(o => ({value:o, label:o})), get:answer(f, fd)}; })),
   ];
 };
@@ -452,7 +467,8 @@ const entersMoving = (dir) => (w, ev) => ev.type === dir && ev.pipelineId === wo
 // Property Update: any change to the chosen property (its value set, changed or cleared).
 // The trigger fires only when its own condition holds on the record after the change.
 // When the record entered the workflow's context: its stage entry, else its creation.
-const contextEnteredAt = (w, deal) => (w.context || {}).stage ? (deal.stageEnteredAt || 0) : (toTime(deal.created) || 0);
+// When the record entered the context: its stage, its pipeline, else its creation.
+const contextEnteredAt = (w, deal) => (w.context || {}).stage ? (deal.stageEnteredAt || 0) : (w.context || {}).pipeline ? (deal.pipelineEnteredAt || toTime(deal.created) || 0) : (toTime(deal.created) || 0);
 /* Trigger Scope (workflows.jsx): New Records — the triggers apply only to records new to the
    context since the workflow was configured (`scopeSince`): ones that entered its stage (a Stage
    context — entering a stage, not necessarily a new record), entered its pipeline (a Pipeline
@@ -468,8 +484,12 @@ const scopeEnteredAt = (w, deal, ev) => {
 /* Applies To: the records of these owners — people, or members of teams (`appliesTo`: 'user:<id>' /
    'team:<id>'); none chosen: everyone's. `excludedUsers`: people another identical workflow applies
    to instead (chosen when the two overlapped) — never this one's. */
-const appliesToOwner = (w, ownerId) => {
-  if(ownerId && ((w && w.excludedUsers) || []).includes(ownerId)) return false;
+const appliesToOwner = (w, ownerId) => excludedFor(w, ownerId) ? false : appliesToList(w, ownerId);
+/* Excluded: the owner follows an identical workflow instead — only while one is on, still identical
+   and applies to them; otherwise the exclusion lapses and this workflow applies to them again. */
+const excludedFor = (w, ownerId) => !!ownerId && ((w && w.excludedUsers) || []).includes(ownerId) && (!WF_LIVE.workflows
+  || WF_LIVE.workflows.some(o => o.id !== w.id && o.active !== false && !((o.excludedUsers || []).includes(ownerId)) && appliesToList(o, ownerId) && workflowSignature(o) === workflowSignature(w)));
+const appliesToList = (w, ownerId) => {
   const list = (w && w.appliesTo) || [];
   if(!list.length) return true;
   if(!ownerId) return false;
@@ -508,6 +528,8 @@ const onActivityProperty = (w, ev, deal, data, acts) => {
     if(!countConditionComplete(c)) return c.op !== 'lt' && c.op !== 'equals';
     return c.op === 'gt' && countedOf(p, deal, acts).length > Number(c.value);
   }
+  // An existing activity changed (a call's outcome edited): the count didn't go up, so it isn't reached again.
+  if(!p.outcome && ev.attrs.added === false) return false;
   const after = countedOf(p, deal, acts).length, before = Math.max(0, after - 1);
   const meets = (x) => countMeets(c, x);
   return meets(after) && (!meets(before) || before === 0);
@@ -693,7 +715,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
                             customers = [], setCustomersRaw, customerActivities = {}, setCustomerActivities,
                             contacts = [], contactActivities = {}, setContactActivities,
                             profiles = {}, profileFacts = {}, accounting = [], quotes = [], forms = []}){
-  WF_LIVE = {profiles, facts:profileFacts, accounting, users:data.users || [], properties:data.properties || [], forms};
+  WF_LIVE = {profiles, facts:profileFacts, accounting, users:data.users || [], properties:data.properties || [], forms, workflows:data.workflows || []};
   const [es, setEs] = React.useState(() => withoutLegacyViolationStatus(withoutSuggestive(savedSlice('engine') || (WF_SAVED && WF_SAVED.engine) || EMPTY_ENGINE())));
   const esRef = React.useRef(es);
   const dataRef = React.useRef(data); dataRef.current = data;
@@ -755,8 +777,13 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
   const getDeal = (id) => dealsRef.current.find(d => d.id === id);
   const getWorkflow = (id) => normalizeWorkflow((dataRef.current.workflows || []).find(w => w.id === id));
   const actsOf = (dealId) => actsRef.current[dealId] || [];
+  // A record is in a sequence while emails of it are still scheduled for it.
+  const enrolledIn = (dealId, seqId) => !!seqId && actsOf(dealId).some(a => a.type === 'email' && a.status === 'scheduled' && a.sequenceId === seqId);
   const patchRun = (id, fn) => commit(s => ({...s, runs:s.runs.map(r => r.id === id ? fn(r) : r)}));
-  const addRun = (r) => commit(s => ({...s, runs:[r, ...s.runs].slice(0, 400)}));
+  /* The run history keeps the latest 400 finished runs; a run still waiting, running or with a step
+     scheduled is never dropped (its delayed steps and checks must still happen). */
+  const runLive = (r) => r.status === 'waiting' || r.status === 'running' || (r.steps || []).some(st => st.status === 'scheduled');
+  const addRun = (r) => commit(s => { let done = 0; return {...s, runs:[r, ...s.runs].filter(x => runLive(x) || ++done <= 400)}; });
   const patchStep = (runId, stepId, patch) => { patchRun(runId, r => ({...r, steps:r.steps.map(s => s.id === stepId ? {...s, ...patch} : s)})); settleRun(runId); };
 
   const pickActs = (m, object) => Object.fromEntries(Object.entries(m).filter(([k]) => recordObjectOf(k) === object));
@@ -875,7 +902,8 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
       if(!by.length) return d0;
       blocks.push({dealId:d0.id, by, attempt:{fromStage:p.stage, fromPipeline:p.pipeline, toStage:d0.stage, toPipeline:d0.pipeline,
         byPerson: !chain || !chain.depth || !!chain.byPerson}});
-      return {...d0, stage:p.stage, pipeline:p.pipeline};
+      // Blocked: it stays where it was — a contact keeps its Types of Contact value too.
+      return {...d0, stage:p.stage, pipeline:p.pipeline, ...(recordObjectOf(d0.id) === 'contacts' ? {contactType:p.contactType} : {})};
     });
     const now = Date.now(), changes = [], propChanges = [];
     // Who made this change, for its history: the workflow (named) or the person signed in.
@@ -925,6 +953,9 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
       const before = userPropertiesOf(dataRef.current, c.from) || {}, after = userPropertiesOf(dataRef.current, c.to) || {};
       userPropertyFields(dataRef.current).filter(f => !samePropertyValue(before[f.key], after[f.key])).forEach(f => emitScoped(c.deal.id, 'owner', f.key, before[f.key], after[f.key], chain));
       addActivity(c.deal.id, {id:wfNewId('own'), ...recordKey(c.deal.id), type:'ownerChange', at:new Date(now), from:c.from || null, to:c.to || null, ...changedBy()});
+      // Its open violations go to the new owner (they're the record owner's to resolve).
+      if(esRef.current.prompts.some(p => p.status === 'pending' && p.dealId === c.deal.id && p.userId === c.from))
+        commit(st => ({...st, prompts:st.prompts.map(p => p.status === 'pending' && p.dealId === c.deal.id && p.userId === c.from ? {...p, userId:c.to || null} : p)}));
     });
     /* Stage history: every move of an existing record (a person's, or a workflow's — named), with
        the stages' names as they were. */
@@ -936,6 +967,10 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
       [...(d.dealIds || []), ...(d.contactId != null ? [String(d.contactId)] : [])].filter(id => next.some(r => r.id === id)).forEach(id =>
         addActivity(id, {id:wfNewId('cus'), ...recordKey(id), type:'customerCreated', at:new Date(now), customerId:d.id, customerName:d.name || '', ...changedBy()})));
     created.forEach(d => emit({type:'recordCreated', recordId:d.id, pipelineId:d.pipeline, attrs:{}}, chain));
+    /* A record created straight into a stage a Block Stage Entry workflow guards: it's created there,
+       and the workflow raises a violation for its owner to change the values (it isn't moved). */
+    created.filter(d => d.stage).forEach(d => entryBlockers({pipeline:d.pipeline, stage:null}, d, chain).forEach(({w, held}) =>
+      fire(w, held, d, () => ({...baseRun(held[held.length - 1], d, {chain: chain || {id:wfNewId('ch'), depth:0, visited:[]}, previousStage:null, change:null}), existingRecord:true, createdInStage:true}))));
     updated.forEach(d => emit({type:'recordUpdated', recordId:d.id, pipelineId:d.pipeline, attrs:{}}, chain));
     emitAssociatedCreated(prev, next, created, chain);
     // Associated Record · Is changed: each record associated with one that changed.
@@ -1127,7 +1162,8 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
     const entryAt = deal.stageEnteredAt || Date.now();
     const checkAt = entryAt + wfDurationMs(v.triggerConfig);
     const same = (r) => r.workflowId === v.id && triggerIdOf(r) === v.triggerId && r.dealId === deal.id && r.entryAt === entryAt;
-    if(esRef.current.runs.some(r => same(r) && r.status !== 'waiting' && !r.checkAt)) return;   // already fired for this stage entry
+    // Already fired for this stage entry — remembered apart from the run history, which drops old runs.
+    if((esRef.current.stayFired || {})[`${v.id}:${v.triggerId}:${deal.id}:${entryAt}`] || esRef.current.runs.some(r => same(r) && r.status !== 'waiting' && !r.checkAt)) return;
     const existing = esRef.current.runs.find(r => same(r) && r.status === 'waiting');
     if(existing){ patchRun(existing.id, r => ({...r, checkAt, version:v.version || 1})); return; }
     addRun(baseRun(v, deal, {status:'waiting', entryAt, checkAt, chain: chain || {id:wfNewId('ch'), depth:0, visited:[]}}));
@@ -1155,9 +1191,10 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
     if(!v){ patchRun(runId, r => ({...r, status:'notRun', reason:'Trigger changed'})); return; }
     if(!deal || deal.stage !== run.stage || deal.stageEnteredAt !== run.entryAt){ patchRun(runId, r => ({...r, status:'notRun', reason:'Left the stage before the time passed'})); return; }
     if(!inTriggerScope(v, deal)){ patchRun(runId, r => ({...r, status:'notRun', reason:'Outside the trigger scope'})); return; }
-    // The waiting run is replaced by the run that starts (or doesn't).
-    commit(s => ({...s, runs:s.runs.filter(x => x.id !== runId)}));
-    fire(w, [v], deal, () => ({...run, triggerId:v.triggerId, checkAt:null, version:w.version || 1}));
+    // The waiting run is replaced by the run that starts (or doesn't); it fires once per stage entry.
+    commit(s => ({...s, runs:s.runs.filter(x => x.id !== runId), stayFired:{...(s.stayFired || {}), [`${w.id}:${v.triggerId}:${deal.id}:${run.entryAt}`]:true}}));
+    // A timer starts its own chain: what ran when the deal entered the stage isn't a loop days later.
+    fire(w, [v], deal, () => ({...run, triggerId:v.triggerId, checkAt:null, version:w.version || 1, chain:{id:wfNewId('ch'), depth:0, visited:[]}}));
   }
   function cancelWaiting(match, reason){
     commit(s => ({...s, runs:s.runs.map(r => r.status === 'waiting' && match(r) ? {...r, status:'notRun', reason} : r)}));
@@ -1176,7 +1213,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
     const deal = getDeal(run.dealId);
     if(!deal) return patchStep(runId, stepId, {status:'failed', result:`The ${recordNoun(run.dealId)} no longer exists`});
     // An identical workflow applies to the record's owner now (they were excluded from this one): what's left is cancelled.
-    if(((w.excludedUsers) || []).includes(deal.owner)) return patchStep(runId, stepId, {status:'cancelled', result:`Another workflow applies to ${userName(dataRef.current, deal.owner) || 'the owner'}`});
+    if(excludedFor(w, deal.owner)) return patchStep(runId, stepId, {status:'cancelled', result:`Another workflow applies to ${userName(dataRef.current, deal.owner) || 'the owner'}`});
     if(delayed){
       if(['stageEntryForward', 'stageEntryBackward', 'stayAtStage'].includes(run.trigger) && (deal.pipeline !== run.pipeline || deal.stage !== run.stage)) return patchStep(runId, stepId, {status:'skipped', result:'The deal left the stage'});
       // Other triggers stay within the workflow's context (a stage context: the deal is still in it).
@@ -1296,33 +1333,40 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
   }
 
   // Sends (or schedules) a workflow's emails on the deal; returns what happened.
+  /* An email goes only to someone: the record's email address (when it has one) and the people
+     chosen; with no one to send to it isn't sent or logged ("skipped"). {{first_name}} is the
+     record's person's first name, as in the composer (emails.jsx). */
   function sendEmails(deal, emails, run, workflowId){
     const data = dataRef.current, owner = userName(data, deal.owner);
-    let sent = 0, scheduled = 0;
+    let sent = 0, scheduled = 0, skipped = 0;
+    const person = {name:deal.name || ''};
     emails.forEach(e => {
       const tpl = emailTemplatesOf(data).find(t => t.id === e.templateId) || {};
       const sendAt = new Date(Date.now() + (e.immediate ? 0 : wfDurationMs(e.schedule)));
       if(!e.immediate && e.schedule && e.schedule.time){ const [h, m] = e.schedule.time.split(':').map(Number); sendAt.setHours(h, m, 0, 0); }
       const now = !!e.immediate || sendAt.getTime() <= Date.now();
-      const to = (e.recipients || []).map(r => r === 'recordEmail' ? 'Customer' : userName(data, resolvePerson(data, deal, r))).filter(Boolean);
-      const subject = (e.email && e.email.subject) || tpl.subject || tpl.name;
+      const to = (e.recipients || []).map(r => r === 'recordEmail' ? String(deal.email || '').trim() : userName(data, resolvePerson(data, deal, r))).filter(Boolean);
+      if(!to.length){ skipped++; return; }
+      const subject = fillFirstName((e.email && e.email.subject) || tpl.subject || tpl.name, person);
       /* The HTML is kept as written (shown in its frame); `body` is its text (lists, search). A
          template (and so a sequence's email) goes as the template is — its format, content and
          signature (emails.jsx emailHtmlOf), with a Simple Text Body's attachments. */
       const content = tpl.id ? templateContentOf(tpl) : null;
-      const html = (e.email && e.email.html) || (content ? emailHtmlOf(content) : '');
+      const html = fillFirstName((e.email && e.email.html) || (content ? emailHtmlOf(content) : ''), person);
       const attachments = content && content.format === 'simple' ? content.attachments : [];
       const act = {id:wfNewId('we'), ...recordKey(deal.id), type:'email', at: now ? new Date() : sendAt, direction:'sent', title:subject, body:htmlText(html),
         html:html || null, ...(attachments.length ? {attachments} : {}),
         // Cc / Bcc: typed on the workflow's email (its action) or when enrolling by hand — kept as lists, only when filled.
         templateId:e.templateId, sequenceId:e.sequenceId || null, to, ...emailCopiesOf(e.cc, e.bcc),
-        status: now ? 'sent' : 'scheduled', scheduledFor:sendAt, source:'team', by:owner, viaWorkflow:workflowId};
+        status: now ? 'sent' : 'scheduled', scheduledFor:sendAt, source:'team', by:owner, viaWorkflow:workflowId, ...(workflowId && run && run.id ? {runId:run.id} : {})};
       addActivity(deal.id, act);
       if(now){ sent++; emit({type:'emailSent', recordId:deal.id, pipelineId:deal.pipeline, attrs:{activityId:act.id, templateId:e.templateId}}, childChain(run)); }
       else { scheduled++; emit({type:'emailScheduled', recordId:deal.id, pipelineId:deal.pipeline, attrs:{activityId:act.id, templateId:e.templateId}}, childChain(run)); }
     });
-    return [sent && `${plural(sent, 'email')} sent`, scheduled && `${plural(scheduled, 'email')} scheduled`].filter(Boolean).join(', ');
+    return [sent && `${plural(sent, 'email')} sent`, scheduled && `${plural(scheduled, 'email')} scheduled`, skipped && `${plural(skipped, 'email')} skipped (no recipient)`].filter(Boolean).join(', ');
   }
+  // Nothing went out (no one to send to): the step is skipped, not done.
+  const emailsResult = (text) => /^\d+ emails? skipped/.test(text) ? {status:'skipped', result:text} : {status:'done', result:text};
 
   /* Log Meeting / Log Call by a workflow (Create Meeting, Add Call Log): what happened, recorded as a
      person logging it would — a comment is a note linked to it. */
@@ -1373,11 +1417,12 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
     const data = dataRef.current, from = recordObjectOf(rec.id), fromNoun = recordNoun(rec.id);
     if(object === 'contacts'){
       const newContactId = newRecordId('contacts');   // never reused (store.jsx)
-      setContacts(cs => [...cs, newContactRecord(newContactId, values)]);
-      recordEffect({kind:'record', object:'contacts', recordId:newContactId});
-      /* Linked to the record — a deal or customer has one contact, so one that already has one keeps it. */
+      /* Linked to the record — a deal or customer has one contact, so one that already has one keeps it.
+         Created and linked in one change through the engine, so New Record and Associated Record ·
+         Is created see it (as any other record created). */
       const linked = rec.contactId == null;
-      if(linked) setDealsTracked(ds => ds.map(d => d.id === rec.id ? {...d, contactId:newContactId} : d), childChain(run));
+      setDealsTracked(ds => [...ds.map(d => linked && d.id === rec.id ? {...d, contactId:newContactId} : d), contactView(newContactRecord(newContactId, values))], childChain(run));
+      recordEffect({kind:'record', object:'contacts', recordId:newContactId});
       return `Contact created: ${values.name || ''}${linked ? ` · linked to this ${fromNoun}` : ` · not linked (the ${fromNoun} already has a contact)`}`;
     }
     if(!['customers', 'deals'].includes(object) || from === object) return `${objectName(data, object)}: not defined yet`;
@@ -1420,9 +1465,15 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
   }
   /* Assign Record Owner: the next person in turn — after the last one this action assigned
      (`es.rotation`, per workflow action), so a changing list carries on from where it was. */
-  function nextInTurn(key, pool){
-    const last = (esRef.current.rotation || {})[key], i = pool.indexOf(last), pick = pool[(i + 1) % pool.length];
-    commit(s => ({...s, rotation:{...(s.rotation || {}), [key]:pick}}));
+  /* `owner`: the record's owner now — when the turn falls on them, they keep the record and their
+     turn isn't used up (the next record is theirs). A last pick who has left the pool: the turn goes
+     on from where they stood in it (`order`, the pool as it was), not back to the first. */
+  function nextInTurn(key, pool, owner){
+    const rot = esRef.current.rotation || {}, last = rot[key], prevOrder = rot[`${key}:order`] || [];
+    let i = pool.indexOf(last);
+    if(i < 0 && last != null){ const at = prevOrder.indexOf(last); i = at < 0 ? -1 : pool.filter(id => prevOrder.indexOf(id) > -1 && prevOrder.indexOf(id) < at).length - 1; }
+    const pick = pool[(i + 1) % pool.length];
+    if(pick !== owner) commit(s => ({...s, rotation:{...(s.rotation || {}), [key]:pick, [`${key}:order`]:pool}}));
     return pick;
   }
   const ownerRuleHolds = (data, userId, r) => {
@@ -1459,9 +1510,11 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
     switch(action.type){
       case 'setPropertyValue':
       case 'clearProperty': {
-        const entries = (c.properties || []).filter(e => e.property);
-        if(!entries.length) return {status:'skipped', result:'No properties chosen'};
         const props = recordProps(deal);
+        // Only properties that still exist (an archived or deleted one is left out, and said).
+        const chosen = (c.properties || []).filter(e => e.property), entries = chosen.filter(e => props.some(p => p.key === e.property));
+        if(!chosen.length) return {status:'skipped', result:'No properties chosen'};
+        if(!entries.length) return {status:'skipped', result:'The chosen properties no longer exist'};
         if(action.type === 'clearProperty'){
           const blocked = entries.filter(e => (props.find(p => p.key === e.property) || {}).mandatory);
           const keys = entries.filter(e => !blocked.includes(e)).map(e => e.property);
@@ -1505,7 +1558,8 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
            working stage of the pipeline). If that move is blocked too, it stays, with a violation to
            change its values. */
         if(run.existingRecord && deal.stage === ctx.stage && deal.pipeline === ctx.pipeline){
-          const back = previousStageOf(deal, ctx.pipeline, ctx.stage);
+          // Created straight into the stage: it stays there, with a violation to change its values.
+          const back = run.createdInStage ? null : previousStageOf(deal, ctx.pipeline, ctx.stage);
           if(back){
             const backLabel = stageLabelOf(data, ctx.pipeline, back);
             const by = blockedBy(applyPatch(deal, {stage:back}, run), deal.id);
@@ -1539,13 +1593,15 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
       case 'scheduleEmail': {
         const emails = (c.emails || []).filter(e => e.templateId);
         if(!emails.length) return {status:'skipped', result:'No email template chosen'};
+        // Already in the sequence (its emails still scheduled): not enrolled again.
+        if(c.sequenceId && emails.some(e => e.sequenceId === c.sequenceId) && enrolledIn(deal.id, c.sequenceId)) return {status:'skipped', result:'Already enrolled in the sequence'};
         if(prompt){
           const e = emails[0], tpl = emailTemplatesOf(data).find(t => t.id === e.templateId) || {};
           const seq = c.sequenceId && emails.some(x => x.sequenceId === c.sequenceId) && emailSequencesOf(data).find(q => q.id === c.sequenceId);
           const title = seq ? `Enroll in ${seq.name}` : emails.length > 1 ? 'Send emails' : `${e.immediate ? 'Send' : 'Schedule'} ${tpl.name || 'the'} email${e.immediate ? ' now' : ''}`;
           return prompted([createPrompt(run, step, deal, 'sendEmail', title, {emails})], owner);
         }
-        return {status:'done', result:sendEmails(deal, emails, run, w.id)};
+        return emailsResult(sendEmails(deal, emails, run, w.id));
       }
       /* Schedule Meeting: Automatic books each meeting at its When (After N units, at a time);
          Required asks the record owner for the date and time. */
@@ -1605,7 +1661,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
         if(!e.templateId) return {status:'skipped', result:'No email template chosen'};
         const emails = [{...e, immediate:true}], tpl = emailTemplatesOf(data).find(t => t.id === e.templateId) || {};
         if(prompt) return prompted([createPrompt(run, step, deal, 'sendEmail', `Send ${tpl.name || 'the'} email now`, {emails})], owner);
-        return {status:'done', result:sendEmails(deal, emails, run, w.id)};
+        return emailsResult(sendEmails(deal, emails, run, w.id));
       }
       /* Exit Email Sequence: the record's emails still scheduled from the sequence aren't sent — they
          leave its activity (the step's effects keep them). */
@@ -1668,15 +1724,15 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
         else if(c.method === 'team'){
           const team = (data.teams || []).find(t => t.id === c.team), pool = (data.users || []).filter(u => u.teamId === c.team && active.includes(u.id)).map(u => u.id);
           if(!team || !pool.length) return {status:'skipped', result:'No active members in the team'};
-          to = nextInTurn(key, pool); how = ` · in turn within ${team.name}`;
+          to = nextInTurn(key, pool, deal.owner); how = ` · in turn within ${team.name}`;
         } else if(c.method === 'roundRobin'){
           const pool = (c.users || []).filter(id => active.includes(id));
           if(!pool.length) return {status:'skipped', result:'No active users in the list'};
-          to = nextInTurn(key, pool); how = ' · round-robin';
+          to = nextInTurn(key, pool, deal.owner); how = ' · round-robin';
         } else if(c.method === 'properties'){
           const pool = active.filter(id => (c.rules || []).every(r => ownerRuleHolds(data, id, r)));
           if(!pool.length) return {status:'done', result:`No user matches the owner conditions · ${owner || 'the owner'} stays the owner`};
-          to = nextInTurn(key, pool); how = pool.length > 1 ? ` · in turn among ${pool.length} matching users` : ' · the matching user';
+          to = nextInTurn(key, pool, deal.owner); how = pool.length > 1 ? ` · in turn among ${pool.length} matching users` : ' · the matching user';
         }
         if(!to) return {status:'skipped', result:'No owner chosen'};
         if(to === deal.owner) return {status:'done', result:`${userName(data, to)} is already the owner${how}`};
@@ -1759,7 +1815,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
     if(!p || !deal) return;
     const run = getRun(p.runId) || {chain:{id:wfNewId('ch'), depth:0, visited:[]}};
     const data = dataRef.current, props = recordProps(deal), owner = userName(data, deal.owner);
-    let outcome = 'Completed';
+    let outcome = 'Completed', confirmSame = [];
     switch(p.kind){
       case 'setProperty': {
         /* A violation confirmed with the client's value unchanged: the values stay as they are and
@@ -1767,6 +1823,8 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
         if(input.sameValue){
           const labels = (p.payload.entries || []).map(e => (props.find(x => x.key === e.property) || {}).label).filter(Boolean).join(', ');
           outcome = `${labels} confirmed unchanged by client · ${CURRENT_USER.name}`;
+          // As confirming from the property itself: an update with the value unchanged — the clock restarts.
+          confirmSame = (p.payload.entries || []).map(e => e.property).filter(k => props.some(x => x.key === k));
           break;
         }
         const patch = {};
@@ -1858,6 +1916,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
       }
     }
     resolvePrompt(id, 'done', outcome);
+    confirmSame.forEach(k => api.confirmPropertySame(deal.id, k));
   }
 
   /* ── Scheduler: due Stay at Stage checks, delayed steps, scheduled emails, and booked meetings
@@ -1869,7 +1928,8 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
     (dataRef.current.workflows || []).map(normalizeWorkflow).filter(w => w.active !== false && w.context && ACTIVITY_RECORD_OBJECTS.includes(w.context.object)).forEach(w => {
       // Throughout the lifecycle: never changed — once per record, open until it changes.
       workflowTriggerViews(w).filter(v => v.trigger === 'propertyUpdate' && v.triggerConfig.op === 'notChanged' && v.triggerConfig.when === 'lifecycle').forEach(v => {
-        dealsRef.current.filter(d => inContext(v, d) && inTriggerScope(v, d) && !lastChangedAt(d, v.triggerConfig)).forEach(d => {
+        // Only the workflow's own Object's records (an Object-wide context matches every pipeline).
+        dealsRef.current.filter(d => recordObjectOf(d.id) === w.context.object && inContext(v, d) && inTriggerScope(v, d) && !lastChangedAt(d, v.triggerConfig)).forEach(d => {
           const key = `${w.id}:${v.triggerId}:${d.id}:life`;
           if((esRef.current.quietFired || {})[key]) return;
           commit(s => ({...s, quietFired:{...(s.quietFired || {}), [key]:true}}));
@@ -1878,7 +1938,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
       });
       workflowTriggerViews(w).filter(v => v.trigger === 'propertyUpdate' && v.triggerConfig.op === 'notChanged' && !v.triggerConfig.inStage && v.triggerConfig.when !== 'lifecycle' && Number(v.triggerConfig.changeAmount) > 0).forEach(v => {
         const c = v.triggerConfig, ms = wfDurationMs(changeDuration(c));
-        dealsRef.current.filter(d => inContext(v, d) && inTriggerScope(v, d)).forEach(d => {
+        dealsRef.current.filter(d => recordObjectOf(d.id) === w.context.object && inContext(v, d) && inTriggerScope(v, d)).forEach(d => {
           const since = Math.max(lastChangedAt(d, c), contextEnteredAt(v, d));
           const key = `${w.id}:${v.triggerId}:${d.id}:${since}`;
           if(now < since + ms || (esRef.current.quietFired || {})[key]) return;
@@ -2022,7 +2082,16 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
     settleEntryViolations();
     esRef.current.runs.filter(r => r.status === 'waiting' && r.checkAt && r.checkAt <= now).forEach(r => checkStay(r.id));
     esRef.current.runs.filter(r => r.status === 'running').forEach(r => r.steps.filter(s => s.status === 'scheduled' && s.dueAt <= now).forEach(s => executeStep(r.id, s.id, true)));
+    /* A workflow's scheduled email goes out only while it still applies — as its delayed steps: the
+       workflow is on, and the record is still in the stage (stage triggers) or the workflow's context;
+       otherwise it's cancelled (it leaves the activity). Emails enrolled by hand always go. */
+    const emailStillDue = (dealId, a) => { if(!a.viaWorkflow) return true;
+      const w = getWorkflow(a.viaWorkflow), deal = getDeal(dealId); if(!w || w.active === false || !deal) return false;
+      const run = a.runId && getRun(a.runId);
+      if(run && ['stageEntryForward', 'stageEntryBackward', 'stayAtStage'].includes(run.trigger)) return deal.pipeline === run.pipeline && deal.stage === run.stage;
+      return inContext(w, deal); };
     Object.entries(actsRef.current).forEach(([dealId, list]) => list.filter(a => a.type === 'email' && a.status === 'scheduled' && a.scheduledFor && new Date(a.scheduledFor).getTime() <= now).forEach(a => {
+      if(!emailStillDue(dealId, a)){ editActivities(m => ({...m, [dealId]:(m[dealId] || []).filter(x => x.id !== a.id)})); return; }
       patchActivity(dealId, a.id, {status:'sent', at:new Date()});
       const deal = getDeal(dealId);
       emit({type:'emailSent', recordId:dealId, pipelineId:deal && deal.pipeline, attrs:{activityId:a.id, templateId:a.templateId}});
@@ -2125,11 +2194,22 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
       if(!(triggersMatchAll(w) ? held.length === views.length : held.length > 0)) resolvePrompt(p.id, 'done', 'Values changed · the block no longer applies');
     });
   }
-  React.useEffect(() => { settleEntryViolations(); settleAssociatedViolations(); }, [deals, customers, contactViews]);
+  /* A record deleted from its page (or in bulk) takes its open violations with it, as the workflow's
+     own Delete Record does: Not applicable. */
+  function settleDeletedRecords(){
+    if(!dealsRef.current.length) return;   // records not there yet: nothing to judge
+    const ids = new Set(dealsRef.current.map(r => String(r.id)));
+    esRef.current.prompts.filter(p => p.status === 'pending' && !ids.has(String(p.dealId)))
+      .forEach(p => resolvePrompt(p.id, 'notApplicable', `No longer applicable · the ${recordNoun(p.dealId)} was deleted`));
+  }
+  React.useEffect(() => { settleEntryViolations(); settleAssociatedViolations(); settleDeletedRecords(); }, [deals, customers, contactViews]);
   function cancelWorkflow(workflowId, reason){
     commit(s => ({...s, runs:s.runs.map(r => r.workflowId !== workflowId ? r
       : r.status === 'waiting' ? {...r, status:'cancelled', reason}
       : {...r, steps:r.steps.map(st => st.status === 'scheduled' ? {...st, status:'cancelled', result:reason} : st)})}));
+    // Its emails still scheduled are cancelled too (they leave the records' activity).
+    if(Object.values(actsRef.current).some(list => (list || []).some(a => a.type === 'email' && a.status === 'scheduled' && a.viaWorkflow === workflowId)))
+      editActivities(m => Object.fromEntries(Object.entries(m).map(([id, list]) => [id, (list || []).filter(a => !(a.type === 'email' && a.status === 'scheduled' && a.viaWorkflow === workflowId))])));
     esRef.current.runs.filter(r => r.workflowId === workflowId).forEach(r => settleRun(r.id));
     clearProgress(workflowId);
   }
@@ -2341,13 +2421,16 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
        scheduled for the record from now — as the workflow action does (same emails, same sequence,
        so Exit Email Sequence ends them). `copies` {cc, bcc}: addresses copied on every email of it
        (typed when enrolling). False without the record, the sequence or an email address. */
+    // → 'enrolled'; 'already' (emails of this sequence still scheduled for the record: skipped); false.
     enrollInSequence: (recordId, sequenceId, copies) => {
       const deal = getDeal(recordId), seq = emailSequencesOf(dataRef.current).find(q => q.id === sequenceId);
       if(!deal || !seq || !String(deal.email || '').trim()) return false;
-      const emails = seq.emails.map((e, i) => ({id:`se-${i}`, immediate:!(Number((e.delay || {}).amount) > 0), recipients:['recordEmail'], templateId:e.templateId, email:null,
-        cc:(copies || {}).cc, bcc:(copies || {}).bcc, sequenceId:seq.id, schedule:{amount:'', unit:'Days', time:'', ...(e.delay || {})}}));
+      if(enrolledIn(deal.id, seq.id)) return 'already';
+      const when = sequenceSchedules(seq);
+      const emails = seq.emails.map((e, i) => ({id:`se-${i}`, immediate:!(when[i].amount > 0) && !when[i].time, recipients:['recordEmail'], templateId:e.templateId, email:null,
+        cc:(copies || {}).cc, bcc:(copies || {}).bcc, sequenceId:seq.id, schedule:when[i]}));
       sendEmails(deal, emails, {chain:{id:wfNewId('ch'), depth:0, visited:[]}}, null);
-      return true;
+      return 'enrolled';
     },
     // A form submission about to create its record (forms.jsx submitFormValues): seen by workflows as the record is created.
     beginFormSubmission: (form, submission) => { WF_FORM_PENDING = {form, submission}; },
@@ -3962,5 +4045,5 @@ function WorkflowBell(){
   );
 }
 
-Object.assign(window, {violationTargets, RecordViolationsProvider, useRecordViolations, ViolationMark, ViolationNotice, recordObjectOf, recordKey, recordNoun, ACTIVITY_RECORD_OBJECTS, withSeeded, PROPERTY_CHANGE_OPERATORS, PROPERTY_CHANGE_UNITS, triggerPropertyOperators, isChangeOp, conditionsValid, triggerConditionComplete, TriggerPropertyCondition, CONDITION_OPERATORS, conditionKind, useWorkflowEngine, WorkflowEngineCtx, useWorkflowEngineCtx, WF_SAVED, reviveActivities, withStageEntry, ConditionsEditor, WorkflowRuns,
+Object.assign(window, {sequenceSchedules, violationTargets, RecordViolationsProvider, useRecordViolations, ViolationMark, ViolationNotice, recordObjectOf, recordKey, recordNoun, ACTIVITY_RECORD_OBJECTS, withSeeded, PROPERTY_CHANGE_OPERATORS, PROPERTY_CHANGE_UNITS, triggerPropertyOperators, isChangeOp, conditionsValid, triggerConditionComplete, TriggerPropertyCondition, CONDITION_OPERATORS, conditionKind, useWorkflowEngine, WorkflowEngineCtx, useWorkflowEngineCtx, WF_SAVED, reviveActivities, withStageEntry, ConditionsEditor, WorkflowRuns,
   DealPromptMarker, WorkflowPromptModal, WorkflowBell, ViolationsButton, ViolationPanel, WorkflowNotices, AutomaticActionModal, workflowExpectations, workflowContextPath, orderedStages, stageMoveDirection, workflowTitle, conditionFields, evalConditions});
