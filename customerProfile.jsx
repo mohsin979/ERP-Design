@@ -14,7 +14,7 @@
    source has a "Label: value" line for it ("Date of birth: 14 March 1994"). The user reviews,
    corrects and completes; each answer keeps where it came from. A person's Customer Profile is off
    until templates (Canada CRS Score, Australia Points System, US NIW, Customer Strength…) are
-   enabled for them — one or more, more later (Enable More); the tab moves between the enabled
+   enabled for them — one or more, ticked on or off later in Customer Profile settings (the tab's settings icon); the tab moves between the enabled
    ones, the one shown being the person's Customer Profile Type. */
 
 /* ── Store ─────────────────────────────────────────────────────────────────────────────────── */
@@ -745,12 +745,15 @@ function PfRows({contact, form, current}){
   );
 }
 /* Enable Customer Profile: the templates not enabled for the person yet — one or more ticked. */
-function EnableProfilesModal({forms, onCancel, onEnable}){
-  const [picked, setPicked] = React.useState([]);
+/* Customer Profile settings: every template, the person's enabled ones ticked — tick to enable,
+   untick to turn one off. Opened from the tab's settings icon, and from Enable Customer Profile. */
+function ProfileTemplatesModal({forms, enabled, onCancel, onSave}){
+  const [picked, setPicked] = React.useState(enabled);
   const toggle = (id) => setPicked(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
+  const changed = picked.length !== enabled.length || picked.some(id => !enabled.includes(id));
   return (
-    <StModal title="Enable Customer Profile" primary="Enable Customer Profile" canSubmit={picked.length > 0} onCancel={onCancel}
-      onSubmit={()=>picked.length && onEnable(forms.filter(f => picked.includes(f.id)).map(f => f.id))}>
+    <StModal title="Edit Customer Profiles" primary="Save Changes" canSubmit={changed} onCancel={onCancel}
+      onSubmit={()=>changed && onSave(forms.filter(f => picked.includes(f.id)).map(f => f.id))}>
       <div style={{display:'flex', flexDirection:'column'}}>
         {forms.map(f => (
           <div key={f.id} role="checkbox" aria-checked={picked.includes(f.id)} onClick={()=>toggle(f.id)}
@@ -764,8 +767,8 @@ function EnableProfilesModal({forms, onCancel, onEnable}){
 }
 /* A person's Customer Profile: off until templates are enabled for them (Enable Customer Profile:
    one or more). Their enabled templates are pills to move between — the first enabled shows to
-   start with — and Enable More adds others. Each template is filled in on its own (Create by Hand,
-   Run Customer Profile). */
+   start with — and the settings icon beside them opens Customer Profile settings, where templates
+   are ticked on or off. Each template is filled in on its own (Create by Hand, Run Customer Profile). */
 function CustomerProfileTab({contact}){
   const store = useProfileForms();
   const [mode, setMode] = React.useState(null);   // 'run' | 'hand' (create) | 'edit'
@@ -780,7 +783,8 @@ function CustomerProfileTab({contact}){
   const can = (action) => action === 'run' ? profilePropsAll() : profileEditAny();
   const panel = mode === 'run' ? <ProfileRunWizard contact={contact} form={form} onCancel={()=>setMode(null)} onSave={()=>setMode(null)}/>
     : mode === 'hand' || mode === 'edit' ? <ProfileByHand contact={contact} startForm={form} editing={mode === 'edit'} onCancel={()=>setMode(null)} onSave={()=>setMode(null)}/> : null;
-  const enableModal = enabling && <EnableProfilesModal forms={rest} onCancel={()=>setEnabling(false)} onEnable={(ids)=>{ store.enable(contact.id, ids); setEnabling(false); }}/>;
+  const enableModal = enabling && <ProfileTemplatesModal forms={store.forms} enabled={enabled.map(f => f.id)} onCancel={()=>setEnabling(false)}
+    onSave={(ids)=>{ store.setEnabled(contact.id, ids); setEnabling(false); }}/>;
   if(!form) return (
     <div style={{padding:'20px 24px 32px'}}>
       <EmptyState illustration="profile" title="Customer Profile is off" action={rest.length > 0 && can('create') && <StCta label="Enable Customer Profile" onClick={()=>setEnabling(true)}/>}/>
@@ -797,7 +801,8 @@ function CustomerProfileTab({contact}){
               style={{height:26, padding:'0 10px', borderRadius:9999, border:`1px solid ${on ? T.black : T.borderStrong}`, background: on ? T.black : '#fff',
                 color: on ? '#fff' : T.gray800, fontSize:12.5, fontWeight:500, cursor:'pointer', fontFamily:'inherit'}}>{f.name}</button>; })}
         </div>
-        {rest.length > 0 && can('create') && <StSecondary label="Enable More" onClick={()=>setEnabling(true)}/>}
+        {can('create') && <button onClick={()=>setEnabling(true)} title="Customer Profile Settings" aria-label="Customer Profile Settings" style={toolbarIconButton}>
+          <Icon name="settingsGear" size={14} color={T.gray800}/></button>}
         <span style={{flex:1}}/>
         {current && can('edit') && <button onClick={()=>setMode('edit')} title="Edit customer profile" aria-label="Edit customer profile" style={toolbarIconButton}><Icon name="edit" size={14} color={T.gray800}/></button>}
         {current && can('run') && <StCta label="Run Customer Profile" onClick={()=>setMode('run')}/>}

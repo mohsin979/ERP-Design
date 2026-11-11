@@ -719,9 +719,14 @@ function App(){
   const setProfileType = (cid, formId) => setProfileFormData(m => ({...m, [cid]:{...withEnabled(m[cid] || {}, [formId]), _type:formId}}));
   const enableProfiles = (cid, ids) => setProfileFormData(m => { const mine = m[cid] || {}, was = enabledIn(mine);
     return {...m, [cid]:{...withEnabled(mine, ids), _type: was.includes(mine._type) ? mine._type : was[0] || ids[0]}}; });
+  /* The person's templates as ticked in Customer Profile settings: unticked ones are turned off
+     (their answers are kept, back if ticked again), newly ticked ones added after the others. */
+  const setEnabledProfiles = (cid, ids) => setProfileFormData(m => { const mine = m[cid] || {}, was = enabledIn(mine);
+    const next = [...was.filter(id => ids.includes(id)), ...ids.filter(id => !was.includes(id))];
+    return {...m, [cid]:{...mine, _enabled:next, _type: next.includes(mine._type) ? mine._type : next[0] || null}}; });
   // Sample profiles for a few sample people (added once).
   React.useEffect(() => { if(SEED) setProfileFormData(m => withSampleProfileData(m, contacts)); }, []);
-  const profileFormsStore = {forms:settingsData.profileForms || [], data:profileFormData, save:saveProfileForm, saveField:saveProfileField, typeOf:profileTypeOf, setType:setProfileType, enabledOf:profileEnabledOf, enable:enableProfiles,
+  const profileFormsStore = {forms:settingsData.profileForms || [], data:profileFormData, save:saveProfileForm, saveField:saveProfileField, typeOf:profileTypeOf, setType:setProfileType, enabledOf:profileEnabledOf, enable:enableProfiles, setEnabled:setEnabledProfiles,
     // The profile holder's activity: a contact's — a lead's or customer's own where it holds the profile (HOF Partners).
     // What the person said anywhere: a contact's own activity and its deals' and customers' (a lead's or customer's own, without Contacts).
     activitiesOf:(cid) => contactActivities[cid] ? [...contactActivities[cid], ...deals.filter(d => d.contactId === cid).flatMap(d => dealActivities[d.id] || []),

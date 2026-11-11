@@ -532,6 +532,30 @@ function OwnerEditableValue({prop, value, onSave, options, display, pencil, alig
     if(!samePropertyValue(stored, value)) onSave(stored);
   };
   const cancel = () => { setEditing(false); setError(null); };
+  const buttons = [{icon:'close', title:'Cancel', aria:`Cancel editing ${label}`, on:cancel}, {icon:'check', title:'Save', aria:`Save ${label}`, on:()=>commit(draft)}].map(b => (
+    <button key={b.icon} onClick={b.on} title={b.title} aria-label={b.aria}
+      style={{width:26, height:26, borderRadius:6, border:`1px solid ${T.borderStrong}`, background:'#fff', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0}}>
+      <Icon name={b.icon} size={12} color={T.gray600}/>
+    </button>
+  ));
+  /* An amount (Deal Amount, a Currency property) in a side panel's narrow column: its currency on
+     one row, then the amount with the cross and checkmark on the next. */
+  if(editing && pencil && propertyTypeId(prop.type) === 'Currency' && !prop.currencyOnly){
+    const m = {...ptMoney(draft), currency:ptMoney(draft).currency || defaultCurrency()};
+    const setM = (patch) => { setDraft({...m, ...patch}); setError(null); };
+    return (
+      <div style={{flex:1, minWidth:0, display:'flex', flexDirection:'column', gap:6}}
+        onKeyDown={e=>{ if(e.key === 'Enter' && e.target.tagName === 'INPUT'){ e.preventDefault(); commit(m); } if(e.key === 'Escape'){ e.stopPropagation(); cancel(); } }}>
+        <FormSelect value={m.currency} options={currencyOptions()} onChange={(c)=>c && setM({currency:c})} invalid={!!error} ariaLabel={`${label} currency`}/>
+        <div style={{display:'flex', alignItems:'center', gap:6}}>
+          <input type="number" autoFocus value={m.amount ?? ''} onChange={e=>setM({amount:e.target.value})} placeholder="Amount" aria-label={`${label} amount`}
+            style={{...fieldInput, flex:1, minWidth:0, borderColor: error ? T.red : T.borderStrong}}/>
+          {buttons}
+        </div>
+        {error && <div style={{fontSize:12, color:T.red}}>{error}</div>}
+      </div>
+    );
+  }
   // With an edit icon: the field, then a cross (discard) and a checkmark (save at once).
   if(editing && pencil) return (
     <div style={{flex:1, minWidth:0, display:'flex', flexDirection:'column', gap:6}}
@@ -541,12 +565,7 @@ function OwnerEditableValue({prop, value, onSave, options, display, pencil, alig
           <TypedPropertyInput prop={prop} value={draft} invalid={!!error} autoFocus options={options} onChange={(v)=>{ setDraft(v); setError(null); }}/>
         </div>
         {/* Secondary icon buttons: a cross (discard) and a checkmark (save). */}
-        {[{icon:'close', title:'Cancel', aria:`Cancel editing ${label}`, on:cancel}, {icon:'check', title:'Save', aria:`Save ${label}`, on:()=>commit(draft)}].map(b => (
-          <button key={b.icon} onClick={b.on} title={b.title} aria-label={b.aria}
-            style={{width:26, height:26, borderRadius:6, border:`1px solid ${T.borderStrong}`, background:'#fff', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0}}>
-            <Icon name={b.icon} size={12} color={T.gray600}/>
-          </button>
-        ))}
+        {buttons}
       </div>
       {error && <div style={{fontSize:12, color:T.red}}>{error}</div>}
     </div>
