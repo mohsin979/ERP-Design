@@ -416,7 +416,7 @@ function DashKpiRow({ids, ctx, replay, arrange}){
   const card = (t, hero, props = {}) => {
     const ink = hero ? '#fff' : '#111113', v = t.read(ctx), movable = arrange && !hero, dragged = live.dragging === t.id;
     return (
-      <div key={t.id} title={t.hint} {...props} style={{flex: hero ? '2 1 0' : '1 1 0', minWidth:0, minHeight:240, borderRadius:22,
+      <div key={t.id} title={t.hint} {...props} style={{flex: hero ? '2 1 0' : '1 1 0', minWidth: hero ? 220 : 150, minHeight:240, borderRadius:22,
         background: hero ? DASH_HERO_BG : '#F2F2F3', border:`1px solid ${hero ? DASH_BLUE : '#E4E4E7'}`, padding: hero ? '20px 24px 22px' : '20px 18px 22px',
         display:'flex', flexDirection:'column', position:'relative', overflow:'hidden', isolation:'isolate',
         cursor: movable ? 'grab' : 'default', opacity: dragged ? .4 : 1,
@@ -429,8 +429,8 @@ function DashKpiRow({ids, ctx, replay, arrange}){
           <span style={{width:20, height:20, borderRadius:6, background: hero ? '#fff' : DASH_BLUE, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0}}>
             <Icon name={t.icon} size={11} color={hero ? DASH_BLUE : '#fff'}/>
           </span>
-          {/* A label that doesn't fit wraps (narrow windows) rather than being cut. */}
-          <span style={{minWidth:0, overflowWrap:'break-word', hyphens:'auto', flex:1}}>{t.label}</span>
+          {/* A label that doesn't fit wraps between words (the cards keep a minimum width; the row wraps instead). */}
+          <span style={{minWidth:0, overflowWrap:'normal', hyphens:'manual', flex:1}}>{t.label}</span>
           {movable && <Icon name="dragHandle" size={14} color={T.gray400}/>}
         </span>
         {movable && (
@@ -452,7 +452,8 @@ function DashKpiRow({ids, ctx, replay, arrange}){
     );
   };
   return (
-    <div ref={live.box} {...(arrange ? live.containerProps : {})} style={{position:'relative', display:'flex', alignItems:'stretch', gap:14}}>
+    // In a narrow window the cards wrap to another row rather than squeezing their labels.
+    <div ref={live.box} {...(arrange ? live.containerProps : {})} style={{position:'relative', display:'flex', flexWrap:'wrap', alignItems:'stretch', gap:14}}>
       {pinned && card(pinned, true)}
       {live.order.map(id => byId[id]).filter(Boolean).map(t => card(t, false, {ref:live.register(t.id), ...(arrange ? live.itemProps(t.id) : {})}))}
     </div>
