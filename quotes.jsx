@@ -15,9 +15,14 @@
      4. Terms & Conditions — rich text;
      5. E-Signature — Require e-signature adds a signature section for the customer;
      6. Branding — the quotation as the customer sees it, in the workspace's brand (Marketing →
-        Brand); Save as template, Save as draft, Send.
-   A quote keeps its own copy of each service as quoted. Sending marks it Sent and puts the
-   quote and its email on the record's activity. Nothing is really emailed or signed (the
+        Brand: its full logo); Save as template, Save as draft, Send.
+   A quote keeps its own copy of each service as quoted. Its number (Q-<year>-<nnnn>) comes from a
+   counter that only goes up, so a deleted quote's number isn't reused. An installment's amount
+   typed on the Payment Terms step is kept as typed; amounts set by percentage round to the cent,
+   the last installment taking what's left. Sending marks it Sent, keeps the brand it went out
+   with, and puts the quote and its email on the record's activity. Past its Valid Until date a
+   draft or sent quote is Expired: it can't be sent, signed or pulled, and can be deleted. A
+   signed quote can't be deleted; it's signed on a date from its sending to today. Nothing is really emailed or signed (the
    prototype has no mailbox and no signing service).
 
    Quote templates (Settings → Templates → Quote Templates, each with a code) hold a configured
@@ -28,7 +33,26 @@
    Shown on the record's Quotes tab (RecordQuotesTab) and on Tools → Quotes (QuotesPage), both
    with the same quotation view (QuoteDocument). */
 
-const QUOTE_STATUS = {draft:{label:'Draft', tone:'neutral'}, sent:{label:'Sent', tone:'info'}, signed:{label:'Signed', tone:'success'}};
+const QUOTE_STATUS = {draft:{label:'Draft', tone:'neutral'}, sent:{label:'Sent', tone:'info'}, signed:{label:'Signed', tone:'success'}, expired:{label:'Expired', tone:'danger'}};
+/* Expired: a draft or sent quote past its Valid Until date — it can't be sent, signed or pulled into
+   Payment Terms, and can be deleted. Worked out from the date, not stored (editing a draft's date
+   brings it back). */
+const quoteExpired = (q) => !!q && (q.status === 'draft' || q.status === 'sent') && !!q.validUntil && q.validUntil < ymdOf(new Date());
+const quoteStatusOf = (q) => quoteExpired(q) ? 'expired' : q.status;
+/* The brand a quote was sent with: kept once per distinct brand in the CRM store (`quoteBrands`),
+   the quote holding its `brandId` — a later Brand change doesn't alter quotes already sent. */
+let QUOTE_BRANDS = null;
+const quoteBrandsOf = () => QUOTE_BRANDS || (QUOTE_BRANDS = savedSlice('quoteBrands') || {});
+const brandKeyOf = (b) => { const str = JSON.stringify(b); let h = 5381; for(let i = 0; i < str.length; i++) h = (h * 33 + str.charCodeAt(i)) | 0; return `b${(h >>> 0).toString(36)}`; };
+function keepQuoteBrand(){
+  const b = orgBrand(), snap = {logo:b.logo || null, colors:b.colors}, id = brandKeyOf(snap);
+  if(!quoteBrandsOf()[id]){ QUOTE_BRANDS = {...quoteBrandsOf(), [id]:snap}; persistSlice('quoteBrands', QUOTE_BRANDS); }
+  return id;
+}
+const quoteBrand = (q) => (q && q.brandId && quoteBrandsOf()[q.brandId]) || orgBrand();
+// The brand's logo, whole (uncropped); without one uploaded, the HOF logo the Brand page shows.
+const BrandLogo = ({brand, height = 28}) => brand.logo
+  ? <img src={brand.logo} alt="" style={{display:'block', maxHeight:height, maxWidth:220, objectFit:'contain'}}/> : <Logo variant="main" height={height}/>;
 const QUOTE_VAT_RATE = 5;   // the default VAT (%), on the discounted subtotal
 const qid = (p) => `${p}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
@@ -47,7 +71,18 @@ function quoteTotals(q){
   return {subtotal, discount, discounted, vatRate, vat, total:round2(discounted + vat)};
 }
 const quoteTotal = (q) => quoteTotals(q).total;
-const installmentAmount = (q, inst) => round2(quoteTotal(q) * (Number(inst.percent) || 0) / 100);
+/* Installment amounts from their percentages: each rounded to the cent, the last one taking what's
+   left so they add up to the total exactly (when the percentages make 100%). */
+const splitAmounts = (total, percents) => {
+  const amounts = percents.map(p => round2((Number(total) || 0) * (Number(p) || 0) / 100));
+  const sum = percents.reduce((s, p) => s + (Number(p) || 0), 0);
+  if(amounts.length && Math.abs(sum - 100) < 0.001) amounts[amounts.length - 1] = round2((Number(total) || 0) - amounts.slice(0, -1).reduce((s, a) => s + a, 0));
+  return amounts;
+};
+const installmentAmount = (q, inst) => {
+  const list = q.installments || [], i = list.findIndex(x => x === inst || (inst.id != null && x.id === inst.id));
+  return i < 0 ? round2(quoteTotal(q) * (Number(inst.percent) || 0) / 100) : splitAmounts(quoteTotal(q), list.map(x => x.percent))[i];
+};
 /* An installment's tentative payment: days after the quote is sent (`{type:'days', days}`, "Day 0"),
    a calendar date (`{type:'date', date:'YYYY-MM-DD'}`), or a delivery milestone — due when that
    share of the work is delivered (`{type:'delivery', at:20}`, "At 20% delivery"). */
@@ -61,10 +96,14 @@ const tentativeOk = (due) => !!due && (due.type === 'date' ? /^\d{4}-\d{2}-\d{2}
 const tentativeDate = (due, sentAt) => !due || due.type === 'delivery' ? '' : due.type === 'date' ? due.date : sentAt ? ymdOf(new Date(new Date(sentAt).getTime() + (Number(due.days) || 0) * 86400000)) : '';
 const normalizeDue = (due) => !due ? due : due.type === 'days' ? {type:'days', days:Number(due.days)} : due.type === 'delivery' ? {type:'delivery', at:Number(due.at)} : due;
 const DUE_DAY0 = () => ({type:'days', days:0});
-const quoteNumber = (quotes) => {
-  const year = new Date().getFullYear();
-  const n = (quotes || []).reduce((mx, q) => { const m = /-(\d+)$/.exec(q.number || ''); return m ? Math.max(mx, Number(m[1])) : mx; }, 0) + 1;
-  return `Q-${year}-${String(n).padStart(3, '0')}`;
+/* Quote numbers come from a counter that only goes up (store.jsx, `ids.quotes`), never below the
+   numbers already used: a deleted quote's number isn't given again. `preview`: the next number,
+   not taken (the builder before saving). */
+const quoteSeqFloor = (quotes) => (quotes || []).reduce((mx, q) => { const m = /-(\d+)$/.exec(q.number || ''); return m ? Math.max(mx, Number(m[1])) : mx; }, 0) + 1;
+const quoteNumber = (quotes, preview) => {
+  ensureIdFloor('quotes', quoteSeqFloor(quotes));
+  const n = preview ? Math.max(peekRecordId('quotes'), quoteSeqFloor(quotes)) : newRecordId('quotes');
+  return `Q-${new Date().getFullYear()}-${String(n).padStart(4, '0')}`;
 };
 const fmtQuoteDate = (v) => { if(!v) return ''; const d = typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? new Date(`${v}T00:00:00`) : new Date(v); return d.toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'}); };
 // A service as quoted: its name, description and milestones with their prices — or, without milestones, its price.
@@ -115,7 +154,7 @@ function QuoteStatusPill({status}){ return <StatusPill status={status} map={QUOT
    e-signature is required — the customer's signature section. */
 function QuoteDocument({quote}){
   const hub = useRecordHub();
-  const brand = orgBrand();
+  const brand = quoteBrand(quote);
   const record = hubRecord(hub, quote.object, quote.recordId);
   const t = quoteTotals(quote);
   const muted = {fontSize:12, color:T.attioMuted};
@@ -131,7 +170,7 @@ function QuoteDocument({quote}){
     <div style={{border:`1px solid ${T.border}`, borderRadius:12, overflow:'hidden', background:'#fff'}}>
       <div style={{height:4, background:brand.colors.primary}}/>
       <div style={{padding:'22px 24px', display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:16, borderBottom:`1px solid ${T.attioLine}`, flexWrap:'wrap'}}>
-        <div style={{display:'flex', alignItems:'center', gap:10, minWidth:0}}><BrandLockup brand={brand}/></div>
+        <div style={{display:'flex', alignItems:'center', gap:10, minWidth:0}}><BrandLogo brand={brand}/></div>
         <div style={{textAlign:'right'}}>
           <div style={{fontSize:11, fontWeight:600, letterSpacing:.6, textTransform:'uppercase', color:brand.colors.secondary}}>Quotation</div>
           <div style={{fontSize:15, fontWeight:600, color:T.attioText, fontVariantNumeric:'tabular-nums'}}>{quote.number}</div>
@@ -199,7 +238,7 @@ function QuoteDocument({quote}){
               <div key={inst.id || i} style={{display:'flex', gap:12, alignItems:'baseline', padding:'7px 0', borderTop:`1px solid ${T.attioLine}`, fontSize:13, color:T.attioText}}>
                 <span style={{width:22, color:T.attioMuted, fontVariantNumeric:'tabular-nums'}}>{i + 1}.</span>
                 <span style={{flex:1, minWidth:0}}>{inst.description}</span>
-                <span style={{...money, color:T.attioMuted, width:52, textAlign:'right'}}>{Number(inst.percent) || 0}%</span>
+                <span style={{...money, color:T.attioMuted, width:52, textAlign:'right'}}>{round2(inst.percent)}%</span>
                 <span style={{...money, color:T.attioMuted, width:110, textAlign:'right'}}>{fmtTentative(inst.due) || '—'}</span>
                 <span style={{...money, width:120, textAlign:'right'}}>{fmtMoney(installmentAmount(quote, inst))}</span>
               </div>
@@ -215,7 +254,7 @@ function QuoteDocument({quote}){
         )}
 
         {/* E-signature: the customer signs here. */}
-        {quote.eSignature && <QuoteSignaturePreview name={quote.recipient.name}/>}
+        {quote.eSignature && <QuoteSignaturePreview name={quote.recipient.name} brand={brand}/>}
       </div>
     </div>
   );
@@ -225,7 +264,8 @@ function QuoteDocument({quote}){
 function sendQuoteVia(hub, q){
   const sentAt = new Date();
   const t = quoteTotals(q);
-  hub.setQuotes(qs => qs.map(x => x.id === q.id ? {...x, status:'sent', sentAt} : x));
+  const brandId = keepQuoteBrand();
+  hub.setQuotes(qs => qs.map(x => x.id === q.id ? {...x, status:'sent', sentAt, brandId} : x));
   hub.add(q.object, q.recordId, {type:'quote', status:'sent', title:`${q.number} · ${q.title}`, quoteId:q.id, total:t.total, source:'you', by:null});
   hub.add(q.object, q.recordId, {type:'email', direction:'sent', status:'sent', to:[q.recipient.email].filter(Boolean), source:'you', by:null, quoteId:q.id,
     title:`Quotation ${q.number}: ${q.title}`,
@@ -233,7 +273,7 @@ function sendQuoteVia(hub, q){
       + (q.items || []).map(it => `${it.name} — ${fmtMoney(quoteItemTotal(it))}`).join('\n')
       + `\n\nSubtotal: ${fmtMoney(t.subtotal)}` + (t.discount ? `\nDiscount: − ${fmtMoney(t.discount)}` : '') + (q.vatRate != null ? `\nVAT (${t.vatRate}%): ${fmtMoney(t.vat)}` : '')
       + `\nTotal: ${fmtMoney(t.total)}` + (q.validUntil ? `\nValid until ${fmtQuoteDate(q.validUntil)}.` : '')
-      + ((q.installments || []).length ? `\n\nPayment terms:\n` + q.installments.map((x, i) => `${i + 1}. ${x.description} — ${x.percent}% — ${fmtMoney(installmentAmount(q, x))}${fmtTentative(x.due) ? ` — ${fmtTentative(x.due)}` : ''}`).join('\n') : '')
+      + ((q.installments || []).length ? `\n\nPayment terms:\n` + q.installments.map((x, i) => `${i + 1}. ${x.description} — ${round2(x.percent)}% — ${fmtMoney(installmentAmount(q, x))}${fmtTentative(x.due) ? ` — ${fmtTentative(x.due)}` : ''}`).join('\n') : '')
       + (q.eSignature ? `\n\nPlease review and sign the quotation.` : '') + `\n\nKind regards,\n${CURRENT_USER.name}`});
   hub.toast(`Quote ${q.number} sent`);
 }
@@ -413,7 +453,7 @@ function QuoteBuilder({mode, id, object, onClose, placement = 'fixed'}){
     setTemplating(null); hub.toast(`Template ${t.code} saved`);
   };
   const section = QUOTE_SECTION;
-  const preview = {...draft(), number: existing ? existing.number : quoteNumber(hub.quotes), createdAt: existing ? existing.createdAt : new Date(), status:'draft'};
+  const preview = {...draft(), number: existing ? existing.number : quoteNumber(hub.quotes, true), createdAt: existing ? existing.createdAt : new Date(), status:'draft'};
   const brand = orgBrand();
   const last = QUOTE_STEPS.length - 1;
   return (
@@ -423,7 +463,7 @@ function QuoteBuilder({mode, id, object, onClose, placement = 'fixed'}){
         <StSecondary label="Cancel" onClick={()=>onClose()}/>
         {step < last ? <StCta label="Next" disabled={!stepOk[step]} onClick={()=>setStep(s => s + 1)}/>
           : <>{templateCan('quoteTemplates', 'create') && <StSecondary label="Save as template" onClick={()=>setTemplating(q.title.trim() || (q.items[0] && q.items[0].name) || '')}/>}
-              <StSecondary label={existing ? 'Save changes' : 'Save as draft'} onClick={()=>save(false)}/><StCta label="Send quote" onClick={()=>save(true)}/></>}
+              <StSecondary label={existing ? 'Save changes' : 'Save as draft'} onClick={()=>save(false)}/><StCta label="Send quote" disabled={!!q.validUntil && q.validUntil < ymdOf(new Date())} onClick={()=>save(true)}/></>}
       </>}>
       {/* The steps, in their own column on the left. */}
       <div style={{width:QUOTE_STEPPER_W, flexShrink:0, borderRight:`1px solid ${T.border}`, padding:'16px 12px', display:'flex', flexDirection:'column', gap:2}}>
@@ -507,17 +547,23 @@ function QuoteBuilder({mode, id, object, onClose, placement = 'fixed'}){
    percentages are of. */
 // The last column takes the rest of the row, so the remove icon sits at its far right.
 const INST_COLS = '22px 200px 200px 200px 200px minmax(28px, 1fr)';
-/* `label`: what the percentage is of, for screen readers (the installment's share, or the delivery reached). */
-function PercentAmountField({percent, total, onPercent, index, label = 'percentage', amountLabel = 'amount'}){
+/* `label`: what the percentage is of, for screen readers (the installment's share, or the delivery reached).
+   An amount typed here is kept exactly: its percentage is stored unrounded (so the amount reads back as
+   typed) and shown to 4 decimals at most. */
+const pctShown = (p) => /\.\d{5,}$/.test(String(p)) ? String(Math.round(Number(p) * 10000) / 10000) : String(p ?? '');
+// `shown`: the amount to show when it differs from total × percent (the last installment's cents).
+function PercentAmountField({percent, total, onPercent, index, label = 'percentage', amountLabel = 'amount', shown}){
   const [amountText, setAmountText] = React.useState(null);   // while the amount is being typed
-  const amount = (Number(total) || 0) * (Number(percent) || 0) / 100;
+  const [percentText, setPercentText] = React.useState(null); // while the percentage is being typed
+  const amount = shown != null ? shown : (Number(total) || 0) * (Number(percent) || 0) / 100;
   const box = {display:'flex', alignItems:'stretch', border:`1px solid ${T.borderStrong}`, borderRadius:8, background:'#fff', overflow:'hidden', height:34};
   const input = {border:'none', outline:'none', fontSize:13, fontFamily:'inherit', color:T.attioText, background:'transparent', textAlign:'right', fontVariantNumeric:'tabular-nums', minWidth:0};
   const unit = {fontSize:12, color:T.attioMuted, display:'flex', alignItems:'center'};
   return (
     <div style={box}>
       <div style={{display:'flex', alignItems:'center', gap:4, padding:'0 10px', flex:'1 1 0', minWidth:0}}>
-        <input value={percent} onChange={e=>onPercent(e.target.value.replace(/[^0-9.]/g, ''))} inputMode="decimal" placeholder="0" aria-label={`Installment ${index + 1} ${label}`} style={{...input, width:'100%'}}/>
+        <input value={percentText != null ? percentText : pctShown(percent)} onFocus={()=>setPercentText(pctShown(percent))} onBlur={()=>setPercentText(null)}
+          onChange={e=>{ const v = e.target.value.replace(/[^0-9.]/g, ''); setPercentText(v); onPercent(v); }} inputMode="decimal" placeholder="0" aria-label={`Installment ${index + 1} ${label}`} style={{...input, width:'100%'}}/>
         <span style={unit}>%</span>
       </div>
       <span style={{width:1, background:T.borderStrong, margin:'6px 0'}}/>
@@ -528,7 +574,7 @@ function PercentAmountField({percent, total, onPercent, index, label = 'percenta
           placeholder={Number(total) > 0 ? '0' : 'Set total'} title={Number(total) > 0 ? undefined : 'Enter the total first'} aria-label={`Installment ${index + 1} ${amountLabel}`}
           disabled={!(Number(total) > 0)}
           onFocus={()=>setAmountText(Number(total) > 0 ? String(Math.round(amount * 100) / 100) : '')} onBlur={()=>setAmountText(null)}
-          onChange={e=>{ const v = e.target.value.replace(/[^0-9.]/g, ''); setAmountText(v); if(Number(total) > 0) onPercent(v === '' ? '' : String(Math.round(Number(v) / Number(total) * 10000) / 100)); }}
+          onChange={e=>{ const v = e.target.value.replace(/[^0-9.]/g, ''); setAmountText(v); if(Number(total) > 0) onPercent(v === '' ? '' : String(Number(v) / Number(total) * 100)); }}
           style={{...input, flex:1, width:'100%'}}/>
       </div>
     </div>
@@ -569,8 +615,10 @@ function TentativeValueField({value, onChange, index, total}){
   );
 }
 function InstallmentsEditor({rows, onChange, total, newId, title = 'Installments'}){
-  const sum = Math.round(rows.reduce((s, x) => s + (Number(x.percent) || 0), 0) * 100) / 100;
-  const ok = rows.length > 0 && Math.abs(sum - 100) < 0.001;
+  // Checked unrounded, as the panels check it; shown to 4 decimals so a near miss doesn't read as 100%.
+  const raw = rows.reduce((s, x) => s + (Number(x.percent) || 0), 0), sum = Math.round(raw * 10000) / 10000;
+  const ok = rows.length > 0 && Math.abs(raw - 100) < 0.001;
+  const amounts = splitAmounts(total, rows.map(x => x.percent));
   const setRow = (id, p) => onChange(rows.map(x => x.id === id ? {...x, ...p} : x));
   const head = {fontSize:11.5, color:T.attioMuted};
   return (
@@ -591,7 +639,7 @@ function InstallmentsEditor({rows, onChange, total, newId, title = 'Installments
         <div key={x.id} style={{display:'grid', gridTemplateColumns:INST_COLS, gap:12, alignItems:'center'}}>
           <span style={{fontSize:12, color:T.attioMuted, fontVariantNumeric:'tabular-nums'}}>{i + 1}.</span>
           <input value={x.description} onChange={e=>setRow(x.id, {description:e.target.value})} placeholder="Installment description" aria-label={`Installment ${i + 1} description`} style={fieldText}/>
-          <PercentAmountField percent={x.percent} total={total} onPercent={(pc)=>setRow(x.id, {percent:pc})} index={i}/>
+          <PercentAmountField percent={x.percent} total={total} shown={amounts[i]} onPercent={(pc)=>setRow(x.id, {percent:pc})} index={i}/>
           <TentativeTypeField value={x.due} onChange={(due)=>setRow(x.id, {due})} index={i}/>
           <TentativeValueField value={x.due} onChange={(due)=>setRow(x.id, {due})} index={i} total={total}/>
           <button type="button" title="Remove installment" onClick={()=>onChange(rows.filter(y => y.id !== x.id))}
@@ -607,8 +655,7 @@ function InstallmentsEditor({rows, onChange, total, newId, title = 'Installments
   );
 }
 // The signature section as it appears on the quotation (E-Signature step).
-function QuoteSignaturePreview({name}){
-  const brand = orgBrand();
+function QuoteSignaturePreview({name, brand = orgBrand()}){
   return (
     <div style={{border:`1.5px dashed ${brand.colors.primary}`, borderRadius:10, padding:'16px 18px', display:'flex', flexDirection:'column', gap:14}}>
       <div style={{display:'flex', alignItems:'center', gap:8}}>
@@ -627,12 +674,15 @@ function QuoteSignaturePreview({name}){
   );
 }
 
-/* A quote's actions, wherever it's shown: Edit and Send (drafts), Delete. */
+/* A quote's actions, wherever it's shown: Edit (drafts), Send (drafts not expired), Mark as signed
+   (sent, not expired), Delete (anything not signed — a signed quote is kept). */
 function quoteActions(hub, q, {onDelete, onEdit, onSign} = {}){
+  const expired = quoteExpired(q);
   return [
-    ...(q.status === 'sent' && onSign ? [{label:'Mark as signed', onClick:()=>onSign(q)}] : []),
-    ...(q.status === 'draft' ? [{label:'Edit quote', onClick:()=>onEdit ? onEdit(q.id) : hub.editQuote(q.id)}, {label:'Send quote', onClick:()=>sendQuoteVia(hub, q)}] : []),
-    {label:'Delete quote', danger:true, onClick:()=>onDelete && onDelete(q)},
+    ...(q.status === 'sent' && !expired && onSign ? [{label:'Mark as signed', onClick:()=>onSign(q)}] : []),
+    ...(q.status === 'draft' ? [{label:'Edit quote', onClick:()=>onEdit ? onEdit(q.id) : hub.editQuote(q.id)}] : []),
+    ...(q.status === 'draft' && !expired ? [{label:'Send quote', onClick:()=>sendQuoteVia(hub, q)}] : []),
+    ...(q.status !== 'signed' ? [{label:'Delete quote', danger:true, onClick:()=>onDelete && onDelete(q)}] : []),
   ];
 }
 /* A sent quote's signed copy came back: when it was signed, and the copy (optional, ≤2 MB). The
@@ -648,6 +698,9 @@ function SignQuoteModal({quote, onCancel, onSigned}){
   const [copy, setCopy] = React.useState(null);
   const [error, setError] = React.useState('');
   const pickFile = (f) => readUpload(f).then(v => { setCopy(v); setError(''); }).catch(e => setError(e.message));
+  // Signed on: from the day it was sent to today.
+  const today = ymdOf(new Date()), sentOn = quote.sentAt ? ymdOf(new Date(quote.sentAt)) : null;
+  const dateOk = !!date && date <= today && (!sentOn || date >= sentOn);
   const save = () => {
     hub.setQuotes(qs => qs.map(x => x.id === quote.id ? {...x, status:'signed', signedAt:date, signedCopy:copy} : x));
     hub.add(quote.object, quote.recordId, {type:'quote', status:'signed', title:`${quote.number} · ${quote.title} signed`, quoteId:quote.id, total:quoteTotal(quote), source:'you', by:null});
@@ -655,8 +708,9 @@ function SignQuoteModal({quote, onCancel, onSigned}){
     onSigned && onSigned();
   };
   return ReactDOM.createPortal(
-    <StModal title={`Mark ${quote.number} as signed`} primary="Mark as signed" canSubmit={!!date} onCancel={onCancel} onSubmit={save}>
-      <div><label style={fieldLabel}>Signed on</label><DateField required value={date} onChange={setDate}/></div>
+    <StModal title={`Mark ${quote.number} as signed`} primary="Mark as signed" canSubmit={dateOk} onCancel={onCancel} onSubmit={()=>dateOk && save()}>
+      <div><label style={fieldLabel}>Signed on</label><DateField required value={date} onChange={setDate}/>
+        {date && !dateOk && <div style={{fontSize:12, color:T.red, marginTop:4}}>Choose a date from {fmtQuoteDate(sentOn || today)} to today.</div>}</div>
       <div>
         <label style={fieldLabel}>Signed copy</label>
         <EvidenceFile value={copy} onChange={pickFile} onClear={()=>setCopy(null)} accept=".pdf,image/*"/>
@@ -700,7 +754,7 @@ function QuoteNavItem({q, selected, onSelect}){
       style={{padding:'10px 20px', cursor:'pointer', background: selected ? '#F4F5F7' : h ? T.headerBg : 'transparent', display:'flex', flexDirection:'column', gap:4}}>
       <div style={{display:'flex', alignItems:'center', gap:8}}>
         <span style={{fontSize:12, color:T.attioMuted, fontVariantNumeric:'tabular-nums'}}>{q.number}</span>
-        <QuoteStatusPill status={q.status}/>
+        <QuoteStatusPill status={quoteStatusOf(q)}/>
         <span style={{flex:1}}/>
         <span style={{fontSize:12, color:T.attioMuted}}>{fmtQuoteDate(q.sentAt || q.createdAt)}</span>
       </div>
@@ -738,10 +792,10 @@ function RecordQuotesTab({contact}){
           {selected && (
             <DetailFrame head={<span style={{fontSize:13, color:T.attioMuted}}>{selected.number} · created by {selected.createdBy}{selected.status === 'signed' ? ` · signed ${fmtQuoteDate(selected.signedAt)}` : ''}</span>}
               actions={<>{selected.status === 'draft' && can('edit') && headerBtn('Edit', ()=>setBuilder({mode:'edit', id:selected.id}))}
-                {selected.status === 'draft' && <button onClick={()=>sendQuoteVia(hub, selected)} style={btnPrimarySm()}>Send</button>}
-                {selected.status === 'sent' && can('edit') && <button onClick={()=>setSigning(selected)} style={btnPrimarySm()}>Mark as signed</button>}
+                {selected.status === 'draft' && !quoteExpired(selected) && <button onClick={()=>sendQuoteVia(hub, selected)} style={btnPrimarySm()}>Send</button>}
+                {selected.status === 'sent' && !quoteExpired(selected) && can('edit') && <button onClick={()=>setSigning(selected)} style={btnPrimarySm()}>Mark as signed</button>}
                 {selected.signedCopy && <a href={selected.signedCopy.dataUrl} download={selected.signedCopy.name} style={{...btnSecondarySm, textDecoration:'none'}}><Icon name="paperclip" size={13} color={T.gray600}/> Signed copy</a>}
-                <DetailMoreMenu items={actions.filter(it => !/^(Edit|Send|Mark)/.test(it.label))}/></>}>
+                {actions.some(it => !/^(Edit|Send|Mark)/.test(it.label)) && <DetailMoreMenu items={actions.filter(it => !/^(Edit|Send|Mark)/.test(it.label))}/>}</>}>
               <QuoteDocument quote={selected}/>
             </DetailFrame>
           )}
@@ -781,20 +835,20 @@ function QuotesPage(){
   const [deleting, setDeleting] = React.useState(null);
   const [newService, setNewService] = React.useState(false);   // New service: the Services panel
   const rows = hub.quotes.map(q => { const r = hubRecord(hub, q.object, q.recordId); return {...q, recordName:r ? r.name : '—', objectLabel:HUB_NOUN[q.object],
-    recipientName:q.recipient.name, total:quoteTotal(q), totalText:fmtMoney(quoteTotal(q)), statusLabel:QUOTE_STATUS[q.status].label, createdText:fmtQuoteDate(q.createdAt)}; });
+    recipientName:q.recipient.name, total:quoteTotal(q), totalText:fmtMoney(quoteTotal(q)), statusLabel:QUOTE_STATUS[quoteStatusOf(q)].label, createdText:fmtQuoteDate(q.createdAt)}; });
   const open = hub.quotes.find(q => q.id === openId) || null;
   const edit = (qid) => { setOpenId(null); setBuilder({mode:'edit', id:qid}); };
   // Bulk Actions: Delete (as a quote's Delete).
-  const quoteBulk = useTableBulkDelete({rows:hub.quotes, noun:'quote',
+  const quoteBulk = useTableBulkDelete({rows:hub.quotes, noun:'quote', canDelete:(q) => q.status !== 'signed', skipNote:'already signed',
     remove:(ids) => { hub.setQuotes(qs => qs.filter(q => !ids.includes(q.id))); if(ids.includes(openId)) setOpenId(null); }, onDone:(n) => hub.toast(`${bulkPlural(n, 'quote')} deleted`)});
   const schema = {
     properties:QUOTE_COLUMNS, noun:'quote', searchKeys:['number', 'title', 'recordName', 'recipientName'], canCreateProperty:false, bulkActions:quoteBulk.bulkActions,
     filterProps:[{key:'statusLabel', label:'Status', type:'select'}, {key:'objectLabel', label:'Record Type', type:'select'}, {key:'total', label:'Total', type:'number'},
       {key:'createdBy', label:'Created By', type:'select'}],
-    selectValues:{statusLabel:['Draft', 'Sent', 'Signed'], objectLabel:['Contact', 'Deal', 'Customer'], createdBy:[...new Set(hub.quotes.map(q => q.createdBy).filter(Boolean))]},
+    selectValues:{statusLabel:['Draft', 'Sent', 'Signed', 'Expired'], objectLabel:['Contact', 'Deal', 'Customer'], createdBy:[...new Set(hub.quotes.map(q => q.createdBy).filter(Boolean))]},
     renderCell:(key, r) => key === 'number' ? <ContactName name={r.number} onOpen={()=>setOpenId(r.id)} style={{fontSize:'inherit', fontWeight:500}}/>
       : key === 'recordName' && r.recordName !== '—' ? <HubRecordLink object={r.object} id={r.recordId} name={r.recordName}/>
-      : key === 'statusLabel' ? <QuoteStatusPill status={r.status}/> : undefined,
+      : key === 'statusLabel' ? <QuoteStatusPill status={quoteStatusOf(r)}/> : undefined,
     renderActions:(r) => <RowActionsMenu title="Quote actions" width={MENU_W} items={[{label:'View quote', onClick:()=>setOpenId(r.id)}, ...quoteActions(hub, hub.quotes.find(q => q.id === r.id), {onDelete:setDeleting, onEdit:edit, onSign:setSigning})]}/>,
   };
   return (
@@ -809,7 +863,7 @@ function QuotesPage(){
         </>}
         overlay={newService ? <ServiceFormPanel onCancel={()=>setNewService(false)} onSave={(vals)=>{ hub.setServices(ss => [...ss, newServiceRecord(vals)]); setNewService(false); hub.toast('Service created'); }}/>
           : builder ? <QuoteBuilder key={builder.id || 'new'} {...builder} onClose={(saved)=>{ setBuilder(null); if(saved) setOpenId(saved.id); }}/>
-          : open && <PageSidePanel width={560} title={`${open.number} · ${open.title}`} subtitle={`${QUOTE_STATUS[open.status].label} · ${fmtMoney(quoteTotal(open))}`}
+          : open && <PageSidePanel width={560} title={`${open.number} · ${open.title}`} subtitle={`${QUOTE_STATUS[quoteStatusOf(open)].label} · ${fmtMoney(quoteTotal(open))}`}
           onClose={()=>setOpenId(null)} menuItems={quoteActions(hub, open, {onDelete:setDeleting, onEdit:edit, onSign:setSigning})}>
           <div style={{flex:1, overflowY:'auto', padding:'4px 20px 24px'}}><QuoteDocument quote={open}/></div>
         </PageSidePanel>}/>
@@ -820,5 +874,5 @@ function QuotesPage(){
   );
 }
 
-Object.assign(window, {InstallmentsEditor, tentativeOk, normalizeDue, readUpload, EvidenceFile, fmtTentative, tentativeDate, installmentAmount, SAMPLE_QUOTES, SAMPLE_QUOTE_TEMPLATES, quoteTemplatesOf, quoteTotals, quoteItemTotal, nextTemplateCode, copyItems, QuoteBuilder, QuoteDocument, RecordQuotesTab, QuoteActivityDetail, QuotesPage, quoteTotal, QUOTE_STATUS, sendQuoteVia,
+Object.assign(window, {InstallmentsEditor, quoteSeqFloor, splitAmounts, quoteExpired, quoteStatusOf, tentativeOk, normalizeDue, readUpload, EvidenceFile, fmtTentative, tentativeDate, installmentAmount, SAMPLE_QUOTES, SAMPLE_QUOTE_TEMPLATES, quoteTemplatesOf, quoteTotals, quoteItemTotal, nextTemplateCode, copyItems, QuoteBuilder, QuoteDocument, RecordQuotesTab, QuoteActivityDetail, QuotesPage, quoteTotal, QUOTE_STATUS, sendQuoteVia,
   QuoteServicesFields, QuotePaymentFields, quoteConfigChecks, normalizeQuoteConfig, QUOTE_SECTION, QUOTE_PANEL_W, QUOTE_VAT_RATE});

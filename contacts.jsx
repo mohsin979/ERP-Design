@@ -883,9 +883,21 @@ function ThreeDotMenu({onMoveLeft, onMoveRight, onSortAsc, onSortDesc, canMove=t
    opens the type-to-confirm modal. */
 // `note`: what happens to the record's associated records (they stay, unlinked).
 // `noun`: the record's name on the button (Contact, Deal, Customer).
-function DeleteConfirmModal({contactName, note, noun = 'Contact', onCancel, onConfirm}){
+/* `paid`: the record has payments recorded — it can't be deleted, so this says so, with Close only. */
+function DeleteConfirmModal({contactName, note, noun = 'Contact', paid, onCancel, onConfirm}){
   const [value, setValue] = React.useState('');
   const canDelete = value === 'Delete';
+  if(paid) return (
+    <div style={{position:'fixed', inset:0, background:'rgba(16,24,40,.35)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:100}}>
+      <div style={{background:'#fff', borderRadius:12, width:400, padding:24}}>
+        <div style={{fontSize:16, fontWeight:600, color:T.gray800, marginBottom:8}}>Can't Delete "{contactName}"</div>
+        <div style={{fontSize:13, color:T.gray600, lineHeight:1.5, marginBottom:20}}>This {noun.toLowerCase()} has payments recorded.</div>
+        <div style={{display:'flex', justifyContent:'flex-end'}}>
+          <button onClick={onCancel} style={{padding:'8px 14px', borderRadius:8, border:`1px solid ${T.borderStrong}`, background:'#fff', fontSize:13, cursor:'pointer'}}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
   return (
     <div style={{position:'fixed', inset:0, background:'rgba(16,24,40,.35)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:100}}>
       <div style={{background:'#fff', borderRadius:12, width:400, padding:24}}>
@@ -2212,7 +2224,7 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
       )}
       {contactBulkModal}
       {pendingDelete && (
-        <DeleteConfirmModal contactName={pendingDelete.name}
+        <DeleteConfirmModal contactName={pendingDelete.name} paid={recordHasPayments('contacts', pendingDelete.id)}
           note={associatedNote([['deal', 'deals', dealsFor ? dealsFor(pendingDelete.id).length : 0], ['customer', 'customers', customersFor ? customersFor(pendingDelete.id).length : 0]], 'contact')}
           onCancel={()=>setPendingDelete(null)}
           onConfirm={()=>{

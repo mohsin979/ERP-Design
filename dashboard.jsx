@@ -26,6 +26,8 @@
      Cash Received    payments recorded in Accounting, by payment date.
      Cash Invoiced    installments invoiced (their invoice date) — issuing isn't payment.
      Forecasted Cash  installments due in the period — expected, paid or not.
+                      A part-paid installment counts what was paid on it; its balance the rest.
+                      Lost and Undecided (Postponed) deals' installments aren't counted.
      Stage Types      every record's stage has a Stage Type (board.jsx): Open, or closed — Won, Lost,
                       Undecided. Total Open: the records in an Open stage now. Total Closed and its
                       Won / Lost / Undecided: the records that reached a closed stage in the period
@@ -100,9 +102,15 @@ function dashBusinessData({deals = [], customers = [], contacts = [], accounting
   // Accounting: each installment invoiced, due and paid — the record's owner's.
   accounting.forEach(sched => {
     const p = person(ownerOf.get(String(sched.recordId))); if(!p) return;
+    // A Lost or Undecided (Postponed) deal's installments aren't expected cash: left out of the forecast.
+    const deal = sched.object === 'deals' && dealById.get(sched.recordId);
+    const forecast = !deal || !['lost', 'undecided'].includes(recordStageType('deals', deal));
     (sched.installments || []).forEach(i => {
       const invoicedAt = dashDayTime(i.invoicedAt, 10), due = dashDayTime(i.dueDate, 9);
-      if(due != null) p.ev.installments.push({amount:i.amount, due});
+      /* Forecast: an installment whose rest moved to a balance installment counts only what was paid
+         on it — the balance carries the rest, by its own date (counted once). */
+      const split = (sched.installments || []).some(x => x.parentId === i.id);
+      if(forecast && due != null) p.ev.installments.push({amount: split ? (i.payments || []).reduce((s, pay) => s + (Number(pay.amount) || 0), 0) : i.amount, due});
       if(invoicedAt != null) p.ev.invoices.push({at:invoicedAt, amount:i.amount});
       (i.payments || []).forEach(pay => { const at = dashDayTime(pay.paidOn, 12); if(at != null) p.ev.payments.push({amount:Number(pay.amount) || 0, at, sent:invoicedAt}); });
     });
@@ -884,7 +892,7 @@ const DASH_WIDGET_DEFS = [
   {id:'dealLost', get label(){ return `${typeSingular('deals', 'Deal')} Lost`; }, width:1,
     render:(c) => <DashWidgetCard title={`${typeSingular('deals', 'Deal')} Lost`}><DealOutcomeList deals={c.deals} type="lost" tone={T.red} range={c.range} now={new Date(c.data.now)} onOpen={c.onOpenDeal}/></DashWidgetCard>},
   // Goals (goals.jsx): Cash Received against the targets — needs View Payment Terms, as the cash KPIs.
-  {id:'goals', label:'Goals', width:1, can:() => accountingViewAny(), render:(c) => <GoalsWidget data={c.data} settings={c.settings} onOpenUser={c.onOpenUser}/>},
+  {id:'goals', label:'Goals', width:1, can:() => accountingViewAny(), render:(c) => <GoalsWidget data={c.data} settings={c.settings} rangeId={c.rangeId} onOpenUser={c.onOpenUser}/>},
 ];
 const dashWidgetDef = (id) => DASH_WIDGET_DEFS.find(w => w.id === id) || null;
 const dashWidgetVisible = (w) => !!w && (!w.can || w.can());
@@ -1227,7 +1235,7 @@ function DashboardPage(){
   const kpiIds = [config.prominent, ...config.kpis];
   const kpiCtx = {data, range, records:(hub && hub.records) || {}, settings:(hub && hub.data) || {}};
   const shownWidgets = config.widgets.filter(w => !w.hidden).map(w => dashWidgetDef(w.id)).filter(dashWidgetVisible);
-  const widgetCtx = {hub, data, range, rangeKey:range.join('-'), deals, violations, settings:(hub && hub.data) || {}, onOpenUser:setUser, onOpenDeal:openDeal, onOpenViolation:openViolation};
+  const widgetCtx = {hub, data, range, rangeKey:range.join('-'), rangeId:filter.id, deals, violations, settings:(hub && hub.data) || {}, onOpenUser:setUser, onOpenDeal:openDeal, onOpenViolation:openViolation};
   // Rearranging: the four KPIs after the pinned one, and the shown widgets, move by drag; any of
   // the four can be pinned as first (the pinned one takes its place).
   const arrangeKpis = arranging && {

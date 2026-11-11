@@ -65,6 +65,19 @@ function goalKpi(ctx){
 
 /* ── Settings → Goals ── the period, then the company's target, each team's with its users'. */
 const goalInput = {...stInput, width:160, textAlign:'right', fontVariantNumeric:'tabular-nums'};
+/* A target's AED field. What's typed shows as typed while the field has focus (so "2500." can
+   become 2500.50); the target is stored as a number. */
+function GoalTargetInput({target, ariaLabel, onChange}){
+  const [text, setText] = React.useState(null);
+  return (
+    <div style={{position:'relative', width:160}}>
+      <span style={{position:'absolute', left:12, top:'50%', transform:'translateY(-50%)', fontSize:12, color:T.gray400, pointerEvents:'none'}}>{DEAL_CURRENCY}</span>
+      <input value={text != null ? text : target.own ? target.value : ''} placeholder={target.value == null ? '0' : formatAmount(target.value)} inputMode="decimal" aria-label={ariaLabel}
+        onFocus={()=>setText(target.own ? String(target.value) : '')} onBlur={()=>setText(null)}
+        onChange={e=>{ const v = e.target.value.replace(/[^0-9.]/g, ''); setText(v); if(v === '' || Number.isFinite(Number(v))) onChange(v); }} style={{...goalInput, paddingLeft:44}}/>
+    </div>
+  );
+}
 function GoalsSettings({data, setData}){
   const can = goalsCan('edit');
   const hub = useRecordHub();
@@ -76,11 +89,7 @@ function GoalsSettings({data, setData}){
   const setAt = (level, id, v) => set({[level]: id == null ? {...(g[level] || {}), [p]:v === '' ? undefined : Number(v)}
     : {...(g[level] || {}), [id]:{...((g[level] || {})[id] || {}), [p]:v === '' ? undefined : Number(v)}}});
   const input = (level, id, target, ariaLabel) => (
-    <div style={{position:'relative', width:160}}>
-      <span style={{position:'absolute', left:12, top:'50%', transform:'translateY(-50%)', fontSize:12, color:T.gray400, pointerEvents:'none'}}>{DEAL_CURRENCY}</span>
-      <input value={target.own ? target.value : ''} placeholder={target.value == null ? '0' : formatAmount(target.value)} inputMode="decimal" aria-label={ariaLabel}
-        onChange={e=>setAt(level, id, e.target.value.replace(/[^0-9.]/g, ''))} style={{...goalInput, paddingLeft:44}}/>
-    </div>
+    <GoalTargetInput key={`${level}:${id}:${p}`} target={target} ariaLabel={ariaLabel} onChange={(v)=>setAt(level, id, v)}/>
   );
   const progress = (target, ids) => { if(!money) return '—'; const r = goalReceived(dash, range, ids); return `${fmtMoney(r)} · ${fmtGoalPct(goalPct(r, target))}`; };
   const cols = `minmax(0, 1fr) 200px 200px 220px`;
@@ -140,9 +149,12 @@ function GoalBar({pct}){
     </div>
   );
 }
-function GoalsWidget({data, settings, onOpenUser}){
+/* The dashboard's Goals widget: the targets for the dashboard's range — Today daily, This Week
+   weekly, This Month monthly (a custom range keeps the period set in Settings → Goals). */
+const GOAL_PERIOD_OF_RANGE = {today:'daily', week:'weekly', month:'monthly'};
+function GoalsWidget({data, settings, rangeId, onOpenUser}){
   const [tab, setTab] = React.useState('teams');
-  const t = goalTargets(settings), range = goalPeriodRange(t.period, new Date(data.now));
+  const t = goalTargets(settings, GOAL_PERIOD_OF_RANGE[rangeId]), range = goalPeriodRange(t.period, new Date(data.now));
   const line = (target, ids) => { const r = goalReceived(data, range, ids); return {received:r, target, pct:goalPct(r, target)}; };
   const company = line(t.company);
   const rows = tab === 'teams'

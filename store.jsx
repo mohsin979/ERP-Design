@@ -20,16 +20,52 @@
    out at once in the background, each with a version so an older write arriving late never
    replaces a newer one; `flush()` sends what's still on its way before the page reloads, and
    `fresh(key)` reads one value again (something another tab saved). On its first run with SQLite,
-   what this browser had saved comes along (localStorage is left as it was). */
+   what this browser had saved comes along (localStorage is left as it was).
+
+   A value saved unchanged isn't written again. Saving can't go wrong silently:
+     Another tab — when another tab (or, with SQLite, another browser) saves data this page holds,
+       this page's copy is out of date: it stops saving that data (it would overwrite the newer
+       one) and the app offers a reload (`hof-erp-stale`). Tabs tell each other through a
+       BroadcastChannel; the server answers 409 to a save older than the one it has.
+     A failed save (no server, storage full) is tried again until it goes through; the app says
+       so (`hof-erp-save-failed`, then `hof-erp-save-ok`).
+   A form's inbox takes other pages' writes by design, so it's left out of this. */
 const DB = (() => {
   const ls = window.localStorage;
   const http = (method, url, body, async) => { const x = new XMLHttpRequest(); x.open(method, url, async); x.setRequestHeader('Content-Type', 'text/plain;charset=utf-8'); return [x, () => x.send(body == null ? null : body)]; };
+  const TAB = Math.random().toString(36).slice(2);
+  const own = (k) => !/^(hof-erp-form-inbox|meta:)/.test(k);
+  const held = new Set();   // the keys this page read or wrote
+  let stale = false, failing = false;
+  const emit = (type) => { try { window.dispatchEvent(new Event(type)); } catch(e){} };
+  const goStale = () => { if(!stale){ stale = true; emit('hof-erp-stale'); } };
+  const failed = () => { if(!failing){ failing = true; emit('hof-erp-save-failed'); } };
+  const worked = () => { if(failing){ failing = false; emit('hof-erp-save-ok'); } };
+  const frozen = (k) => stale && own(k) && held.has(k);
+  const hold = (k) => { if(own(k)) held.add(k); };
+  const channel = (() => { try { return new BroadcastChannel('hof-erp-saves'); } catch(e){ return null; } })();
+  if(channel) channel.onmessage = (e) => { const m = e.data || {}; if(m.tab !== TAB && held.has(m.key)) goStale(); };
+  const announce = (k) => { if(channel && own(k)) try { channel.postMessage({key:k, tab:TAB}); } catch(e){} };
   let cache = null;
   try {
     const [x, go] = http('GET', '/api/kv', null, false); go();
     if(x.status === 200 && /json/.test(x.getResponseHeader('Content-Type') || '')) cache = JSON.parse(x.responseText);
   } catch(e){}
-  if(!cache) return {sqlite:false, getItem:(k) => ls.getItem(k), setItem:(k, v) => ls.setItem(k, v), removeItem:(k) => ls.removeItem(k), keys:() => Object.keys(ls), flush(){}, fresh:(k) => ls.getItem(k)};
+  if(!cache){
+    const waiting = new Map();   // key → the value still to be written (a failed save tries again)
+    const write = (k) => {
+      if(!waiting.has(k)) return;
+      if(frozen(k)) return void waiting.delete(k);
+      try { ls.setItem(k, waiting.get(k)); waiting.delete(k); worked(); announce(k); }
+      catch(e){ failed(); setTimeout(() => write(k), 10000); }
+    };
+    return {sqlite:false,
+      getItem:(k) => { hold(k); return ls.getItem(k); },
+      setItem:(k, v) => { v = String(v); hold(k); if(frozen(k) || (!waiting.has(k) && ls.getItem(k) === v)) return;
+        const again = waiting.has(k); waiting.set(k, v); if(!again) write(k); },
+      removeItem:(k) => { if(!frozen(k)){ waiting.delete(k); ls.removeItem(k); } },
+      keys:() => Object.keys(ls), flush(){}, fresh:(k) => ls.getItem(k)};
+  }
   const IMPORTED = 'meta:imported-localstorage';
   if(!(IMPORTED in cache)){
     const take = {};
@@ -40,18 +76,25 @@ const DB = (() => {
   let ver = Date.now() * 1000;
   const pending = new Map();   // key → the version still on its way
   const send = (method, k, value, sync) => {
+    if(frozen(k)) return void pending.delete(k);
     const v = ++ver; pending.set(k, v);
     const [x, go] = http(method, `/api/kv/${encodeURIComponent(k)}`, value, !sync);
     x.setRequestHeader('X-Ver', String(v));
-    if(!sync) x.onloadend = () => { if(pending.get(k) === v && x.status >= 200 && x.status < 300) pending.delete(k); };
+    const done = () => {
+      if(x.status >= 200 && x.status < 300){ if(pending.get(k) === v) pending.delete(k); worked(); announce(k); }
+      // 409: the server has a newer save from elsewhere — unless this page's own newer save is on its way.
+      else if(x.status === 409){ if(pending.get(k) === v){ pending.delete(k); if(own(k)) goStale(); } }
+      else { failed(); if(!sync) setTimeout(() => { if(pending.get(k) === v){ if(k in cache) send('PUT', k, cache[k]); else send('DELETE', k, null); } }, 5000); }
+    };
+    if(!sync) x.onloadend = done;
     go();
-    if(sync && x.status >= 200 && x.status < 300 && pending.get(k) === v) pending.delete(k);
+    if(sync) done();
   };
   return {
     sqlite:true,
-    getItem:(k) => Object.prototype.hasOwnProperty.call(cache, k) ? cache[k] : null,
-    setItem:(k, v) => { cache[k] = String(v); send('PUT', k, cache[k]); },
-    removeItem:(k) => { delete cache[k]; send('DELETE', k, null); },
+    getItem:(k) => { hold(k); return Object.prototype.hasOwnProperty.call(cache, k) ? cache[k] : null; },
+    setItem:(k, v) => { v = String(v); hold(k); if(frozen(k) || cache[k] === v) return; cache[k] = v; send('PUT', k, v); },
+    removeItem:(k) => { if(frozen(k) || !(k in cache)) return; delete cache[k]; send('DELETE', k, null); },
     keys:() => Object.keys(cache),
     // Before a reload: anything not confirmed yet goes again, and waits.
     flush:() => { [...pending.keys()].forEach(k => { try { if(k in cache) send('PUT', k, cache[k], true); else send('DELETE', k, null, true); } catch(e){} }); },
@@ -207,9 +250,14 @@ const APP_SAVED = (() => {
 })();
 const appStore = {...(APP_SAVED || {})};
 let appStoreTimer = null, appStoreCleared = false;
+// What was last saved (without its time): a store saved unchanged isn't written again.
+let appStoreBody = APP_SAVED ? JSON.stringify({...appStore, version:2}) : null;
 function writeAppStore(){
   clearTimeout(appStoreTimer); appStoreTimer = null;
   if(appStoreCleared) return;
+  const body = JSON.stringify({...appStore, version:2});
+  if(body === appStoreBody) return;
+  appStoreBody = body;
   try { DB.setItem(APP_STORE_KEY, JSON.stringify({...appStore, version:2, savedAt:Date.now()})); }
   catch(e){ console.warn('HOF ERP: could not save', e); }
 }
@@ -249,6 +297,8 @@ function newRecordId(object){
   persistSlice('ids', {...ids, [object]:n + 1});
   return RECORD_ID_PREFIX[object] ? `${RECORD_ID_PREFIX[object]}-${n}` : n;
 }
+// The number the next newRecordId(object) gives, without taking it (a preview).
+const peekRecordId = (object) => (appStore.ids || {})[object] || 1;
 // The next free number after the records' own IDs (numbers, or "<prefix>-<n>").
 const idFloorOf = (records) => records.reduce((mx, r) => {
   const n = typeof r.id === 'number' ? r.id : Number(String(r.id).split('-').pop());
@@ -264,4 +314,4 @@ const userLabel = (v) => { if(!v) return ''; const u = USER_DIRECTORY.find(x => 
 const userIdOf = (v, users = USER_DIRECTORY) => { if(!v) return ''; if(users.some(u => u.id === v)) return v; const u = users.find(x => x.name === v); return u ? u.id : ''; };
 
 Object.assign(window, {DB, crmStoreKey, peopleStoreKey, readStore, writeStore, APP_STORE_KEY, freezeAppStore, CRM_TEMPLATE, ORG_REGISTRY, ACTIVE_CRM, ORG_ROLES, CRM_MIGRATION, CRM_PARTNERS, CRM_PACK, PEOPLE_PAKISTAN, PEOPLE_DUBAI, LEGACY_CRM_OF,
-  DEFAULT_BRAND, HOF_BRAND, saveOrgRegistry, reloadInto, orgBrand, APP_SAVED, persistSlice, usePersistedState, savedSlice, resetAppStore, newRecordId, ensureIdFloor, idFloorOf, setUserDirectory, userLabel, userIdOf, writeAppStore});
+  DEFAULT_BRAND, HOF_BRAND, saveOrgRegistry, reloadInto, orgBrand, APP_SAVED, persistSlice, usePersistedState, savedSlice, resetAppStore, newRecordId, peekRecordId, ensureIdFloor, idFloorOf, setUserDirectory, userLabel, userIdOf, writeAppStore});

@@ -730,6 +730,7 @@ function App(){
      workflows run on. */
   // Quotes, forms and payment terms (declared before the engine, which reads quotes and payment terms).
   const [quotes, setQuotes] = usePersistedState('quotes', () => SEED ? SAMPLE_QUOTES(SAMPLE_SERVICES()) : [], (qs) => withBiz(qs, 'quotes'));
+  ensureIdFloor('quotes', quoteSeqFloor(quotes));   // quote numbers never fall back below one used (quotes.jsx)
   const [forms, setForms] = usePersistedState('forms', () => SEED ? SAMPLE_FORMS() : []);
   // Payment schedules pulled from signed quotes, and their payments (accounting.jsx).
   const [accounting, setAccounting] = usePersistedState('accounting', [], (list) => withBiz(unpackPaymentTerms(list), 'accounting'), packPaymentTerms);
@@ -740,6 +741,12 @@ function App(){
     const missing = [...contacts.map(r => ['contacts', r]), ...deals.map(r => ['deals', r]), ...customers.map(r => ['customers', r])].filter(([o, r]) => !has.has(key(o, r.id)));
     if(missing.length) setAccounting(list => { const h = new Set(list.map(s => key(s.object, s.recordId)));
       return [...list, ...missing.filter(([o, r]) => !h.has(key(o, r.id))).map(([o, r]) => defaultPaymentTerms(o, r))]; });
+    /* A deal's default terms total the deal's amount: while they're untouched (never edited or paid),
+       they follow it when the amount changes. */
+    const amountOf = new Map(deals.map(d => [String(d.id), Math.round((Number(d.amount) || 0) * 100) / 100]));
+    const untouched = (s) => JSON.stringify(s) === JSON.stringify(defaultTermsOf(s.id, s.object, s.recordId, s.total, s.startDate, s.createdAt));
+    const follow = (s) => s.isDefault && s.object === 'deals' && amountOf.has(String(s.recordId)) && amountOf.get(String(s.recordId)) !== s.total && untouched(s);
+    if(accounting.some(follow)) setAccounting(list => list.map(s => follow(s) ? defaultTermsOf(s.id, s.object, s.recordId, amountOf.get(String(s.recordId)), s.startDate, s.createdAt) : s));
   }, [contacts, deals, customers, accounting]);
   // Overview View Settings per record type — pinned Highlights and Snapshots (overviewSettings.jsx).
   const [overviewSettings, setOverviewSettings] = usePersistedState('overviewSettings', {});
@@ -803,6 +810,16 @@ function App(){
   const [appToast, setAppToast] = React.useState(null);
   const appToastTimer = React.useRef(null);
   const showAppToast = (message, action) => { setAppToast({message, action}); clearTimeout(appToastTimer.current); appToastTimer.current = setTimeout(()=>setAppToast(null), 4000); };
+  /* Saving (store.jsx DB): data changed in another tab — this one stops saving and offers a reload;
+     a failed save — said while it's tried again, then "Changes saved". Shown until resolved. */
+  const [saveNotice, setSaveNotice] = React.useState(null);   // {kind:'stale'|'failed', message, action?}
+  React.useEffect(() => {
+    const stale = () => setSaveNotice({kind:'stale', message:'This CRM was changed in another tab', action:{label:'Reload', onClick:()=>window.location.reload()}});
+    const failed = () => setSaveNotice(n => n && n.kind === 'stale' ? n : {kind:'failed', message:'Couldn’t save changes · Retrying'});
+    const ok = () => { setSaveNotice(n => n && n.kind === 'failed' ? null : n); showAppToast('Changes saved'); };
+    window.addEventListener('hof-erp-stale', stale); window.addEventListener('hof-erp-save-failed', failed); window.addEventListener('hof-erp-save-ok', ok);
+    return () => { window.removeEventListener('hof-erp-stale', stale); window.removeEventListener('hof-erp-save-failed', failed); window.removeEventListener('hof-erp-save-ok', ok); };
+  }, []);
   /* The links start from where it's created — on a deal: that deal, and the deal's contact; on a
      contact: that contact — and can be changed in the form (any contact or none, any deals or none). */
   const startCustomer = ({contact, deal} = {}) => {
@@ -942,7 +959,7 @@ function App(){
       {engine.event && <AutomaticActionModal key={engine.event.id} event={engine.event} onClose={engine.closeEvent} hidden={eventAway}/>}
     </WorkflowEngineCtx.Provider>
   );
-  if(screen !== 'crm' && !crmOpened) return withEngine(<>{main}{people}</>);
+  if(screen !== 'crm' && !crmOpened) return withEngine(<>{main}{people}{saveNotice && <CopyToast message={saveNotice.message} action={saveNotice.action}/>}</>);
 
   // CRM screen: the nav spans the full viewport height on the left; the header belongs only
   // to the right-hand content pane (not the sidebar), so it never duplicates the sidebar's
@@ -1000,9 +1017,11 @@ function App(){
       </div>
       {customerForm && <CustomerFormModal data={settingsData} initial={customerForm.initial} links={customerForm.links} contacts={contactsWithDeals} deals={deals}
         onCancel={()=>setCustomerForm(null)} onSave={saveCustomer}/>}
-      <CopyToast message={appToast && appToast.message} action={appToast && appToast.action}/>
+      {!saveNotice && <CopyToast message={appToast && appToast.message} action={appToast && appToast.action}/>}
     </div>
     </PageVisibleCtx.Provider>
+    {/* Saving trouble, on every screen, until it's resolved. */}
+    {saveNotice && <CopyToast message={saveNotice.message} action={saveNotice.action}/>}
   </>);
 }
 

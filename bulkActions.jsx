@@ -13,7 +13,7 @@
    property the selected records share shows its value; one they differ on shows "Mixed values".
    Only the properties changed are written — to every selected record the person may edit (the
    others are skipped and counted). Delete: confirmed by typing Delete; records the person may not
-   delete are skipped and counted. Enroll in Email Sequence: the sequence's emails are scheduled for
+   delete, and records with payments recorded, are skipped and counted. Enroll in Email Sequence: the sequence's emails are scheduled for
    each record from now (as the workflow action does); records without an email address are skipped.
    Cc and Bcc typed there go on every email of the sequence, for each record enrolled.
 
@@ -208,9 +208,12 @@ function useRecordBulk({object, data, records, update, remove, move}){
       onSave={(patch)=>{ const ok = chosen.filter(r => recordCan(object, r, 'edit')), skipped = chosen.length - ok.length;
         if(ok.length) update(ok.map(r => r.id), patch);
         toast(`${bulkPlural(ok.length, noun)} updated${skipped ? ` · ${skipped} skipped (no permission)` : ''}`); done(); }}/>;
-    if(bulk.kind === 'delete'){ const ok = chosen.filter(r => recordCan(object, r, 'delete'));
-      modal = <BulkDeleteModal count={ok.length} noun={noun} skipped={chosen.length - ok.length} onCancel={()=>setBulk(null)}
-        onConfirm={()=>{ if(ok.length) remove(ok.map(r => r.id)); toast(`${bulkPlural(ok.length, noun)} deleted${chosen.length - ok.length ? ` · ${chosen.length - ok.length} skipped (no permission)` : ''}`); done(); }}/>; }
+    // Delete: records with payments recorded are kept (they can't be deleted), as are those without permission.
+    if(bulk.kind === 'delete'){ const may = chosen.filter(r => recordCan(object, r, 'delete')), ok = may.filter(r => !recordHasPayments(object, r.id));
+      const noPerm = chosen.length - may.length, paid = may.length - ok.length;
+      modal = <BulkDeleteModal count={ok.length} noun={noun} skipped={noPerm} note={paid ? `${bulkPlural(paid, noun)} with payments recorded will be kept.` : ''} onCancel={()=>setBulk(null)}
+        onConfirm={()=>{ if(ok.length) remove(ok.map(r => r.id));
+          toast(`${bulkPlural(ok.length, noun)} deleted${noPerm ? ` · ${noPerm} skipped (no permission)` : ''}${paid ? ` · ${paid} kept (payments recorded)` : ''}`); done(); }}/>; }
     if(bulk.kind === 'enroll') modal = <BulkEnrollModal data={data} records={chosen} onCancel={()=>setBulk(null)}
       onEnroll={(seqId, copies)=>{ const withEmail = chosen.filter(r => String(r.email || '').trim());
         const n = engineCtx ? withEmail.filter(r => engineCtx.api.enrollInSequence(object === 'contacts' ? String(r.id) : r.id, seqId, copies)).length : 0;

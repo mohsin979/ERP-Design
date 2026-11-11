@@ -503,7 +503,7 @@ function CustomersModule({data, customers, setCustomers, activities, setActiviti
         onSave={(owner)=>{ updateCustomer(changingOwner.id, {owner}); setChangingOwner(null); }}/>}
       {customerBulk.bulkModal}
       {/* Delete Customer: its activity goes with it; its contact and deals stay as they are. */}
-      {pendingDelete && <DeleteConfirmModal contactName={pendingDelete.name} noun="Customer"
+      {pendingDelete && <DeleteConfirmModal contactName={pendingDelete.name} noun="Customer" paid={recordHasPayments('customers', pendingDelete.id)}
         note={associatedNote([['contact', 'contacts', contactOf(pendingDelete) ? 1 : 0], ['deal', 'deals', dealsOf(pendingDelete).length]], 'customer')}
         onCancel={()=>setPendingDelete(null)}
         onConfirm={()=>{

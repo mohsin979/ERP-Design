@@ -178,7 +178,7 @@ function QuoteTemplatesTab({data, setData, say}){
             </div>
             <div>
               <div style={section}>Payment terms</div>
-              {(open.installments || []).map((x, i) => row(`${i + 1}. ${x.description}`, `${x.percent}%`, x.id || i))}
+              {(open.installments || []).map((x, i) => row(`${i + 1}. ${x.description}`, `${round2(x.percent)}%`, x.id || i))}
               {!(open.installments || []).length && <div style={{fontSize:13, color:T.attioMuted}}>No installments.</div>}
             </div>
             <div>

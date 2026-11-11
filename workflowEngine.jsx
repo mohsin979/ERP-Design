@@ -241,6 +241,12 @@ const termsTotals = (terms) => terms.reduce((t, s) => { const x = scheduleTotals
 const liveInstallments = (terms) => termsInOrder(terms).flatMap(s => (s.installments || []).filter(i => !(s.installments || []).some(x => x.parentId === i.id)).map(i => ({s, i})));
 const installmentStatusLabel = (s, i) => (PAYMENT_STATUS[installmentState(s, i).status] || {}).label || '';
 const nextInstallment = (terms) => liveInstallments(terms).find(({s, i}) => installmentState(s, i).status !== 'paid') || null;
+// The installment that carries what's left of `i`: the last of its balance installments (itself without one).
+const balanceEndOf = (s, i) => { let cur = i, next; while((next = (s.installments || []).find(x => x.parentId === cur.id))) cur = next; return cur; };
+/* The first installment's status, through its balance: Paid once the balance is paid, Partially Paid
+   while part of it is still owed. */
+const firstInstallmentLabel = (s, i) => { const end = balanceEndOf(s, i);
+  return end === i ? installmentStatusLabel(s, i) : installmentState(s, end).status === 'paid' ? PAYMENT_STATUS.paid.label : PAYMENT_STATUS.partial.label; };
 const ACCOUNTING_TRIGGER_FIELDS = [
   {key:'totalAmount',   label:'Total Amount',      kind:'number', level:'record', readRecord:(terms) => terms.length ? termsTotals(terms).total : ''},
   {key:'totalReceived', label:'Total Received',    kind:'number', level:'record', readRecord:(terms) => terms.length ? termsTotals(terms).received : ''},
@@ -249,7 +255,7 @@ const ACCOUNTING_TRIGGER_FIELDS = [
      the payment the client makes to start (e.g. before Payment Made). */
   {key:'firstInstallmentStatus', label:'First Installment Status', kind:'select', level:'record', options:PAYMENT_STATUS_OPTIONS,
    readRecord:(terms) => { const s = termsInOrder(terms)[0], i = s && (s.installments || []).find(x => !x.parentId);
-     return i ? installmentStatusLabel(s, i) : ''; }},
+     return i ? firstInstallmentLabel(s, i) : ''; }},
   // The next installment still to be paid (in schedule order): its status, its due date.
   {key:'nextInstallmentStatus', label:'Next Installment Status', kind:'select', level:'record', options:PAYMENT_STATUS_OPTIONS,
    readRecord:(terms) => { const n = nextInstallment(terms); return n ? installmentStatusLabel(n.s, n.i) : ''; }},
@@ -1616,8 +1622,10 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
       }
       // Initiate Call (Track Violations): the owner calls the record — resolved by a call through the dialer.
       case 'initiateCall': return prompted([createPrompt(run, step, deal, 'initiateCall', `Call ${deal.name || 'the record'}`, {})], owner);
-      // Delete Record (Track Violations): the owner is asked to delete it — confirmed, with their delete permission.
-      case 'deleteRecord': return prompted([createPrompt(run, step, deal, 'deleteRecord', `Delete ${objectName(data, recordObjectOf(deal.id)).replace(/s$/, '')}`, {})], owner);
+      /* Delete Record (Track Violations): the owner is asked to delete it — confirmed, with their delete
+         permission. A record with payments recorded can't be deleted: skipped. */
+      case 'deleteRecord': if(recordHasPayments(recordObjectOf(deal.id), deal.id)) return {status:'skipped', result:'Has payments recorded'};
+        return prompted([createPrompt(run, step, deal, 'deleteRecord', `Delete ${objectName(data, recordObjectOf(deal.id)).replace(/s$/, '')}`, {})], owner);
       /* Update Associated Record: each associated record of the chosen Object, set to the values. */
       case 'updateAssociatedRecord': {
         const tProps = objectProperties(data, c.object || ''), entries = (c.properties || []).filter(e => e.property && tProps.some(p => p.key === e.property));
@@ -1796,7 +1804,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
       case 'initiateCall': return;
       // Delete Record: only with the person's own permission to delete it.
       case 'deleteRecord': {
-        if(!canDeleteRecord(deal)) return;
+        if(!canDeleteRecord(deal) || recordHasPayments(recordObjectOf(deal.id), deal.id)) return;   // payments recorded: kept
         resolvePrompt(id, 'done', `${deal.name || 'Record'} deleted · ${CURRENT_USER.name}`);
         removeRecord(deal, run);
         return;
@@ -2873,7 +2881,8 @@ function violationTargets(data, p){
 function violationInstallments(terms, key){
   if(!terms) return [];
   const live = liveInstallments([terms]);
-  if(key === 'firstInstallmentStatus'){ const i = (terms.installments || []).find(x => !x.parentId); return i ? [i.id] : []; }
+  // The first installment, or the balance that still carries part of it.
+  if(key === 'firstInstallmentStatus'){ const i = (terms.installments || []).find(x => !x.parentId); return i ? [balanceEndOf(terms, i).id] : []; }
   if(key === 'nextInstallmentStatus' || key === 'nextInstallmentDueDate'){ const n = nextInstallment([terms]); return n ? [n.i.id] : []; }
   if(key === 'lastInstallmentDueDate'){ const l = live.slice(-1)[0]; return l ? [l.i.id] : []; }
   if(key === 'allInstallmentStatuses') return live.filter(({s, i}) => installmentState(s, i).status !== 'paid').map(({i}) => i.id);
@@ -3786,7 +3795,8 @@ function WorkflowPromptModal({promptId, onClose, hidden, direct}){
         noun={objectName(data, objectId).replace(/s$/, '').toLowerCase()} zIndex={210} onCancel={direct ? onClose : ()=>setCreating(false)} onSave={(vals)=>done({values:vals})}/>, document.body);
   };
   if(p.kind === 'createRecord' && direct) return recordForm();
-  const deletable = p.kind === 'deleteRecord' && canDeleteRecord(deal);
+  const paid = p.kind === 'deleteRecord' && recordHasPayments(recordObjectOf(deal.id), deal.id);
+  const deletable = p.kind === 'deleteRecord' && canDeleteRecord(deal) && !paid;
   const deleteConfirm = () => ReactDOM.createPortal(
     <div style={{position:'relative', zIndex:200}}>
       <DeleteConfirmModal contactName={deal.name} noun={objectName(data, recordObjectOf(deal.id)).replace(/s$/, '')} onCancel={direct ? onClose : ()=>setDeleting(false)} onConfirm={()=>done({})}/>
@@ -3861,7 +3871,7 @@ function WorkflowPromptModal({promptId, onClose, hidden, direct}){
     </>);
   } else if(p.kind === 'deleteRecord' && !deletable){
     can = false;
-    content = <div style={{fontSize:13, color:T.attioMuted, lineHeight:1.5}}>You don’t have permission to delete this {recordNoun(deal.id)}. Ask someone who can delete it.</div>;
+    content = <div style={{fontSize:13, color:T.attioMuted, lineHeight:1.5}}>{paid ? `This ${recordNoun(deal.id)} has payments recorded, so it can't be deleted.` : `You don’t have permission to delete this ${recordNoun(deal.id)}. Ask someone who can delete it.`}</div>;
   }
   const submit = () => done(p.kind === 'setProperty' ? (sameValue ? {sameValue:true} : {values}) : p.kind === 'addNote' ? {body} : p.kind === 'scheduleMeeting' ? {date, time}
     : p.kind === 'logMeeting' ? {notes} : p.kind === 'logCall' ? {outcome:callOutcome, comment:notes} : {});

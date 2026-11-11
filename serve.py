@@ -6,6 +6,7 @@ localStorage — one key-value table, the same keys the app used there (store.js
   GET    /api/kv          every key and its value, as one JSON object (read once per page load)
   GET    /api/kv/<key>    one value (204, empty, when there's none — a check, not an error)
   PUT    /api/kv/<key>    save a value (the body); X-Ver: a newer version only replaces an older one
+                          (409 when an older one arrives: the page holding it is out of date)
   DELETE /api/kv/<key>    remove it (X-Ver as above)
   POST   /api/kv          save several at once (a JSON object of key → value): the first import of
                           what a browser had in localStorage
@@ -72,9 +73,11 @@ class NoCache(http.server.SimpleHTTPRequestHandler):
         if not key: return self._send(404, '')
         value, ver = self._body(), self._ver()
         with LOCK, db() as con:
-            con.execute('INSERT INTO kv (key, value, ver) VALUES (?, ?, ?) '
-                        'ON CONFLICT(key) DO UPDATE SET value = excluded.value, ver = excluded.ver WHERE excluded.ver >= kv.ver', (key, value, ver))
-        return self._send(204)
+            cur = con.execute('INSERT INTO kv (key, value, ver) VALUES (?, ?, ?) '
+                              'ON CONFLICT(key) DO UPDATE SET value = excluded.value, ver = excluded.ver WHERE excluded.ver >= kv.ver', (key, value, ver))
+            applied = cur.rowcount > 0
+        # 409: a newer save (from another tab or browser) is kept, this one isn't.
+        return self._send(204 if applied else 409, '')
 
     def do_DELETE(self):
         key = self._key()
