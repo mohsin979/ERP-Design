@@ -1,59 +1,62 @@
-/* HOF Pulse ERP — Accounting: a record's payment structures (record detail → Accounting tab, on
-   Contacts, Deals and Customers).
+/* HOF Pulse ERP — Accounting: a record's Payment Plans (record detail → Accounting tab, on
+   Contacts, Deals and Customers). Invoicing: invoices.jsx.
 
-   One payment structure per record ("Payment Terms"): every record starts with it — one payment
-   of the whole amount, Unpaid (the default terms) — and none is created by hand. Edit Payment Terms
-   sets its plan (PaymentTermsFields — the same fields on a quote's Payment Terms step and a
-   document's Add Payment Term), one of three types (decided 2026-11-12):
+   Payment Plans (were Payment Terms; decided 2026-11-12): a record has any number of them, none to
+   start with — Add Payment Plan makes one, and signing a quote or a document with a payment term
+   makes one from it (plansOnQuoteSigned; documents.jsx plansFromDocument), linked to it ("From
+   Quote" / "From Document"). Each has a number (PP-<year>-<nnnn>) and sits in one of the tab's
+   three tabs: Active; Paid — every payment reconciled and nothing left to bill (planState); Frozen.
+   A plan's fields (PaymentTermsFields — the same on a quote's Payment Plan step and a document's
+   Add Payment Plan) are one of three types:
      One-Time Payment    — currency, amount, invoice issue date (Quote Signed or a fixed date) and
        due date (Due on Receipt, Net 7 … Net 60, a custom date or a custom number of days). Update
-       Status marks it Paid (the payment date: today or an earlier day; evidence optional) or, once
-       Paid, Unpaid again: the payment is reversed — kept on the terms (`reversed`) and in the
-       record's activity; a payment's date never changes. Its amount can be edited at any time;
-       while Paid, the payment follows it (paid in full).
+       Status marks it Paid (the payment date: today or an earlier day; proof required) or, once
+       Paid, Unpaid again: the payment is reversed — kept on the plan (`reversed`) and in the
+       record's activity; a payment's date never changes. Once Paid its amount is fixed.
      Installment Payment — currency, total amount; a deposit (a fixed amount or a percentage of the
        total) with its own invoice issue date and due date; the rest in equal installments, due
        every 30 days after the deposit, each invoiced on its due date, 1 to 3 days or a week before,
        or a custom number of days before (1 day by default). Edit on the schedule sets each amount
        and date and adds or deletes installments: the schedule then bills what's set, whether or
-       not it adds up to the total (decided 2026-11-12).
+       not it adds up to the total.
      Recurring Payment   — a subscription: the same amount every month (30 days) or year, its first
        invoice issued when the quote is signed or on a fixed date, each due by its terms; for a
        number of years, or until cancelled (Cancel Subscription).
    The plan makes the payments (planSchedule) — real dated installments, so the Accounting
-   properties, Forecasted Cash, Cash Invoiced (an installment is invoiced on its invoice date,
-   invoicedOn) and workflows read every type alike. Quote Signed waits for the record's quote to be
-   signed: until then the dates read "Day N" from signing (datePlansOnSigning dates them).
-   Switching type keeps what's recorded: a paid One-Time Payment becomes the paid deposit (Recurring
-   isn't offered then); once an installment is paid the type is fixed, as the terms are. Each
-   One-Time change (paid, reversed, amount) and each switch is in the record's activity (Payment).
-   Terms saved before plans keep their installments as they were; edited, they open as a plan (planOf).
-   Its ⋯ (One-Time: Edit at any time; Installment and Recurring: until the first payment is recorded):
-     Edit Payment Terms — the panel above.
-     Cancel Subscription — (until cancelled) the day it ends: nothing is invoiced after it; what's
-       invoiced by then stays owed. Once cancelled, the terms can't be edited.
-     Pull from quote    — a quote sent to the record (Sent or Signed) fills the structure with its
-       payment terms (its plan for the quote's total; saved before plans: its installments, a
-       "Day N" counting from the quote's sent date), marked "Imported from Quote". Each quote can be
-       pulled once. Payments can be recorded once the quote is signed.
-   A record saved with more than one structure (before this rule) keeps one — the one with
-   payments, else a quote's, else its own (primaryTermsOf) — and the others stay, archived:
-   viewable, read-only, never deleted.
+   properties, Forecasted Cash and workflows read every type alike — and every payment its own
+   invoice (invoices.jsx), issued on its invoice date. Quote Signed waits for the record's quote to
+   be signed: until then the dates read "Day N" from signing (plansOnQuoteSigned dates them).
+   Editing (⋯ Edit Payment Plan, at any time — frozen too): a payment with anything paid on it keeps
+   its amount and dates (shown locked); the rest follow the new plan. Each save is a revision
+   (`revision`, the ones before in `revisions`); an issued, unpaid invoice whose payment changed is
+   archived and the payment invoiced again (archiveChangedInvoices). A paid One-Time Payment can
+   become an Installment Payment's paid deposit (Recurring isn't offered then); otherwise the type
+   is fixed once anything's paid. Creating, editing, freezing and each One-Time change are in the
+   record's activity (Payment).
+   Freeze: Save and Freeze when adding one, or Freeze Plan at the top of its panel. Frozen, no
+   invoice is issued and no payment recorded; its invoices and payments stay. Unfreeze Plan brings
+   it back — what fell due meanwhile is invoiced then. Cancel Subscription (until cancelled, ⋯): the
+   day it ends — nothing is invoiced after it; what's invoiced by then stays owed. Once cancelled,
+   the plan can't be edited.
+   Records saved before plans: their untouched starting terms are dropped (migratePlans); the rest
+   are plans, numbered in the order they were made, their installments as they were (edited, they
+   open as a plan — planOf).
 
    Installment payments only move forward (no edit or undo until a correction workflow is defined):
      Unpaid          — nothing received.
      Partially Paid  — an amount received (less than the installment); the rest becomes its own
-                       installment, linked to the original ("Balance of …"), with its own amount,
-                       expected date and status. The original keeps its amount and payment.
-     Paid            — the installment's outstanding amount received in full.
+                       payment, linked to the original ("Balance of …"), with its own amount,
+                       expected date, status and invoice (the original's is archived, keeping what
+                       was received). The original keeps its amount and payment.
+     Paid            — the installment's outstanding amount received in full: its invoice Paid.
    Each payment is its own record: amount (more than 0), date (today or earlier), who recorded it,
-   and optional evidence — an uploaded screenshot (≤2 MB) and / or a payment gateway or reference
-   link. A part payment's balance is expected today or later.
+   and its proof — an uploaded screenshot (≤2 MB) and / or a payment gateway or reference link (one
+   of them required). A part payment's balance is expected today or later.
 
-   A customer with a deal shows its deal's Payment Terms (termsHolderOf): one structure for the sale.
+   A customer with a deal shows its deal's Payment Plans (termsHolderOf): one set for the sale.
 
-   Recording payments and manual structures need edit access to the record; everyone who can see
-   it sees its structures. A record with payments recorded can't be deleted (recordHasPayments) —
+   Recording payments and editing plans need edit access to the record; everyone who can see
+   it sees its plans. A record with payments recorded can't be deleted (recordHasPayments) —
    by hand, in bulk or by a workflow — so no recorded cash leaves Cash Received or Goals. */
 
 const ACCOUNTING_RECORD_TYPES = ['contacts', 'deals', 'customers'];
@@ -87,8 +90,6 @@ function recordEditable(object, record){
   const p = ACCESS.perms[object];
   return !!(p && p.enabled && permissionCovers(p.edit, object, record));
 }
-// The quotes on the record (its own).
-const recordQuotes = (hub, object, record) => (hub.quotes || []).filter(q => q.object === object && String(q.recordId) === String(record.id));
 const hasPayments = (s) => (s.installments || []).some(x => (x.payments || []).length);
 /* The payment type (see the header): set when the terms are saved; before that, untouched default
    terms — one installment, no due date — are One-Time, anything else Installment. A Subscription
@@ -97,20 +98,35 @@ const PAYMENT_TYPE_LABEL = {'one-time':'One-Time Payment', installments:'Install
 const PAYMENT_TYPES = [['one-time', 'One-Time'], ['installments', 'Installment'], ['recurring', 'Recurring']];
 const RECURRING_FREQUENCY = {weekly:'Weekly', monthly:'Monthly', yearly:'Yearly'};
 const paymentTypeOf = (s) => s.paymentType === 'subscription' ? 'recurring' : s.paymentType || (s.source === 'manual' && (s.installments || []).length === 1 && !s.installments[0].dueDate ? 'one-time' : 'installments');
-/* Whose Payment Terms a record shows: a customer with a deal shows its deal's (one structure for the
-   sale — the Accounting tab, the Accounting columns and workflows all read it); anything else its own. */
+/* Whose Payment Plans a record shows: a customer with a deal shows its deal's (one set for the sale
+   — the Accounting tab, the Accounting columns and workflows all read them); anything else its own. */
 const termsHolderOf = (object, record) => object === 'customers' && record && (record.dealIds || []).length ? {object:'deals', id:record.dealIds[0]} : {object, id:record ? record.id : null};
-// Whether a record has payments recorded (in any of its payment terms): such a record can't be deleted.
+// Whether a record has payments recorded (in any of its plans): such a record can't be deleted.
 const recordHasPayments = (object, id, list = WF_LIVE.accounting) => (list || []).some(s => s.object === object && String(s.recordId) === String(id) && hasPayments(s));
-// A record's one payment structure among those saved for it (see the header); the rest are archived.
-function primaryTermsOf(list){
-  if(!list || !list.length) return null;
-  const paid = list.filter(hasPayments);
-  return paid.length ? paid[paid.length - 1] : list.find(s => s.source !== 'manual') || list.find(s => !s.isDefault) || list[0];
+// The plans a record shows (a customer with a deal: its deal's).
+const recordPlansOf = (list, object, record) => { const h = termsHolderOf(object, record); return (list || []).filter(s => s.object === h.object && String(s.recordId) === String(h.id)); };
+// A plan's payments that carry what's owed: each one, or the balance its rest moved to.
+const livePayments = (s) => (s.installments || []).filter(i => !(s.installments || []).some(x => x.parentId === i.id));
+/* Where a plan is (the Accounting tab's tabs): Frozen; Paid — every payment reconciled and nothing
+   more to bill (a subscription until cancelled: once cancelled); else Active. */
+const PLAN_STATES = [{id:'active', name:'Active', icon:'coins'}, {id:'paid', name:'Paid', icon:'check'}, {id:'frozen', name:'Frozen', icon:'freeze'}];
+const planState = (s) => s.frozen ? 'frozen' : (s.installments || []).length && livePayments(s).every(i => installmentState(s, i).status === 'paid')
+  && (!planOngoing(s.plan) || !!s.cancelledOn) ? 'paid' : 'active';
+// A plan's number: PP-<year>-<nnnn>, from a counter that only goes up (store.jsx `ids.paymentPlans`).
+const nextPlanNumber = (list, at) => { ensureIdFloor('paymentPlans', quoteSeqFloor(list));
+  return `PP-${new Date(at || Date.now()).getFullYear()}-${String(newRecordId('paymentPlans')).padStart(4, '0')}`; };
+const planTitle = (s) => `${s.number ? `${s.number} · ` : ''}${PAYMENT_TYPE_LABEL[paymentTypeOf(s)]}`;
+/* Plans saved before (Payment Terms): the untouched starting terms every record had go (a record
+   starts with none now); the rest are numbered in the order they were made. */
+function migratePlans(list){
+  const kept = (list || []).filter(s => s && !(s.isDefault && !hasPayments(s)));
+  const time = (s) => new Date(s.createdAt).getTime() || 0;
+  const num = new Map(kept.filter(s => !s.number).sort((a, b) => time(a) - time(b)).map(s => [s.id, nextPlanNumber(kept, s.createdAt)]));
+  return num.size ? kept.map(s => num.has(s.id) ? {...s, number:num.get(s.id), revision:s.revision || 1} : s) : kept;
 }
-/* A quote's payment structure, as pulled: its plan (the quote's total, in its currency), dated from
-   the day it was signed (not signed yet: dated when it is — datePlansOnSigning). A quote saved
-   before plans: its installments as they were. */
+/* A quote's Payment Plan, made when it's signed (plansOnQuoteSigned): its plan (the quote's total, in
+   its currency), dated from the day it was signed. A quote saved before plans: its installments as
+   they were. */
 const scheduleFromQuote = (q, object, record) => {
   const head = {id:`qs-${q.id}`, source:'quote', quoteId:q.id, quoteNumber:q.number, quoteTitle:q.title, object, recordId:record.id, createdAt:q.createdAt, createdBy:q.createdBy, total:quoteTotal(q), currency:quoteCurrency(q)};
   if(q.payment){
@@ -121,23 +137,11 @@ const scheduleFromQuote = (q, object, record) => {
   return {...head, installments:(q.installments || []).map((x, i) => ({id:`qs-${q.id}-${x.id || i}`, parentId:null, description:x.description, percent:Number(x.percent) || 0,
     amount:installmentAmount(q, x), dueDate:tentativeDate(x.due, q.sentAt), tentative: x.due && x.due.type !== 'date' ? fmtTentative(x.due) : '', payments:[]}))};
 };
-/* The default payment terms every Contact, Deal and Customer starts with while it has none of its
-   own: one installment — First installment, 100%, Unpaid — the total the deal's amount, following it
-   while the terms are untouched (0 for a contact or customer until it's set). A real structure (edited, paid or replaced like any other),
-   so the record's First Installment Status reads Unpaid for workflows. No due date is invented:
-   it's set when the terms are edited (Forecasted Cash counts installments by due date). */
+/* The starting terms every record had before Payment Plans (one installment, the deal's amount),
+   saved compactly while untouched: read back so migratePlans can drop them. */
 const defaultTermsOf = (id, object, recordId, total, startDate, createdAt, currency) => ({id, source:'manual', isDefault:true, object, recordId, createdAt, createdBy:'System',
   title:'Payment terms', total, ...(currency ? {currency} : {}), startDate, terms:[{id:id + 't', description:'First installment', percent:100, due:null}],
   installments:[{id:id + 'i', parentId:null, description:'First installment', percent:100, amount:total, dueDate:'', tentative:'', payments:[]}]});
-const defaultPaymentTerms = (object, record) =>
-  defaultTermsOf(acId('ps'), object, record.id, object === 'deals' ? r2(Number(record.amount) || 0) : 0, ymdOf(new Date()), new Date(), object === 'deals' ? record.currency : undefined);
-/* Saved compactly while untouched (every record has them, and browser storage is small); once
-   edited or paid they're saved in full like any other structure. */
-const packPaymentTerms = (list) => list.map(s => {
-  if(!s.isDefault) return s;
-  const fresh = defaultTermsOf(s.id, s.object, s.recordId, s.total, s.startDate, s.createdAt, s.currency);
-  return JSON.stringify(s) === JSON.stringify(fresh) ? {defaultTerms:[s.id, s.object, s.recordId, s.total, s.startDate, +new Date(s.createdAt), ...(s.currency ? [s.currency] : [])]} : s;
-});
 const unpackPaymentTerms = (list) => (list || []).map(s => s && s.defaultTerms
   ? (([id, object, recordId, total, startDate, at, currency]) => defaultTermsOf(id, object, recordId, total, startDate, new Date(at), currency))(s.defaultTerms) : s);
 /* ── Payment terms: a plan and the schedule it makes (decided 2026-11-12) ──
@@ -191,8 +195,9 @@ const planCycles = (plan) => { const c = planCount(plan), yearly = plan.frequenc
   return plan.duration === 'years' ? (yearly ? c : c * 12) : yearly ? Math.ceil(c / 12) : c; };
 /* The payments a plan makes. `total`: the amount when it isn't the plan's own (a quote's total).
    `signedOn`: the day it was signed. `asOf`: today. `preview`: at least this many billing cycles
-   of a subscription until cancelled. `cancelledOn`: no invoice after it. */
-function planSchedule(plan, {id = 'pt', signedOn = '', total, asOf = ymdOf(new Date()), preview = 1, cancelledOn = ''} = {}){
+   of a subscription until cancelled. `cancelledOn`: no invoice after it. `locked`: payments with
+   something paid on them, by id — they keep their amount and dates ({amount, invoiceDate, dueDate}). */
+function planSchedule(plan, {id = 'pt', signedOn = '', total, asOf = ymdOf(new Date()), preview = 1, cancelledOn = '', locked} = {}){
   const type = paymentTypeOf(plan), amount = r2(total != null ? total : plan.amount), byDate = (plan.issue || {}).type === 'date';
   // A date and whether it's known (else counted from day 0: today, until the signing).
   const at = (date, fixed) => ({date, fixed});
@@ -229,6 +234,7 @@ function planSchedule(plan, {id = 'pt', signedOn = '', total, asOf = ymdOf(new D
       rows.push(row(`${id}-i${k}`, `Installment ${k}`, set(o.amount) ? r2(o.amount) : custom ? 0 : k === n ? r2(rest - each * (n - 1)) : each, inv, du));
     }
   }
+  if(locked) rows = rows.map(x => locked[x.id] ? {...x, amount:locked[x.id].amount, invoiceDate:locked[x.id].invoiceDate || '', dueDate:locked[x.id].dueDate || '', invoiceTentative:'', tentative:'', locked:true} : x);
   const sum = rows.reduce((a, x) => a + x.amount, 0);
   return rows.map(x => ({...x, percent: sum ? x.amount / sum * 100 : 0}));
 }
@@ -275,9 +281,10 @@ const invoicedOn = (inst, today = ymdOf(new Date())) => inst.invoicedAt || (inst
 const quoteSignedOn = (quotes, s) => { const signed = (quotes || []).filter(q => q.status === 'signed' && q.signedAt);
   const own = signed.find(q => q.id === s.quoteId); if(own) return dayOf(own.signedAt);
   return signed.filter(q => q.object === s.object && String(q.recordId) === String(s.recordId)).map(q => dayOf(q.signedAt)).sort().pop() || ''; };
-/* Payment terms' rows as their plan makes them now (`patch`: dated from a signing, cancelled) —
-   a row kept keeps everything but its dates (payments, invoices, balances); a row the plan no
-   longer makes (a cycle after a cancellation) stays only when something's paid on it. */
+/* A plan's rows as it makes them now (`patch`: dated from a signing, cancelled) — a row kept keeps
+   everything but its dates (payments, invoices, balances), and a dated one with something paid on
+   it its dates too; a row the plan no longer makes (a cycle after a cancellation) stays only when
+   something's paid on it. */
 function refreshSchedule(s, patch = {}){
   const next = {...s, ...patch}, all = next.installments || [], top = all.filter(x => !x.parentId);
   const fresh = planSchedule(next.plan, {id:next.id, signedOn:next.signedOn, cancelledOn:next.cancelledOn});
@@ -286,19 +293,29 @@ function refreshSchedule(s, patch = {}){
   const used = new Set();
   const rows = fresh.flatMap(f => { const o = top.find(x => x.id === f.id) || (fresh.length === 1 && top.length === 1 ? top[0] : null);
     if(!o) return [f]; used.add(o.id);
-    return withKids({...o, invoiceDate:f.invoiceDate, dueDate:f.dueDate, invoiceTentative:f.invoiceTentative, tentative:f.tentative}); });
+    return withKids((o.payments || []).length && o.dueDate ? o : {...o, invoiceDate:f.invoiceDate, dueDate:f.dueDate, invoiceTentative:f.invoiceTentative, tentative:f.tentative}); });
   const installments = [...rows, ...top.filter(x => !used.has(x.id) && paidTree(x)).flatMap(withKids)];
   return {...next, installments, total:r2(installments.filter(x => !x.parentId).reduce((a, x) => a + x.amount, 0))};
 }
 const withSignedOn = (s, on) => refreshSchedule(s, {signedOn:on});
 // A subscription until cancelled: billed up to today and the next cycle (on every load, app.jsx).
 const rollSubscription = (s) => s && planOngoing(s.plan) && !s.archived ? refreshSchedule(s) : s;
-/* A quote signed (quotes.jsx): the payment terms waiting for it — pulled from it, or on its record
-   and set to Quote Signed — get their dates. */
-function datePlansOnSigning(hub, quote, signedAt){
-  const on = dayOf(signedAt);
-  hub.setAccounting(list => list.map(s => !s.plan || (s.plan.issue || {}).type === 'date' || s.signedOn
-    || !(s.quoteId === quote.id || (s.object === quote.object && String(s.recordId) === String(quote.recordId))) ? s : withSignedOn(s, on)));
+/* A quote signed (quotes.jsx): the plans waiting for it — on its record and set to Quote Signed — get
+   their dates, and the quote's own Payment Plan is made (once; with payment terms and a total), on
+   the record that holds its plans, dated from the signing — its invoices due by then are issued at
+   once (invoices.jsx). A quote saved before plans has no invoice dates: each payment is invoiced on
+   its due date. */
+function plansOnQuoteSigned(hub, quote, signedAt){
+  const on = dayOf(signedAt), rec = hubRecord(hub, quote.object, quote.recordId), h = rec ? termsHolderOf(quote.object, rec) : null;
+  const holder = h && hubRecord(hub, h.object, h.id);
+  const make = holder && (quote.payment || (quote.installments || []).length) && quoteTotal(quote) > 0 && !(hub.accounting || []).some(s => s.quoteId === quote.id);
+  const made = make ? scheduleFromQuote({...quote, status:'signed', signedAt}, h.object, holder) : null;
+  const plan = made ? {...made, number:nextPlanNumber(hub.accounting), revision:1, createdAt:new Date(), createdBy:'System',
+    ...(made.plan ? {} : {installments:made.installments.map(x => x.dueDate && !x.invoiceDate ? {...x, invoiceDate:x.dueDate} : x)})} : null;
+  hub.setAccounting(list => [...list.map(s => !s.plan || (s.plan.issue || {}).type === 'date' || s.signedOn
+    || !(s.quoteId === quote.id || (s.object === quote.object && String(s.recordId) === String(quote.recordId))) ? s : withSignedOn(s, on)),
+    ...(plan && !list.some(s => s.quoteId === quote.id) ? [plan] : [])]);
+  if(plan) hub.add(plan.object, plan.recordId, {type:'payment', action:'Payment plan created', detail:`${planTitle(plan)} · from ${quote.number}`, source:'you', by:'System'});
 }
 
 /* A schedule as a table: each payment's name, invoice date, due date (or Day N) and amount, then
@@ -325,8 +342,8 @@ function PaymentPlanTable({rows, currency, rule, ongoing}){
       </div>}
   </div>);
 }
-/* ── The payment terms' fields ── the Edit Payment Terms panel's (Accounting, Documents) and a
-   quote's Payment Terms step (`total`: the quote's — no currency or amount here then). Every
+/* ── A Payment Plan's fields ── the Payment Plan panel's (Accounting, Documents) and a quote's
+   Payment Plan step (`total`: the quote's — no currency or amount here then). Every
    input the same size, one per row, a second one beside it when a choice needs it (a fixed date,
    custom days, a number):
      One-Time    — Currency, Amount, Invoice Issue Date, Due Date;
@@ -338,11 +355,14 @@ function PaymentPlanTable({rows, currency, rule, ongoing}){
      Recurring   — Currency, Amount, Billing Frequency, Invoice Issue Date, Due Date, Duration (a
                    number of years, or until cancelled);
    then the schedule they make. `signedLabel`: the issue date's first option ("Quote Signed", a
-   document's "Document Signed"). `paid`: a paid One-Time payment ({amount}) — switched to
-   Installment it's the deposit, as paid; Recurring isn't offered then. `signedOn`: the day it's
-   already signed (Accounting: the record's quote), so the schedule shows its dates. */
+   document's "Document Signed"). `paid`: a paid One-Time payment ({amount, invoiceDate, dueDate}) —
+   its amount and dates fixed; switched to Installment it's the deposit, as paid; Recurring isn't
+   offered then. `locked`: the plan's payments with something paid on them, by id (planSchedule) —
+   shown as they are, not editable, and the type and currency fixed; `scheduleId`: the plan's id
+   (its payments' ids). `signedOn`: the day it's already signed (Accounting: the record's quote), so
+   the schedule shows its dates. */
 const PT_W = 280, PT_H = 36;
-function PaymentTermsFields({plan, onChange, total, currency, signedLabel = 'Quote Signed', paid, signedOn}){
+function PaymentTermsFields({plan, onChange, total, currency, signedLabel = 'Quote Signed', paid, signedOn, locked, scheduleId}){
   const set = (p) => onChange({...plan, ...p}), type = paymentTypeOf(plan), inQuote = total != null;
   const amount = Number(inQuote ? total : plan.amount) || 0, cur = currency || plan.currency, unit = RECURRING_UNIT[plan.frequency] || 'Month';
   const section = {fontSize:11, fontWeight:600, color:T.attioFaint, textTransform:'uppercase', letterSpacing:.4};
@@ -358,6 +378,10 @@ function PaymentTermsFields({plan, onChange, total, currency, signedLabel = 'Quo
     <input value={value ?? ''} onChange={e=>onValue(e.target.value.replace(decimal ? /[^0-9.]/g : /[^0-9]/g, ''))} inputMode={decimal ? 'decimal' : 'numeric'} placeholder="0" aria-label={label} style={bare}/>
     {after && <span style={affix}>{after}</span>}</div>;
   const date = (value, onValue, label, placeholder) => <DateField required value={value || ''} onChange={onValue} ariaLabel={label} inputStyle={dateInput} placeholder={placeholder || 'Select date'}/>;
+  // Fixed (something's paid on it): the value as it is.
+  const fixed = (text, status) => <div style={{display:'flex', alignItems:'center', gap:10, height:PT_H, fontSize:13, color:T.attioText, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap'}}>
+    {text}{status && <StatusPill status={status} map={PAYMENT_STATUS}/>}</div>;
+  const lockedAny = !!locked && Object.keys(locked).length > 0, paidOneTime = !!paid && type === 'one-time';
   const issue = plan.issue || {type:'signed'}, due = plan.due || {type:'net', days:0};
   const issueField = (label) => F(label, pick(issue.type, [{value:'signed', label:signedLabel}, {value:'date', label:'Fixed Date'}], (v)=>set({issue: v === 'date' ? {type:'date', date:issue.date || ''} : {type:'signed'}}), label),
     issue.type === 'date' && date(issue.date, (v)=>set({issue:{type:'date', date:v}}), label));
@@ -375,7 +399,9 @@ function PaymentTermsFields({plan, onChange, total, currency, signedLabel = 'Quo
     ? num(typed != null ? typed : plan.depositPercent === '' ? '' : String(depositAmount), (v)=>{ setTyped(v); set({depositPercent: v === '' || !(amount > 0) ? '' : Number(v) / amount * 100}); }, 'Deposit amount', cur, plan.depositPercent === '' ? '' : `${Math.round(pct * 100) / 100}%`, true)
     : num(plan.depositPercent === '' ? '' : String(Math.round(pct * 10000) / 10000), (v)=>set({depositPercent:v}), 'Deposit percentage', null, `%${plan.depositPercent === '' ? '' : ` · ${fmtMoney(depositAmount, cur)}`}`, true);
   const ready = planOk({...plan, schedule: plan.schedule === 'custom' ? 'every30' : plan.schedule}, total);
-  const rows = type !== 'one-time' && ready ? planSchedule(plan, {total, signedOn, preview:3}) : [];
+  const rows = type !== 'one-time' && ready ? planSchedule(plan, {id:scheduleId, total, signedOn, preview:3, locked}) : [];
+  // An installment before a paid one stays (the paid one keeps its place).
+  const lastLocked = rows.reduce((m, x, i) => x.locked ? i : m, 0), depositFixed = !!paid || !!(rows[0] && rows[0].locked);
   const custom = type === 'installments' && plan.schedule === 'custom';
   // Edit: the schedule as it stands, each installment's amount set on its row (its dates the 30-day ones until changed).
   const [editOn, setEditing] = React.useState(false), editing = editOn && custom;
@@ -389,16 +415,18 @@ function PaymentTermsFields({plan, onChange, total, currency, signedLabel = 'Quo
     {stack(<>
       <Field label="Payment Type">{(
         <div role="radiogroup" aria-label="Payment type" style={{display:'inline-flex', border:`1px solid ${T.borderStrong}`, borderRadius:8, overflow:'hidden', background:'#fff'}}>
-          {PAYMENT_TYPES.map(([id, l]) => { const off = id === 'recurring' && !!paid; return (
+          {PAYMENT_TYPES.map(([id, l]) => { const off = id !== type && (paid ? id === 'recurring' : lockedAny); return (
             <button key={id} type="button" role="radio" aria-checked={type === id} disabled={off} onClick={()=>!off && set({paymentType:id})}
               style={{border:'none', cursor: off ? 'default' : 'pointer', padding:'6px 14px', fontSize:12.5, fontWeight:500, fontFamily:'inherit', whiteSpace:'nowrap', opacity: off ? .45 : 1,
                 background: type === id ? T.black : 'transparent', color: type === id ? '#fff' : T.gray600}}>{l}</button>); })}
         </div>)}</Field>
       {!inQuote && <>
-        {F('Currency', pick(cur, currencyOptions(), (c)=>c && set({currency:c}), 'Currency'))}
-        {F(type === 'installments' ? 'Total Amount' : 'Amount', num(plan.amount, (v)=>set({amount:v}), type === 'installments' ? 'Total amount' : 'Amount', cur, null, true))}
+        {F('Currency', paid || lockedAny ? fixed(cur) : pick(cur, currencyOptions(), (c)=>c && set({currency:c}), 'Currency'))}
+        {F(type === 'installments' ? 'Total Amount' : 'Amount', paidOneTime ? fixed(fmtMoney(paid.amount, cur), 'paid')
+          : num(plan.amount, (v)=>set({amount:v}), type === 'installments' ? 'Total amount' : 'Amount', cur, null, true))}
       </>}
-      {type === 'one-time' && <>{issueField('Invoice Issue Date')}{dueField('Due Date')}</>}
+      {type === 'one-time' && (paidOneTime ? <>{F('Invoice Issue Date', fixed(fmtQuoteDate(paid.invoiceDate) || '—'))}{F('Due Date', fixed(fmtQuoteDate(paid.dueDate) || '—'))}</>
+        : <>{issueField('Invoice Issue Date')}{dueField('Due Date')}</>)}
       {type === 'recurring' && <>
         {F('Billing Frequency', pick(plan.frequency === 'yearly' ? 'yearly' : 'monthly', [{value:'monthly', label:'Monthly'}, {value:'yearly', label:'Yearly'}], (v)=>set({frequency:v}), 'Billing frequency'))}
         {issueField('Invoice Issue Date')}
@@ -411,10 +439,16 @@ function PaymentTermsFields({plan, onChange, total, currency, signedLabel = 'Quo
     {type === 'installments' && <>
       {divider}<span style={section}>Deposit</span>
       {stack(<>
-        {paid ? F('Amount', <div style={{display:'flex', alignItems:'center', gap:10, height:PT_H, fontSize:13, color:T.attioText, fontVariantNumeric:'tabular-nums'}}>{fmtMoney(paid.amount, cur)}<StatusPill status="paid" map={PAYMENT_STATUS}/></div>)
-          : F('Amount', pick(byAmount ? 'amount' : 'percent', [{value:'amount', label:'Fixed Amount'}, {value:'percent', label:'Percentage of Total Amount'}], (v)=>{ setTyped(null); set({depositBy:v}); }, 'Deposit type'), depositInput)}
-        {issueField('Invoice Issue Date')}
-        {dueField('Due Date')}
+        {/* Paid (a paid One-Time payment, or anything paid on it): the deposit as it is. */}
+        {depositFixed ? <>
+          {F('Amount', fixed(fmtMoney(paid ? paid.amount : rows[0].amount, cur), paid ? 'paid' : locked[rows[0].id].status))}
+          {F('Invoice Issue Date', fixed(fmtQuoteDate(paid ? paid.invoiceDate : rows[0].invoiceDate) || '—'))}
+          {F('Due Date', fixed(fmtQuoteDate(paid ? paid.dueDate : rows[0].dueDate) || '—'))}
+        </> : <>
+          {F('Amount', pick(byAmount ? 'amount' : 'percent', [{value:'amount', label:'Fixed Amount'}, {value:'percent', label:'Percentage of Total Amount'}], (v)=>{ setTyped(null); set({depositBy:v}); }, 'Deposit type'), depositInput)}
+          {issueField('Invoice Issue Date')}
+          {dueField('Due Date')}
+        </>}
       </>)}
       {divider}<span style={section}>Installments</span>
       {stack(<>
@@ -432,7 +466,12 @@ function PaymentTermsFields({plan, onChange, total, currency, signedLabel = 'Quo
         <div style={{display:'flex', flexDirection:'column', gap:8}}>
           <div style={{display:'grid', gridTemplateColumns:cols, gap:10, fontSize:11.5, color:T.attioMuted}}>
             <span>Payment</span><span>Amount</span><span>Invoice Issue Date</span><span>Payment Due Date</span><span/></div>
-          {rows.map((x, i) => (
+          {rows.map((x, i) => x.locked ? (
+            <div key={x.id} style={{display:'grid', gridTemplateColumns:cols, gap:10, alignItems:'center'}}>
+              <span style={{fontSize:13, color:T.attioText}}>{x.description}</span>
+              {fixed(fmtMoney(x.amount, cur), locked[x.id].status)}{fixed(fmtQuoteDate(x.invoiceDate) || '—')}{fixed(fmtQuoteDate(x.dueDate) || '—')}<span/>
+            </div>
+          ) : (
             <div key={x.id} style={{display:'grid', gridTemplateColumns:cols, gap:10, alignItems:'center'}}>
               <span style={{fontSize:13, color:T.attioText}}>{x.description}</span>
               {i === 0
@@ -443,8 +482,8 @@ function PaymentTermsFields({plan, onChange, total, currency, signedLabel = 'Quo
                 (v)=>i === 0 ? set({issue:{type:'date', date:v}}) : setRow(i - 1, {invoiceDate:v}), `${x.description} invoice issue date`, x.invoiceTentative)}
               {date(i === 0 ? (due.type === 'date' ? due.date : x.dueDate) : ((plan.rows || [])[i - 1] || {}).dueDate || x.dueDate,
                 (v)=>i === 0 ? set({due:{type:'date', date:v}}) : setRow(i - 1, {dueDate:v}), `${x.description} payment due date`, x.tentative)}
-              {/* The deposit stays; an installment can go while one is left. */}
-              {i > 0 && rows.length > 2 ? <button type="button" title={`Delete ${x.description}`} onClick={()=>deleteRow(i - 1)}
+              {/* The deposit stays; an installment can go while one is left (not one before a paid one). */}
+              {i > 0 && i > lastLocked && rows.length > 2 ? <button type="button" title={`Delete ${x.description}`} onClick={()=>deleteRow(i - 1)}
                 style={{border:'none', background:'transparent', cursor:'pointer', display:'flex', justifyContent:'center', padding:4}}><Icon name="trash" size={14} color={T.gray600}/></button> : <span/>}
             </div>
           ))}
@@ -457,41 +496,31 @@ function PaymentTermsFields({plan, onChange, total, currency, signedLabel = 'Quo
   </>);
 }
 
-/* ── Edit Payment Terms: the side panel ── PaymentTermsFields, saved as a plan (`onSave(plan)`).
-   `initial`: the plan, and `paid` for a paid One-Time payment. `pullable`: the quotes sent to the
-   record whose terms aren't pulled yet; `onPull(quote)` fills the terms with one. `heading` /
-   `zIndex` / `signedLabel`: Documents' Add Payment Term, over its builder. `signedOn`: PaymentTermsFields'. */
-function PaymentStructurePanel({initial, onCancel, onSave, pullable = [], onPull, heading, zIndex, signedLabel, signedOn}){
+/* ── A Payment Plan's side panel ── PaymentTermsFields, saved as a plan (`onSave(plan, {freeze})`).
+   `initial`: the plan, and `paid` for a paid One-Time payment. `isNew`: Add Payment Plan — Save and
+   Save and Freeze. An existing plan: Freeze Plan / Unfreeze Plan at the top (`frozen`, `onFreeze`),
+   at once. `locked` / `scheduleId` / `signedOn`: PaymentTermsFields'. `heading` / `zIndex` /
+   `signedLabel`: Documents' Add Payment Plan, over its builder. */
+function PaymentStructurePanel({initial, onCancel, onSave, heading, zIndex, signedLabel, signedOn, locked, scheduleId, isNew, frozen, onFreeze}){
   const paid = initial && initial.paid;
   const [plan, setPlan] = React.useState(() => newPaymentPlan(initial ? (({paid: _, ...p}) => p)(initial) : undefined));
-  const [pickOpen, setPickOpen] = React.useState(false);
   // A paid One-Time payment as the deposit: its amount, the total more than it.
   const view = paid && plan.paymentType === 'installments' ? {...plan, depositBy:'amount', depositPercent: Number(plan.amount) > 0 ? paid.amount / Number(plan.amount) * 100 : ''} : plan;
   const def = () => normalizePlan(view);
-  const ok = planOk(view);
-  // Saved untouched, the terms stay exactly as they are (a quote's stay the quote's, invoices and all).
+  const ok = planOk(paid && view.paymentType === 'one-time' ? {...view, amount:paid.amount} : view);
+  // Saved untouched, an existing plan stays exactly as it is (a quote's stay the quote's, invoices and all).
   const opened = React.useRef(JSON.stringify(plan)).current;
-  const save = () => ok && (JSON.stringify(plan) === opened ? onCancel() : onSave(def()));
+  const save = (freeze) => ok && (!isNew && JSON.stringify(plan) === opened ? onCancel() : onSave(def(), {freeze}));
   return (
-    <CreatePanelFrame title={heading || 'Edit Payment Terms'} onClose={onCancel} placement="fixed" width={920} zIndex={zIndex} actions={<>
-      <StSecondary label="Cancel" onClick={onCancel}/>
-      <StCta label="Save" disabled={!ok} onClick={save}/>
-    </>}>
-      {/* Pull from quote: a sent quote's payment terms, brought in as they are. */}
-      {onPull && pullable.length > 0 && (
-        <div style={{display:'flex', alignItems:'center', gap:10, padding:'12px 14px', marginBottom:18, border:`1px solid ${T.attioLine}`, borderRadius:10, background:T.headerBg}}>
-          <Icon name="quote" size={15} color={T.gray600}/>
-          <span style={{flex:1, fontSize:13, color:T.attioText}}>Pull payment terms from a sent quote</span>
-          <div style={{position:'relative'}}>
-            <button type="button" onClick={()=>setPickOpen(o => !o)} style={btnSecondarySm}>Pull from Quote <Icon name="chevDown" size={11} color={T.gray600}/></button>
-            <MenuShell open={pickOpen} onClose={()=>setPickOpen(false)} anchorRight width={340}>
-              {/* One line each (menu copy never wraps): the quote's number, title and total. */}
-              {pullable.map(q => <MenuItem key={q.id} label={`${q.number} · ${q.title} · ${fmtMoney(quoteTotal(q), quoteCurrency(q))}`} onClick={()=>{ setPickOpen(false); onPull(q); }}/>)}
-            </MenuShell>
-          </div>
-        </div>
-      )}
-      <PaymentTermsFields plan={view} onChange={setPlan} signedLabel={signedLabel} paid={paid} signedOn={signedOn}/>
+    <CreatePanelFrame title={heading || (isNew ? 'Add Payment Plan' : 'Edit Payment Plan')} onClose={onCancel} placement="fixed" width={920} zIndex={zIndex}
+      headerActions={onFreeze && <button type="button" onClick={onFreeze} style={{...btnSecondarySm, display:'inline-flex', alignItems:'center', gap:6}}>
+        <Icon name={frozen ? 'unfreeze' : 'freeze'} size={13} color={T.gray600}/>{frozen ? 'Unfreeze Plan' : 'Freeze Plan'}</button>}
+      actions={<>
+        <StSecondary label="Cancel" onClick={onCancel}/>
+        {isNew && <StSecondary label="Save and Freeze" disabled={!ok} onClick={()=>save(true)}/>}
+        <StCta label="Save" disabled={!ok} onClick={()=>save(false)}/>
+      </>}>
+      <PaymentTermsFields plan={view} onChange={setPlan} signedLabel={signedLabel} paid={paid} signedOn={signedOn} locked={locked} scheduleId={scheduleId}/>
     </CreatePanelFrame>
   );
 }
@@ -506,7 +535,8 @@ function CancelSubscriptionModal({onCancel, onSave}){
     </StModal>, document.body);
 }
 
-/* ── Update an installment's status: Paid or Partially Paid, with the payment and its evidence ──
+/* ── Update an installment's status: Paid or Partially Paid, with the payment and its evidence
+   (required: a screenshot or a reference link — saving reconciles it and its invoice is Paid) ──
    `oneTime`: a One-Time payment — Paid or Unpaid; once Paid, Unpaid reverses it (`onReverse`). */
 function PaymentModal({schedule, inst, oneTime, onCancel, onSave, onReverse}){
   const st = installmentState(schedule, inst), cur = scheduleCurrency(schedule);
@@ -524,11 +554,11 @@ function PaymentModal({schedule, inst, oneTime, onCancel, onSave, onReverse}){
   const unpaid = status === 'unpaid';
   const amt = Number(amount);
   const amountOk = !partial || (amount !== '' && amt > 0 && amt < due);
-  const linkOk = !link.trim() || /^https?:\/\/\S+$/i.test(link.trim());
+  const linkOk = !link.trim() || /^https?:\/\/\S+$/i.test(link.trim()), proofOk = !!file || !!link.trim();
   // Paid today or earlier; the rest of a part payment is expected today or later.
   const today = ymdOf(new Date()), paidOnOk = !!paidOn && paidOn <= today, expectedOk = !partial || (!!expected && expected >= today);
   // A payment needs something owed: an installment of 0 (terms whose total isn't set yet) takes none.
-  const ok = wasPaid ? unpaid : unpaid || (due > 0 && paidOnOk && amountOk && linkOk && expectedOk);
+  const ok = wasPaid ? unpaid : unpaid || (due > 0 && paidOnOk && amountOk && linkOk && proofOk && expectedOk);
   const radio = (k, label) => (
     <label key={k} style={{display:'flex', alignItems:'center', gap:8, fontSize:13, color:T.attioText, cursor:'pointer'}}>
       <input type="radio" name="payment-status" checked={status === k} onChange={()=>setStatus(k)}/> {label}
@@ -564,7 +594,7 @@ function PaymentModal({schedule, inst, oneTime, onCancel, onSave, onReverse}){
           <div><label style={fieldLabel}>Payment Date</label><DateField required value={paidOn} onChange={setPaidOn}/>
             {paidOn && !paidOnOk && <div style={{fontSize:12, color:T.red, marginTop:4}}>A payment can't be dated in the future.</div>}</div>
           <div>
-            <label style={fieldLabel}>Payment Evidence</label>
+            <label style={fieldLabel}>Payment Evidence <span style={{color:T.attioMuted, fontWeight:400}}>· a screenshot or a link</span></label>
             <div style={{display:'flex', flexDirection:'column', gap:8}}>
               <EvidenceFile tall value={file} accept="image/*,.pdf" onClear={()=>setFile(null)} onChange={(f)=>readUpload(f).then(v => { setFile(v); setError(''); }).catch(e => setError(e.message))}/>
               <input value={link} onChange={e=>setLink(e.target.value)} placeholder="Payment gateway or reference link (https://…)" aria-label="Reference link"
@@ -628,22 +658,41 @@ function PaymentVerificationModal({inst, currency, onClose}){
     </StModal>, document.body);
 }
 
-/* One set of payment terms, laid straight into the tab: its payment type and totals, then the
-   payments across the full width — Installment, Amount, Status, Invoice Date, Due Date, Actions —
-   each on one line (a date not set yet: Day N from signing). Narrower than its columns, the table
-   scrolls sideways and Actions stays in view. */
-const SCHEDULE_COLS = 'minmax(200px, 2fr) minmax(112px, 1fr) minmax(124px, 1fr) minmax(120px, 1fr) minmax(120px, 1fr) 150px';
-const SCHEDULE_MIN_W = 826;
-// A One-Time payment: one row — Amount, Status, Invoice Date, Due Date, Paid On, Actions.
-const ONE_TIME_COLS = 'minmax(140px, 1fr) minmax(124px, 1fr) minmax(120px, 1fr) minmax(120px, 1fr) minmax(120px, 1fr) 250px';
-const ONE_TIME_MIN_W = 874;
+/* One Payment Plan, laid straight into the tab: its number and type, where it came from, its
+   totals, then the payments across the full width — Installment, Amount, Status, Invoice, Invoice
+   Date, Due Date, Actions — each on one line (a date not set yet: Day N from signing); under them,
+   its archived invoices. Narrower than its columns, the table scrolls sideways and Actions stays
+   in view. */
+const SCHEDULE_COLS = 'minmax(200px, 2fr) minmax(112px, 1fr) minmax(124px, 1fr) minmax(130px, 1fr) minmax(120px, 1fr) minmax(120px, 1fr) 150px';
+const SCHEDULE_MIN_W = 956;
+// A One-Time payment: one row — Amount, Status, Invoice, Invoice Date, Due Date, Paid On, Actions.
+const ONE_TIME_COLS = 'minmax(140px, 1fr) minmax(124px, 1fr) minmax(130px, 1fr) minmax(120px, 1fr) minmax(120px, 1fr) minmax(120px, 1fr) 250px';
+const ONE_TIME_MIN_W = 1004;
 // A payment's invoice and due dates as the table shows them: the date, else Day N, else —; saved before plans, the invoice it had.
 const invoiceCell = (inst) => fmtQuoteDate(inst.invoiceDate || inst.invoicedAt) || inst.invoiceTentative || '—';
 const dueCell = (inst) => fmtQuoteDate(inst.dueDate) || inst.tentative || '—';
-// `canEdit`: edit the terms and record payments (Payment Terms → Edit).
-// `archived`: a record's extra structure saved before one-per-record — shown read-only.
-function PaymentScheduleCard({schedule, canEdit, canPay, quote, pullable, archived, onPay, onView, onEdit, onOpenQuote, onCancelSubscription}){
-  const t = scheduleTotals(schedule), type = paymentTypeOf(schedule), oneTime = type === 'one-time';
+// A payment's invoice: its number, opening it (none issued yet: —).
+const InvoiceLink = ({invoice, onOpen}) => invoice
+  ? <button type="button" onClick={()=>onOpen(invoice)} title={INVOICE_STATUS[invoiceStatusOf(invoice)].label}
+      style={{...formTextAction, fontWeight:400, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', padding:0}}>{invoice.number}</button>
+  : <span style={{color:T.attioMuted}}>—</span>;
+// A source pill: the quote or document a plan was made from (gone if it was deleted).
+function PlanSourcePill({icon, label, target, onOpen}){
+  return (<>
+    <button type="button" disabled={!target} onClick={()=>target && onOpen(target)} title={target ? target.number : undefined}
+      style={{display:'inline-flex', alignItems:'center', gap:5, border:'none', fontFamily:'inherit', fontSize:11.5, fontWeight:500, padding:'2px 8px', borderRadius:9999,
+        background:T.blueLight, color:T.blue, whiteSpace:'nowrap', cursor: target ? 'pointer' : 'default'}}>
+      <Icon name={icon} size={11} color={T.blue}/>
+      <span style={target ? {textDecorationLine:'underline', textUnderlineOffset:2} : undefined}>{label}</span></button>
+    {!target && <span style={{fontSize:12, color:T.attioMuted, whiteSpace:'nowrap'}}>Deleted</span>}
+  </>);
+}
+// `canEdit`: edit the plan and record payments (Payment Plans → Edit); a frozen plan takes no payments.
+function PaymentScheduleCard({schedule, canEdit, invoices, quote, doc, onPay, onView, onEdit, onOpenQuote, onOpenDocument, onCancelSubscription, onOpenInvoice}){
+  const t = scheduleTotals(schedule), type = paymentTypeOf(schedule), oneTime = type === 'one-time', frozen = !!schedule.frozen;
+  const [showArchived, setShowArchived] = React.useState(false);
+  const mine = planInvoices(invoices, schedule.id), archived = mine.filter(v => v.status === 'archived');
+  const invoiceOf = (inst) => mine.find(v => v.instId === inst.id && v.status !== 'archived') || null;
   // Every row (header included) one line, at the record tables' row height.
   const head = {fontSize:11.5, fontWeight:500, color:T.attioMuted, height:T.attioRowH, padding:'0 12px', display:'flex', alignItems:'center', whiteSpace:'nowrap'};
   const cell = {fontSize:13, color:T.attioText, height:T.attioRowH, padding:'0 12px', minWidth:0, display:'flex', alignItems:'center', whiteSpace:'nowrap'};
@@ -659,35 +708,28 @@ function PaymentScheduleCard({schedule, canEdit, canPay, quote, pullable, archiv
       <div style={{fontSize:14, fontWeight:600, color: tone || T.attioText, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', marginTop:1}}>{fmtMoney(value, scheduleCurrency(schedule))}</div>
     </div>
   );
+  const canPay = canEdit && !frozen;
   return (
     <div style={{borderBottom:`1px solid ${T.border}`, paddingBottom:8}}>
       <div style={{padding:'16px 24px 14px', display:'flex', flexDirection:'column', gap:12}}>
         <div style={{display:'flex', alignItems:'flex-start', gap:8}}>
           <div style={{flex:1, minWidth:0, display:'flex', flexDirection:'column', gap:2}}>
-            <div style={{display:'flex', alignItems:'center', gap:8, minWidth:0}}>
-              <span style={{fontSize:14, fontWeight:600, color:T.attioText, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{PAYMENT_TYPE_LABEL[type]}{type === 'recurring' && schedule.plan ? ` · ${RECURRING_FREQUENCY[schedule.plan.frequency] || 'Monthly'}` : ''}</span>
+            <div style={{display:'flex', alignItems:'center', gap:8, minWidth:0, flexWrap:'wrap'}}>
+              <span style={{fontSize:14, fontWeight:600, color:T.attioText, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{planTitle(schedule)}{type === 'recurring' && schedule.plan ? ` · ${RECURRING_FREQUENCY[schedule.plan.frequency] || 'Monthly'}` : ''}</span>
+              {frozen && <StatusPill status="frozen" map={{frozen:{label:`Frozen ${fmtQuoteDate(schedule.frozen.at)}`, tone:'info'}}}/>}
               {/* A subscription until cancelled, once cancelled: nothing invoiced after the day. */}
               {schedule.cancelledOn && <StatusPill status="cancelled" map={{cancelled:{label:`Cancelled ${fmtQuoteDate(schedule.cancelledOn)}`, tone:'danger'}}}/>}
-              {/* Imported: links to the quotation it came from (gone if it was deleted). */}
-              {schedule.source !== 'manual' && <>
-                <button type="button" disabled={!quote} onClick={()=>quote && onOpenQuote(quote)} title={quote ? quote.number : undefined}
-                  style={{display:'inline-flex', alignItems:'center', gap:5, border:'none', fontFamily:'inherit', fontSize:11.5, fontWeight:500, padding:'2px 8px', borderRadius:9999,
-                    background:T.blueLight, color:T.blue, whiteSpace:'nowrap', cursor: quote ? 'pointer' : 'default'}}>
-                  <Icon name="quote" size={11} color={T.blue}/>
-                  <span style={quote ? {textDecorationLine:'underline', textUnderlineOffset:2} : undefined}>Imported from Quote</span></button>
-                {!quote && <span style={{fontSize:12, color:T.attioMuted, whiteSpace:'nowrap'}}>Quote deleted</span>}
-              </>}
+              {/* Made from a quote or a document: links to it. */}
+              {schedule.source === 'quote' && <PlanSourcePill icon="quote" label={`From ${schedule.quoteNumber || 'Quote'}`} target={quote} onOpen={onOpenQuote}/>}
+              {schedule.source === 'document' && <PlanSourcePill icon="files" label={`From ${schedule.documentNumber || 'Document'}`} target={doc} onOpen={onOpenDocument}/>}
             </div>
-            <span style={{fontSize:12, color:T.attioMuted}}>Created {fmtQuoteDate(schedule.createdAt)} by {schedule.createdBy}</span>
+            <span style={{fontSize:12, color:T.attioMuted}}>Created {fmtQuoteDate(schedule.createdAt)} by {schedule.createdBy}{(schedule.revision || 1) > 1 ? ` · Revision ${schedule.revision}` : ''}</span>
           </div>
-          {/* Edit and Pull from quote: until the first payment is recorded — payments are never
-              removed. A One-Time payment's Edit stays (its amount and type can change). A
-              subscription until cancelled: Cancel Subscription, once; cancelled, nothing more.
-              Archived terms (`archived`) have none. */}
-          {canEdit && !archived && (
-            <RowActionsMenu title="Payment Terms Actions" items={[
-              {label:'Edit Payment Terms', disabled:(!oneTime && hasPayments(schedule)) || !!schedule.cancelledOn, onClick:onEdit},
-              ...(pullable && pullable.length ? [{label:'Pull from Quote', disabled:hasPayments(schedule) || !!schedule.cancelledOn, onClick:onEdit}] : []),
+          {/* Edit: at any time, frozen too (what's paid stays as it is); not once cancelled. A
+              subscription until cancelled: Cancel Subscription, once. */}
+          {canEdit && (
+            <RowActionsMenu title="Payment Plan Actions" items={[
+              {label:'Edit Payment Plan', disabled:!!schedule.cancelledOn, onClick:onEdit},
               ...(planOngoing(schedule.plan) && !schedule.cancelledOn ? [{label:'Cancel Subscription', danger:true, onClick:onCancelSubscription}] : [])]}/>
           )}
         </div>
@@ -695,12 +737,12 @@ function PaymentScheduleCard({schedule, canEdit, canPay, quote, pullable, archiv
           {summary('Total', t.total)}{summary('Received', t.received, '#027A48')}{summary('Outstanding', t.outstanding, t.outstanding > 0 ? '#B54708' : null)}
         </div>
       </div>
-      {oneTime ? <OneTimePaymentRow schedule={schedule} canAct={canEdit && canPay && !archived} archived={archived} head={head} cell={cell} num={num} clip={clip} actionsCol={actionsCol} onPay={onPay} onView={onView}/> : (
+      {oneTime ? <OneTimePaymentRow schedule={schedule} canAct={canPay} invoice={invoiceOf(schedule.installments[0] || {})} head={head} cell={cell} num={num} clip={clip} actionsCol={actionsCol} onPay={onPay} onView={onView} onOpenInvoice={onOpenInvoice}/> : (
       <div style={{overflowX:'auto'}}>
         <div style={{minWidth:SCHEDULE_MIN_W}}>
           <div style={{display:'grid', gridTemplateColumns:SCHEDULE_COLS, background:T.headerBg, borderTop:`1px solid ${T.attioLine}`, borderBottom:`1px solid ${T.attioLine}`}}>
             <span style={{...head, paddingLeft:24}}>Installment</span><span style={{...head, justifyContent:'flex-end'}}>Amount</span>
-            <span style={head}>Status</span><span style={head}>Invoice Date</span><span style={head}>Due Date</span><span style={{...head, ...actionsCol, background:T.headerBg}}>Actions</span>
+            <span style={head}>Status</span><span style={head}>Invoice</span><span style={head}>Invoice Date</span><span style={head}>Due Date</span><span style={{...head, ...actionsCol, background:T.headerBg}}>Actions</span>
           </div>
           {!schedule.installments.length && <div style={{padding:'14px 24px', fontSize:13, color:T.attioMuted}}>No installments</div>}
           {schedule.installments.map(inst => {
@@ -716,11 +758,12 @@ function PaymentScheduleCard({schedule, canEdit, canPay, quote, pullable, archiv
                   <span style={num}>{fmtMoney(inst.amount, scheduleCurrency(schedule))}</span>
                   <span style={{...cell, gap:6}}><PaymentStatusPill status={st.status}/>
                     {/* A workflow violation about this installment (e.g. it must be paid by now). */}
-                    {!archived && <ViolationMark inst={inst.id}/>}</span>
+                    <ViolationMark inst={inst.id}/></span>
+                  <span style={cell}><InvoiceLink invoice={invoiceOf(inst)} onOpen={onOpenInvoice}/></span>
                   <span style={{...cell, fontVariantNumeric:'tabular-nums'}}><span style={clip}>{invoiceCell(inst)}</span></span>
                   <span style={{...cell, fontVariantNumeric:'tabular-nums'}}><span style={clip}>{dueCell(inst)}</span></span>
                   <span style={{...cell, ...actionsCol, background:'#fff'}}>
-                    {st.status === 'unpaid' && canEdit && canPay && !archived && <button onClick={()=>onPay(inst)} style={{...btnSecondarySm, height:26, padding:'0 10px', whiteSpace:'nowrap'}}>Update status</button>}
+                    {st.status === 'unpaid' && canPay && <button onClick={()=>onPay(inst)} style={{...btnSecondarySm, height:26, padding:'0 10px', whiteSpace:'nowrap'}}>Update status</button>}
                     {(inst.payments || []).length > 0 && (
                       <button onClick={()=>onView(inst)} style={{...formTextAction, display:'inline-flex', alignItems:'center', gap:6, whiteSpace:'nowrap'}}>
                         <Icon name="check" size={12} color="#027A48"/> View payment</button>
@@ -732,24 +775,40 @@ function PaymentScheduleCard({schedule, canEdit, canPay, quote, pullable, archiv
           })}
         </div>
       </div>)}
+      {/* Archived invoices: superseded by an edit, or by a part payment's balance — kept, read-only. */}
+      {archived.length > 0 && <div style={{padding:'10px 24px 4px'}}>
+        <button type="button" onClick={()=>setShowArchived(v => !v)} style={{...formTextAction, display:'inline-flex', alignItems:'center', gap:6}}>
+          <Icon name="chevDown" size={11} color={T.gray600} style={{transform: showArchived ? 'none' : 'rotate(-90deg)'}}/>Archived invoices ({archived.length})</button>
+        {showArchived && <div style={{display:'flex', flexDirection:'column', marginTop:6}}>
+          {archived.map(v => (
+            <div key={v.id} style={{display:'flex', alignItems:'center', gap:12, padding:'6px 0', borderTop:`1px solid ${T.attioLine}`, fontSize:13, color:T.attioText}}>
+              <span style={{width:130}}><InvoiceLink invoice={v} onOpen={onOpenInvoice}/></span>
+              <span style={{flex:1, minWidth:0, ...clip}}>{v.description}</span>
+              <span style={{fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap'}}>{fmtMoney(v.amount, v.currency)}</span>
+              <span style={{width:200, color:T.attioMuted, whiteSpace:'nowrap'}}>{v.archivedReason === 'partial' ? 'Part paid' : 'Superseded'} {fmtQuoteDate(v.archivedAt)}</span>
+            </div>))}
+        </div>}
+      </div>}
     </div>
   );
 }
-/* A One-Time payment in the tab: its amount, status, invoice and due dates and the date it was
-   paid (the date it was made is the card's); Update status (Paid, or back to Unpaid) and View payment. */
-function OneTimePaymentRow({schedule, canAct, archived, head, cell, num, clip, actionsCol, onPay, onView}){
+/* A One-Time payment in the tab: its amount, status, invoice, invoice and due dates and the date
+   it was paid (the date it was made is the card's); Update status (Paid, or back to Unpaid) and
+   View payment. */
+function OneTimePaymentRow({schedule, canAct, invoice, head, cell, num, clip, actionsCol, onPay, onView, onOpenInvoice}){
   const inst = schedule.installments[0], st = installmentState(schedule, inst);
   const paidOn = st.status === 'paid' ? (inst.payments[inst.payments.length - 1] || {}).paidOn : null;
   return (
     <div style={{overflowX:'auto'}}>
       <div style={{minWidth:ONE_TIME_MIN_W}}>
         <div style={{display:'grid', gridTemplateColumns:ONE_TIME_COLS, background:T.headerBg, borderTop:`1px solid ${T.attioLine}`, borderBottom:`1px solid ${T.attioLine}`}}>
-          <span style={{...head, paddingLeft:24, justifyContent:'flex-end'}}>Amount</span><span style={head}>Status</span><span style={head}>Invoice Date</span><span style={head}>Due Date</span><span style={head}>Paid On</span>
+          <span style={{...head, paddingLeft:24, justifyContent:'flex-end'}}>Amount</span><span style={head}>Status</span><span style={head}>Invoice</span><span style={head}>Invoice Date</span><span style={head}>Due Date</span><span style={head}>Paid On</span>
           <span style={{...head, ...actionsCol, background:T.headerBg}}>Actions</span>
         </div>
         <div style={{display:'grid', gridTemplateColumns:ONE_TIME_COLS, borderBottom:`1px solid ${T.attioLine}`}}>
           <span style={{...num, paddingLeft:24}}>{fmtMoney(inst.amount, scheduleCurrency(schedule))}</span>
-          <span style={{...cell, gap:6}}><PaymentStatusPill status={st.status}/>{!archived && <ViolationMark inst={inst.id}/>}</span>
+          <span style={{...cell, gap:6}}><PaymentStatusPill status={st.status}/><ViolationMark inst={inst.id}/></span>
+          <span style={cell}><InvoiceLink invoice={invoice} onOpen={onOpenInvoice}/></span>
           <span style={{...cell, fontVariantNumeric:'tabular-nums'}}><span style={clip}>{invoiceCell(inst)}</span></span>
           <span style={{...cell, fontVariantNumeric:'tabular-nums'}}><span style={clip}>{dueCell(inst)}</span></span>
           <span style={{...cell, fontVariantNumeric:'tabular-nums'}}><span style={clip}>{paidOn ? fmtQuoteDate(paidOn) : '—'}</span></span>
@@ -766,104 +825,146 @@ function OneTimePaymentRow({schedule, canAct, archived, head, cell, num, clip, a
   );
 }
 
-/* ── The record's Accounting tab ── its one Payment Terms (primaryTermsOf); any archived ones
-   under it, read-only. */
-// A customer with a deal: the deal's Payment Terms (termsHolderOf), as the deal shows them.
+/* ── The record's Accounting tab ── its Payment Plans in three tabs (Active, Paid, Frozen), Add
+   Payment Plan, each plan's side panel, payments and invoices. */
+// A customer with a deal: the deal's Payment Plans (termsHolderOf), as the deal shows them.
 function AccountingTab({object, record}){
   const hub = useRecordHub(), holder = termsHolderOf(object, record);
   const deal = holder.object !== object ? (((hub && hub.records) || {}).deals || []).find(d => d.id === holder.id) : null;
   return deal ? <RecordAccounting key={deal.id} object="deals" record={deal}/> : <RecordAccounting object={object} record={record}/>;
 }
+/* Terms saved before plans open as a plan (planOf): their payments, by place, are the plan's — the
+   first the deposit (one alone: the payment), the next Installment 1, 2… (`planIdsOf`: the plan's id
+   for each, in order). */
+const planIdsOf = (s) => { const tops = (s.installments || []).filter(x => !x.parentId);
+  return tops.map((x, i) => s.plan ? x.id : tops.length < 2 ? `${s.id}-p` : i === 0 ? `${s.id}-d` : `${s.id}-i${i}`); };
+// A plan's payments with something paid on them, as they stay through an edit (PaymentTermsFields' `locked`), by the plan's ids.
+const lockedOf = (s) => { const ids = planIdsOf(s);
+  return Object.fromEntries((s.installments || []).filter(x => !x.parentId).map((x, i) => [ids[i], x]).filter(([, x]) => (x.payments || []).length)
+    .map(([id, x]) => [id, {amount:x.amount, invoiceDate:x.invoiceDate || dayOf(x.invoicedAt) || '', dueDate:x.dueDate || '', status:installmentState(s, x).status}])); };
 function RecordAccounting({object, record}){
   const hub = useRecordHub();
+  const [tab, setTab] = React.useState('active');
   const [paying, setPaying] = React.useState(null);   // {scheduleId, instId}
   const [viewing, setViewing] = React.useState(null); // {scheduleId, instId}: View payment
-  const [editing, setEditing] = React.useState(null); // {id}: the Edit Payment Terms panel
+  const [editing, setEditing] = React.useState(null); // {id} | {isNew:true}: the plan's side panel
   const [cancelling, setCancelling] = React.useState(null); // the subscription being cancelled (its id)
-  const [showArchived, setShowArchived] = React.useState(false);
-  const [quoteOpen, setQuoteOpen] = React.useState(null); // the quotation opened from "Imported from Quote"
-  // Payment Terms permissions (Records → <Object> → Accounting), by the record's owner.
+  const [quoteOpen, setQuoteOpen] = React.useState(null); // the quotation a plan was made from
+  const [docOpen, setDocOpen] = React.useState(null);     // the document a plan was made from
+  const [invoiceOpen, setInvoiceOpen] = React.useState(null); // an invoice's id
+  // Payment Plans permissions (Records → <Object> → Accounting), by the record's owner.
   const can = (action) => paymentTermsCan(action, object, record);
   const canEdit = can('edit');
-  const stored = (hub.accounting || []).filter(s => s.object === object && String(s.recordId) === String(record.id));
-  const quotes = recordQuotes(hub, object, record);
-  // Quotes sent to the record whose terms haven't been pulled yet (an expired one can't be).
-  const pullable = quotes.filter(q => ['sent', 'signed'].includes(q.status) && !quoteExpired(q) && !(hub.accounting || []).some(s => s.quoteId === q.id));
-  const all = stored;
-  const primary = primaryTermsOf(stored), archivedList = stored.filter(s => s !== primary);
-  // Pull from quote fills the one structure (same id) — only while nothing is paid; once per quote.
-  const pull = (q) => {
-    if(!primary || hasPayments(primary) || (hub.accounting || []).some(s => s.quoteId === q.id)) return;
-    hub.setAccounting(list => list.some(s => s.quoteId === q.id) ? list
-      : list.map(s => s.id === primary.id ? {...scheduleFromQuote(q, object, record), id:primary.id, createdAt:primary.createdAt, createdBy:primary.createdBy, ...(s.reversed ? {reversed:s.reversed} : {})} : s));
-    setEditing(null);
-    hub.toast(`Payment terms pulled from ${q.number}`);
-  };
-  // A One-Time payment's changes and a payment type switch, in the record's activity (Payment).
+  const all = (hub.accounting || []).filter(s => s.object === object && String(s.recordId) === String(record.id));
+  const invoices = hub.invoices || [];
+  const time = (s) => new Date(s.createdAt).getTime() || 0;
+  const shown = all.filter(s => planState(s) === tab).sort((a, b) => time(b) - time(a));
+  // Plan changes, payments and switches, in the record's activity (Payment).
   const logPayment = (action, change) => hub.add(object, record.id, {type:'payment', action, ...change, source:'you', by:CURRENT_USER.name});
-  // Recording a payment: the structure (a quote's, as it stands) is saved with the payment.
+  /* Recording a payment (not on a frozen plan): its invoice — issued now if it has none yet — is
+     Paid; a part payment archives it (keeping what was received) and the balance is a new payment,
+     invoiced today (InvoiceIssuer). */
   const savePayment = (scheduleId, instId, v) => {
-    const base = all.find(s => s.id === scheduleId); if(!base || !(Number(v.amount) > 0)) return;   // a payment is more than 0
+    const base = all.find(s => s.id === scheduleId), inst0 = base && base.installments.find(x => x.id === instId);
+    if(!inst0 || base.frozen || !(Number(v.amount) > 0) || installmentState(base, inst0).status !== 'unpaid') return;   // a payment is more than 0; forward only
     if(paymentTypeOf(base) === 'one-time') logPayment('Marked Paid', {detail:`${fmtMoney(v.amount, scheduleCurrency(base))} · Paid on ${fmtQuoteDate(v.paidOn)}`});
+    const today = ymdOf(new Date()), at = new Date();
+    const payment = {id:acId('pay'), amount:v.amount, paidOn:v.paidOn, recordedAt:at, recordedBy:CURRENT_USER.name, evidence:(v.evidence.file || v.evidence.link) ? v.evidence : null};
+    const invoice = currentInvoiceOf(invoices, base.id, instId) || issueInvoices(hub, [{s:base, inst:inst0, on:today}])[0];
     hub.setAccounting(list => {
       const s = list.find(x => x.id === scheduleId) || base;
       const inst = s.installments.find(x => x.id === instId);
-      if(!inst || installmentState(s, inst).status !== 'unpaid') return list;   // forward only
-      const payment = {id:acId('pay'), amount:v.amount, paidOn:v.paidOn, recordedAt:new Date(), recordedBy:CURRENT_USER.name,
-        evidence:(v.evidence.file || v.evidence.link) ? v.evidence : null};
+      if(!inst || installmentState(s, inst).status !== 'unpaid') return list;
       let installments = s.installments.map(x => x.id === instId ? {...x, payments:[...(x.payments || []), payment]} : x);
       if(v.status === 'partial'){
         const remaining = r2(inst.amount - v.amount);
         const total = scheduleTotals(s).total || 1;
-        const balance = {id:acId('pi'), parentId:inst.id, description:`Balance of ${inst.description}`, percent:r2(remaining / total * 100), amount:remaining, dueDate:v.expected, tentative:'', payments:[]};
-        const at = installments.findIndex(x => x.id === instId);
-        installments = [...installments.slice(0, at + 1), balance, ...installments.slice(at + 1)];
+        const balance = {id:acId('pi'), parentId:inst.id, description:`Balance of ${inst.description}`, percent:r2(remaining / total * 100), amount:remaining, invoiceDate:today, dueDate:v.expected, tentative:'', payments:[]};
+        const i = installments.findIndex(x => x.id === instId);
+        installments = [...installments.slice(0, i + 1), balance, ...installments.slice(i + 1)];
       }
-      const next = {...s, installments};
-      return list.some(x => x.id === scheduleId) ? list.map(x => x.id === scheduleId ? next : x) : [...list, next];
+      return list.map(x => x.id === scheduleId ? {...s, installments} : x);
     });
+    if(invoice) hub.setInvoices(list => list.map(x => x.id !== invoice.id ? x : v.status === 'partial'
+      ? {...x, status:'archived', archivedAt:at.toISOString(), archivedReason:'partial', received:r2(v.amount)}
+      : {...x, status:'paid', paidOn:v.paidOn, paymentId:payment.id, paidAt:at.toISOString()}));
     setPaying(null);
     hub.toast(paymentTypeOf(base) === 'one-time' ? 'Payment marked as paid' : v.status === 'paid' ? 'Installment marked as paid' : 'Partial payment recorded');
   };
-  /* A paid One-Time payment back to Unpaid: its payment moves to the terms' `reversed` list (who and
-     when) — out of Cash Received, never deleted — and the record's activity says so. */
+  /* A paid One-Time payment back to Unpaid: its payment moves to the plan's `reversed` list (who and
+     when) — out of Cash Received, never deleted — its invoice back to unpaid (the reversal kept on
+     it), and the record's activity says so. */
   const reversePayment = (scheduleId, instId) => {
     const base = all.find(s => s.id === scheduleId), inst = base && base.installments.find(x => x.id === instId);
     if(!inst || paymentTypeOf(base) !== 'one-time' || !(inst.payments || []).length) return;
-    const at = new Date(), pays = inst.payments;
+    const at = new Date(), pays = inst.payments, amount = r2(pays.reduce((a, p) => a + (Number(p.amount) || 0), 0));
     hub.setAccounting(list => list.map(s => s.id !== scheduleId ? s : {...s,
       reversed:[...(s.reversed || []), ...pays.map(p => ({...p, instId, reversedAt:at, reversedBy:CURRENT_USER.name}))],
       installments:s.installments.map(x => x.id === instId ? {...x, payments:[]} : x)}));
-    logPayment('Marked Unpaid', {detail:`${fmtMoney(r2(pays.reduce((a, p) => a + (Number(p.amount) || 0), 0)), scheduleCurrency(base))} paid on ${fmtQuoteDate(pays[pays.length - 1].paidOn)} reversed`});
+    hub.setInvoices(list => list.map(x => x.planId === scheduleId && x.instId === instId && x.status === 'paid'
+      ? (({paidOn, paymentId, paidAt, ...rest}) => ({...rest, status:'issued', reversals:[...(x.reversals || []), {amount, paidOn, reversedAt:at.toISOString(), reversedBy:CURRENT_USER.name}]}))(x) : x));
+    logPayment('Marked Unpaid', {detail:`${fmtMoney(amount, scheduleCurrency(base))} paid on ${fmtQuoteDate(pays[pays.length - 1].paidOn)} reversed`});
     setPaying(null);
     hub.toast('Payment marked as unpaid');
   };
-  /* Saving the terms (a plan): they become the record's own (a quote's terms edited here are no
-     longer the quote's), their payments made by the plan (planSchedule) — Quote Signed dated from
-     the record's signed quote (none yet: when one is signed). A payment kept through the edit (the
-     same id) keeps its invoice — invoicing is history. A paid One-Time payment keeps its payment:
-     of the new amount (One-Time), or as the deposit (Installment). Reversed payments (`reversed`)
-     stay whatever the type. Installment and Recurring terms with payments aren't edited (their ⋯
-     Edit is off). */
-  const saveManual = (plan) => {
-    const id = editing && editing.id, s0 = all.find(s => s.id === id);
-    if(!s0) return;
+  // The day a plan's Quote Signed / Document Signed counts from: its document's signing, else the record's quote.
+  const signedOnOf = (s) => s && s.source === 'document' ? s.signedOn || '' : quoteSignedOn(hub.quotes, s || {object, recordId:record.id});
+  // Add Payment Plan: a new plan on the record — numbered, frozen at once with Save and Freeze.
+  const createPlan = (plan, {freeze} = {}) => {
+    const id = acId('ps'), signedOn = plan.issue.type === 'signed' ? signedOnOf(null) : '', at = new Date();
+    const installments = planSchedule(plan, {id, signedOn});
+    const s = {id, number:nextPlanNumber(hub.accounting), source:'manual', object, recordId:record.id, createdAt:at, createdBy:CURRENT_USER.name,
+      paymentType:plan.paymentType, currency:plan.currency, total:r2(installments.reduce((a, x) => a + x.amount, 0)), plan, ...(signedOn ? {signedOn} : {}), installments, revision:1,
+      ...(freeze ? {frozen:{at, by:CURRENT_USER.name}, freezes:[{action:'frozen', at, by:CURRENT_USER.name}]} : {})};
+    hub.setAccounting(list => [...list, s]);
+    logPayment('Payment plan created', {detail:`${planTitle(s)} · ${fmtMoney(s.total, s.currency)}${freeze ? ' · frozen' : ''}`});
+    setEditing(null); setTab(freeze ? 'frozen' : 'active');
+    hub.toast(freeze ? `${s.number} saved and frozen` : `${s.number} saved`);
+  };
+  /* Saving a plan's edit: a new revision (the one before kept in `revisions`). Its payments are made
+     by the plan (planSchedule), except those with something paid on them, which stay as they are
+     (with their balances); a payment kept through the edit keeps the invoice it had issued before
+     plans. A paid One-Time payment stays: One-Time, as it is; Installment, the deposit. Issued,
+     unpaid invoices whose payment changed are archived (archiveChangedInvoices) and invoiced
+     again. Reversed payments (`reversed`) stay whatever the type. */
+  const editPlan = (plan) => {
+    const s0 = all.find(s => s.id === (editing && editing.id));
+    if(!s0 || s0.cancelledOn) return;
     const was = paymentTypeOf(s0), first = s0.installments[0], paidOne = was === 'one-time' && hasPayments(s0) ? first : null;
-    if(was !== 'one-time' && hasPayments(s0)) return;
-    const signedOn = plan.issue.type === 'signed' ? quoteSignedOn(hub.quotes, s0) : '';
-    const installments = planSchedule(plan, {id:s0.id, signedOn}).map(x => { const o = s0.installments.find(p => p.id === x.id); return o && o.invoicedAt ? {...x, invoicedAt:o.invoicedAt} : x; });
-    // One-Time to One-Time: the same payment (its id, its payments now of the amount); a paid one to Installment: the deposit, as paid.
-    if(first && (paidOne || (was === 'one-time' && plan.paymentType === 'one-time'))) installments[0] = {...installments[0], id:first.id, createdAt:first.createdAt, ...(first.invoicedAt ? {invoicedAt:first.invoicedAt} : {}),
-      payments: plan.paymentType === 'one-time' ? (first.payments || []).map(p => ({...p, amount:installments[0].amount})) : first.payments};
-    const total = r2(installments.reduce((a, x) => a + x.amount, 0));
-    const next = {id:s0.id, source:'manual', object:s0.object, recordId:s0.recordId, createdAt:s0.createdAt, createdBy:s0.createdBy, ...(s0.reversed ? {reversed:s0.reversed} : {}),
-      paymentType:plan.paymentType, currency:plan.currency, total, plan, ...(signedOn ? {signedOn} : {}), installments};
-    hub.setAccounting(list => list.map(s => s.id === id ? next : s));
-    const before = fmtMoney(scheduleTotals(s0).total, scheduleCurrency(s0)), after = fmtMoney(total, plan.currency);
+    if(was !== 'one-time' && hasPayments(s0) && plan.paymentType !== was) return;
+    const signedOn = plan.issue.type === 'signed' ? signedOnOf(s0) : '';
+    const old = s0.installments || [], used = new Set(), tops = old.filter(x => !x.parentId);
+    // Saved before plans: the plan's payments take theirs, by place (their payments and invoices stay with them).
+    const fresh = planSchedule(plan, {id:s0.id, signedOn, locked:paidOne ? null : lockedOf(s0)}).map((f, i) => !s0.plan && tops[i] ? {...f, id:tops[i].id} : f);
+    const kids = (x) => old.filter(b => b.parentId === x.id).flatMap(b => [b, ...kids(b)]);
+    const paidTree = (x) => (x.payments || []).length > 0 || kids(x).some(k => (k.payments || []).length);
+    const rows = fresh.flatMap((f, i) => {
+      if(paidOne && i === 0){ used.add(first.id); return [{...first, description: plan.paymentType === 'one-time' ? first.description : 'Deposit'}]; }
+      const o = old.find(x => x.id === f.id && !x.parentId);
+      if(o && paidTree(o)){ used.add(o.id); return [o, ...kids(o)]; }
+      return [o && o.invoicedAt ? {...f, invoicedAt:o.invoicedAt} : f];
+    });
+    const installments = [...rows, ...old.filter(x => !x.parentId && !used.has(x.id) && paidTree(x)).flatMap(x => [x, ...kids(x)])];
+    const total = r2(installments.filter(x => !x.parentId).reduce((a, x) => a + x.amount, 0)), at = new Date();
+    const {signedOn: _was, ...keep} = s0;
+    const next = {...keep, paymentType:plan.paymentType, currency:plan.currency, total, plan, ...(signedOn ? {signedOn} : {}), installments, revision:(s0.revision || 1) + 1,
+      revisions:[...(s0.revisions || []), {revision:s0.revision || 1, paymentType:was, currency:scheduleCurrency(s0), total:s0.total, plan:s0.plan || null, savedAt:at, savedBy:CURRENT_USER.name}]};
+    hub.setAccounting(list => list.map(s => s.id === s0.id ? next : s));
+    hub.setInvoices(list => archiveChangedInvoices(list, next));
     if(was !== plan.paymentType) logPayment('Payment type changed', {from:PAYMENT_TYPE_LABEL[was], to:PAYMENT_TYPE_LABEL[plan.paymentType]});
-    else if(was === 'one-time' && before !== after) logPayment('Amount changed', {from:before, to:after});
+    logPayment('Payment plan edited', {detail:`${planTitle(next)} · revision ${next.revision} · ${fmtMoney(total, plan.currency)}`});
     setEditing(null);
-    hub.toast('Payment terms saved');
+    hub.toast(`${s0.number || 'Payment plan'} saved`);
+  };
+  /* Freeze / Unfreeze (the plan's side panel): frozen, no invoices are issued and no payments
+     recorded; unfrozen, what fell due meanwhile is invoiced. Each in the plan's `freezes` and the
+     record's activity. */
+  const freezePlan = (id, on) => {
+    const s0 = all.find(s => s.id === id); if(!s0 || !!s0.frozen === on) return;
+    const at = new Date(), by = CURRENT_USER.name;
+    hub.setAccounting(list => list.map(s => s.id !== id ? s : {...s, frozen: on ? {at, by} : null, freezes:[...(s.freezes || []), {action: on ? 'frozen' : 'unfrozen', at, by}]}));
+    logPayment(on ? 'Payment plan frozen' : 'Payment plan unfrozen', {detail:planTitle(s0)});
+    hub.toast(on ? `${s0.number} frozen` : `${s0.number} unfrozen`);
   };
   /* Cancel Subscription (until cancelled): from the day chosen nothing more is invoiced — the cycles
      after it go, unless something's paid on them; what's invoiced by then stays owed. In the
@@ -871,58 +972,64 @@ function RecordAccounting({object, record}){
   const cancelSubscription = (id, on) => {
     const s0 = all.find(s => s.id === id); if(!s0 || !planOngoing(s0.plan) || s0.cancelledOn) return;
     hub.setAccounting(list => list.map(s => s.id === id ? refreshSchedule(s, {cancelledOn:on}) : s));
-    logPayment('Subscription cancelled', {detail:`No invoices after ${fmtQuoteDate(on)}`});
+    logPayment('Subscription cancelled', {detail:`${planTitle(s0)} · no invoices after ${fmtQuoteDate(on)}`});
     setCancelling(null);
     hub.toast('Subscription cancelled');
   };
   const payingSchedule = paying && all.find(s => s.id === paying.scheduleId);
-  const payingInst = payingSchedule && payingSchedule.installments.find(x => x.id === paying.instId);
+  const payingInst = payingSchedule && !payingSchedule.frozen && payingSchedule.installments.find(x => x.id === paying.instId);
   const viewingSchedule = viewing && all.find(s => s.id === viewing.scheduleId);
   const viewingInst = viewingSchedule && viewingSchedule.installments.find(x => x.id === viewing.instId);
-  const openedQuote = quoteOpen && quotes.find(q => q.id === quoteOpen);
-  const editingSchedule = editing && all.find(s => s.id === editing.id);
+  const openedQuote = quoteOpen && (hub.quotes || []).find(q => q.id === quoteOpen);
+  const openedDoc = docOpen && (hub.documents || []).find(d => d.id === docOpen);
+  const openedInvoice = invoiceOpen && invoices.find(v => v.id === invoiceOpen);
+  const editingSchedule = editing && editing.id && all.find(s => s.id === editing.id);
   const editingType = editingSchedule && paymentTypeOf(editingSchedule), editingPaid = editingType === 'one-time' && hasPayments(editingSchedule) ? editingSchedule.installments[0] : null;
-  // The terms as a plan to edit (saved before plans: as one — planOf); a paid One-Time payment's amount.
+  // The plan to edit (saved before plans: as one — planOf); a paid One-Time payment's amount and dates.
   const editingPlan = editingSchedule ? {...planOf(editingSchedule), currency:editingSchedule.currency || (scheduleTotals(editingSchedule).total > 0 ? LEGACY_CURRENCY : defaultCurrency()),
-    ...(editingPaid ? {paid:{id:editingPaid.id, amount:installmentState(editingSchedule, editingPaid).received}} : {})} : null;
-  const card = (s, archived) => {
-    const quote = s.source !== 'manual' ? quotes.find(q => q.id === s.quoteId) || null : null;
-    return <PaymentScheduleCard key={s.id} schedule={s} quote={quote} archived={archived} canEdit={canEdit} pullable={pullable}
-      canPay={s.source === 'manual' || hasPayments(s) || (quote && quote.status === 'signed')}
+    ...(editingPaid ? {paid:{id:editingPaid.id, amount:installmentState(editingSchedule, editingPaid).received, invoiceDate:editingPaid.invoiceDate || editingPaid.invoicedAt || '', dueDate:editingPaid.dueDate || ''}} : {})} : null;
+  const card = (s) => (
+    <PaymentScheduleCard key={s.id} schedule={s} canEdit={canEdit} invoices={invoices}
+      quote={s.source === 'quote' ? (hub.quotes || []).find(q => q.id === s.quoteId) || null : null}
+      doc={s.source === 'document' ? (hub.documents || []).find(d => d.id === s.documentId) || null : null}
       onPay={(inst)=>setPaying({scheduleId:s.id, instId:inst.id})} onView={(inst)=>setViewing({scheduleId:s.id, instId:inst.id})}
-      onEdit={()=>setEditing({id:s.id})} onOpenQuote={(q)=>setQuoteOpen(q.id)} onCancelSubscription={()=>setCancelling(s.id)}/>;
-  };
-  if(!can('view')) return <div style={{flex:1, padding:'48px 24px', textAlign:'center', fontSize:13, color:T.gray400}}>You don't have access to this record's payment terms.</div>;
+      onEdit={()=>setEditing({id:s.id})} onOpenQuote={(q)=>setQuoteOpen(q.id)} onOpenDocument={(d)=>setDocOpen(d.id)}
+      onCancelSubscription={()=>setCancelling(s.id)} onOpenInvoice={(v)=>setInvoiceOpen(v.id)}/>
+  );
+  if(!can('view')) return <div style={{flex:1, padding:'48px 24px', textAlign:'center', fontSize:13, color:T.gray400}}>You don't have access to this record's payment plans.</div>;
   return (
     <div style={{flex:1, minHeight:0, minWidth:0, display:'flex', flexDirection:'column', position:'relative'}}>
       <div style={{display:'flex', alignItems:'center', gap:10, padding:'12px 20px', borderBottom:`1px solid ${T.border}`, flexShrink:0}}>
-        <span style={{fontSize:13, fontWeight:600, color:T.attioText}}>Payment Terms</span>
+        <span style={{fontSize:13, fontWeight:600, color:T.attioText}}>Payment Plans</span>
+        <div style={{flex:1}}/>
+        {can('create') && <button onClick={()=>setEditing({isNew:true})} style={{...btnPrimarySm(), display:'inline-flex', alignItems:'center', gap:6}}><Icon name="plus" size={13} color="#fff"/> Add Payment Plan</button>}
       </div>
+      <PrimaryTabs inset="settings" items={PLAN_STATES} active={tab} onSelect={setTab}/>
       <div style={{flex:1, minHeight:0, overflowY:'auto', paddingBottom:32, display:'flex', flexDirection:'column'}}>
-        {primary && card(primary, false)}
-        {!primary && <EmptyState compact title="No payment terms yet"/>}
-        {/* Archived: extra structures saved before one-per-record — read-only. */}
-        {archivedList.length > 0 && <>
-          <button type="button" onClick={()=>setShowArchived(v => !v)} style={{...formTextAction, alignSelf:'flex-start', margin:'14px 24px 6px', display:'inline-flex', alignItems:'center', gap:6}}>
-            <Icon name="chevDown" size={11} color={T.gray600} style={{transform: showArchived ? 'none' : 'rotate(-90deg)'}}/>
-            Archived payment terms ({archivedList.length})
-          </button>
-          {showArchived && archivedList.map(s => card(s, true))}
-        </>}
+        {shown.map(card)}
+        {!shown.length && <EmptyState compact title={`No ${tab} payment plans`}/>}
       </div>
       {payingInst && <PaymentModal schedule={payingSchedule} inst={payingInst} oneTime={paymentTypeOf(payingSchedule) === 'one-time'} onCancel={()=>setPaying(null)}
         onSave={(v)=>savePayment(payingSchedule.id, payingInst.id, v)} onReverse={()=>reversePayment(payingSchedule.id, payingInst.id)}/>}
       {cancelling && <CancelSubscriptionModal onCancel={()=>setCancelling(null)} onSave={(on)=>cancelSubscription(cancelling, on)}/>}
       {viewingInst && <PaymentVerificationModal inst={viewingInst} currency={scheduleCurrency(viewingSchedule)} onClose={()=>setViewing(null)}/>}
-      {editing && editingPlan && <PaymentStructurePanel key={editing.id} initial={editingPlan} signedOn={quoteSignedOn(hub.quotes, editingSchedule)}
-        onCancel={()=>setEditing(null)} onSave={saveManual} pullable={hasPayments(editingSchedule) ? [] : pullable} onPull={pull}/>}
-      {/* The quotation, as on Tools → Quotes. */}
-      {openedQuote && <PageSidePanel title={openedQuote.number}
-        onClose={()=>setQuoteOpen(null)}>
+      {editing && editing.isNew && <PaymentStructurePanel key="new" isNew initial={newPaymentPlan()} signedOn={signedOnOf(null)} onCancel={()=>setEditing(null)} onSave={createPlan}/>}
+      {editing && editingPlan && <PaymentStructurePanel key={editing.id} initial={editingPlan} signedOn={signedOnOf(editingSchedule)} scheduleId={editingSchedule.id}
+        locked={editingPaid ? null : lockedOf(editingSchedule)} signedLabel={editingSchedule.source === 'document' ? 'Document Signed' : undefined}
+        frozen={!!editingSchedule.frozen} onFreeze={canEdit ? ()=>freezePlan(editingSchedule.id, !editingSchedule.frozen) : null}
+        heading={`Edit Payment Plan · ${editingSchedule.number || ''}`} onCancel={()=>setEditing(null)} onSave={editPlan}/>}
+      {/* The quotation or document a plan was made from, as on Tools; an invoice. */}
+      {openedQuote && <PageSidePanel title={openedQuote.number} onClose={()=>setQuoteOpen(null)}>
         <div style={{flex:1, overflowY:'auto', padding:'4px 20px 24px'}}><QuoteDocument quote={openedQuote}/></div>
       </PageSidePanel>}
+      {openedDoc && <PageSidePanel title={openedDoc.number} onClose={()=>setDocOpen(null)}>
+        <div style={{flex:1, overflowY:'auto', padding:'4px 20px 24px'}}><DocumentView doc={openedDoc}/></div>
+      </PageSidePanel>}
+      {openedInvoice && <InvoicePanel invoice={openedInvoice} onClose={()=>setInvoiceOpen(null)}/>}
     </div>
   );
 }
 
-Object.assign(window, {RECURRING_FREQUENCY, rollSubscription, refreshSchedule, planOngoing, newPaymentPlan, planSchedule, planTotal, planOk, planOf, planOfShares, normalizePlan, invoicedOn, dayOf, datePlansOnSigning, PaymentTermsFields, PaymentPlanTable, PAYMENT_TYPE_LABEL, paymentTypeOf, scheduleCurrency, primaryTermsOf, hasPayments, recordHasPayments, termsHolderOf, defaultPaymentTerms, defaultTermsOf, packPaymentTerms, unpackPaymentTerms, AccountingTab, ACCOUNTING_RECORD_TYPES, installmentState, scheduleTotals});
+Object.assign(window, {RECURRING_FREQUENCY, rollSubscription, refreshSchedule, planOngoing, newPaymentPlan, planSchedule, planTotal, planOk, planOf, planOfShares, normalizePlan, invoicedOn, dayOf,
+  plansOnQuoteSigned, PaymentTermsFields, PaymentPlanTable, PAYMENT_TYPE_LABEL, paymentTypeOf, scheduleCurrency, hasPayments, recordHasPayments, termsHolderOf, recordPlansOf, livePayments,
+  PLAN_STATES, planState, nextPlanNumber, planTitle, migratePlans, defaultTermsOf, unpackPaymentTerms, AccountingTab, ACCOUNTING_RECORD_TYPES, installmentState, scheduleTotals});

@@ -692,13 +692,15 @@ function ContentSidePanel({width, zIndex = 80, style, children}){
 }
 /* `width`: wider for a builder with a stepper (Quotes); `flush`: the body lays itself out (its own columns and scrolling). */
 /* Every creation panel opens in the same place (ContentSidePanel); `placement` and `more` are
-   kept for their callers but no longer change it (the footer's ⋯ stub is gone). Escape closes it. */
-function CreatePanelFrame({title, onClose, top, children, actions, placement, width = CREATE_PANEL_W, flush = false, more, zIndex}){
+   kept for their callers but no longer change it (the footer's ⋯ stub is gone). Escape closes it.
+   `headerActions`: controls beside the close button (a Payment Plan's Freeze Plan). */
+function CreatePanelFrame({title, onClose, top, children, actions, placement, width = CREATE_PANEL_W, flush = false, more, zIndex, headerActions}){
   useEscapeClose(onClose);
   return (
     <ContentSidePanel width={width} zIndex={zIndex} style={{background:'#fff', borderLeft:`1px solid ${T.border}`, boxShadow:'-8px 0 24px rgba(16,24,40,.08)', display:'flex', flexDirection:'column'}}>
       <div style={{display:'flex', alignItems:'center', gap:10, padding:'16px 20px', borderBottom:`1px solid ${T.border}`, flexShrink:0}}>
         <span style={{flex:1, minWidth:0, fontSize:15, fontWeight:600, color:T.attioText, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{title}</span>
+        {headerActions}
         <button title="Close" onClick={onClose} style={{border:'none', background:'transparent', cursor:'pointer', display:'flex', padding:4}}><Icon name="close" size={14} color={T.gray600}/></button>
       </div>
       {top && <div style={{padding:'16px 20px', borderBottom:`1px solid ${T.border}`, flexShrink:0}}>{top}</div>}

@@ -246,14 +246,19 @@ const PROFILE_TRIGGER_FIELDS = () => [
   // Each Customer Profile form field: the person's current answer (WF_LIVE.profiles: their filled forms).
   ...PROFILE_FORM_TRIGGER_FIELDS(),
 ];
-/* Accounting properties — each read across the record's payment terms (Accounting), oldest first:
-   totals summed; installments in schedule order. An installment whose rest moved to a balance
-   installment counts through that balance (it carries what's left). `all`: the condition holds when
-   every installment's value meets it. */
+/* Accounting properties — each read across the record's Payment Plans (Accounting), oldest first:
+   totals summed (in their currency; plans in different currencies, in the default one); a frozen
+   plan counts what was received on it, not what's left. Installments in schedule order, frozen
+   plans' left out. An installment whose rest moved to a balance installment counts through that
+   balance (it carries what's left). A record with no plan reads Unpaid where a status is asked
+   (decided 2026-11-12). `all`: the condition holds when every installment's value meets it. */
 const PAYMENT_STATUS_OPTIONS = ['Unpaid', 'Partially Paid', 'Paid'].map(v => ({value:v, label:v}));
 const termsInOrder = (terms) => [...terms].sort((a, b) => (toTime(a.createdAt) || 0) - (toTime(b.createdAt) || 0));
-const termsTotals = (terms) => terms.reduce((t, s) => { const x = scheduleTotals(s); return {total:t.total + x.total, received:t.received + x.received, outstanding:t.outstanding + x.outstanding}; }, {total:0, received:0, outstanding:0});
-const liveInstallments = (terms) => termsInOrder(terms).flatMap(s => (s.installments || []).filter(i => !(s.installments || []).some(x => x.parentId === i.id)).map(i => ({s, i})));
+const termsCurrency = (terms) => { const cs = [...new Set(terms.map(scheduleCurrency))]; return cs.length === 1 ? cs[0] : defaultCurrency(); };
+const termsTotals = (terms) => { const cur = termsCurrency(terms), money = (n, s) => scheduleCurrency(s) === cur ? n : toDefaultCurrency(n, scheduleCurrency(s));
+  return terms.reduce((t, s) => { const x = scheduleTotals(s), out = s.frozen ? 0 : x.outstanding;
+    return {total:r2(t.total + money(s.frozen ? x.received : x.total, s)), received:r2(t.received + money(x.received, s)), outstanding:r2(t.outstanding + money(out, s))}; }, {total:0, received:0, outstanding:0}); };
+const liveInstallments = (terms) => termsInOrder(terms.filter(s => !s.frozen)).flatMap(s => (s.installments || []).filter(i => !(s.installments || []).some(x => x.parentId === i.id)).map(i => ({s, i})));
 const installmentStatusLabel = (s, i) => (PAYMENT_STATUS[installmentState(s, i).status] || {}).label || '';
 const nextInstallment = (terms) => liveInstallments(terms).find(({s, i}) => installmentState(s, i).status !== 'paid') || null;
 // The installment that carries what's left of `i`: the last of its balance installments (itself without one).
@@ -269,24 +274,23 @@ const ACCOUNTING_TRIGGER_FIELDS = [
   /* The record's first installment — the first one of its earliest payment terms (empty with none):
      the payment the client makes to start (e.g. before Payment Made). */
   {key:'firstInstallmentStatus', label:'First Installment Status', kind:'select', level:'record', options:PAYMENT_STATUS_OPTIONS,
-   readRecord:(terms) => { const s = termsInOrder(terms)[0], i = s && (s.installments || []).find(x => !x.parentId);
+   readRecord:(terms) => { if(!terms.length) return PAYMENT_STATUS.unpaid.label;
+     const s = termsInOrder(terms.filter(x => !x.frozen))[0], i = s && (s.installments || []).find(x => !x.parentId);
      return i ? firstInstallmentLabel(s, i) : ''; }},
   // The next installment still to be paid (in schedule order): its status, its due date.
   {key:'nextInstallmentStatus', label:'Next Installment Status', kind:'select', level:'record', options:PAYMENT_STATUS_OPTIONS,
-   readRecord:(terms) => { const n = nextInstallment(terms); return n ? installmentStatusLabel(n.s, n.i) : ''; }},
+   readRecord:(terms) => { if(!terms.length) return PAYMENT_STATUS.unpaid.label; const n = nextInstallment(terms); return n ? installmentStatusLabel(n.s, n.i) : ''; }},
   {key:'allInstallmentStatuses', label:'All Installment Statuses', kind:'select', level:'installments', all:true, options:PAYMENT_STATUS_OPTIONS,
-   readAll:(terms) => liveInstallments(terms).map(({s, i}) => installmentStatusLabel(s, i))},
+   readAll:(terms) => !terms.length ? [PAYMENT_STATUS.unpaid.label] : liveInstallments(terms).map(({s, i}) => installmentStatusLabel(s, i))},
   {key:'nextInstallmentDueDate', label:'Next Installment Due Date', kind:'date', level:'record',
    readRecord:(terms) => { const n = nextInstallment(terms); return n ? n.i.dueDate || '' : ''; }},
   // The payment schedule's final installment.
   {key:'lastInstallmentDueDate', label:'Last Installment Due Date', kind:'date', level:'record',
    readRecord:(terms) => { const l = liveInstallments(terms).slice(-1)[0]; return l ? l.i.dueDate || '' : ''; }},
 ];
-// A record's payment terms (Accounting), and one property's values across them (any may match).
-// Its one Payment Terms (accounting.jsx, primaryTermsOf) — archived ones don't count.
+// A record's Payment Plans (Accounting), and one property's values across them (any may match).
 // A customer with a deal reads its deal's (accounting.jsx termsHolderOf).
-const recordPaymentTerms = (rec) => { if(!rec) return []; const h = termsHolderOf(recordObjectOf(rec.id), rec);
-  const p = primaryTermsOf((WF_LIVE.accounting || []).filter(s => s.object === h.object && String(s.recordId) === String(h.id))); return p ? [p] : []; };
+const recordPaymentTerms = (rec) => rec ? recordPlansOf(WF_LIVE.accounting, recordObjectOf(rec.id), rec) : [];
 const accountingValues = (rec, f) => f.level === 'installments' ? f.readAll(recordPaymentTerms(rec))
   : [f.readRecord(recordPaymentTerms(rec))];
 /* The fields a property trigger can watch in a scope (`prop:<key>`, as the record's own are). */
@@ -714,8 +718,8 @@ const useWorkflowEngineCtx = () => React.useContext(WorkflowEngineCtx);
 function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, setDealActivities, setContacts,
                             customers = [], setCustomersRaw, customerActivities = {}, setCustomerActivities,
                             contacts = [], contactActivities = {}, setContactActivities,
-                            profiles = {}, profileFacts = {}, accounting = [], quotes = [], forms = []}){
-  WF_LIVE = {profiles, facts:profileFacts, accounting, users:data.users || [], properties:data.properties || [], forms, workflows:data.workflows || []};
+                            profiles = {}, profileFacts = {}, accounting = [], invoices = [], quotes = [], forms = []}){
+  WF_LIVE = {profiles, facts:profileFacts, accounting, invoices, users:data.users || [], properties:data.properties || [], forms, workflows:data.workflows || []};
   const [es, setEs] = React.useState(() => withoutLegacyViolationStatus(withoutSuggestive(savedSlice('engine') || (WF_SAVED && WF_SAVED.engine) || EMPTY_ENGINE())));
   const esRef = React.useRef(es);
   const dataRef = React.useRef(data); dataRef.current = data;
@@ -2983,13 +2987,13 @@ function violationTargets(data, p){
   }
   return {props:[...props], tabs:[...tabs], accounting:[...accounting]};
 }
-// The installments an accounting field points at, in the record's one Payment Terms.
-function violationInstallments(terms, key){
-  if(!terms) return [];
-  const live = liveInstallments([terms]);
+// The installments an accounting field points at, across the record's Payment Plans (frozen ones left out).
+function violationInstallments(list, key){
+  if(!list || !list.length) return [];
+  const live = liveInstallments(list);
   // The first installment, or the balance that still carries part of it.
-  if(key === 'firstInstallmentStatus'){ const i = (terms.installments || []).find(x => !x.parentId); return i ? [balanceEndOf(terms, i).id] : []; }
-  if(key === 'nextInstallmentStatus' || key === 'nextInstallmentDueDate'){ const n = nextInstallment([terms]); return n ? [n.i.id] : []; }
+  if(key === 'firstInstallmentStatus'){ const terms = termsInOrder(list.filter(x => !x.frozen))[0], i = terms && (terms.installments || []).find(x => !x.parentId); return i ? [balanceEndOf(terms, i).id] : []; }
+  if(key === 'nextInstallmentStatus' || key === 'nextInstallmentDueDate'){ const n = nextInstallment(list); return n ? [n.i.id] : []; }
   if(key === 'lastInstallmentDueDate'){ const l = live.slice(-1)[0]; return l ? [l.i.id] : []; }
   if(key === 'allInstallmentStatuses') return live.filter(({s, i}) => installmentState(s, i).status !== 'paid').map(({i}) => i.id);
   return [];
@@ -3004,7 +3008,7 @@ function RecordViolationsProvider({record, children}){
   const value = React.useMemo(() => {
     if(!list.length) return EMPTY_RECORD_VIOLATIONS;
     const object = recordObjectOf(id);
-    const terms = hub ? primaryTermsOf((hub.accounting || []).filter(s => s.object === object && String(s.recordId) === String(id))) : null;
+    const terms = hub ? (hub.accounting || []).filter(s => s.object === object && String(s.recordId) === String(id)) : [];
     const out = {list, object, props:{}, tabs:{}, installments:{}};
     const add = (map, k, line) => { (map[k] = map[k] || []).includes(line) || map[k].push(line); };
     list.forEach(p => {

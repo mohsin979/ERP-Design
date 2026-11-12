@@ -1948,7 +1948,7 @@ function TriggerSettings({data, trig, context, config, onChange}){
         return <React.Fragment key={f}>
           {(pick || watched.property) && <TriggerPropertyCondition data={data} workflow={{context:ctx, trigger:trig.key, triggerConfig:watched}} property={pick || undefined}
             onChange={(patch)=>onChange({...watched, ...patch})}/>}
-          {sc === 'accounting' && cfgHelp('Read from the record’s payment terms in Accounting.')}
+          {sc === 'accounting' && cfgHelp('Read from the record’s payment plans in Accounting.')}
           {sc === 'form' && cfgHelp('Read from the form submission that created the record (Marketing → Forms).')}
           {sc === 'owner' && cfgHelp(ctx.object ? 'Checks the record owner’s User Properties.' : 'Checked for each user: the workflow runs for every user it holds for.')}
         </React.Fragment>;

@@ -118,7 +118,7 @@ function QuoteTemplateFormPanel({templates, onCancel, onSave}){
         <span style={QUOTE_SECTION}>Services</span>
         <QuoteServicesFields q={t} set={set} checks={checks}/>
         {divider}
-        <span style={QUOTE_SECTION}>Payment terms</span>
+        <span style={QUOTE_SECTION}>Payment plan</span>
         <QuotePaymentFields q={t} set={set} checks={checks}/>
         {divider}
         <span style={QUOTE_SECTION}>Terms & conditions</span>
@@ -139,7 +139,7 @@ function QuoteTemplatesTab({data, setData, say}){
   const [deleting, setDeleting] = React.useState(null);
   const open = list.find(t => t.id === openId) || null;
   const cols = [{key:'code', label:'Code', width:110}, {key:'name', label:'Template Name', width:240}, {key:'services', label:'Services', width:280},
-    {key:'payment', label:'Payment Terms', width:180}, {key:'createdBy', label:'Created By', width:160}, {key:'created', label:'Created', width:150}];
+    {key:'payment', label:'Payment Plan', width:180}, {key:'createdBy', label:'Created By', width:160}, {key:'created', label:'Created', width:150}];
   const rows = list.map(t => ({id:t.id, code:t.code, name:t.name, services:(t.items || []).map(it => it.name).join(', '), payment:PAYMENT_TYPE_LABEL[quotePlanOf(t).paymentType],
     createdBy:creatorOf(t), created:fmtQuoteDate(t.createdAt)}));
   const actions = (t) => [{label:'View Template', onClick:()=>setOpenId(t.id)}, ...(can('edit', t) ? [{label:'Rename Template', onClick:()=>setRenaming({id:t.id, name:t.name})}] : []),
@@ -181,7 +181,7 @@ function QuoteTemplatesTab({data, setData, say}){
               ))}
             </div>
             <div>
-              <div style={section}>Payment terms</div>
+              <div style={section}>Payment plan</div>
               <PaymentPlanTable rows={quoteSchedule(open)} currency={quoteCurrency(open)} ongoing={planOngoing(quotePlanOf(open))}/>
             </div>
             <div>

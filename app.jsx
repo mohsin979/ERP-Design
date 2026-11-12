@@ -759,24 +759,13 @@ function App(){
   const [documents, setDocuments] = usePersistedState('documents', [], (ds) => (ds || []).map(upgradeDocument));   // saved before: one body (upgradeDocument)
   ensureIdFloor('documents', quoteSeqFloor(documents));
   const [forms, setForms] = usePersistedState('forms', () => SEED ? SAMPLE_FORMS() : []);
-  // Payment schedules pulled from signed quotes, and their payments (accounting.jsx); subscriptions until cancelled billed up to today and the next cycle.
-  const [accounting, setAccounting] = usePersistedState('accounting', [], (list) => withBiz(unpackPaymentTerms(list), 'accounting').map(rollSubscription), packPaymentTerms);
-  /* Every Contact, Deal and Customer has payment terms: the default ones (accounting.jsx) until it
-     has its own — records already there, and each one created from now on. */
-  React.useEffect(() => {
-    const key = (o, id) => `${o}:${id}`, has = new Set(accounting.map(s => key(s.object, s.recordId)));
-    const missing = [...contacts.map(r => ['contacts', r]), ...deals.map(r => ['deals', r]), ...customers.map(r => ['customers', r])].filter(([o, r]) => !has.has(key(o, r.id)));
-    if(missing.length) setAccounting(list => { const h = new Set(list.map(s => key(s.object, s.recordId)));
-      return [...list, ...missing.filter(([o, r]) => !h.has(key(o, r.id))).map(([o, r]) => defaultPaymentTerms(o, r))]; });
-    /* A deal's default terms total the deal's amount, in its currency: while they're untouched
-       (never edited or paid), they follow it when the amount or currency changes. */
-    const amountOf = new Map(deals.map(d => [String(d.id), Math.round((Number(d.amount) || 0) * 100) / 100]));
-    const currencyOf = new Map(deals.map(d => [String(d.id), d.currency || undefined]));
-    const untouched = (s) => JSON.stringify(s) === JSON.stringify(defaultTermsOf(s.id, s.object, s.recordId, s.total, s.startDate, s.createdAt, s.currency));
-    const follow = (s) => s.isDefault && s.object === 'deals' && amountOf.has(String(s.recordId)) && untouched(s)
-      && (amountOf.get(String(s.recordId)) !== s.total || scheduleCurrency(s) !== (currencyOf.get(String(s.recordId)) || LEGACY_CURRENCY));
-    if(accounting.some(follow)) setAccounting(list => list.map(s => follow(s) ? defaultTermsOf(s.id, s.object, s.recordId, amountOf.get(String(s.recordId)), s.startDate, s.createdAt, currencyOf.get(String(s.recordId))) : s));
-  }, [contacts, deals, customers, accounting]);
+  /* Payment Plans and their payments (accounting.jsx) — saved before: the untouched starting terms
+     dropped, the rest numbered (migratePlans); subscriptions until cancelled billed up to today and
+     the next cycle. A record starts with no plan. */
+  const [accounting, setAccounting] = usePersistedState('accounting', [], (list) => migratePlans(withBiz(unpackPaymentTerms(list), 'accounting')).map(rollSubscription));
+  // Invoices: one per payment of a plan (invoices.jsx — InvoiceIssuer issues them); numbers never fall back below one used.
+  const [invoices, setInvoices] = usePersistedState('invoices', []);
+  ensureIdFloor('invoices', quoteSeqFloor(invoices));
   /* Last Contacted (a Contact's): its latest real touch — a connected call, a sent email or a held
      meeting, on the contact or on its deals and customers (activities.jsx isRealTouch) — kept in
      step with the activity. Written as a system value (no workflow event for each contact). */
@@ -799,7 +788,7 @@ function App(){
   const [overviewSettings, setOverviewSettings] = usePersistedState('overviewSettings', {});
   const engine = useWorkflowEngine({data:settingsData, setData:setSettingsData, deals, setDealsRaw, dealActivities, setDealActivities, setContacts,
     customers, setCustomersRaw, customerActivities, setCustomerActivities, contacts, contactActivities, setContactActivities,
-    profiles:profileFormData, profileFacts, accounting, quotes, forms});
+    profiles:profileFormData, profileFacts, accounting, invoices, quotes, forms});
   // Customers change through the engine too: owner history, stage entry and Customer workflows.
   const setDeals = engine.setDeals, setCustomers = engine.setCustomers;
   /* Contacts ⇄ Deals. A contact's Associated Deals count is its deals (`contactId`), so the two
@@ -1003,12 +992,12 @@ function App(){
     : object === 'customers' ? setCustomers(cs => cs.map(c => c.id === id ? {...c, ...patch} : c)) : null;
   const hubValue = {data:settingsData, records:{contacts:contactsWithDeals, deals:dealsView, customers:customersView}, updateRecord,
     activities:{contacts:contactActivities, deals:dealActivities, customers:customerActivities},
-    add:hubAdd, update:hubUpdate, remove:hubRemove, openRecord, quotes, setQuotes, documents, setDocuments, services, setServices, forms, setForms, createRecord, setData:setSettingsData, accounting, setAccounting, overviewSettings, setOverviewSettings,
+    add:hubAdd, update:hubUpdate, remove:hubRemove, openRecord, quotes, setQuotes, documents, setDocuments, services, setServices, forms, setForms, createRecord, setData:setSettingsData, accounting, setAccounting, invoices, setInvoices, overviewSettings, setOverviewSettings,
     // A workflow violation's details: its Object's page with Workflow Violations open and it selected.
     openViolation:(object, id) => { setCrmActive(object); engine.value.openViolation(object, id); }};
   const withEngine = (el) => (
     <WorkflowEngineCtx.Provider value={engineValue}>
-      <RecordHubProvider value={hubValue}><ProfileFormsCtx.Provider value={profileFormsStore}>{el}</ProfileFormsCtx.Provider><PublicFormInbox/><DocumentSignInbox/></RecordHubProvider>
+      <RecordHubProvider value={hubValue}><ProfileFormsCtx.Provider value={profileFormsStore}>{el}</ProfileFormsCtx.Provider><PublicFormInbox/><DocumentSignInbox/><InvoiceIssuer/></RecordHubProvider>
       {engine.openPromptId && <WorkflowPromptModal key={engine.openPromptId} promptId={engine.openPromptId} direct={engine.promptDirect} onClose={engine.closePrompt} hidden={eventAway}/>}
       <WorkflowNotices notices={engine.notices} onDismiss={engine.dismissNotice} onView={engine.value.openEvent}/>
       {engine.event && <AutomaticActionModal key={engine.event.id} event={engine.event} onClose={engine.closeEvent} hidden={eventAway}/>}
@@ -1065,6 +1054,7 @@ function App(){
           : crmActive === 'tasks' ? <TasksBoardPage/>
           : TOOL_PAGES[crmActive] ? <ToolActivityPage key={crmActive} pageId={crmActive}/>
           : crmActive === 'quotes' ? <QuotesPage/>
+          : crmActive === 'invoices' ? <InvoicesPage/>
           : crmActive === 'documents' ? <DocumentsPage/>
           : crmActive === 'services' ? <ServicesPage/>
           // Dashboard: Financial KPIs, Wall of Fame, Business Velocity (dashboard.jsx).

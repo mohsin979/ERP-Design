@@ -37,6 +37,7 @@ const CRM_NAV_DEFAULT = () => ([
     {id:'meetings', label:'Meetings', icon:'videoCamera', hidden:false},
     {id:'notes',    label:'Notes',    icon:'notepad',     hidden:false},
     {id:'quotes',   label:'Quotes',   icon:'quote',       hidden:false},
+    {id:'invoices', label:'Invoices', icon:'coins',       hidden:false},
     {id:'documents', label:'Documents', icon:'files',     hidden:false},
   ]},
   // Services moved to Settings → Templates (a kind of template).
@@ -99,7 +100,8 @@ const isObjectNavItem = (id) => !!OBJECT_NAV_ICONS[id] || String(id).startsWith(
 const REMOVED_NAV_IDS = ['leadScoring', 'services'];   // Services: now Settings → Templates → Services
 // Entries added to the product since a navigation was saved join their group, after `after`.
 const ADDED_NAV_ITEMS = [{group:'marketing', after:'ads', item:{id:'forms', label:'Forms', icon:'forms', hidden:false}},
-  {group:'tools', after:'quotes', item:{id:'documents', label:'Documents', icon:'files', hidden:false}}];
+  {group:'tools', after:'quotes', item:{id:'documents', label:'Documents', icon:'files', hidden:false}},
+  {group:'tools', after:'quotes', item:{id:'invoices', label:'Invoices', icon:'coins', hidden:false}}];
 // Groups renamed since a navigation was saved: the Automation group (once Workflows) is Administrative.
 const RENAMED_NAV_GROUPS = {automation:'Administrative'};
 function navWithObjects(nav, objects){

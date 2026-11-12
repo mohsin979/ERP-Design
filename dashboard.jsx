@@ -24,9 +24,11 @@
    Data: the CRM's own records (dashBusinessData) — deals, their contacts and customers, their
    activity, Accounting and the workflow violations; each attributed to the deal's owner.
      Cash Received    payments recorded in Accounting, by payment date.
-     Cash Invoiced    installments invoiced (their invoice date) — issuing isn't payment.
-     Forecasted Cash  installments due in the period — expected, paid or not.
-                      A part-paid installment counts what was paid on it; its balance the rest.
+     Cash Invoiced    invoices issued (invoices.jsx, by issue date) — issuing isn't payment; a
+                      superseded one doesn't count, a part-paid one counts what was received (its
+                      balance has its own invoice).
+     Forecasted Cash  installments due in the period — expected, paid or not; a frozen plan's
+                      aren't. A part-paid installment counts what was paid on it; its balance the rest.
                       Lost and Postponed deals' installments aren't counted (Postponed: an open
                       stage, known by its name).
      Money totals are in the default currency (Settings → Defaults), each amount converted at
@@ -65,7 +67,7 @@ const dashTime = (v) => { if(v == null || v === '') return null; if(typeof v ===
 const dashDayTime = (ymd, hour) => ymd ? dashTime(`${ymd}T${String(hour).padStart(2, '0')}:00:00`) : null;
 // A deal in its pipeline's Postponed stage (an open stage the forecast leaves out).
 const dealPostponed = (d) => { const pl = STAGE_PIPELINES.find(p => p.id === d.pipeline), st = pl && pl.stages.find(x => x.id === d.stage); return !!st && /^postponed$/i.test(st.label || ''); };
-function dashBusinessData({deals = [], customers = [], contacts = [], accounting = [], activities = {}, users = [], now = new Date()}){
+function dashBusinessData({deals = [], customers = [], contacts = [], accounting = [], invoices = [], activities = {}, users = [], now = new Date()}){
   const people = new Map();
   const person = (ownerId) => {
     if(ownerId == null || ownerId === '') return null;
@@ -104,23 +106,29 @@ function dashBusinessData({deals = [], customers = [], contacts = [], accounting
     const dc = d.createdAt || dashTime(d.created), at = dashTime(c.created);
     if(dc != null && at != null && at >= dc) p.ev.converted.push({at, hours:(at - dc) / 36e5});
   });
-  // Accounting: each installment invoiced, due and paid — the record's owner's.
+  // Accounting: each invoice issued, each installment due and paid — the record's owner's.
+  const planById = new Map(accounting.map(sched => [sched.id, sched]));
+  const issuedAt = new Map();   // a payment's invoice: when it was issued (Invoice to Cash)
+  invoices.forEach(v => {
+    const sched = planById.get(v.planId), p = sched && person(ownerOf.get(String(sched.recordId))), at = dashDayTime(v.issueDate, 10);
+    if(v.status !== 'archived') issuedAt.set(`${v.planId}|${v.instId}`, at);
+    if(!p || at == null || (v.status === 'archived' && v.archivedReason !== 'partial')) return;
+    p.ev.invoices.push({at, amount:toDefaultCurrency(v.status === 'archived' ? v.received || 0 : v.amount, v.currency)});
+  });
   accounting.forEach(sched => {
     const p = person(ownerOf.get(String(sched.recordId))); if(!p) return;
-    // A Lost or Postponed deal's installments aren't expected cash: left out of the forecast.
+    // A Lost or Postponed deal's installments aren't expected cash, nor a frozen plan's: left out of the forecast.
     const deal = sched.object === 'deals' && dealById.get(sched.recordId);
-    const forecast = !deal || (recordStageType('deals', deal) !== 'lost' && !dealPostponed(deal));
+    const forecast = !sched.frozen && (!deal || (recordStageType('deals', deal) !== 'lost' && !dealPostponed(deal)));
     // Every amount in the default currency (Settings' exchange rates), so the totals add up.
     const cur = scheduleCurrency(sched), dflt = (n) => toDefaultCurrency(n, cur);
     (sched.installments || []).forEach(i => {
-      // Invoiced on its invoice date once that's come (invoicedOn, accounting.jsx), or as recorded.
-      const invoicedAt = dashDayTime(invoicedOn(i), 10), due = dashDayTime(i.dueDate, 9);
+      const due = dashDayTime(i.dueDate, 9), sent = issuedAt.get(`${sched.id}|${i.id}`) ?? null;
       /* Forecast: an installment whose rest moved to a balance installment counts only what was paid
          on it — the balance carries the rest, by its own date (counted once). */
       const split = (sched.installments || []).some(x => x.parentId === i.id);
       if(forecast && due != null) p.ev.installments.push({amount:dflt(split ? (i.payments || []).reduce((s, pay) => s + (Number(pay.amount) || 0), 0) : i.amount), due});
-      if(invoicedAt != null) p.ev.invoices.push({at:invoicedAt, amount:dflt(i.amount)});
-      (i.payments || []).forEach(pay => { const at = dashDayTime(pay.paidOn, 12); if(at != null) p.ev.payments.push({amount:dflt(Number(pay.amount) || 0), at, sent:invoicedAt}); });
+      (i.payments || []).forEach(pay => { const at = dashDayTime(pay.paidOn, 12); if(at != null) p.ev.payments.push({amount:dflt(Number(pay.amount) || 0), at, sent}); });
     });
   });
   return {people:[...people.values()], now:now.getTime()};
@@ -178,12 +186,12 @@ const fmtUserStat = (key, v) => { const s = userStat(key); if(!s || v == null) r
    records, payments and activities stay the same — workflows read User Properties often. */
 let USER_STATS_CACHE = null;
 function liveUserStatsData(){
-  const recs = WF_LIVE.records || [], accounting = WF_LIVE.accounting || [], acts = WF_LIVE.acts || {};
+  const recs = WF_LIVE.records || [], accounting = WF_LIVE.accounting || [], invoices = WF_LIVE.invoices || [], acts = WF_LIVE.acts || {};
   const c = USER_STATS_CACHE;
-  if(c && c.recs === recs && c.accounting === accounting && c.acts === acts) return c.data;
+  if(c && c.recs === recs && c.accounting === accounting && c.invoices === invoices && c.acts === acts) return c.data;
   const of = (o) => recs.filter(r => recordObjectOf(r.id) === o);
-  const data = dashBusinessData({deals:of('deals'), customers:of('customers'), contacts:of('contacts'), accounting, activities:{deals:acts}, users:WF_LIVE.users || []});
-  USER_STATS_CACHE = {recs, accounting, acts, data};
+  const data = dashBusinessData({deals:of('deals'), customers:of('customers'), contacts:of('contacts'), accounting, invoices, activities:{deals:acts}, users:WF_LIVE.users || []});
+  USER_STATS_CACHE = {recs, accounting, invoices, acts, data};
   return data;
 }
 // A user's statistics, all-time, as numbers (workflows' User Properties).
@@ -1088,11 +1096,11 @@ const dashGreeting = (d = new Date()) => { const h = zonedParts(d).h; return h <
 function useDashBusinessData(hub){
   const deals = (hub && hub.records && hub.records.deals) || [];
   const records = (hub && hub.records) || {};
-  // Only the payment terms the signed-in user may view (Payment Terms → View) count.
+  // Only the payment plans the signed-in user may view (Payment Plans → View) count, and their invoices.
   return React.useMemo(() => { const byId = Object.fromEntries(['contacts', 'deals', 'customers'].map(o => [o, new Map((records[o] || []).map(r => [String(r.id), r]))]));
     const accounting = ((hub && hub.accounting) || []).filter(s => { const r = (byId[s.object] || new Map()).get(String(s.recordId)); return !r || paymentTermsCan('view', s.object, r); });
-    return dashBusinessData({deals, customers:records.customers || [], contacts:records.contacts || [], accounting,
-    activities:(hub && hub.activities) || {}, users:(hub && hub.data.users) || []}); }, [deals, records.customers, records.contacts, hub && hub.accounting, hub && hub.activities]);
+    return dashBusinessData({deals, customers:records.customers || [], contacts:records.contacts || [], accounting, invoices:(hub && hub.invoices) || [],
+    activities:(hub && hub.activities) || {}, users:(hub && hub.data.users) || []}); }, [deals, records.customers, records.contacts, hub && hub.accounting, hub && hub.invoices, hub && hub.activities]);
 }
 
 /* ── A user's statistics in their profile panel ──────────────────────────────────────────

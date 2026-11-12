@@ -10,7 +10,7 @@
         panel, the service then ready to add): each with its name, description and milestones
         (name, description, price — the price editable for this quote), or, without milestones,
         its price; the services subtotal;
-     3. Payment Terms — the payment terms for the quote's total (PaymentTermsFields, accounting.jsx:
+     3. Payment Plan — the payment plan for the quote's total (PaymentTermsFields, accounting.jsx:
         One-Time, Installment or Recurring, Quote Signed or a fixed date), then the discount on
         the services subtotal (a percentage or an amount) and 5% VAT on the discounted subtotal,
         down to the total;
@@ -20,9 +20,10 @@
         Brand: its full logo and the saved Digital Letterhead, used on every quote without
         choosing it); Save as Template, Save as Draft, Send Quote.
    A quote keeps its own copy of each service as quoted. Its number (Q-<year>-<nnnn>) comes from a
-   counter that only goes up, so a deleted quote's number isn't reused. Its payment terms are a plan
+   counter that only goes up, so a deleted quote's number isn't reused. Its payment plan is a plan
    (`payment`) for its total: the payments it makes (planSchedule) are dated once it's signed (Day N
-   from signing until then); a quote saved before plans keeps its installments (shares of the total)
+   from signing until then), and signing makes it a Payment Plan on the record (plansOnQuoteSigned,
+   accounting.jsx) — its invoices issued from then on; a quote saved before plans keeps its installments (shares of the total)
    and, edited, opens with them as a deposit and equal installments (planOfShares). Sending marks it Sent, keeps the brand it went out
    with, and puts the quote and its email on the record's activity. Past its Valid Until date a
    draft or sent quote is Expired: it can't be sent, signed or pulled, and can be deleted. A
@@ -243,7 +244,7 @@ function QuoteDocument({quote}){
         {/* Payment terms: the plan's payments (saved before plans: the installments as they were). */}
         {(quote.payment || installments.length > 0) && (
           <div>
-            <div style={{...section, display:'flex', justifyContent:'space-between', gap:12}}>Payment terms
+            <div style={{...section, display:'flex', justifyContent:'space-between', gap:12}}>Payment plan
               {quote.payment && <span style={{color:T.attioMuted, fontWeight:500, letterSpacing:0, textTransform:'none', fontSize:12}}>{PAYMENT_TYPE_LABEL[quotePlanOf(quote).paymentType]}</span>}</div>
             {quote.payment ? <PaymentPlanTable rows={quoteSchedule(quote)} currency={cur} rule={brand.colors.primary} ongoing={planOngoing(quotePlanOf(quote))}/>
               : <InstallmentsTable installments={installments} total={t.total} currency={cur}/>}
@@ -339,8 +340,8 @@ function sendQuoteVia(hub, q){
       + (q.items || []).map(it => `${it.name} — ${fmtMoney(quoteItemTotal(it), cur)}`).join('\n')
       + `\n\nSubtotal: ${fmtMoney(t.subtotal, cur)}` + (t.discount ? `\nDiscount: − ${fmtMoney(t.discount, cur)}` : '') + (q.vatRate != null ? `\nVAT (${t.vatRate}%): ${fmtMoney(t.vat, cur)}` : '')
       + `\nTotal: ${fmtMoney(t.total, cur)}` + (q.validUntil ? `\nValid until ${fmtQuoteDate(q.validUntil)}.` : '')
-      + (q.payment ? `\n\nPayment terms (${PAYMENT_TYPE_LABEL[quotePlanOf(q).paymentType]}):\n` + quoteSchedule(q).map((x, i) => `${i + 1}. ${x.description} — ${fmtMoney(x.amount, cur)} — due ${fmtQuoteDate(x.dueDate) || x.tentative}`).join('\n') + (planOngoing(quotePlanOf(q)) ? '\nUntil cancelled' : '')
-        : (q.installments || []).length ? `\n\nPayment terms:\n` + q.installments.map((x, i) => `${i + 1}. ${x.description} — ${round2(x.percent)}% — ${fmtMoney(installmentAmount(q, x), cur)}${fmtTentative(x.due) ? ` — ${fmtTentative(x.due)}` : ''}`).join('\n') : '')
+      + (q.payment ? `\n\nPayment plan (${PAYMENT_TYPE_LABEL[quotePlanOf(q).paymentType]}):\n` + quoteSchedule(q).map((x, i) => `${i + 1}. ${x.description} — ${fmtMoney(x.amount, cur)} — due ${fmtQuoteDate(x.dueDate) || x.tentative}`).join('\n') + (planOngoing(quotePlanOf(q)) ? '\nUntil cancelled' : '')
+        : (q.installments || []).length ? `\n\nPayment plan:\n` + q.installments.map((x, i) => `${i + 1}. ${x.description} — ${round2(x.percent)}% — ${fmtMoney(installmentAmount(q, x), cur)}${fmtTentative(x.due) ? ` — ${fmtTentative(x.due)}` : ''}`).join('\n') : '')
       + (q.eSignature ? `\n\nPlease review and sign the quotation.` : '') + `\n\nKind regards,\n${CURRENT_USER.name}`});
   hub.toast(`Quote ${q.number} sent`);
 }
@@ -348,7 +349,7 @@ function sendQuoteVia(hub, q){
 /* ── The builder (new, or editing a draft) ── the creation side panel (CreatePanelFrame), wider
    for its six steps, which run down their own column on the left; the step's content on the
    right — on Basics, under Record Type and the record when it isn't known (Tools → Quotes). */
-const QUOTE_STEPS = ['Basics', 'Services', 'Payment Terms', 'Terms & Conditions', 'E-Signature', 'Branding'];
+const QUOTE_STEPS = ['Basics', 'Services', 'Payment Plan', 'Terms & Conditions', 'E-Signature', 'Branding'];
 const priceOk = (v) => v !== '' && v != null && Number.isFinite(Number(v)) && Number(v) >= 0;
 const itemPricesOk = (it) => (it.milestones || []).length ? it.milestones.every(m => priceOk(m.price)) : priceOk(it.price);
 /* What the Services and Payment Terms steps check (the builder and a quote template): a service
@@ -680,7 +681,7 @@ function quoteActions(hub, q, {onDelete, onEdit, onSign} = {}){
   ];
 }
 /* A sent quote's signed copy came back: when it was signed, and the copy (optional, ≤2 MB). The
-   quote becomes Signed; its payment terms can then be pulled into the record's Accounting. */
+   quote becomes Signed, and its payment plan a Payment Plan on the record (plansOnQuoteSigned). */
 const readUpload = (file, maxBytes = 2 * 1024 * 1024) => new Promise((resolve, reject) => {
   if(!file) return resolve(null);
   if(file.size > maxBytes) return reject(new Error('The file is larger than 2 MB.'));
@@ -691,7 +692,7 @@ function SignQuoteModal({quote, onCancel, onSigned}){
   return <MarkSignedModal sentAt={quote.sentAt} onCancel={onCancel} onSave={({signedAt, signedCopy}) => {
     hub.setQuotes(qs => qs.map(x => x.id === quote.id ? {...x, status:'signed', signedAt, signedCopy} : x));
     // Payment terms set to Quote Signed (pulled from it, or on its record) are dated from its signing.
-    datePlansOnSigning(hub, quote, signedAt);
+    plansOnQuoteSigned(hub, quote, signedAt);
     hub.add(quote.object, quote.recordId, {type:'quote', status:'signed', title:`${quote.number} · ${quote.title} signed`, quoteId:quote.id, total:quoteTotal(quote), source:'you', by:null});
     hub.toast(`Quote ${quote.number} marked as signed`);
     onSigned && onSigned();

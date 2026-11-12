@@ -80,8 +80,8 @@ const PERMISSION_PRESETS = [SUPER_ADMIN, 'Admin', 'Team Lead', 'Sales Profession
 
 /* Permission categories (left list), each with its horizontal tabs:
      Records                     — Contacts / Deals / Customers: what's done on records (their
-                                   tools — Calls, Call Logs, Meetings, Notes, Tasks, Files, Quotes, Documents —
-                                   and Accounting: Payment Terms, by the record's owner), and under
+                                   tools — Calls, Call Logs, Meetings, Notes, Tasks, Files, Quotes, Invoices, Documents —
+                                   and Accounting: Payment Plans, by the record's owner), and under
                                    Edit: moving between stages, which property values may be edited.
      Customer Profile Properties — which Customer Profile answers may be edited, on every record.
      Templates                   — Email Templates, Email Sequences, Quote Templates, Playbooks,
@@ -132,6 +132,7 @@ const PERMISSION_TOOLS = [
   {key:'tasks',    label:'Tasks'},
   {key:'files',    label:'Files'},
   {key:'quotes',   label:'Quotes'},
+  {key:'invoices', label:'Invoices'},
   {key:'documents', label:'Documents'},
 ];
 const TOOL_ACTIONS = [
@@ -184,9 +185,9 @@ function normalizeObjectPermissions(o){
     ...Object.fromEntries(SCOPED_PERMISSION_KEYS.map(k => [k, fromOld(o[k])]))};
   return {...std, tools:normalizeToolPermissions(o.tools, std), accounting:normalizeAccountingPermissions(o.accounting, std)};
 }
-/* Payment Terms (the record's Accounting tab), per Object: Create, View, Edit, Delete — by the
-   record's owner, as the Object's own. None saved yet → mirroring the Object's (as Payment Terms
-   followed the record's Edit before). Without View the record's payment terms and every
+/* Payment Plans (the record's Accounting tab), per Object: Create, View, Edit, Delete — by the
+   record's owner, as the Object's own. None saved yet → mirroring the Object's (as Payment Plans
+   followed the record's Edit before). Without View the record's payment plans and every
    accounting figure from them (Accounting properties, cash KPIs and statistics) don't show. */
 function normalizeAccountingPermissions(a, std){
   const scoped = (v, fallback) => v ? scopedPermission(v.on, v.scope || 'own', v.life) : scopedPermission(fallback.on, fallback.scope, fallback.life);
@@ -1324,14 +1325,14 @@ function ObjectPermissionsEditor({obj, seat, value, onChange, properties = []}){
             rows={toolActionsOf(tool).map(a => ({...a, allowed:seat.contactStandard.includes(a.key)}))}
             value={tools[tool.key]} set={(key, patch)=>setTool(tool.key, key, patch)}/>
         ))}
-        {/* Accounting: the record's Payment Terms (its Accounting tab), by the record's owner. */}
+        {/* Accounting: the record's Payment Plans (its Accounting tab), by the record's owner. */}
         <div style={{height:1, background:T.borderStrong}}/>
         <span style={{fontSize:14, fontWeight:500, color:T.black}}>Accounting</span>
-        <PermissionTable title="Payment Terms" obj={obj} idKey={`${obj.key}-accounting`}
-          rows={[{key:'create', label:() => 'Create Payment Terms', unscoped:true}, {key:'view', label:() => 'View Payment Terms'},
-            {key:'edit', label:() => 'Edit Payment Terms'}, {key:'delete', label:() => 'Delete Payment Terms'}].map(a => ({...a, allowed:seat.contactStandard.includes(a.key)}))}
+        <PermissionTable title="Payment Plans" obj={obj} idKey={`${obj.key}-accounting`}
+          rows={[{key:'create', label:() => 'Create Payment Plans', unscoped:true}, {key:'view', label:() => 'View Payment Plans'},
+            {key:'edit', label:() => 'Edit Payment Plans'}, {key:'delete', label:() => 'Delete Payment Plans'}].map(a => ({...a, allowed:seat.contactStandard.includes(a.key)}))}
           value={accounting} set={(key, patch)=>onChange(o => ({...o, accounting:{...(o.accounting || accounting), [key]:applyPermission((o.accounting || accounting)[key], key, patch)}}))}/>
-        <div style={stTextB}>Without View Payment Terms, the record's payment terms and the accounting figures from them (Accounting properties, cash KPIs and statistics) don't show.</div>
+        <div style={stTextB}>Without View Payment Plans, the record's payment plans and the accounting figures from them (Accounting properties, cash KPIs and statistics) don't show.</div>
       </>)}
     </div>
   );

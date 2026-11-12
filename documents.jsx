@@ -5,12 +5,12 @@
    The builder (DocumentBuilder) is the page itself, on the open branch's Digital Letterhead
    (BrandedDocument, quotes.jsx), written in place. Above it: the document's name (the file's name —
    lists, emails; not on the page), then the toolbar — the rich-text editor's (bold, italic,
-   underline, lists, link), the text size in numbers, Image, then Add Record Info, Add Payment Term
+   underline, lists, link), the text size in numbers, Image, then Add Record Info, Add Payment Plan
    and Add Signature, which put an element where the cursor is:
      Record Info  — a record (one search over every record, by name) and which of its details go
                     in (its name, email, phone and address to start with): put in as ordinary text
                     under "Prepared for" — edited like the rest (decided 2026-11-12);
-     Payment Term — the record Accounting's Payment Terms panel (accounting.jsx): One-Time,
+     Payment Plan — the record Accounting's Payment Plan panel (accounting.jsx): One-Time,
                     Installment or Recurring, the same fields and data, its invoice issue date
                     "Document Signed" or a fixed date; shown as its payments (planSchedule) — dated
                     from the day the document is signed by everyone (until then: Day N);
@@ -32,8 +32,9 @@
    copied; "1 of 2 signed") → Signed once every signature is (no edit or delete). A sent one keeps
    the brand it went out with. Its number (DOC-<year>-<nnnn>) comes from a counter that only goes
    up. Created, sent and each signature go on the record's activity; sending puts its emails there
-   too. Nothing is really emailed. A payment term here is the document's content only — the
-   record's Accounting is not changed. Documents saved before (sections of blocks) open as one body
+   too. Nothing is really emailed. Once signed by everyone, each payment plan in it becomes a
+   Payment Plan on its record (plansFromDocument — on the record that holds its plans, dated from
+   the signing, "From DOC-…"); a document without a record makes none. Documents saved before (sections of blocks) open as one body
    (upgradeDocument); their Assignable recipient and Signable flag are no longer used. Permissions:
    the record type's Tools → Documents (Users & Teams). */
 
@@ -67,7 +68,7 @@ function paymentEmbedHtml(pt, brand, signedOn){
   const kind = PAYMENT_TYPE_LABEL[plan.paymentType] + (plan.paymentType === 'recurring' ? ` · ${RECURRING_FREQUENCY[plan.frequency] || 'Monthly'}` : '');
   const rows = planSchedule(plan, {id:'pt', signedOn, preview:3}), when = (d, t) => escHtml(fmtQuoteDate(d) || t || '—');
   return `<div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:8px">`
-    + `<span style="font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:${brand.colors.secondary}">Payment Terms</span>`
+    + `<span style="font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:${brand.colors.secondary}">Payment Plan</span>`
     + `<span style="font-size:12px;${muted}">${escHtml(kind)}</span></div>`
     + `<div style="display:flex;gap:12px;padding:0 0 6px;font-size:11.5px;${muted}"><span style="flex:1">Payment</span>`
     + `<span style="width:110px;text-align:right">Invoice</span><span style="width:110px;text-align:right">Due</span><span style="width:120px;text-align:right">Amount</span></div>`
@@ -174,7 +175,7 @@ function documentPlain(d){
     if(data && data.kind === 'record'){ const p = document.createElement('p'); p.innerHTML = (data.fields || []).map(f => escHtml(recordInfoPlain(f) || f.key === 'name' ? f.value : `${f.label}: ${f.value}`)).join('<br>'); n.replaceWith(p); return; }
     if(!data || data.kind !== 'payment'){ n.remove(); return; }
     const plan = planOf(data), cur = plan.currency || defaultCurrency();
-    const lines = [`Payment terms (${PAYMENT_TYPE_LABEL[plan.paymentType]}):`, ...planSchedule(plan, {signedOn: d.status === 'signed' ? d.signedAt : '', preview:3})
+    const lines = [`Payment plan (${PAYMENT_TYPE_LABEL[plan.paymentType]}):`, ...planSchedule(plan, {signedOn: d.status === 'signed' ? d.signedAt : '', preview:3})
       .map((x, i) => `${i + 1}. ${x.description} — ${fmtMoney(x.amount, cur)} — due ${fmtQuoteDate(x.dueDate) || x.tentative}`), ...(planOngoing(plan) ? ['Until cancelled'] : [])];
     const p = document.createElement('p'); p.innerHTML = lines.map(escHtml).join('<br>'); n.replaceWith(p); });
   box.innerHTML = box.innerHTML.replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|li|div)>/gi, '\n');
@@ -361,7 +362,7 @@ function DocumentBuilder({mode, id, object, onClose, placement = 'fixed'}){
     if(!target) setLinked({object:o, id:recordId});
     if(insert) setTimeout(() => insert(recordInfoText(fields)), 0);
   };
-  const tools = ({insert, keep}) => [['record', 'Add Record Info', 'contacts'], ['payment', 'Add Payment Term', 'coins'], ['signature', 'Add Signature', 'edit']].map(([kind, label, icon]) => (
+  const tools = ({insert, keep}) => [['record', 'Add Record Info', 'contacts'], ['payment', 'Add Payment Plan', 'coins'], ['signature', 'Add Signature', 'edit']].map(([kind, label, icon]) => (
     <button key={kind} type="button" onMouseDown={e=>{ e.preventDefault(); keep(); }} onClick={()=>{ insertRef.current = insert; setEditing({kind, id:docId({record:'ri', payment:'pt', signature:'sg'}[kind]), isNew:true}); }}
       style={{...btnSecondarySm, height:26, padding:'0 10px'}}><Icon name={icon} size={12} color={T.gray600}/> {label}</button>
   ));
@@ -393,7 +394,7 @@ function DocumentBuilder({mode, id, object, onClose, placement = 'fixed'}){
           </div>
         </div>
       </div>
-      {editing && editing.kind === 'payment' && <PaymentStructurePanel zIndex={95} heading={editing.isNew ? 'Add Payment Term' : 'Edit Payment Term'} signedLabel="Document Signed"
+      {editing && editing.kind === 'payment' && <PaymentStructurePanel zIndex={95} heading={editing.isNew ? 'Add Payment Plan' : 'Edit Payment Plan'} signedLabel="Document Signed"
         initial={editingData ? planOf((({kind, ...p}) => p)(editingData)) : newPaymentPlan({issue:{type:'signed'}})}
         onCancel={()=>setEditing(null)} onSave={(def)=>saveEmbed(def)}/>}
       {editing && editing.kind === 'record' && <RecordInfoModal defaultRecord={target} onCancel={()=>setEditing(null)} onSave={addRecordInfo}/>}
@@ -578,8 +579,32 @@ function PublicSignPage({route}){
     </div>
   );
 }
+/* A document signed by everyone: each payment plan in it becomes a Payment Plan on its record (once
+   each — `documentId` and the element's id), on the record that holds its plans, dated from the
+   signing; with no record, none. Its invoices due by then are issued at once (invoices.jsx). */
+function plansFromDocument(hub, d){
+  const rec = d.recordId != null && d.object ? hubRecord(hub, d.object, d.recordId) : null;
+  if(!rec) return;
+  const h = termsHolderOf(d.object, rec), signedOn = dayOf(d.signedAt);
+  let list = hub.accounting || [];
+  const made = bodyEmbeds(d.body).filter(e => e.kind === 'payment').map(e => ({eid:e.id, data:(d.embeds || {})[e.id]})).filter(x => x.data)
+    .filter(x => !list.some(s => s.documentId === d.id && s.embedId === x.eid)).map(({eid, data}) => {
+      const plan = normalizePlan(planOf((({kind, ...p}) => p)(data)));
+      if(!(Number(plan.amount) > 0)) return null;
+      const id = acId('ps'), dated = (plan.issue || {}).type === 'signed' ? signedOn : '';
+      const installments = planSchedule(plan, {id, signedOn:dated});
+      const s = {id, number:nextPlanNumber(list), source:'document', documentId:d.id, documentNumber:d.number, embedId:eid, object:h.object, recordId:h.id, createdAt:new Date(), createdBy:'System',
+        paymentType:plan.paymentType, currency:plan.currency, total:Math.round(installments.reduce((a, x) => a + x.amount, 0) * 100) / 100, plan, ...(dated ? {signedOn:dated} : {}), installments, revision:1};
+      list = [...list, s];
+      return s;
+    }).filter(Boolean);
+  if(!made.length) return;
+  hub.setAccounting(all => [...all, ...made.filter(s => !all.some(x => x.documentId === d.id && x.embedId === s.embedId))]);
+  made.forEach(s => hub.add(s.object, s.recordId, {type:'payment', action:'Payment plan created', detail:`${planTitle(s)} · from ${d.number}`, source:'you', by:'System'}));
+}
 /* The app's side of the inbox: each signature (once) fills its signer's area; a document whose
-   areas are all signed is Signed. Each goes on the record's activity, by the signer. */
+   areas are all signed is Signed — its payment plans become Payment Plans. Each goes on the
+   record's activity, by the signer. */
 function DocumentSignInbox(){
   const hub = useRecordHub();
   const live = React.useRef(hub); live.current = hub;
@@ -603,6 +628,7 @@ function DocumentSignInbox(){
       Object.values(next).forEach(d => { const all = documentSigners(d);
         if(all.length && all.every(s => s.signedAt)) next[d.id] = {...d, status:'signed', signedAt:ymdOf(new Date(all.reduce((mx, s) => Math.max(mx, new Date(s.signedAt).getTime()), 0)))}; });
       if(Object.keys(next).length) hub.setDocuments(ds => ds.map(d => next[d.id] || d));
+      Object.values(next).filter(d => d.status === 'signed').forEach(d => plansFromDocument(hub, d));
     };
     take();
     const onStorage = (e) => { if(e.key === SIGN_INBOX_KEY(crmId)) take(); };
@@ -614,4 +640,4 @@ function DocumentSignInbox(){
 }
 
 Object.assign(window, {DOCUMENT_STATUS, documentNumber, upgradeDocument, DocumentView, DocumentBuilder, RecordDocumentsTab, DocumentActivityDetail, DocumentsPage, sendDocumentVia,
-  documentSignRoute, PublicSignPage, DocumentSignInbox});
+  documentSignRoute, PublicSignPage, DocumentSignInbox, plansFromDocument});

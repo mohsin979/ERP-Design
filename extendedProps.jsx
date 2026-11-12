@@ -7,7 +7,7 @@
                                   a record's value is its person's answer (a deal's or customer's
                                   is its contact's).
      Accounting Properties        ACCOUNTING_TRIGGER_FIELDS (workflowEngine.jsx — the workflows'
-                                  and filters' list), read from the record's own payment terms.
+                                  and filters' list), read from the record's Payment Plans.
    Keys: 'pf:<form id>:<field id>', 'acc:<accounting key>'. Values are read-only here (profile
    answers are edited in the Customer Profile tab or Highlights).
 
@@ -51,8 +51,7 @@ function extendedValue(key, record){
     const f = ACCOUNTING_TRIGGER_FIELDS.find(a => a.key === key.slice(4));
     // Accounting figures show only with View Payment Terms on the record.
     if(!f || !paymentTermsCan('view', object, object === 'contacts' ? {...record, id:Number(record.id)} : record)) return '';
-    const h = termsHolderOf(object, record);   // a customer with a deal: its deal's terms
-    const terms = (WF_LIVE.accounting || []).filter(s => s.object === h.object && String(s.recordId) === String(h.id));
+    const terms = recordPlansOf(WF_LIVE.accounting, object, record);   // a customer with a deal: its deal's
     const v = f.level === 'installments' ? f.readAll(terms) : f.readRecord(terms);
     return Array.isArray(v) ? [...new Set(v)].join(', ') : (v ?? '');
   }
@@ -64,15 +63,13 @@ function extendedValue(key, record){
 }
 // Accounting figures are money (right-aligned in tables, with their currency).
 const extendedIsMoney = (key) => String(key).startsWith('acc:') && (ACCOUNTING_TRIGGER_FIELDS.find(a => a.key === key.slice(4)) || {}).kind === 'number';
-// As shown: money in its payment terms' currency, dates as dates, profile answers as the Customer Profile shows them.
+// As shown: money in its plans' currency (in different ones: the default), dates as dates, profile answers as the Customer Profile shows them.
 function extendedValueText(key, record){
   const v = extendedValue(key, record);
   if(v === '' || v == null) return '';
   if(key.startsWith('acc:')){
     const f = ACCOUNTING_TRIGGER_FIELDS.find(a => a.key === key.slice(4)) || {};
-    if(f.kind === 'number'){ const object = recordObjectOf(record.id), h = termsHolderOf(object, record);
-      const terms = primaryTermsOf((WF_LIVE.accounting || []).filter(s => s.object === h.object && String(s.recordId) === String(h.id)));
-      return fmtMoney(Number(v), scheduleCurrency(terms)); }
+    if(f.kind === 'number') return fmtMoney(Number(v), termsCurrency(recordPlansOf(WF_LIVE.accounting, recordObjectOf(record.id), record)));
     if(f.kind === 'date') return /^\d{4}-\d{2}-\d{2}$/.test(String(v)) ? ptFmtDay(v) : String(v);
     return String(v);
   }
