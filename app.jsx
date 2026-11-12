@@ -755,9 +755,12 @@ function App(){
   // Quotes, forms and payment terms (declared before the engine, which reads quotes and payment terms).
   const [quotes, setQuotes] = usePersistedState('quotes', () => SEED ? SAMPLE_QUOTES(SAMPLE_SERVICES()) : [], (qs) => withBiz(qs, 'quotes'));
   ensureIdFloor('quotes', quoteSeqFloor(quotes));   // quote numbers never fall back below one used (quotes.jsx)
+  // Documents (Tools → Documents, documents.jsx): their numbers likewise.
+  const [documents, setDocuments] = usePersistedState('documents', [], (ds) => (ds || []).map(upgradeDocument));   // saved before: one body (upgradeDocument)
+  ensureIdFloor('documents', quoteSeqFloor(documents));
   const [forms, setForms] = usePersistedState('forms', () => SEED ? SAMPLE_FORMS() : []);
-  // Payment schedules pulled from signed quotes, and their payments (accounting.jsx).
-  const [accounting, setAccounting] = usePersistedState('accounting', [], (list) => withBiz(unpackPaymentTerms(list), 'accounting'), packPaymentTerms);
+  // Payment schedules pulled from signed quotes, and their payments (accounting.jsx); subscriptions until cancelled billed up to today and the next cycle.
+  const [accounting, setAccounting] = usePersistedState('accounting', [], (list) => withBiz(unpackPaymentTerms(list), 'accounting').map(rollSubscription), packPaymentTerms);
   /* Every Contact, Deal and Customer has payment terms: the default ones (accounting.jsx) until it
      has its own — records already there, and each one created from now on. */
   React.useEffect(() => {
@@ -1000,12 +1003,12 @@ function App(){
     : object === 'customers' ? setCustomers(cs => cs.map(c => c.id === id ? {...c, ...patch} : c)) : null;
   const hubValue = {data:settingsData, records:{contacts:contactsWithDeals, deals:dealsView, customers:customersView}, updateRecord,
     activities:{contacts:contactActivities, deals:dealActivities, customers:customerActivities},
-    add:hubAdd, update:hubUpdate, remove:hubRemove, openRecord, quotes, setQuotes, services, setServices, forms, setForms, createRecord, setData:setSettingsData, accounting, setAccounting, overviewSettings, setOverviewSettings,
+    add:hubAdd, update:hubUpdate, remove:hubRemove, openRecord, quotes, setQuotes, documents, setDocuments, services, setServices, forms, setForms, createRecord, setData:setSettingsData, accounting, setAccounting, overviewSettings, setOverviewSettings,
     // A workflow violation's details: its Object's page with Workflow Violations open and it selected.
     openViolation:(object, id) => { setCrmActive(object); engine.value.openViolation(object, id); }};
   const withEngine = (el) => (
     <WorkflowEngineCtx.Provider value={engineValue}>
-      <RecordHubProvider value={hubValue}><ProfileFormsCtx.Provider value={profileFormsStore}>{el}</ProfileFormsCtx.Provider><PublicFormInbox/></RecordHubProvider>
+      <RecordHubProvider value={hubValue}><ProfileFormsCtx.Provider value={profileFormsStore}>{el}</ProfileFormsCtx.Provider><PublicFormInbox/><DocumentSignInbox/></RecordHubProvider>
       {engine.openPromptId && <WorkflowPromptModal key={engine.openPromptId} promptId={engine.openPromptId} direct={engine.promptDirect} onClose={engine.closePrompt} hidden={eventAway}/>}
       <WorkflowNotices notices={engine.notices} onDismiss={engine.dismissNotice} onView={engine.value.openEvent}/>
       {engine.event && <AutomaticActionModal key={engine.event.id} event={engine.event} onClose={engine.closeEvent} hidden={eventAway}/>}
@@ -1062,6 +1065,7 @@ function App(){
           : crmActive === 'tasks' ? <TasksBoardPage/>
           : TOOL_PAGES[crmActive] ? <ToolActivityPage key={crmActive} pageId={crmActive}/>
           : crmActive === 'quotes' ? <QuotesPage/>
+          : crmActive === 'documents' ? <DocumentsPage/>
           : crmActive === 'services' ? <ServicesPage/>
           // Dashboard: Financial KPIs, Wall of Fame, Business Velocity (dashboard.jsx).
           : crmActive === 'dashboard' ? <DashboardPage/>
@@ -1077,11 +1081,14 @@ function App(){
   </>);
 }
 
-/* A form's public link (#f~<CRM instance>~<form>, forms.jsx) opens the form alone, signed in or not.
-   Otherwise — signed out: the sign-in screen first (workspaces.jsx); signed in: the ERP home, with
-   the open CRM instance. Moving onto, off or between form links starts the page over. */
+/* A form's public link (#f~<CRM instance>~<form>, forms.jsx) opens the form alone, signed in or not;
+   a document's signing link (#s~<CRM instance>~<document>~<signature>, documents.jsx) the document
+   for its signer. Otherwise — signed out: the sign-in screen first (workspaces.jsx); signed in: the
+   ERP home, with the open CRM instance. Moving onto, off or between these links starts the page over. */
 const PUBLIC_FORM_ROUTE = formPublicRoute(window.location.hash);
-window.addEventListener('hashchange', () => { if(JSON.stringify(formPublicRoute(window.location.hash)) !== JSON.stringify(PUBLIC_FORM_ROUTE)) window.location.reload(); });
+const PUBLIC_SIGN_ROUTE = documentSignRoute(window.location.hash);
+window.addEventListener('hashchange', () => { if(JSON.stringify(formPublicRoute(window.location.hash)) !== JSON.stringify(PUBLIC_FORM_ROUTE)
+  || JSON.stringify(documentSignRoute(window.location.hash)) !== JSON.stringify(PUBLIC_SIGN_ROUTE)) window.location.reload(); });
 /* Signed in with a CRM instance open that isn't theirs (the last one opened in this browser): the
    first instance they have opens instead (workspaces.jsx). */
 function CrmGate(){
@@ -1089,4 +1096,4 @@ function CrmGate(){
   React.useEffect(() => { if(to) reloadInto({crmId:to}); }, []);
   return to ? null : <App/>;
 }
-ReactDOM.createRoot(document.getElementById('root')).render(PUBLIC_FORM_ROUTE ? <PublicFormPage route={PUBLIC_FORM_ROUTE}/> : SESSION ? <CrmGate/> : <LoginScreen/>);
+ReactDOM.createRoot(document.getElementById('root')).render(PUBLIC_FORM_ROUTE ? <PublicFormPage route={PUBLIC_FORM_ROUTE}/> : PUBLIC_SIGN_ROUTE ? <PublicSignPage route={PUBLIC_SIGN_ROUTE}/> : SESSION ? <CrmGate/> : <LoginScreen/>);

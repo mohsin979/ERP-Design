@@ -5,7 +5,15 @@
    and links. The value is HTML, kept to those few tags (sanitizeRichText) — anything pasted in
    is reduced to them. Plain text saved before (no tags) shows as paragraphs.
    `ctas` (the Default HTML Template email, emails.jsx) adds Primary CTA and Secondary CTA: a
-   link on its own line, marked data-cta="primary" | "secondary", drawn as a button. */
+   link on its own line, marked data-cta="primary" | "secondary", drawn as a button.
+   The document editor (documents.jsx) turns on more, each kept by the sanitizer only when asked
+   (RICH_DOC): `sizes` — text size in points (10 to 36: SPAN data-size; the toolbar shows the size
+   at the cursor); `images` —
+   pictures in the text (IMG with a data: image source, ≤1 MB); `embeds` — elements placed in the
+   text (DIV data-embed="payment" | "signature" | "record" with data-id), saved empty: what they show is drawn
+   from their data where they're shown, and clicking one in the editor opens it. `tools` adds the
+   caller's own toolbar buttons (they insert at the cursor); `toolbarTarget` puts the toolbar
+   elsewhere (above the page); `page` drops the editor's box, for a page that is the editor. */
 
 const RICH_TAGS = ['B', 'STRONG', 'I', 'EM', 'U', 'OL', 'UL', 'LI', 'A', 'P', 'BR', 'DIV'];
 // Plain text (saved before rich text) → paragraphs; HTML is kept as it is.
@@ -14,13 +22,33 @@ const richHtmlOf = (v) => {
   if(/<[a-z][\s\S]*>/i.test(s)) return s;
   return s.split(/\n{2,}/).map(p => p.trim()).filter(Boolean).map(p => `<p>${p.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/\n/g, '<br/>')}</p>`).join('');
 };
-// Only the editor's tags survive; links keep an http(s) or mailto href and open in a new tab.
-function sanitizeRichText(html){
+// Text sizes (data-size, in px), from the browser's font sizes (1–7, pasted) and the named sizes saved before.
+const RICH_SIZES = ['10', '11', '12', '13', '14', '16', '18', '20', '24', '28', '32', '36'];
+const RICH_FONT_SIZE = {'1':'10', '2':'12', '3':'14', '4':'16', '5':'18', '6':'24', '7':'32'};
+const RICH_OLD_SIZES = {sm:'12', md:'14', lg:'18', xl:'24'};
+const RICH_EMBEDS = ['payment', 'signature', 'record'];
+const RICH_DOC = {sizes:true, images:true, embeds:true};   // what the document editor keeps
+// Only the editor's tags survive; links keep an http(s) or mailto href and open in a new tab. `opts`: see the header.
+function sanitizeRichText(html, opts = {}){
   const box = document.createElement('div');
   box.innerHTML = html || '';
+  const extra = (n) => (opts.sizes && n.tagName === 'SPAN' && (RICH_SIZES.includes(n.getAttribute('data-size')) || !!RICH_OLD_SIZES[n.getAttribute('data-size')]))
+    || (opts.images && n.tagName === 'IMG' && /^data:image\//.test(n.getAttribute('src') || ''))
+    || (opts.embeds && n.tagName === 'DIV' && RICH_EMBEDS.includes(n.getAttribute('data-embed')) && /^[\w-]+$/.test(n.getAttribute('data-id') || ''));
   const walk = (node) => {
     [...node.childNodes].forEach(n => {
       if(n.nodeType === 3) return;
+      // The browser's font sizes become text sizes.
+      if(opts.sizes && n.nodeType === 1 && n.tagName === 'FONT' && RICH_FONT_SIZE[n.getAttribute('size')]){
+        const span = document.createElement('span'); span.setAttribute('data-size', RICH_FONT_SIZE[n.getAttribute('size')]); span.append(...n.childNodes); n.replaceWith(span); walk(span); return;
+      }
+      if(n.nodeType === 1 && extra(n)){
+        const keep = n.tagName === 'SPAN' ? ['data-size'] : n.tagName === 'IMG' ? ['src'] : ['data-embed', 'data-id'];
+        if(n.tagName === 'SPAN' && RICH_OLD_SIZES[n.getAttribute('data-size')]) n.setAttribute('data-size', RICH_OLD_SIZES[n.getAttribute('data-size')]);
+        [...n.attributes].forEach(a => { if(!keep.includes(a.name)) n.removeAttribute(a.name); });
+        if(n.tagName === 'DIV'){ n.innerHTML = ''; return; }   // an embed is saved empty
+        walk(n); return;
+      }
       if(n.nodeType !== 1 || !RICH_TAGS.includes(n.tagName)){
         if(n.nodeType === 1){ walk(n); n.replaceWith(...n.childNodes); } else n.remove();
         return;
@@ -37,10 +65,10 @@ function sanitizeRichText(html){
   };
   walk(box);
   // Empty paragraphs the editor leaves behind (e.g. before a list) go.
-  box.querySelectorAll('p, div').forEach(n => { if(!n.textContent.trim() && !n.querySelector('br, li')) n.remove(); });
+  box.querySelectorAll('p, div').forEach(n => { if(!n.textContent.trim() && !n.matches('[data-embed]') && !n.querySelector('br, li, img, [data-embed]')) n.remove(); });
   return box.innerHTML;
 }
-const richIsEmpty = (html) => { const d = document.createElement('div'); d.innerHTML = html || ''; return !d.textContent.trim(); };
+const richIsEmpty = (html) => { const d = document.createElement('div'); d.innerHTML = html || ''; return !d.textContent.trim() && !d.querySelector('img, [data-embed]'); };
 /* Rich text as one line of plain text (a note's row in a timeline, a list, a search): its words,
    each paragraph and list item apart. Plain text is returned as it is. */
 const richTextPlain = (v) => {
@@ -53,7 +81,12 @@ const richTextPlain = (v) => {
 const RICH_CSS = `.hof-rich p{margin:0 0 8px}.hof-rich p:last-child{margin-bottom:0}.hof-rich ol,.hof-rich ul{margin:0 0 8px;padding-left:22px}
 .hof-rich ol[type="a"]{list-style-type:lower-alpha}.hof-rich li{margin:2px 0}.hof-rich a{color:${T.attioBlue};text-decoration:underline}
 .hof-rich a[data-cta]{display:inline-block;margin:4px 0;padding:6px 16px;border-radius:980px;text-decoration:none;font-weight:500;font-size:12.5px;border:1px solid ${T.black}}
-.hof-rich a[data-cta="primary"]{background:${T.black};color:#fff}.hof-rich a[data-cta="secondary"]{background:#fff;color:${T.black}}`;
+.hof-rich a[data-cta="primary"]{background:${T.black};color:#fff}.hof-rich a[data-cta="secondary"]{background:#fff;color:${T.black}}
+${RICH_SIZES.map(n => `.hof-rich span[data-size="${n}"]{font-size:${n}px}`).join('')}
+.hof-rich img{display:block;max-width:100%;height:auto;margin:8px 0;border-radius:6px}.hof-rich [data-embed]{margin:14px 0;position:relative}
+.hof-rich-edit [data-embed]{cursor:pointer;border-radius:10px}.hof-rich-edit [data-embed]:hover{box-shadow:0 0 0 2px ${T.blueLight}}
+.hof-rich-edit [data-embed-remove]{position:absolute;top:6px;right:6px;width:22px;height:22px;border:none;border-radius:6px;background:#fff;box-shadow:0 0 0 1px ${T.borderStrong};cursor:pointer;display:none;align-items:center;justify-content:center;font-size:14px;line-height:1;color:${T.gray600}}
+.hof-rich-edit [data-embed]:hover [data-embed-remove]{display:flex}`;
 function RichTextStyles(){ return <style>{RICH_CSS}</style>; }
 
 // The read-only view, wherever rich text is shown (the quote, a service's detail).
@@ -77,21 +110,62 @@ const RICH_TOOLS = [
    Secondary CTA ask for the button's label and address, then put it on its own line where the
    cursor is. */
 const RICH_CTA_TOOLS = [{id:'primary', label:'Primary CTA'}, {id:'secondary', label:'Secondary CTA'}];
-function RichTextEditor({value, onChange, placeholder, minHeight = 110, ariaLabel, ctas}){
+const RICH_SIZE_TOOLS = RICH_SIZES;
+const RICH_IMAGE_MAX = 1024 * 1024;
+/* `embeds` {render(kind, id) → its HTML, onOpen(kind, id), key (changes when their data does)};
+   `tools({insert, keep})` → the caller's toolbar buttons: `keep()` on press remembers the cursor,
+   `insert(html)` puts the HTML there later (at the end without one). */
+function RichTextEditor({value, onChange, placeholder, minHeight = 110, ariaLabel, ctas, sizes, images, embeds, tools, toolbarTarget, page}){
+  const opts = {sizes:!!sizes, images:!!images, embeds:!!embeds};
   const ref = React.useRef(null);
+  const fileRef = React.useRef(null);
+  const [sizing, setSizing] = React.useState(false);
+  const [curSize, setCurSize] = React.useState(null);   // the text size at the cursor (px), shown on Text Size
+  const [imageError, setImageError] = React.useState('');
   const saved = React.useRef(null);   // the selection while the link address is typed
   const [linking, setLinking] = React.useState(false);
   const [url, setUrl] = React.useState('https://');
   const [cta, setCta] = React.useState(null);   // {kind, label, url} while a CTA is being added
   const [empty, setEmpty] = React.useState(() => richIsEmpty(richHtmlOf(value)));
+  // Embeds show what their data says, and can't be typed into.
+  const embedsRef = React.useRef(embeds); embedsRef.current = embeds;   // the latest, for an insert made after their data changed
+  const hydrate = () => { const em = embedsRef.current, el = ref.current; if(!em || !el) return; el.querySelectorAll('[data-embed]').forEach(n => {
+    n.setAttribute('contenteditable', 'false'); n.innerHTML = em.render(n.getAttribute('data-embed'), n.getAttribute('data-id')) || ''; });
+    // Room to write after an element that ends the text.
+    if(el.lastElementChild && el.lastElementChild.matches('[data-embed]')){ const p = document.createElement('p'); p.innerHTML = '<br>'; el.appendChild(p); } };
   // The editor owns its content while it's in use; a new value from outside replaces it.
   React.useEffect(() => {
     const el = ref.current; if(!el) return;
-    const next = sanitizeRichText(richHtmlOf(value));
-    if(sanitizeRichText(el.innerHTML) !== next) el.innerHTML = next;
+    const next = sanitizeRichText(richHtmlOf(value), opts);
+    if(sanitizeRichText(el.innerHTML, opts) !== next){ el.innerHTML = next; hydrate(); }
     setEmpty(richIsEmpty(next));
   }, [value]);
-  const emit = () => { const html = sanitizeRichText(ref.current.innerHTML); setEmpty(richIsEmpty(html)); onChange(html); };
+  React.useEffect(() => { hydrate(); }, [embeds && embeds.key]);
+  const emit = () => { const html = sanitizeRichText(ref.current.innerHTML, opts); setEmpty(richIsEmpty(html)); onChange(html); };
+  // Insert HTML where the cursor was (kept with `keepSelection`), else at the end.
+  const insert = (html) => {
+    const el = ref.current; el.focus();
+    if(saved.current && el.contains(saved.current.startContainer)){ const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(saved.current); }
+    else { const r = document.createRange(); r.selectNodeContents(el); r.collapse(false); const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r); }
+    document.execCommand('insertHTML', false, html);
+    saved.current = null; hydrate(); emit();
+  };
+  // Text size: the selection marked with the browser's font size, then given the size chosen (an inner size wins over an outer one).
+  const setSize = (n) => {
+    restore(); document.execCommand('styleWithCSS', false, false); document.execCommand('fontSize', false, '7');
+    ref.current.querySelectorAll('font[size]').forEach(f => { f.querySelectorAll('span[data-size]').forEach(x => x.replaceWith(...x.childNodes));
+      const span = document.createElement('span'); span.setAttribute('data-size', f.getAttribute('size') === '7' ? n : RICH_FONT_SIZE[f.getAttribute('size')] || '14'); span.append(...f.childNodes); f.replaceWith(span); });
+    setSizing(false); setCurSize(Number(n)); emit();
+  };
+  // The size at the cursor, for the Text Size button.
+  const readSize = () => { const sel = window.getSelection(), n = sel && sel.anchorNode; if(!n || !ref.current || !ref.current.contains(n)) return;
+    const el = n.nodeType === 3 ? n.parentElement : n; setCurSize(Math.round(parseFloat(getComputedStyle(el).fontSize))); };
+  const pickImage = (f) => {
+    if(!f) return;
+    if(!/^image\//.test(f.type)) return setImageError('Choose an image file (PNG, JPG or SVG).');
+    if(f.size > RICH_IMAGE_MAX) return setImageError('Choose an image under 1 MB.');
+    const r = new FileReader(); r.onload = () => { setImageError(''); insert(`<p><img src="${r.result}"></p>`); }; r.readAsDataURL(f);
+  };
   const keepSelection = () => { const sel = window.getSelection(); saved.current = sel && sel.rangeCount && ref.current.contains(sel.anchorNode) ? sel.getRangeAt(0).cloneRange() : null; };
   const restore = () => { const sel = window.getSelection(); if(saved.current){ sel.removeAllRanges(); sel.addRange(saved.current); } else ref.current.focus(); };
   const run = (id) => {
@@ -129,10 +203,8 @@ function RichTextEditor({value, onChange, placeholder, minHeight = 110, ariaLabe
   };
   const btn = {width:28, height:26, border:'none', borderRadius:6, background:'transparent', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center',
     fontSize:13, color:T.attioText, fontFamily:'inherit'};
-  return (
-    <div style={{border:`1px solid ${T.borderStrong}`, borderRadius:8, background:'#fff', overflow:'hidden'}}>
-      <RichTextStyles/>
-      <div style={{display:'flex', alignItems:'center', gap:2, padding:'4px 6px', borderBottom:`1px solid ${T.attioLine}`, background:T.headerBg, flexWrap:'wrap'}}>
+  const toolbar = (
+      <div style={page ? {display:'flex', alignItems:'center', gap:2, flexWrap:'wrap'} : {display:'flex', alignItems:'center', gap:2, padding:'4px 6px', borderBottom:`1px solid ${T.attioLine}`, background:T.headerBg, flexWrap:'wrap'}}>
         {RICH_TOOLS.map((t, i) => (
           <React.Fragment key={t.id}>
             {(i === 3 || i === 6) && <span style={{width:1, height:16, background:T.borderStrong, margin:'0 4px'}}/>}
@@ -140,6 +212,23 @@ function RichTextEditor({value, onChange, placeholder, minHeight = 110, ariaLabe
               onMouseEnter={e=>e.currentTarget.style.background = '#E9EAEE'} onMouseLeave={e=>e.currentTarget.style.background = 'transparent'}>{t.label}</button>
           </React.Fragment>
         ))}
+        {sizes && <>
+          <span style={{width:1, height:16, background:T.borderStrong, margin:'0 4px'}}/>
+          <div style={{position:'relative'}}>
+            <button type="button" title="Text Size" aria-label="Text Size" onMouseDown={e=>{ e.preventDefault(); keepSelection(); }} onClick={()=>setSizing(v => !v)}
+              style={{...btn, width:52, justifyContent:'space-between', padding:'0 6px', gap:4, fontSize:12.5, border:`1px solid ${T.borderStrong}`, background:'#fff', fontVariantNumeric:'tabular-nums'}}>
+              {curSize || (page ? 14 : 13)} <Icon name="chevDown" size={10} color={T.gray600}/></button>
+            <MenuShell open={sizing} onClose={()=>setSizing(false)} width={90}>
+              {RICH_SIZE_TOOLS.map(n => <MenuItem key={n} label={n} onClick={()=>setSize(n)}/>)}
+            </MenuShell>
+          </div>
+        </>}
+        {images && <>
+          <input ref={fileRef} type="file" accept="image/*" style={{display:'none'}} onChange={e=>{ pickImage(e.target.files[0]); e.target.value = ''; }}/>
+          <button type="button" title="Insert Image" aria-label="Insert Image" onMouseDown={e=>{ e.preventDefault(); keepSelection(); }} onClick={()=>fileRef.current.click()}
+            style={{...btn, width:'auto', padding:'0 6px', gap:4, fontSize:12.5}}><Icon name="paperclip" size={12} color={T.gray600}/> Image</button>
+        </>}
+        {tools && <><span style={{flex:1}}/>{tools({insert, keep:keepSelection})}</>}
         {ctas && <>
           <span style={{width:1, height:16, background:T.borderStrong, margin:'0 4px'}}/>
           {RICH_CTA_TOOLS.map(t => (
@@ -169,14 +258,24 @@ function RichTextEditor({value, onChange, placeholder, minHeight = 110, ariaLabe
             <button type="button" onClick={()=>setCta(null)} title="Cancel" style={btn}><Icon name="close" size={11} color={T.gray600}/></button>
           </div>
         )}
+        {imageError && <span style={{flex:'1 1 100%', fontSize:12, color:T.red, padding:'2px 4px'}}>{imageError}</span>}
       </div>
+  );
+  return (
+    <div style={page ? {} : {border:`1px solid ${T.borderStrong}`, borderRadius:8, background:'#fff', overflow:'hidden'}}>
+      <RichTextStyles/>
+      {toolbarTarget ? ReactDOM.createPortal(toolbar, toolbarTarget) : page ? null : toolbar}
       <div style={{position:'relative'}}>
-        {empty && placeholder && <div style={{position:'absolute', top:9, left:12, fontSize:13, color:T.gray400, pointerEvents:'none'}}>{placeholder}</div>}
-        <div ref={ref} className="hof-rich" contentEditable suppressContentEditableWarning role="textbox" aria-multiline="true" aria-label={ariaLabel}
-          onInput={emit} onBlur={emit}
+        {empty && placeholder && <div style={{position:'absolute', top: page ? 0 : 9, left: page ? 0 : 12, fontSize:13, color:T.gray400, pointerEvents:'none'}}>{placeholder}</div>}
+        <div ref={ref} className={embeds ? 'hof-rich hof-rich-edit' : 'hof-rich'} contentEditable suppressContentEditableWarning role="textbox" aria-multiline="true" aria-label={ariaLabel}
+          onInput={emit} onBlur={emit} onKeyUp={()=>{ keepSelection(); if(sizes) readSize(); }} onMouseUp={()=>{ keepSelection(); if(sizes) readSize(); }}
+          // An embed opens when clicked; its × takes it out.
+          onClick={e=>{ if(!embeds) return; const n = e.target.closest && e.target.closest('[data-embed]'); if(!n || !ref.current.contains(n)) return;
+            e.preventDefault(); if(e.target.closest('[data-embed-remove]')){ n.remove(); emit(); } else embeds.onOpen(n.getAttribute('data-embed'), n.getAttribute('data-id')); }}
           onPaste={e=>{ e.preventDefault(); const html = e.clipboardData.getData('text/html'); const text = e.clipboardData.getData('text/plain');
-            document.execCommand('insertHTML', false, html ? sanitizeRichText(html) : richHtmlOf(text) || text); emit(); }}
-          style={{minHeight, height:minHeight, padding:'8px 12px', fontSize:13, color:T.attioText, lineHeight:1.55, outline:'none',
+            document.execCommand('insertHTML', false, html ? sanitizeRichText(html, {sizes:opts.sizes}) : richHtmlOf(text) || text); emit(); }}
+          style={page ? {minHeight, padding:0, fontSize:14, color:T.attioText, lineHeight:1.6, outline:'none'}
+            : {minHeight, height:minHeight, padding:'8px 12px', fontSize:13, color:T.attioText, lineHeight:1.55, outline:'none',
             /* Drag the corner to make it taller (or back down to its starting height). */
             resize:'vertical', overflowY:'auto', boxSizing:'border-box'}}/>
       </div>
@@ -184,4 +283,4 @@ function RichTextEditor({value, onChange, placeholder, minHeight = 110, ariaLabe
   );
 }
 
-Object.assign(window, {richTextPlain, RichTextEditor, RichTextView, sanitizeRichText, richHtmlOf, richIsEmpty});
+Object.assign(window, {richTextPlain, RichTextEditor, RichTextView, RichTextStyles, sanitizeRichText, richHtmlOf, richIsEmpty, RICH_DOC});

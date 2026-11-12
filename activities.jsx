@@ -36,6 +36,8 @@ const ACTIVITY_TYPES = {
   file:        {label:'File',         icon:'paperclip'},   // a file added to the record, or received with its email (files.jsx)
   fileChange:  {label:'File deleted', icon:'trash'},       // a file removed from the record — the record keeps that it was
   quote:       {label:'Quote',        icon:'quote'},       // a quotation created or sent for the record (quotes.jsx)
+  document:    {label:'Document',     icon:'files'},       // a document created, sent or signed for the record (documents.jsx)
+  payment:     {label:'Payment',      icon:'coins'},       // a One-Time payment marked Paid or Unpaid, its amount changed, or the payment type switched (accounting.jsx)
 };
 /* The contact-facing types, used to seed each contact's mock history. */
 const CARD_ACTIVITY_ORDER = ['email', 'call', 'meeting', 'task', 'note'];
@@ -331,6 +333,7 @@ function activityHeadline(a){
     case 'stageChange': return `${(a.from || {}).label || '—'} → ${(a.to || {}).label || '—'}`;
     case 'customerCreated': return a.customerName;
     case 'taskReassigned': return `${a.taskTitle} · ${a.from || 'No one'} → ${a.to || 'No one'}`;
+    case 'payment':     return a.from || a.to ? `${a.from || '—'} → ${a.to || '—'}` : a.detail || '';
     case 'workflow':    return a.title;
   }
   return '';
@@ -421,12 +424,14 @@ function activityLines(a, contact, context = 'all'){
     case 'stageChange': return {lead:act('Stage changed', 'by'), detail:activityHeadline(a), when};
     case 'customerCreated': return {lead:act('Customer created', 'by'), detail:a.customerName, when};
     case 'taskReassigned': return {lead:act('Task reassigned', 'by'), detail:activityHeadline(a), when};
+    case 'payment': return {lead:act(a.action || 'Payment', 'by'), detail:activityHeadline(a), when};
     case 'workflow': return {lead:act('Workflow ran'), detail:a.title, when};
     case 'file': return a.origin === 'received'
       ? {lead:act(all ? 'File received' : 'Received', 'from'), detail:a.name, when}
       : {lead:act(all ? 'File added' : 'Added', 'by'), detail:a.name, when};
     case 'fileChange': return {lead:act('File deleted', 'by'), detail:a.fileName, when};
     case 'quote': return {lead:act(a.status === 'signed' ? 'Quote signed' : a.status === 'sent' ? 'Quote sent' : 'Quote created', 'by'), detail:a.title, when};
+    case 'document': return {lead:act(a.status === 'signed' ? 'Document signed' : a.status === 'sent' ? 'Document sent' : 'Document created', 'by'), detail:a.title, when};
   }
   return {lead:{prefix: ACTIVITY_TYPES[a.type] ? ACTIVITY_TYPES[a.type].label : '', name:'', owner:false, cc:''}, detail:'', when};
 }
@@ -638,6 +643,7 @@ function HistoryItem({a, last}){
     case 'note':    body = richTextPlain(a.body); break;
     case 'ownerChange': title = `${userLabel(a.from) || 'No owner'} → ${userLabel(a.to) || 'No owner'}`; break;
     case 'stageChange': case 'customerCreated': case 'taskReassigned': title = activityHeadline(a); break;
+    case 'payment': title = `${a.action || 'Payment'} · ${activityHeadline(a)}`; break;
     case 'workflow':    title = a.title; body = a.body; break;
   }
   const overdue = isOverdue(a);

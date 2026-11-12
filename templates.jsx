@@ -101,10 +101,10 @@ function SequenceFormPanel({initial, templates, onCancel, onSave}){
 /* New quote template: a name (and its code), then the quote builder's Services and Payment Terms
    fields and the terms — in one panel, the builder's width. */
 function QuoteTemplateFormPanel({templates, onCancel, onSave}){
-  const [t, setT] = React.useState({name:'', title:'', items:[], installments:[], discount:{type:'percent', value:''}, vatRate:QUOTE_VAT_RATE, terms:'', currency:defaultCurrency()});
+  const [t, setT] = React.useState({name:'', title:'', items:[], payment:newPaymentPlan(), discount:{type:'percent', value:''}, vatRate:QUOTE_VAT_RATE, terms:'', currency:defaultCurrency()});
   const set = (p) => setT(x => ({...x, ...p}));
   const checks = quoteConfigChecks(t);
-  const ok = !!t.name.trim() && checks.itemsOk && checks.discountOk && checks.installmentsOk;
+  const ok = !!t.name.trim() && checks.itemsOk && checks.discountOk && checks.paymentOk;
   const save = () => onSave({name:t.name.trim(), ...normalizeQuoteConfig(t), vatRate:t.vatRate, terms:t.terms, currency:t.currency});
   const divider = <div style={{borderTop:`1px solid ${T.border}`, margin:'4px -20px 0'}}/>;
   return (
@@ -139,8 +139,8 @@ function QuoteTemplatesTab({data, setData, say}){
   const [deleting, setDeleting] = React.useState(null);
   const open = list.find(t => t.id === openId) || null;
   const cols = [{key:'code', label:'Code', width:110}, {key:'name', label:'Template Name', width:240}, {key:'services', label:'Services', width:280},
-    {key:'installments', label:'Installments', width:120}, {key:'createdBy', label:'Created By', width:160}, {key:'created', label:'Created', width:150}];
-  const rows = list.map(t => ({id:t.id, code:t.code, name:t.name, services:(t.items || []).map(it => it.name).join(', '), installments:(t.installments || []).length,
+    {key:'payment', label:'Payment Terms', width:180}, {key:'createdBy', label:'Created By', width:160}, {key:'created', label:'Created', width:150}];
+  const rows = list.map(t => ({id:t.id, code:t.code, name:t.name, services:(t.items || []).map(it => it.name).join(', '), payment:PAYMENT_TYPE_LABEL[quotePlanOf(t).paymentType],
     createdBy:creatorOf(t), created:fmtQuoteDate(t.createdAt)}));
   const actions = (t) => [{label:'View Template', onClick:()=>setOpenId(t.id)}, ...(can('edit', t) ? [{label:'Rename Template', onClick:()=>setRenaming({id:t.id, name:t.name})}] : []),
     ...(can('delete', t) ? [{label:'Delete Template', danger:true, onClick:()=>setDeleting(t)}] : [])];
@@ -151,7 +151,7 @@ function QuoteTemplatesTab({data, setData, say}){
     properties:cols, noun:'template', searchKeys:['code', 'name', 'services'], canCreateProperty:false, boards:false, bulkActions:qtBulk.bulkActions,
     filterProps:[{key:'name', label:'Name', type:'text'}, {key:'createdBy', label:'Created By', type:'select'}], selectValues:{createdBy:[...new Set(list.map(t => t.createdBy).filter(Boolean))]},
     renderCell:(key, r) => key === 'name' ? <ContactName name={r.name} onOpen={()=>setOpenId(r.id)} style={{fontSize:'inherit', fontWeight:500}}/>
-      : key === 'installments' ? <span style={{fontVariantNumeric:'tabular-nums'}}>{r.installments}</span> : undefined,
+      : undefined,
     renderActions:(r) => <RowActionsMenu title="Template Actions" width={MENU_W} items={actions(list.find(t => t.id === r.id))}/>,
   };
   const section = {...QUOTE_SECTION, marginBottom:8};
@@ -182,8 +182,7 @@ function QuoteTemplatesTab({data, setData, say}){
             </div>
             <div>
               <div style={section}>Payment terms</div>
-              {(open.installments || []).map((x, i) => row(`${i + 1}. ${x.description}`, `${round2(x.percent)}%`, x.id || i))}
-              {!(open.installments || []).length && <div style={{fontSize:13, color:T.attioMuted}}>No installments</div>}
+              <PaymentPlanTable rows={quoteSchedule(open)} currency={quoteCurrency(open)} ongoing={planOngoing(quotePlanOf(open))}/>
             </div>
             <div>
               <div style={section}>Discount & tax</div>

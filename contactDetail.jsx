@@ -339,6 +339,7 @@ const CONTACT_TABS = [
   {id:'meetings', label:'Meetings',         icon:'videoCamera', list:true},
   {id:'files',    label:'Files',            icon:'folder',   list:true},
   {id:'quotes',   label:'Quotes',           icon:'quote',    list:true},
+  {id:'documents', label:'Documents',       icon:'files',    list:true},
   {id:'accounting', label:'Accounting',     icon:'coins',    list:false},
   {id:'deals',    label:'Deals',            icon:'deals',    list:true},
   {id:'customers', label:'Customers',       icon:'customers', list:true},
@@ -411,8 +412,8 @@ function ContactWorkspace({contact, acts, onStub, onCall, onCreateProfile, profi
             contact={ra && ra.object !== 'contacts' ? ((hub && hub.records.contacts) || []).find(c => c.id === ra.record.contactId) || null : contact}/>
         </div>
       )}
-      {/* Files and Quotes bring their own toolbars (files.jsx, quotes.jsx). */}
-      {(tab.list || overview) && !(isActivityTab && activityViews) && !['files', 'quotes'].includes(tab.id) && (
+      {/* Files, Quotes and Documents bring their own toolbars (files.jsx, quotes.jsx, documents.jsx). */}
+      {(tab.list || overview) && !(isActivityTab && activityViews) && !['files', 'quotes', 'documents'].includes(tab.id) && (
         <div style={{display:'flex', alignItems:'center', gap:10, padding:'12px 20px', borderBottom:`1px solid ${T.border}`, flexShrink:0}}>
           <div style={{position:'relative'}}>
             <div style={{position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', display:'flex'}}>
@@ -457,6 +458,8 @@ function ContactWorkspace({contact, acts, onStub, onCall, onCreateProfile, profi
         <div style={{flex:1, minHeight:0, display:'flex', overflow:'hidden'}}><FilesTab acts={acts} contact={contact} team={team || []} onStub={onStub}/></div>
       ) : tab.id === 'quotes' ? (
         <div style={{flex:1, minHeight:0, display:'flex', overflow:'hidden'}}><RecordQuotesTab contact={contact} onStub={onStub}/></div>
+      ) : tab.id === 'documents' ? (
+        <div style={{flex:1, minHeight:0, display:'flex', overflow:'hidden'}}><RecordDocumentsTab contact={contact}/></div>
       ) : tab.id === 'accounting' ? (
         /* Accounting: the record's payment structures (accounting.jsx). */
         <div style={{flex:1, minHeight:0, display:'flex', overflow:'hidden'}}><AccountingTab object={ra ? ra.object : 'contacts'} record={ra ? ra.record : contact}/></div>

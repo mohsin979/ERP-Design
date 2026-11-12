@@ -10,7 +10,7 @@
    The Organization (store.jsx ORG_REGISTRY): HOF Global, the one workspace — its lockup top left
    of the ERP header (its logo, else the HOF mark), nothing to switch. Its modules have branches
    (instances; "Branches" in the product):
-     CRM     — Migration, Pack, Partners: each its own CRM store — records, settings and Users &
+     CRM     — Migration, Pack, Redberry Consultancy: each its own CRM store — records, settings and Users &
                Teams (a person's preset, seat and team per branch). The CRM sidebar's head reads
                "← Migration | CRM" — a switcher for someone with more than one CRM branch; with one
                branch just "← CRM" (nav.jsx).
@@ -40,9 +40,10 @@
    Design-system pattern (ERP Settings): a settings page carries no title or explanation that
    repeats the menu it's opened from — only its controls (search, actions, the table).
 
-   Brand (CRM → Marketing → Brand): the Organization's — one for every CRM instance — set by CRM
-   administrators: the company logo, brand colours (used on quotations and documents), the company
-   email signature and the digital letterhead. */
+   Brand (CRM → Marketing → Brand): each CRM branch's own (decided 2026-11-11; a branch without one
+   shows the Organization's until its Brand is saved) — set by CRM administrators: the company logo,
+   brand colours (used on quotations and documents), the company email signature and the digital
+   letterhead. */
 
 const ALLOWED_EMAIL_DOMAINS = ['hofmigration.com', 'hof-global.com'];
 // Addresses on other domains that may sign in (none now: mohsin979@gmail.com was removed 2026-11-10).
@@ -65,7 +66,8 @@ function useOrg(){
 }
 function setOrg(patch){ saveOrgRegistry(patch); window.dispatchEvent(new Event(ORG_EVENT)); }
 const updateOrg = (patch) => setOrg({org:{...ORG_REGISTRY.org, ...patch}});
-const updateBrand = (patch) => updateOrg({brand:{...(ORG_REGISTRY.org.brand || {}), ...patch}});
+// Brand edits are the open CRM branch's own (a branch without one starts from the Organization's).
+const updateBrand = (patch) => setOrg({crm:ORG_REGISTRY.crm.map(c => c.id === ORG_REGISTRY.crmId ? {...c, brand:{...crmBrandOf(c.id), ...patch}} : c)});
 
 /* An image file as a data URL (logos), at most `max` bytes. */
 const LOGO_MAX_BYTES = 400 * 1024;
@@ -100,11 +102,12 @@ function BrandLockup({brand}){
 function SwitcherMenu({label, title, icon, options, value, onPick, width = 220}){
   const [open, setOpen] = React.useState(false);
   return (
-    <div style={{position:'relative', flexShrink:0, minWidth:0}}>
+    // A long branch name ends in an ellipsis rather than running under what's beside it.
+    <div style={{position:'relative', flexShrink:1, minWidth:0}}>
       <div onClick={()=>setOpen(v=>!v)} title={title} style={{display:'flex', alignItems:'center', gap:6, cursor:'pointer', minWidth:0}}>
         {icon}
-        <span style={{fontSize:13, fontWeight:600, color:T.attioText, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{label}</span>
-        <Icon name="chevDown" size={T.chevronSize} color={T.gray600} style={{transform: open ? 'rotate(180deg)' : 'none'}}/>
+        <span style={{fontSize:13, fontWeight:600, color:T.attioText, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', minWidth:0}}>{label}</span>
+        <Icon name="chevDown" size={T.chevronSize} color={T.gray600} style={{flexShrink:0, transform: open ? 'rotate(180deg)' : 'none'}}/>
       </div>
       <MenuShell open={open} onClose={()=>setOpen(false)} width={width}>
         {options.map(o => o.divider ? <div key={o.id} style={{height:1, background:T.border, margin:'4px 2px'}}/> : (
@@ -621,7 +624,7 @@ function LoginScreen(){
 
 /* ── Brand (CRM → Marketing → Brand) ── four sections, switched with the Settings tabs (as in
    Users & Teams): Logo, Color System, Email Signature, Digital Letterhead. Each is saved on the
-   Organization's brand (every CRM instance's); CRM administrators edit, everyone else sees them. */
+   open CRM branch's brand (updateBrand); CRM administrators edit, everyone else sees them. */
 const BRAND_SECTIONS = [
   // Color System (BrandColorsSection) is hidden for now; its saved colours still apply.
   {id:'logo', label:'Logo', icon:'profile'},
@@ -797,7 +800,9 @@ function BrandSignatureSection(props){
 }
 
 /* Digital Letterhead: the company information on the letterhead, with the company logo (Logo);
-   the preview is a page with that header and footer. "Additional info" reads under the address. */
+   the preview is a page with that header and footer. "Additional info" reads under the address.
+   Every quotation is on it (quotes.jsx): new and draft quotes the saved one, sent quotes the one
+   they went out with. */
 const LETTERHEAD_FIELDS = [
   {key:'companyName', label:'Company Name', placeholder:'e.g. HOF Migration', required:true}, {key:'address', label:'Address', multiline:true},
   {key:'additional', label:'Additional Info', multiline:true},

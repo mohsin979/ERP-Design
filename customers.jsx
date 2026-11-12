@@ -89,6 +89,7 @@ const CUSTOMER_TABS = [
   {id:'meetings', label:'Meetings',         icon:'videoCamera', list:true},
   {id:'files',    label:'Files',            icon:'folder',      list:true},
   {id:'quotes',   label:'Quotes',           icon:'quote',       list:true},
+  {id:'documents', label:'Documents',       icon:'files',    list:true},
   {id:'accounting', label:'Accounting',     icon:'coins',       list:false},
   {id:'contacts', label:'Contacts',         icon:'contacts',    list:true},
   {id:'deals',    label:'Deals',            icon:'deals',       list:true},

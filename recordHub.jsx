@@ -1,13 +1,13 @@
 /* HOF Pulse ERP — The record hub: every record's activity, in one place.
 
    Contacts, Deals and Customers each keep their own activity (App). The hub is the one way the
-   workspace-wide pages (Tools → Calls, Tasks, Emails, Meetings, Notes, Quotes), the email
-   composer, files and quotations read and change it — so a call logged from Tools → Calls is the
+   workspace-wide pages (Tools → Calls, Tasks, Emails, Meetings, Notes, Quotes, Documents), the
+   email composer, files, quotations and documents read and change it — so a call logged from Tools → Calls is the
    same activity a contact's Calls tab shows, and the other way round. Deal and Customer activity
    goes through the workflow engine (App), so workflows see it as they see any other.
 
    `hub` (App): {data, records:{contacts, deals, customers}, activities:{…}, add, update, remove,
-   openRecord, quotes, setQuotes, services, setServices}. The provider adds the overlays every
+   openRecord, quotes, setQuotes, documents, setDocuments, services, setServices}. The provider adds the overlays every
    page shares: the email composer, the call window and the quotation builder. */
 
 const RecordHubCtx = React.createContext(null);

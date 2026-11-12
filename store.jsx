@@ -29,12 +29,12 @@
        BroadcastChannel; the server answers 409 to a save older than the one it has.
      A failed save (no server, storage full) is tried again until it goes through; the app says
        so (`hof-erp-save-failed`, then `hof-erp-save-ok`).
-   A form's inbox takes other pages' writes by design, so it's left out of this. */
+   A form's inbox and a document's signing inbox take other pages' writes by design, so they're left out of this. */
 const DB = (() => {
   const ls = window.localStorage;
   const http = (method, url, body, async) => { const x = new XMLHttpRequest(); x.open(method, url, async); x.setRequestHeader('Content-Type', 'text/plain;charset=utf-8'); return [x, () => x.send(body == null ? null : body)]; };
   const TAB = Math.random().toString(36).slice(2);
-  const own = (k) => !/^(hof-erp-form-inbox|meta:)/.test(k);
+  const own = (k) => !/^(hof-erp-form-inbox|hof-erp-sign-inbox|meta:)/.test(k);
   const held = new Set();   // the keys this page read or wrote
   let stale = false, failing = false;
   const emit = (type) => { try { window.dispatchEvent(new Event(type)); } catch(e){} };
@@ -77,7 +77,9 @@ const DB = (() => {
   const pending = new Map();   // key → the version still on its way
   const send = (method, k, value, sync) => {
     if(frozen(k)) return void pending.delete(k);
-    const v = ++ver; pending.set(k, v);
+    // An inbox (written by other pages by design) goes by the time of the write: the latest one wins,
+    // whichever page loaded first; this page's own data by its load-time count (a newer page's save wins).
+    const v = own(k) ? ++ver : Date.now() * 1000 + (++ver % 1000); pending.set(k, v);
     const [x, go] = http(method, `/api/kv/${encodeURIComponent(k)}`, value, !sync);
     x.setRequestHeader('X-Ver', String(v));
     const done = () => {
@@ -105,15 +107,18 @@ const DB = (() => {
 })();
 
 /* ── The Organization ── one Organization (HOF Global) with module instances: the CRM instances
-   (Migration, Partners, Pack — each with a CRM store of its own, everything below) and the People
-   instances (Pakistan, Dubai — each with its own employees). The registry (ORG_KEY) is what they share:
-     org     — its name and logo (the ERP's own mark — white label) and its brand (CRM → Marketing →
-               Brand: the company logo, colours, email signature and letterhead — one for every CRM
-               instance: quotations, documents, emails);
-     crm     — the CRM branches (instances) [{id, name, sample, template, createdAt}]: `sample` the one with
-               the sample data (Migration), `template` a CRM setup to start from (Partners:
-               WORKSPACE_TEMPLATES, workspaces.jsx); any other starts empty, with the standard
-               record types;
+   (Migration, Pack, Redberry Consultancy — each with a CRM store of its own, everything below) and
+   the People instances (Pakistan, Dubai — each with its own employees). The registry (ORG_KEY) is
+   what they share:
+     org     — its name and logo (the ERP's own mark — white label) and its brand: the brand of
+               every CRM branch without one of its own;
+     crm     — the CRM branches (instances) [{id, name, sample, template, brand, createdAt}]: `sample`
+               the one with the sample data (Migration), `template` a CRM setup to start from
+               (Redberry Consultancy: WORKSPACE_TEMPLATES, workspaces.jsx); any other starts empty,
+               with the standard record types. `brand` (decided 2026-11-11): the branch's own brand
+               (CRM → Marketing → Brand: the company logo, colours, email signature and letterhead —
+               its quotations, documents and emails); without one, the Organization's, until its
+               Brand is first saved (Redberry Consultancy starts with its own);
      people  — the People branches [{id, name, createdAt}];
      branches — the other modules' branches, by module id ({accounting:[{id, name, createdAt}], …}):
                Accounting, Analytics and Complience start with one (HOF Global), Academy with the
@@ -140,12 +145,17 @@ const DEFAULT_BRAND = () => ({primary:'#15141B', secondary:'#FF0004'});
 const HOF_BRAND = () => ({primary:'#000000', secondary:'#1869EC'});
 const CRM_MIGRATION = 'crm-migration', CRM_PARTNERS = 'crm-partners', CRM_PACK = 'crm-pack';
 const PEOPLE_PAKISTAN = 'people-pakistan', PEOPLE_DUBAI = 'people-dubai';
+/* Redberry Consultancy's brand (was the Partners branch, renamed 2026-11-11): its logo, red and
+   blue, and its letterhead (the ITIN is a sample). */
+const REDBERRY_BRAND = () => ({logo:'assets/brand/redberry-logo.png', colors:{primary:'#C9363E', secondary:'#3C7DC0'},
+  letterhead:{companyName:'Red Berry Consultancy LLC', address:'1408, Opal Tower, Burj Khalifa Blvd\nBusiness Bay, Dubai, UAE', additional:'ITIN: 100-4521-7863-003',
+    phone:'+971-52 82 61877', email:'info@redberryaccountservices.com', website:'www.redberryaccounting.com', footer:'Accounting, Audit & Tax Consultancy'}});
 const ORG_ROLES = ['Super Admin', 'Member'];
 const DEFAULT_ORG = () => ({id:'hof-global', name:'HOF Global', logo:null, brand:{logo:null, colors:HOF_BRAND()}});
 const DEFAULT_CRM_INSTANCES = () => [
   {id:CRM_MIGRATION, name:'Migration', sample:true, createdAt:'2026-08-01'},
   {id:CRM_PACK,      name:'Pack',      createdAt:'2026-11-09'},
-  {id:CRM_PARTNERS,  name:'Partners',  template:'accounting', createdAt:'2026-11-06'},
+  {id:CRM_PARTNERS,  name:'Redberry Consultancy', template:'accounting', brand:REDBERRY_BRAND(), createdAt:'2026-11-06'},
 ];
 const DEFAULT_PEOPLE_INSTANCES = () => [{id:PEOPLE_PAKISTAN, name:'Pakistan', createdAt:'2026-11-09'}, {id:PEOPLE_DUBAI, name:'Dubai', createdAt:'2026-11-09'}];
 /* The other modules' branches at first: one company-wide branch each, named after the
@@ -205,14 +215,16 @@ const ORG_LAYOUT = 1;
 const ORG_REGISTRY = (() => {
   let r = readStore(ORG_KEY), legacy = null;
   if(!r){ const m = migrateWorkspacesToOrg(); if(m){ ({browser:legacy, ...r} = m); } }
-  const reg = {org:{...DEFAULT_ORG(), ...((r && r.org) || {})}, crm: r && Array.isArray(r.crm) && r.crm.length ? r.crm : DEFAULT_CRM_INSTANCES(),
+  // The Partners branch is Redberry Consultancy, with its own brand (once: a branch still named Partners, without a brand).
+  const renamed = (list) => list.map(c => c.id === CRM_PARTNERS && c.name === 'Partners' && !c.brand ? {...c, name:'Redberry Consultancy', brand:REDBERRY_BRAND()} : c);
+  const reg = {org:{...DEFAULT_ORG(), ...((r && r.org) || {})}, crm: r && Array.isArray(r.crm) && r.crm.length ? renamed(r.crm) : DEFAULT_CRM_INSTANCES(),
     people: r && Array.isArray(r.people) && r.people.length ? r.people : DEFAULT_PEOPLE_INSTANCES(), branches:{...DEFAULT_MODULE_BRANCHES(), ...((r && r.branches) || {})}, users:(r && r.users) || DEFAULT_ORG_USERS(), layout:ORG_LAYOUT};
   const b = browserState || legacy || {}, crmOf = (id) => reg.crm.some(c => c.id === id) ? id : reg.crm.some(c => c.id === LEGACY_CRM_OF[id]) ? LEGACY_CRM_OF[id] : null;
   const crmId = crmOf(b.crmId) || crmOf(b.activeId) || reg.crm[0].id;
   const peopleId = reg.people.some(p => p.id === b.peopleId) ? b.peopleId : reg.people[0].id;   // the open People branch
   const out = {...reg, crmId, peopleId, openCrm:!!b.openCrm, session:b.session || null, accounts:b.accounts || [], timeZones:b.timeZones || {}};
-  // Migrated (or nothing saved yet): saved now, so every browser and tab reads the same.
-  if(!readStore(ORG_KEY)){ try { DB.setItem(ORG_KEY, JSON.stringify(Object.fromEntries(Object.entries(out).filter(([k]) => !BROWSER_FIELDS.includes(k))))); DB.flush(); } catch(e){ console.warn('HOF ERP: could not save the organization', e); } }
+  // Migrated, renamed (or nothing saved yet): saved now, so every browser and tab reads the same.
+  if(!readStore(ORG_KEY) || (r && Array.isArray(r.crm) && JSON.stringify(r.crm) !== JSON.stringify(reg.crm))){ try { DB.setItem(ORG_KEY, JSON.stringify(Object.fromEntries(Object.entries(out).filter(([k]) => !BROWSER_FIELDS.includes(k))))); DB.flush(); } catch(e){ console.warn('HOF ERP: could not save the organization', e); } }
   return out;
 })();
 const ACTIVE_CRM = ORG_REGISTRY.crm.find(c => c.id === ORG_REGISTRY.crmId) || ORG_REGISTRY.crm[0];
@@ -240,8 +252,9 @@ function saveOrgRegistry(patch){
 }
 // Opening another CRM branch (or signing in or out) loads its own store: the page starts over.
 function reloadInto(patch){ if(appStoreTimer) writeAppStore(); saveOrgRegistry(patch); DB.flush(); window.location.reload(); }
-// The Organization's brand (CRM → Marketing → Brand), its colours filled in — quotations, documents, emails.
-const orgBrand = () => { const b = ORG_REGISTRY.org.brand || {}; return {...b, name:ORG_REGISTRY.org.name, colors:{...DEFAULT_BRAND(), ...(b.colors || {})}}; };
+// The open CRM branch's brand (CRM → Marketing → Brand; without its own, the Organization's), its colours filled in — quotations, documents, emails.
+const crmBrandOf = (crmId) => { const c = ORG_REGISTRY.crm.find(x => x.id === crmId); return (c && c.brand) || ORG_REGISTRY.org.brand || {}; };
+const orgBrand = () => { const b = crmBrandOf(ORG_REGISTRY.crmId); return {...b, name:ORG_REGISTRY.org.name, colors:{...DEFAULT_BRAND(), ...(b.colors || {})}}; };
 const APP_STORE_KEY = crmStoreKey(ACTIVE_CRM.id);
 // Dates are saved as ISO strings (JSON) and come back as Dates.
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;

@@ -113,7 +113,8 @@ function dashBusinessData({deals = [], customers = [], contacts = [], accounting
     // Every amount in the default currency (Settings' exchange rates), so the totals add up.
     const cur = scheduleCurrency(sched), dflt = (n) => toDefaultCurrency(n, cur);
     (sched.installments || []).forEach(i => {
-      const invoicedAt = dashDayTime(i.invoicedAt, 10), due = dashDayTime(i.dueDate, 9);
+      // Invoiced on its invoice date once that's come (invoicedOn, accounting.jsx), or as recorded.
+      const invoicedAt = dashDayTime(invoicedOn(i), 10), due = dashDayTime(i.dueDate, 9);
       /* Forecast: an installment whose rest moved to a balance installment counts only what was paid
          on it — the balance carries the rest, by its own date (counted once). */
       const split = (sched.installments || []).some(x => x.parentId === i.id);

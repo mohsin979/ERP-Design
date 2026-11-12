@@ -80,7 +80,7 @@ const PERMISSION_PRESETS = [SUPER_ADMIN, 'Admin', 'Team Lead', 'Sales Profession
 
 /* Permission categories (left list), each with its horizontal tabs:
      Records                     — Contacts / Deals / Customers: what's done on records (their
-                                   tools — Calls, Call Logs, Meetings, Notes, Tasks, Files, Quotes —
+                                   tools — Calls, Call Logs, Meetings, Notes, Tasks, Files, Quotes, Documents —
                                    and Accounting: Payment Terms, by the record's owner), and under
                                    Edit: moving between stages, which property values may be edited.
      Customer Profile Properties — which Customer Profile answers may be edited, on every record.
@@ -132,6 +132,7 @@ const PERMISSION_TOOLS = [
   {key:'tasks',    label:'Tasks'},
   {key:'files',    label:'Files'},
   {key:'quotes',   label:'Quotes'},
+  {key:'documents', label:'Documents'},
 ];
 const TOOL_ACTIONS = [
   {key:'create', label:() => 'Create', unscoped:true},
@@ -396,13 +397,13 @@ const userAdminCan = (section, action, target) => {
 };
 
 // Which tool an activity belongs to (emails, owner changes and workflow entries aren't tools).
-const ACTIVITY_TOOL = {call:'callLogs', meeting:'meetings', note:'notes', task:'tasks', file:'files', fileChange:'files', quote:'quotes'};
+const ACTIVITY_TOOL = {call:'callLogs', meeting:'meetings', note:'notes', task:'tasks', file:'files', fileChange:'files', quote:'quotes', document:'documents'};
 const activityVisible = (object, record, a) => { const t = ACTIVITY_TOOL[a.type]; return !t || toolCan(object, record, t, 'view'); };
 const visibleActivities = (object, record, acts) => ACCESS.user ? (acts || []).filter(a => activityVisible(object, record, a)) : (acts || []);
 const activityCan = (object, record, a, action) => { const t = ACTIVITY_TOOL[a.type]; return !t || toolCan(object, record, t, action); };
 // Adding from an activity tab / quick action: the tool each creates.
 const ADD_TOOL = {'Note':'notes', 'Call':'calls', 'Log Call':'callLogs', 'Start Meeting':'meetings', 'Schedule Meeting':'meetings', 'Log Meeting':'meetings', 'Task':'tasks',
-  call:'calls', task:'tasks', note:'notes', meeting:'meetings', 'Meeting':'meetings', 'Create task':'tasks', 'Add note':'notes', file:'files', quote:'quotes'};
+  call:'calls', task:'tasks', note:'notes', meeting:'meetings', 'Meeting':'meetings', 'Create task':'tasks', 'Add note':'notes', file:'files', quote:'quotes', document:'documents'};
 const canAdd = (object, record, what) => { const t = ADD_TOOL[what]; return !t || toolCan(object, record, t, 'create'); };
 
 /* Sample users — the CRM's team (the contact owners) from the Figma rows, the signed-in user,
