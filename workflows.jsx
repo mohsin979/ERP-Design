@@ -5,7 +5,8 @@
                  Object, then optionally its Property and / or one of its Pipelines, then that
                  pipeline's Stage ({object?, property?, pipeline?, stage?}). Pre-filled from where
                  the builder is opened (a pipeline's stage row, or the pipeline itself); levels are
-                 added and removed in the Context panel. It stays as set whatever triggers or
+                 added and removed in the Context panel, under Started from — the CRM branch it's
+                 built in (e.g. Migration CRM). It stays as set whatever triggers or
                  actions are chosen: a context change never rewrites them — a trigger or action it
                  no longer fits is flagged "Needs attention" (triggerIssue / actionIssue) until it's
                  fixed. A Stage in the context scopes every trigger to records currently in that
@@ -26,7 +27,7 @@
                  context — created since; a Pipeline — entered that pipeline since; a Stage —
                  entered that stage since (not necessarily a new record). The engine enforces it.
    (Additional conditions are off for now: not shown, not evaluated.)
-   On the canvas: CONTEXT (Record in: Object → Pipeline → Stage) → TRIGGER (each trigger's type
+   On the canvas: CONTEXT (Record in: the branch → Object → Pipeline → Stage) → TRIGGER (each trigger's type
    and summary) → ACTION (the actions, by name only).
    Selecting a block opens its configuration on the right. Each action can wait before it runs
    (the clock beside its delete icon; not Enroll in Email Sequence, whose emails carry their own schedule).
@@ -506,8 +507,8 @@ const WORKFLOW_CONTEXT_FIELDS = {
 };
 // The display name of a context value (e.g. 'us-niw' → 'US NIW').
 const workflowContextLabel = (data, key, ctx) => ((WORKFLOW_CONTEXT_FIELDS[key].options(data, ctx) || []).find(o => o.value === ctx[key]) || {}).label || '';
-// "Company-wide → Deals → Total Amount → US NIW → CCL Sent" (levels added but not chosen yet are left out).
-const contextPathOf = (data, ctx) => ['Company-wide', ...WORKFLOW_CONTEXT_LEVELS.filter(k => ctx && ctx[k]).map(k => workflowContextLabel(data, k, ctx))].join(' → ');
+// "Migration CRM → Deals → Total Amount → US NIW → CCL Sent": the branch first (levels added but not chosen yet are left out).
+const contextPathOf = (data, ctx) => [`${ACTIVE_CRM.name} CRM`, ...WORKFLOW_CONTEXT_LEVELS.filter(k => ctx && ctx[k]).map(k => workflowContextLabel(data, k, ctx))].join(' → ');
 // A stage's name, in whichever pipeline it's in.
 const anyStageLabel = (data, id) => (((data.pipelines || []).flatMap(p => p.stages || [])).find(s => s.id === id) || {}).label || '';
 
@@ -1865,8 +1866,8 @@ function ActionGroupItem({group, onPick, disabled, hold}){
   );
 }
 
-/* Context — where the workflow operates: Company-wide, then the levels added here, each a select
-   with a remove ×. "+ Object" first; with an Object, "+ Property" and "+ Pipeline"; with a
+/* Context — where the workflow operates: the CRM branch it's built in (Started from), then the
+   levels added here, each a select with a remove ×. "+ Object" first; with an Object, "+ Property" and "+ Pipeline"; with a
    Pipeline, "+ Stage". Removing a level removes the levels that depend on it; changing one keeps
    them while they're still valid. A level added but not chosen yet doesn't narrow anything. */
 function ContextSection({data, context, onChange}){
@@ -1883,14 +1884,14 @@ function ContextSection({data, context, onChange}){
     && (k !== 'pipeline' || objectPipelines(data, ctx.object).length > 0);
   const row = (label, control, trailing) => (
     <div key={label} style={{display:'flex', alignItems:'center', gap:8, minHeight:34}}>
-      <span style={{width:72, flexShrink:0, fontSize:12.5, color:T.attioMuted}}>{label}</span>
+      <span style={{width:80, flexShrink:0, fontSize:12.5, color:T.attioMuted, whiteSpace:'nowrap'}}>{label}</span>
       <div style={{flex:1, minWidth:0}}>{control}</div>
       {trailing}
     </div>
   );
   return cfgPart(null, (
     <div style={{display:'flex', flexDirection:'column', gap:8}}>
-      {row('Scope', <span style={{fontSize:13, color:T.attioText}}>Company-wide</span>)}
+      {row('Started from', <span style={{fontSize:13, color:T.attioText}}>{ACTIVE_CRM.name} CRM</span>)}
       {WORKFLOW_CONTEXT_LEVELS.filter(has).map(k => {
         const f = WORKFLOW_CONTEXT_FIELDS[k];
         return row(f.label, <FormSelect value={ctx[k] || ''} placeholder={`Select ${f.label.toLowerCase()}`} options={f.options(data, ctx)} onChange={(v)=>set(k, v)}/>,
@@ -2106,7 +2107,7 @@ function WorkflowEditor({data, initial, onCancel, onSave, onDelete, onRename, on
     if(draft.actions.length) setSelected(draft.actions[0].id);
     else { setSelected('actions'); setAdding(true); }
   };
-  // The context as a path: Company-wide → Deals → US NIW → Qualified Client.
+  // The context as a path: Migration CRM → Deals → US NIW → Qualified Client.
   const contextPath = contextPathOf(data, draft.context);
   // An action's timing shows while its clock is on (on by default when it already waits);
   // turning the clock off removes the wait, so what's shown is what applies.
@@ -2141,12 +2142,6 @@ function WorkflowEditor({data, initial, onCancel, onSave, onDelete, onRename, on
     if(selected === 'context') return (
       <div style={{padding:'18px 20px', display:'flex', flexDirection:'column', gap:16}}>
         <span style={{fontSize:15, fontWeight:600, color:T.attioText}}>Context</span>
-        {workflowOriginLabel(data, draft.origin) && (
-          <div style={{display:'flex', alignItems:'baseline', gap:8, fontSize:12.5}}>
-            <span style={{color:T.attioMuted, whiteSpace:'nowrap'}}>Started from</span>
-            <span style={{color:T.attioText, minWidth:0, overflowWrap:'anywhere'}}>{workflowOriginLabel(data, draft.origin)}</span>
-          </div>
-        )}
         <ContextSection data={data} context={draft.context} onChange={setContext}/>
       </div>
     );

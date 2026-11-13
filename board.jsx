@@ -121,7 +121,7 @@ const workspaceHasType = (id) => !Object.keys(OBJECT_NAMES).length || id in OBJE
    own, and a customer's is its lead's (the customer is made from the lead: one person, one
    profile); a customer with no lead keeps its own. */
 const profileHolderId = (object, record) => !record ? null : object === 'contacts' ? record.id
-  : record.contactId != null ? record.contactId : workspaceHasType('contacts') ? null
+  : personIdOf(record) != null ? personIdOf(record) : workspaceHasType('contacts') ? null
   : object === 'deals' ? record.id
   /* A customer whose own profile was filled (before a lead was linked) keeps it; else its lead's —
      so linking or deleting a lead later doesn't make the answers vanish from view. */

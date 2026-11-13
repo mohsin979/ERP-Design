@@ -4,6 +4,9 @@
    Deals against Deals, Customers against Customers — for a shared email (any case) or phone
    number (its digits). Records linked that way are one MERGE CASE. Records of different types are
    never matched: a deal carries its contact's email, and it's the same person, not a duplicate.
+   One switch per record type (Settings → Records → the record type, 2026-11-13): Enable Merge Cases
+   Reporting. On, its records get Merge Status and its cases show; off, neither (Contacts on to
+   start with, every other record type off — dataModel.jsx mergeReportingOn).
      Merge Status — a system property (dataModel.jsx), worked out here: in a case, the oldest
                     record is Unique and each newer one Form Refill (a form submission created it)
                     or Duplicate (added any other way); a record with no match is Unique.
@@ -16,8 +19,12 @@
                     Date, the owner). Clicking a value makes it the final one — the kept record's to
                     start with, else the first record's that has one. A pipeline and its stage are
                     picked together; an amount brings its currency.
-     Merge        — the oldest record is kept with the chosen values; the others' activity (files and
-                    emails included), associations, quotes, documents, payment plans, invoices,
+                    A link the kept record may have only one of (the link's type — by default a
+                    deal's or customer's contact, a customer's deal) is a row too, when they differ.
+     Merge        — the oldest record is kept with the chosen values; its links as their types allow
+                    (all of the merged records' where it may have many, the picked one where only
+                    one — the others unlinked); the others' activity (files and
+                    emails included), quotes, documents, payment plans, invoices,
                     Customer Profile answers and form submissions move to it, and they're deleted. A
                     "Records merged" activity on it keeps what was merged and the values replaced
                     (App's mergeRecords).
@@ -74,30 +81,41 @@ const mergeStatusIn = (idx, id) => (idx && idx.status.get(String(id))) || 'Uniqu
 // Merge Status in workflow conditions (workflowEngine.jsx conditionFields): undefined for any other property.
 const mergeRecordValue = (key, rec) => key !== 'mergeStatus' || !rec ? undefined : mergeStatusIn(WF_LIVE.merge && WF_LIVE.merge[recordObjectOf(rec.id)], rec.id);
 // The cases the signed-in person may act on: their Merge permission covers every record.
-const mergeCasesFor = (hub, object) => ((hub && hub.merge && hub.merge[object] && hub.merge[object].cases) || []).filter(c => c.records.every(r => recordCan(object, r, 'merge')));
+// A record type's cases show only with Enable Merge Cases Reporting on, and to people whose Merge permission covers every record in the case.
+const mergeCasesFor = (hub, object) => !hub || !mergeReportingOn(hub.data, object) ? []
+  : ((hub.merge && hub.merge[object] && hub.merge[object].cases) || []).filter(c => c.records.every(r => recordCan(object, r, 'merge')));
 
 /* The properties a merge review compares: every stored one (system ones included), not the worked-out
-   ones (Associated Deals, Last Activity Date, Form Name, Merge Status…) — a deal's or customer's
-   Associated Contact excepted: it's one link, so the kept record takes one of them. A contact's Last
-   Activity Date and Last Contacted follow its activity, so they're worked out again after. */
+   ones (Associated Deals, Last Activity Date, Form Name, Merge Status…). A contact's Last Activity
+   Date and Last Contacted follow its activity, so they're worked out again after.
+   Then the links (dataModel.jsx linkRule): where the kept record may have only one of a record type
+   (by default a deal's or customer's contact, a customer's deal) and the records differ, a row picks
+   it — the others are unlinked; where it may have many, it gets every merged record's. */
 const MERGE_WORKED_OUT = {contacts:['lastActivity', 'lastContacted']};
 // Picked together: a pipeline and its stage.
 const MERGE_LINKED = {pipeline:['stage'], stage:['pipeline']};
-function mergeRows(data, object, recs){
-  const props = objectProperties(data, object).filter(p => p.key !== 'mergeStatus' && !(MERGE_WORKED_OUT[object] || []).includes(p.key)
-    && (!p.derived || (p.key === 'contact' && object !== 'contacts' && workspaceHasType('contacts'))));
-  return props.map(p => ({...p, field: p.key === 'contact' ? 'contactId' : p.key}))
+// The Associated property of each record type a record links to (its label in the review).
+const MERGE_LINK_PROPERTY = {contacts:'contact', deals:'deals', customers:'customers'};
+// `records`: {contacts, deals, customers}.
+function mergeRows(data, object, recs, records){
+  const props = objectProperties(data, object).filter(p => p.key !== 'mergeStatus' && !(MERGE_WORKED_OUT[object] || []).includes(p.key) && !p.derived);
+  const rows = props.map(p => ({...p, field:p.key}))
     .filter(p => {
-      const same = (a, b) => (p.field === 'contactId' ? String(a[p.field] ?? '') === String(b[p.field] ?? '') : samePropertyValue(a[p.field], b[p.field]))
-        && (p.key !== 'amount' || samePropertyValue(a.currency, b.currency));
+      const same = (a, b) => samePropertyValue(a[p.field], b[p.field]) && (p.key !== 'amount' || samePropertyValue(a.currency, b.currency));
       return !recs.every(r => same(r, recs[0]));
     });
+  const linkRows = RECORD_OBJECTS.filter(o => o !== object && workspaceHasType(o) && linkStoreOf(object, o) && (linkRule(object, o) || {}).perX === 1).map(o => {
+    const prop = objectProperties(data, object).find(p => p.key === MERGE_LINK_PROPERTY[o]);
+    const linkIds = Object.fromEntries(recs.map(r => [String(r.id), (linkedOf(records, object, r, o)[0] || {}).id ?? null]));
+    return {key:`link:${o}`, linkTo:o, label:prop ? prop.label : `Associated ${typeSingular(o, o)}`, type:'Single-Line Text', linkIds};
+  }).filter(row => !recs.every(r => String(row.linkIds[String(r.id)] ?? '') === String(row.linkIds[String(recs[0].id)] ?? '')));
+  return [...rows, ...linkRows];
 }
-const mergeBlank = (row, rec) => row.field === 'contactId' ? rec.contactId == null : propertyIsEmpty(row, rec[row.field]);
+const mergeBlank = (row, rec) => row.linkTo ? row.linkIds[String(rec.id)] == null : propertyIsEmpty(row, rec[row.field]);
 // A record's value of a compared property, in one line.
 function mergeValueText(hub, object, row, rec){
+  if(row.linkTo) return (hubRecord(hub, row.linkTo, row.linkIds[String(rec.id)]) || {}).name || '';
   const v = rec[row.field];
-  if(row.field === 'contactId'){ const c = rec.contactId != null && hubRecord(hub, 'contacts', rec.contactId); return c ? c.name : ''; }
   const t = propertyTypeId(row.type);
   if(t === 'Pipeline') return (recordPipelines(hub.data, object).find(x => x.id === v) || {}).label || '';
   if(t === 'Pipeline stage') return stageLabelOf(hub.data, rec.pipeline, v) || '';
@@ -181,7 +199,7 @@ function MergeCasesButton({object}){
 function MergeReviewPanel({object, mergeCase, onClose}){
   const hub = useRecordHub();
   const recs = mergeCase.ids.map(id => hubRecord(hub, object, id)).filter(Boolean);
-  const rows = mergeRows(hub.data, object, recs);
+  const rows = mergeRows(hub.data, object, recs, hub.records);
   const defaultPick = (row) => { const i = recs.findIndex(r => !mergeBlank(row, r)); return mergeBlank(row, recs[0]) && i > 0 ? i : 0; };
   const [picks, setPicks] = React.useState(() => Object.fromEntries(rows.map(r => [r.key, defaultPick(r)])));
   const [confirming, setConfirming] = React.useState(false);
@@ -192,11 +210,13 @@ function MergeReviewPanel({object, mergeCase, onClose}){
   const kept = recs[0];
   // The values the kept record takes (only where another record's was chosen), and the log of them.
   const chosen = rows.filter(r => pickOf(r) !== 0);
-  const values = Object.assign({}, ...chosen.map(r => { const src = recs[pickOf(r)];
+  // The one linked record picked for each link the kept record may have only one of.
+  const links = Object.fromEntries(rows.filter(r => r.linkTo).map(r => [r.linkTo, r.linkIds[String(recs[pickOf(r)].id)]]));
+  const values = Object.assign({}, ...chosen.filter(r => !r.linkTo).map(r => { const src = recs[pickOf(r)];
     return {[r.field]:src[r.field], ...(r.key === 'amount' ? {currency:src.currency} : {})}; }));
   const changes = chosen.map(r => ({label:r.label, from:mergeValueText(hub, object, r, kept), to:mergeValueText(hub, object, r, recs[pickOf(r)])}));
   const merge = () => {
-    hub.merge.mergeRecords(object, recs.map(r => r.id), values, changes);
+    hub.merge.mergeRecords(object, recs.map(r => r.id), values, changes, links);
     hub.toast(`${typePlural(object, 'Records')} merged · ${values.name ?? kept.name ?? noun}`);
     onClose();
   };

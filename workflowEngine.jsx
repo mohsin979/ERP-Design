@@ -317,8 +317,8 @@ const associatedNames = (objectId, key, rec) => {
   const recs = WF_LIVE.records || [], of = (o) => recs.filter(r => recordObjectOf(r.id) === o), names = (list) => list.map(r => r.name).join(', ');
   if(objectId === 'deals' && key === 'customers') return names(of('customers').filter(c => (c.dealIds || []).includes(rec.id)));
   if(objectId === 'customers' && key === 'deals') return names(of('deals').filter(d => (rec.dealIds || []).includes(d.id)));
-  if(objectId === 'contacts' && key === 'deals') return names(of('deals').filter(d => String(d.contactId) === String(rec.id)));
-  if(objectId === 'contacts' && key === 'customers') return names(of('customers').filter(c => String(c.contactId) === String(rec.id)));
+  if(objectId === 'contacts' && key === 'deals') return names(of('deals').filter(d => contactIdsOf(d).some(id => sameId(id, rec.id))));
+  if(objectId === 'contacts' && key === 'customers') return names(of('customers').filter(c => contactIdsOf(c).some(id => sameId(id, rec.id))));
   return undefined;
 };
 /* The fields a workflow's conditions can read: `w` = {context, trigger, triggerConfig}. */
@@ -547,7 +547,8 @@ const countMeets = (c, x) => { const n = Number(c.value); return c.op === 'gt' ?
 const countedOf = (p, deal, acts) => {
   if(p.quotes) return deal ? (WF_LIVE.quotes || []).filter(q => q.object === recordObjectOf(deal.id) && String(q.recordId) === String(deal.id)).filter(p.counts) : [];
   const own = acts || [];
-  const withContact = p.withContact && deal && recordObjectOf(deal.id) !== 'contacts' && deal.contactId != null ? ((WF_LIVE.acts || {})[String(deal.contactId)] || []) : [];
+  // The record's person's (its first contact's) activity too.
+  const withContact = p.withContact && deal && recordObjectOf(deal.id) !== 'contacts' && personIdOf(deal) != null ? ((WF_LIVE.acts || {})[String(personIdOf(deal))] || []) : [];
   return [...own, ...withContact].filter(p.counts);
 };
 /* A Stage context, as a record enters the stage: triggers about the record's state hold if they're
@@ -569,27 +570,25 @@ const entryStateHolds = (w, deal, data, acts) => {
   return !!p && !!p.counts && !p.each && !c.repeat && countMeets(c, countedOf(p, deal, acts).length);
 };
 const isStageQuietTrigger = (v) => v.trigger === 'propertyUpdate' && v.triggerConfig.op === 'notChanged' && !!v.triggerConfig.inStage && !!v.context.stage;
-/* Records associated with each other: a deal's or customer's contact (`contactId`), a customer's
+/* Records associated with each other: a deal's or customer's contacts (`contactIds`), a customer's
    deals (`dealIds`). */
 const recordsLinked = (a, b) => {
   const oa = recordObjectOf(a.id), ob = recordObjectOf(b.id);
   if(oa === ob) return false;
   const [x, y] = [a, b].sort((p, q) => recordObjectOf(p.id) < recordObjectOf(q.id) ? -1 : 1);   // contacts < customers < deals
   const ox = recordObjectOf(x.id), oy = recordObjectOf(y.id);
-  if(ox === 'contacts') return y.contactId != null && String(y.contactId) === String(x.id);
+  if(ox === 'contacts') return contactIdsOf(y).some(id => sameId(id, x.id));
   return ox === 'customers' && oy === 'deals' && (x.dealIds || []).some(id => String(id) === String(y.id));
 };
 const associatedRecordsOf = (rec, object, list) => list.filter(r => recordObjectOf(r.id) === object && recordsLinked(rec, r));
-/* Existing records that can be associated with `rec` (Associate existing …): only ones free to link
-   — a deal has one contact, a customer has one deal, a deal has one customer. */
+// The engine's one list of records, by record type (for the links' limits, dataModel.jsx canLink).
+const linkRecordsOf = (list) => ({contacts:list.filter(r => recordObjectOf(r.id) === 'contacts'),
+  deals:list.filter(r => recordObjectOf(r.id) === 'deals'), customers:list.filter(r => recordObjectOf(r.id) === 'customers')});
+/* Existing records that can be associated with `rec` (Associate existing …): only ones the links'
+   types allow — each side still under its limit (by default a deal has one contact, a customer one deal). */
 const linkableRecords = (rec, object, list) => {
-  const from = recordObjectOf(rec.id), live = (id, o) => list.some(r => recordObjectOf(r.id) === o && String(r.id) === String(id));
-  return list.filter(r => recordObjectOf(r.id) === object && !recordsLinked(rec, r)).filter(r => {
-    if(object === 'customers' && from === 'deals') return !(r.dealIds || []).some(id => live(id, 'deals'));
-    if(object === 'deals' && from === 'customers') return !list.some(c => recordObjectOf(c.id) === 'customers' && (c.dealIds || []).some(id => String(id) === String(r.id)));
-    if(from === 'contacts') return r.contactId == null || !live(r.contactId, 'contacts');
-    return true;
-  });
+  const from = recordObjectOf(rec.id), recs = linkRecordsOf(list);
+  return (recs[object] || []).filter(r => canLink(recs, from, rec, object, r));
 };
 /* Whether a trigger keeps a record out of a stage as it tries to enter (Block Stage Entry): as the
    record would be — an associated record that isn't there (In this stage / Throughout the lifecycle);
@@ -658,7 +657,7 @@ function recordSystemValues(data, p, d, now){
     return n;
   }
   if(obj === 'customers' && !p){
-    const source = d.source || ((d.dealIds || []).length ? 'Deal' : d.contactId != null ? 'Contact' : 'Manual');
+    const source = d.source || ((d.dealIds || []).length ? 'Deal' : contactIdsOf(d).length ? 'Contact' : 'Manual');
     return {...d, source, customerSince:d.customerSince || dateOnly(d.created) || todayLabel()};
   }
   return d;
@@ -862,8 +861,8 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
      was (its other changes are kept). Returns {blocked:[{dealId, attempt, workflows}]}. */
   /* Associated Record Created: a new record linked to another — as it's created, or in the same
      action (a contact created from a deal, then linked to it) — is the other record's event. Linking
-     a record that already existed isn't a creation. Links: a deal's or customer's contact
-     (`contactId`), a customer's deals (`dealIds`). `freshIds`: records created in this action. */
+     a record that already existed isn't a creation. Links: a deal's or customer's contacts
+     (`contactIds`), a customer's deals (`dealIds`). `freshIds`: records created in this action. */
   const freshIds = React.useRef(new Set());
   const markFresh = (ids) => {
     if(!ids.length) return;
@@ -874,7 +873,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
     const out = new Set();
     list.forEach(r => {
       const o = recordObjectOf(r.id);
-      if((o === 'deals' || o === 'customers') && r.contactId != null) out.add(`${r.id}|${r.contactId}`);
+      if(o === 'deals' || o === 'customers') contactIdsOf(r).forEach(c => out.add(`${r.id}|${c}`));
       if(o === 'customers') (r.dealIds || []).forEach(d => out.add(`${r.id}|${d}`));
     });
     return out;
@@ -968,9 +967,9 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
     changes.filter(c => c.prev).forEach(c => addActivity(c.next.id, {id:wfNewId('stg'), ...recordKey(c.next.id), type:'stageChange', at:new Date(now),
       from:{pipeline:c.prev.pipeline, stage:c.prev.stage, label:stageLabelIn(dataRef.current, c.prev.pipeline, c.prev.stage)},
       to:{pipeline:c.next.pipeline, stage:c.next.stage, label:stageLabelIn(dataRef.current, c.next.pipeline, c.next.stage)}, ...changedBy()}));
-    // A new customer: noted on its deals and its contact ("Customer created").
+    // A new customer: noted on its deals and its contacts ("Customer created").
     created.filter(d => recordObjectOf(d.id) === 'customers').forEach(d =>
-      [...(d.dealIds || []), ...(d.contactId != null ? [String(d.contactId)] : [])].filter(id => next.some(r => r.id === id)).forEach(id =>
+      [...(d.dealIds || []), ...contactIdsOf(d).map(String)].filter(id => next.some(r => r.id === id)).forEach(id =>
         addActivity(id, {id:wfNewId('cus'), ...recordKey(id), type:'customerCreated', at:new Date(now), customerId:d.id, customerName:d.name || '', ...changedBy()})));
     created.forEach(d => emit({type:'recordCreated', recordId:d.id, pipelineId:d.pipeline, attrs:{}}, chain));
     /* A record created straight into a stage a Block Stage Entry workflow guards: it's created there,
@@ -1395,13 +1394,13 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
     emit({type:'callLogged', recordId:rec.id, pipelineId:rec.pipeline, attrs:{activityId:act.id, outcome:act.outcome, logged:true}}, childChain(run));
     return act;
   }
-  /* A record's associated records of an Object: a contact's deals and customers; a deal's contact and
-     customers; a customer's contact and deals. */
+  /* A record's associated records of an Object: a contact's deals and customers; a deal's contacts and
+     customers; a customer's contacts and deals. */
   function associatedOf(rec, object){
     const all = dealsRef.current, from = recordObjectOf(rec.id);
-    const contactOf = (r) => r.contactId == null ? [] : all.filter(x => recordObjectOf(x.id) === 'contacts' && x.id === String(r.contactId));
-    if(from === 'contacts') return all.filter(x => recordObjectOf(x.id) === object && object !== 'contacts' && String(x.contactId) === rec.id);
-    if(object === 'contacts') return contactOf(rec);
+    const contactsOf = (r) => contactIdsOf(r).map(id => all.find(x => recordObjectOf(x.id) === 'contacts' && sameId(x.id, id))).filter(Boolean);
+    if(from === 'contacts') return all.filter(x => recordObjectOf(x.id) === object && object !== 'contacts' && contactIdsOf(x).some(id => sameId(id, rec.id)));
+    if(object === 'contacts') return contactsOf(rec);
     if(from === 'deals' && object === 'customers') return all.filter(x => recordObjectOf(x.id) === 'customers' && (x.dealIds || []).includes(rec.id));
     if(from === 'customers' && object === 'deals') return all.filter(x => (rec.dealIds || []).includes(x.id));
     return [];
@@ -1423,18 +1422,22 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
     const data = dataRef.current, from = recordObjectOf(rec.id), fromNoun = recordNoun(rec.id);
     if(object === 'contacts'){
       const newContactId = newRecordId('contacts');   // never reused (store.jsx)
-      /* Linked to the record — a deal or customer has one contact, so one that already has one keeps it.
-         Created and linked in one change through the engine, so New Record and Associated Record ·
-         Is created see it (as any other record created). */
-      const linked = rec.contactId == null;
-      setDealsTracked(ds => [...ds.map(d => linked && d.id === rec.id ? {...d, contactId:newContactId} : d), contactView(newContactRecord(newContactId, values))], childChain(run));
+      /* Linked to the record when the link allows another (by default a deal or customer has one
+         contact, so one that already has one keeps it). Created and linked in one change through
+         the engine, so New Record and Associated Record · Is created see it (as any other record created). */
+      const linked = canLink(linkRecordsOf(dealsRef.current), from, rec, 'contacts', {id:newContactId});
+      setDealsTracked(ds => [...ds.map(d => linked && d.id === rec.id ? withLinkId(d, 'contactIds', newContactId) : d), contactView(newContactRecord(newContactId, values))], childChain(run));
       recordEffect({kind:'record', object:'contacts', recordId:newContactId});
       return `Contact created: ${values.name || ''}${linked ? ` · linked to this ${fromNoun}` : ` · not linked (the ${fromNoun} already has a contact)`}`;
     }
     if(!['customers', 'deals'].includes(object) || from === object) return `${objectName(data, object)}: not defined yet`;
     const pipes = recordPipelines(data, object), pl = pipes.find(x => x.id === values.pipeline) || pipes[0];
     const stage = values.stage || (pl ? ((pl.stages.find(st => !isClosedStage(st)) || pl.stages[0] || {}).id || '') : '');
-    const contactId = from === 'contacts' ? Number(rec.id) : rec.contactId ?? null;
+    /* Its contact: the contact it's made from, else the record's person (its first contact) — each
+       when the link allows another. */
+    const recs = linkRecordsOf(dealsRef.current), personId = from === 'contacts' ? Number(rec.id) : personIdOf(rec);
+    const person = personId == null ? null : recs.contacts.find(c => sameId(c.id, personId)) || {id:personId};
+    const contactIds = person && canLink(recs, 'contacts', person, object, NEW_RECORD) ? [personId] : [];
     const created = storePropertyValue('Date & time', new Date());
     if(object === 'customers'){
       // A deal can have several customers (as Create Customer by hand): each run makes one.
@@ -1443,27 +1446,28 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
       const forDeal = from === 'deals' && !values.pipeline ? pipes.find(x => x.id === CUSTOMER_PIPELINE_FOR_DEAL[rec.pipeline]) : null;
       const cpl = forDeal || pl, cstage = forDeal ? ((forDeal.stages.find(st => !isClosedStage(st)) || forDeal.stages[0] || {}).id || '') : stage;
       const fill = from === 'deals' ? {email:rec.email || '', phone:rec.phone || '', status:'Active'} : {};
-      const cust = {id:newRecordId('customers'), ...fill, ...values, pipeline:values.pipeline || (cpl || {}).id || '', ...(cstage ? {stage:cstage} : {}), contactId, dealIds: from === 'deals' ? [rec.id] : [], created};
+      const toDeal = from === 'deals' && canLink(recs, 'deals', rec, 'customers', NEW_RECORD), linked = from === 'deals' ? toDeal : contactIds.length > 0;
+      const cust = {id:newRecordId('customers'), ...fill, ...values, pipeline:values.pipeline || (cpl || {}).id || '', ...(cstage ? {stage:cstage} : {}), contactIds, dealIds: toDeal ? [rec.id] : [], created};
       editActivities(m => ({...m, [cust.id]:[]}));
       setDealsTracked(rs => [...rs, cust], childChain(run));
       recordEffect({kind:'record', object:'customers', recordId:cust.id});
-      return `Customer created: ${cust.name || ''} · linked to this ${fromNoun}`;
+      return `Customer created: ${cust.name || ''}${linked ? ` · linked to this ${fromNoun}` : ' · not linked'}`;
     }
-    /* A deal: the contact's deal, and — from a customer — the customer's deal, when it has none
-       yet (a customer has one deal: Deals → Customers is One-to-many). */
+    /* A deal: the contact's deal, and — from a customer — the customer's deal, when the link allows
+       another (by default a customer has one deal). */
     const amount = values.amount === '' || values.amount == null ? '' : Number(values.amount);
-    const nd = {id:newRecordId('deals'), contactId, ...values, pipeline:values.pipeline || (pl || {}).id || '', ...(stage ? {stage} : {}), amount, currency:values.currency || defaultCurrency(), created};
-    const linked = from !== 'customers' || !(rec.dealIds || []).length;
+    const nd = {id:newRecordId('deals'), contactIds, ...values, pipeline:values.pipeline || (pl || {}).id || '', ...(stage ? {stage} : {}), amount, currency:values.currency || defaultCurrency(), created};
+    const linked = from === 'customers' ? canLink(recs, 'customers', rec, 'deals', NEW_RECORD) : contactIds.length > 0;
     editActivities(m => ({...m, [nd.id]:[]}));
-    setDealsTracked(rs => [...rs.map(r => from === 'customers' && linked && r.id === rec.id ? {...r, dealIds:[nd.id]} : r), nd], childChain(run));
+    setDealsTracked(rs => [...rs.map(r => from === 'customers' && linked && r.id === rec.id ? withLinkId(r, 'dealIds', nd.id) : r), nd], childChain(run));
     recordEffect({kind:'record', object:'deals', recordId:nd.id});
-    return `${typeSingular('deals', 'Deal')} created: ${nd.name || ''}${linked ? ` · linked to this ${fromNoun}` : ` · not linked (the ${typeNoun('customers', 'customer')} already has a ${typeNoun('deals', 'deal')})`}`;
+    return `${typeSingular('deals', 'Deal')} created: ${nd.name || ''}${linked ? ` · linked to this ${fromNoun}` : ' · not linked'}`;
   }
   /* Delete Record: what deleting it on its page does — its activity goes with it; the records
      associated with it stay, no longer linked to it; its other open violations no longer apply. */
   function removeRecord(rec, run){
     const object = recordObjectOf(rec.id);
-    setDealsTracked(rs => rs.filter(r => r.id !== rec.id).map(r => object === 'contacts' && r.contactId != null && String(r.contactId) === rec.id ? {...r, contactId:null}
+    setDealsTracked(rs => rs.filter(r => r.id !== rec.id).map(r => object === 'contacts' && contactIdsOf(r).some(id => sameId(id, rec.id)) ? withoutLinkId(r, 'contactIds', rec.id)
       : object === 'deals' && (r.dealIds || []).includes(rec.id) ? {...r, dealIds:r.dealIds.filter(x => x !== rec.id)} : r), childChain(run));
     editActivities(m => { const n = {...m}; delete n[rec.id]; return n; });
     recordEffect({kind:'recordDeleted', object, recordId:rec.id, name:rec.name});
@@ -2324,7 +2328,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
       new Set([...was.keys(), ...now.keys()]).forEach(qid => { if(was.get(qid) !== now.get(qid)) ids.add(String((now.get(qid) || was.get(qid)).recordId)); });
     }
     // A contact's calls count on its deals and customers too (Number of Total Calls).
-    if(ids.size) dealsRef.current.forEach(d => { if(d.contactId != null && ids.has(String(d.contactId))) ids.add(d.id); });
+    if(ids.size) dealsRef.current.forEach(d => { if(contactIdsOf(d).some(id => ids.has(String(id)))) ids.add(d.id); });
     if(ids.size) checkRepeatDecrements([...ids], prev, next);
   }, [recordActs, quotes]);
   /* Quote events (Quote Sent / Signed): from the quotes list. */
@@ -2406,11 +2410,10 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
     createAssociated: (recordId, object, values) => { const rec = getDeal(recordId); return rec ? createLinkedRecord(rec, object, values, {chain:{id:wfNewId('ch'), depth:0, visited:[], byPerson:true}}) : null; },
     associateExisting: (recordId, otherId) => {
       const a = getDeal(recordId), b = dealsRef.current.find(r => String(r.id) === String(otherId));
-      if(!a || !b || recordsLinked(a, b)) return;
-      const [x, y] = [a, b].sort((p, q) => recordObjectOf(p.id) < recordObjectOf(q.id) ? -1 : 1);   // contacts < customers < deals
-      const target = recordObjectOf(x.id) === 'contacts' ? y : x;
-      const patch = recordObjectOf(x.id) === 'contacts' ? {contactId:Number(x.id)} : {dealIds:[y.id]};
-      setDealsTracked(rs => rs.map(r => r.id === target.id ? {...r, ...patch} : r));
+      if(!a || !b || !canLink(linkRecordsOf(dealsRef.current), recordObjectOf(a.id), a, recordObjectOf(b.id), b)) return;
+      // Written on the record that holds the link (a deal's or customer's contacts, a customer's deals).
+      const lp = linkPatch(recordObjectOf(a.id), recordObjectOf(a.id) === 'contacts' ? {...a, id:Number(a.id)} : a, recordObjectOf(b.id), recordObjectOf(b.id) === 'contacts' ? {...b, id:Number(b.id)} : b);
+      if(lp) setDealsTracked(rs => rs.map(r => String(r.id) === String(lp.id) ? lp.apply(r) : r));
     },
     /* A blocked move kept pending on the record: what still keeps it out (each workflow and its
        triggers that hold), completing it, or dropping it. */

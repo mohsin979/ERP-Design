@@ -58,12 +58,13 @@ function recordHighlightText(object, key, {record, view, acts, contact, hub}){
     if(key === 'amount') return view.amountText || '';
     if(key === 'lastActivity') return latestActivityDate(acts);
     if(key === 'nextActivity') return nextActivityDate(acts);
-    if(key === 'contact') return contact ? contact.name : '';
+    // Every contact it has (the first is `contact`, its person).
+    if(key === 'contact') return nameOf(contactIdsOf(record).map(id => ((hub.records || {}).contacts || []).find(c => sameId(c.id, id))).filter(Boolean)) || (contact ? contact.name : '');
   }
   const records = (hub.records || {});
   if(key === 'deals') return nameOf(object === 'customers' ? (record.dealIds || []).map(id => (records.deals || []).find(d => d.id === id)).filter(Boolean)
-    : (records.deals || []).filter(d => d.contactId === record.id));
-  if(key === 'customers') return nameOf((records.customers || []).filter(c => object === 'deals' ? (c.dealIds || []).includes(record.id) : c.contactId === record.id));
+    : (records.deals || []).filter(d => contactIdsOf(d).some(id => sameId(id, record.id))));
+  if(key === 'customers') return nameOf((records.customers || []).filter(c => object === 'deals' ? (c.dealIds || []).includes(record.id) : contactIdsOf(c).some(id => sameId(id, record.id))));
   const v = record[key];
   if(v == null || v === '') return '';
   if(prop && propertyTypeId(prop.type) === 'Timestamp') return dateOnly(v);

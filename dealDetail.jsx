@@ -78,7 +78,8 @@ const dealSubtitleOptions = (props) => dealPanelProperties(props).filter(p => ![
 const dealSubtitle = (deal, view, contact, settings) => {
   const k = settings.subtitle;
   if(!k) return '';
-  const v = k === 'contact' ? contact && contact.name : k === 'amount' ? view.amountText : ['owner', 'pipeline', 'stage'].includes(k) ? view[k] : deal[k];
+  // `contact`: the deal's contacts (or one).
+  const v = k === 'contact' ? [].concat(contact || []).map(c => c.name).join(', ') : k === 'amount' ? view.amountText : ['owner', 'pipeline', 'stage'].includes(k) ? view[k] : deal[k];
   return v == null ? '' : String(v);
 };
 const defaultDealPanelSettings = (props) => ({
@@ -134,7 +135,7 @@ const nextActivityDate = (acts) => {
 };
 
 /* `view`: the deal as shown — owner, pipeline and stage as names, the amount with its currency. */
-function DealInfo({deal, view, acts, contact, customers = [], keys, props, onOpenContact, onOpenCustomer, onStub}){
+function DealInfo({deal, view, acts, contacts = [], customers = [], keys, props, onOpenContact, onOpenCustomer, onStub}){
   const owner = ownerDates({owner:view.owner, created:dateOnly(deal.created)}, acts);
   const hub = useRecordHub();
   const rows = {
@@ -147,8 +148,8 @@ function DealInfo({deal, view, acts, contact, customers = [], keys, props, onOpe
     closeDate:     {value:deal.closeDate},
     created:       {value:deal.created},
     lastActivity:  {value:latestActivityDate(acts)},
-    contact:       {value:contact && contact.name, open:() => contact && onOpenContact(contact)},
-    customers:     {value:customers.length ? customers : null, list:true},
+    contact:       {value:contacts.length ? contacts : null, list:true, noun:'contact', open:(c) => onOpenContact(c)},
+    customers:     {value:customers.length ? customers : null, list:true, noun:'customer', open:(x) => onOpenCustomer && onOpenCustomer(x)},
   };
   const labels = Object.fromEntries(dealPanelProperties(props).map(p => [p.key, p.label]));
   const shown = keys.filter(k => labels[k]);
@@ -169,7 +170,7 @@ function DealInfo({deal, view, acts, contact, customers = [], keys, props, onOpe
               : spec ? <PanelEditableValue spec={spec} display={rows[k] ? (r.value == null ? '' : String(r.value)) : undefined}/>
               : r.owner ? <OwnerValue object="deals" record={deal} name={r.value}/>
               : !r.value ? <span style={{fontSize:13, color:T.attioFaint}}>—</span>
-              : r.list ? <AssociatedRecordsValue records={r.value} noun="customer" onOpen={(x)=>onOpenCustomer && onOpenCustomer(x)}/>
+              : r.list ? <AssociatedRecordsValue records={r.value} noun={r.noun} onOpen={r.open}/>
               : r.open ? <button onClick={r.open} style={linkButton}>{r.value}</button>
               : <span style={{fontSize:13, color:T.attioText, minWidth:0, overflowWrap:'anywhere'}}>{dateShown(r.value)}</span>}
           </div>
@@ -227,10 +228,10 @@ function RecordDetailBody({object, record, view, acts, email, phone, settings, d
 // A deal shows its contact's email and phone — its own where it has no contact (HOF Partners' Leads have no Contacts).
 const dealEmail = (deal, contact) => (contact && contact.email) || deal.email || '';
 const dealPhone = (deal, contact) => (contact && contact.phone) || deal.phone || '';
-function DealDetailBody({deal, view, acts, contact, customers, settings, props, onQuick, onOpenContact, onOpenCustomer, onStub, onCopied}){
+function DealDetailBody({deal, view, acts, contact, contacts, customers, settings, props, onQuick, onOpenContact, onOpenCustomer, onStub, onCopied}){
   return <RecordDetailBody object="deals" record={deal} view={view} acts={acts} email={dealEmail(deal, contact)} phone={dealPhone(deal, contact)}
     settings={settings} dropdowns={DEAL_DROPDOWNS} propertiesKey="dealProperties" onQuick={onQuick} onStub={onStub} onCopied={onCopied}
-    info={(keys) => <DealInfo deal={deal} view={view} acts={acts} contact={contact} customers={customers} props={props} onOpenContact={onOpenContact}
+    info={(keys) => <DealInfo deal={deal} view={view} acts={acts} contacts={contacts || (contact ? [contact] : [])} customers={customers} props={props} onOpenContact={onOpenContact}
       onOpenCustomer={onOpenCustomer} onStub={onStub} keys={keys}/>}/>;
 }
 
@@ -280,7 +281,7 @@ const ASSOCIATED_CONTACT_COLUMNS = [
 
 /* ── Deal Detail ───────────────────────────────────────────────────────────────────────── */
 
-function DealDetail({mode, deal, view, acts, contact, profiles, props, settings, menu, requestedTab, team, activityViews, customers = [], onOpenCustomer,
+function DealDetail({mode, deal, view, acts, contact, contacts = contact ? [contact] : [], profiles, props, settings, menu, requestedTab, team, activityViews, customers = [], onOpenCustomer,
                      onQuick, onOpenContact, onCreateProfile, onStub, onCopied, onClose, onExpand, onCollapse, onUpdateActivity, onAddActivity, onReassignOwner}){
   // One Customer Profile per person: the deal shows (and creates) its contact's — without Contacts (HOF Partners), the lead's own.
   const holder = contact || (!workspaceHasType('contacts') ? deal : null);
@@ -289,7 +290,7 @@ function DealDetail({mode, deal, view, acts, contact, profiles, props, settings,
       ? <CustomerProfileTab contact={holder} profiles={profiles} onCall={()=>onStub('Call')}
           onCreate={(templateId)=>onCreateProfile(holder, templateId)} onStub={onStub}/>
       : <div style={{padding:'40px 24px', textAlign:'center', fontSize:13, color:T.gray400}}>This {typeNoun('deals', 'deal')} has no contact, so it has no Customer Profile.</div>;
-    if(tab.id === 'contacts') return <AssociatedRecords columns={ASSOCIATED_CONTACT_COLUMNS} rows={contact ? [contactView(contact)] : []} q={q}
+    if(tab.id === 'contacts') return <AssociatedRecords columns={ASSOCIATED_CONTACT_COLUMNS} rows={contacts.map(contactView)} q={q}
       onOpen={(c)=>onOpenContact(c)} empty={`No contacts on this ${typeNoun('deals', 'deal')}`}/>;
     // Deals → Customers: the deal's customers.
     if(tab.id === 'customers') return <AssociatedRecords columns={ASSOCIATED_CUSTOMER_COLUMNS} rows={customers} q={q}
@@ -299,9 +300,9 @@ function DealDetail({mode, deal, view, acts, contact, profiles, props, settings,
   return (
     <ContactDetail mode={mode} contact={view} acts={acts} onClose={onClose} onExpand={onExpand} onCollapse={onCollapse} onStub={onStub}
       backLabel={typePlural('deals', 'Deals')}
-      renderName={(headerActions) => <DealNameRow deal={deal} subtitle={dealSubtitle(deal, view, contact, settings)} headerActions={headerActions}/>}
+      renderName={(headerActions) => <DealNameRow deal={deal} subtitle={dealSubtitle(deal, view, contacts, settings)} headerActions={headerActions}/>}
       menu={menu}
-      body={<DealDetailBody deal={deal} view={view} acts={acts} contact={contact} customers={customers} settings={settings} props={props}
+      body={<DealDetailBody deal={deal} view={view} acts={acts} contact={contact} contacts={contacts} customers={customers} settings={settings} props={props}
         onQuick={onQuick} onOpenContact={onOpenContact} onOpenCustomer={onOpenCustomer} onStub={onStub} onCopied={onCopied}/>}
       workspace={<ContactWorkspace contact={view} acts={acts} onStub={onStub} requestedTab={requestedTab}
         team={team} onUpdateActivity={onUpdateActivity} onAddActivity={onAddActivity} onReassignOwner={onReassignOwner}
@@ -320,7 +321,7 @@ const dealListRow = (data, d) => {
    ("<contact> US NIW", ids deal-1…12) lose the suffix and point at that sample contact. Any other
    deal without a contact stays without one — an association is never guessed from a name. */
 const linkSavedDeal = (d) => {
-  if(d.contactId !== undefined) return d;
+  if(d.contactId !== undefined || d.contactIds !== undefined) return d;
   const legacy = /^deal-([1-9]|1[0-2])$/.test(d.id) && / US NIW$/.test(String(d.name || ''));
   const name = legacy ? String(d.name).replace(/ US NIW$/, '') : d.name;
   const c = legacy && SAMPLE_CONTACTS.find(x => x.name === name);

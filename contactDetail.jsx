@@ -186,9 +186,10 @@ function PropertyRowLabel({k, label}){
 function ContactInfo({contact, acts, onStub, keys, onOpenDeals, onOpenCustomers, panelProperties}){
   const owner = ownerDates(contact, acts);
   const hub = useRecordHub();
-  const contactDeals = ((hub && hub.records && hub.records.deals) || []).filter(d => d.contactId === contact.id);
+  const listsMe = (r) => contactIdsOf(r).some(id => sameId(id, contact.id));
+  const contactDeals = ((hub && hub.records && hub.records.deals) || []).filter(listsMe);
   const openDeal = (d) => onOpenDeals ? onOpenDeals(contact, d.id) : onStub(`Deal · ${d.name}`);
-  const contactCustomers = ((hub && hub.records && hub.records.customers) || []).filter(c => c.contactId === contact.id);
+  const contactCustomers = ((hub && hub.records && hub.records.customers) || []).filter(listsMe);
   const openCustomer = (c) => onOpenCustomers ? onOpenCustomers(contact, c.id) : onStub(`Customer · ${c.name}`);
 
   /* Values that point at another record open it. Neither a user profile nor Deal records are
@@ -409,7 +410,7 @@ function ContactWorkspace({contact, acts, onStub, onCall, onCreateProfile, profi
       {overview && (
         <div style={{padding:'20px 24px 16px', flexShrink:0, borderBottom:`1px solid ${T.border}`}}>
           <RecordHighlights object={ra ? ra.object : 'contacts'} record={ra ? ra.record : contact} view={contact} acts={acts}
-            contact={ra && ra.object !== 'contacts' ? ((hub && hub.records.contacts) || []).find(c => c.id === ra.record.contactId) || null : contact}/>
+            contact={ra && ra.object !== 'contacts' ? ((hub && hub.records.contacts) || []).find(c => sameId(c.id, personIdOf(ra.record))) || null : contact}/>
         </div>
       )}
       {/* Files, Quotes and Documents bring their own toolbars (files.jsx, quotes.jsx, documents.jsx). */}

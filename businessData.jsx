@@ -199,7 +199,7 @@ function generateBusinessData({users, services, now = new Date(), takenNames = [
     // The quote only as far as it had got by now.
     const qs = quote && quote.draftAt <= NOW ? {status: quote.signedAt && quote.signedAt <= NOW ? 'signed' : quote.sentAt <= NOW ? 'sent' : 'draft'} : null;
 
-    const deal = {id:dealId, name, contactId:id, email:contact.email, phone:contact.phone, pipeline, stage, dealType: chance(.12) ? 'Existing Business' : 'New Business',
+    const deal = {id:dealId, name, contactIds:[id], email:contact.email, phone:contact.phone, pipeline, stage, dealType: chance(.12) ? 'Existing Business' : 'New Business',
       owner:owner.id, amount, currency:DEAL_CURRENCY, health: lost ? 'At Risk' : chance(.2) ? 'Needs Attention' : 'Healthy', created:stamp(dealAt), createdAt:dealAt,
       source:contact.source, closeDate:day(Math.max(closeDate, dealAt + BIZ_DAY)), actualCloseDate: closedAt ? stamp(closedAt) : '', stageEnteredAt, pipelineEnteredAt:dealAt};
     deals.push(deal);
@@ -299,7 +299,7 @@ function generateBusinessData({users, services, now = new Date(), takenNames = [
       const custId = `cust-${1000 + customers.length + 1}`;
       customers.push({id:custId, name, email:contact.email, phone:contact.phone, owner:owner.id, pipeline:pl, stage:cst.id,
         status: closedOut ? 'Closed' : chance(.08) ? 'On Hold' : 'Active', source:'Deal', customerSince:dayLabel(closedAt), company:contact.company,
-        contactId:id, dealIds:[dealId], created:stamp(closedAt + 3600000), stageEnteredAt:closedAt + 3600000 + since * .7 * BIZ_DAY});
+        contactIds:[id], dealIds:[dealId], created:stamp(closedAt + 3600000), stageEnteredAt:closedAt + 3600000 + since * .7 * BIZ_DAY});
       customerActivities[custId] = [
         {id:actId(custId), customerId:custId, type:'call', at:new Date(atHour(closedAt + between(1, 4) * BIZ_DAY)), source:'team', by, direction:'outbound', outcome:'Connected', logged:true,
           durationMin:Math.floor(between(15, 40)), body:'Welcome call — introduced the case team and the next steps.'},

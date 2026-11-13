@@ -23,9 +23,10 @@
    where Deal Assignment Date comes from. Deal Amount is entered with its currency (the default
    one to start with — Settings → Defaults); the sample deals are in AED (DEAL_CURRENCY).
    A deal opens its record (DealDetail, dealDetail.jsx — the Contact Detail experience) and is
-   linked to the contact it was created from (`contactId`); Contact → Deal is CreateDealModal.
-   Deals ↔ Customers is Many-to-many: Create Customer makes a customer linked to the deal; deleting a
-   deal keeps its customers, unlinked. Export downloads the current view as CSV. Not defined yet (placeholder): Enrich, calling,
+   linked to the contact it was created from (`contactIds`: its contacts, as many as the link's type
+   allows; the first is its person — emails, calls, Customer Profile); Contact → Deal is
+   CreateDealModal, and Edit Deal picks its contacts. Create Customer makes a customer linked to the
+   deal; deleting a deal keeps its customers, unlinked. Export downloads the current view as CSV. Not defined yet (placeholder): Enrich, calling,
    email and meetings from a deal, what Smart Actions recommend, how Deal Health and Deal Score are calculated (sample
    values only). */
 
@@ -38,7 +39,7 @@ const dealStamp = (d) => storePropertyValue('Date & time', d);
 const DEAL_HEALTH = {'At Risk':T.hot, 'Needs Attention':T.warm};
 
 /* Sample US NIW deals (the one demo pipeline), spread across the stages, owned by existing users.
-   Each came from a sample contact: it carries that contact's id (`contactId`, the Contact → Deal
+   Each came from a sample contact: it carries that contact's id (`contactIds`, the Contact → Deal
    association) and, like a deal created from a contact by default, the contact's name. */
 const SAMPLE_DEALS = () => {
   const at = (m, d, h = 10) => dealStamp(new Date(2026, m - 1, d, h, 15));
@@ -48,7 +49,7 @@ const SAMPLE_DEALS = () => {
   const deal = (id, contact, stage, owner, amount, health, created, closed = '', pipeline = 'us-niw') => {
     const c = SAMPLE_CONTACTS.find(x => x.name === contact) || null;
     const expected = new Date(created); expected.setDate(expected.getDate() + 35);
-    return {id:`deal-${id}`, name:contact, contactId:c ? c.id : null, email:c ? c.email : '', phone:c ? c.phone : '',
+    return {id:`deal-${id}`, name:contact, contactIds:c ? [c.id] : [], email:c ? c.email : '', phone:c ? c.phone : '',
       pipeline, stage, dealType:DEAL_TYPES[id % 3 === 0 ? 1 : 0], owner, amount, currency:DEAL_CURRENCY, health, created,
       source:c ? c.source : 'Manual', closeDate:storePropertyValue('Date', `${expected.getFullYear()}-${expected.getMonth() + 1}-${expected.getDate()}`), actualCloseDate:closed};
   };
@@ -362,11 +363,12 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
   /* Filter by associated object → Contacts: every Contact filter property (Contacts' own list),
      read from the deal's contact — each row carries it. */
   const contactAssoc = React.useMemo(()=>assocFilterSchema('Contacts', 'Contact', customContactSchema(objectFormProperties(data, 'contacts'))), [data.properties]);
-  const contactOfDeal = (d) => contacts.find(c => c.id === d.contactId);
+  // A deal's contacts; the first is its person (Customer Profile, emails, calls).
+  const contactsOfDeal = (d) => contactIdsOf(d).map(id => contacts.find(c => sameId(c.id, id))).filter(Boolean);
   // With the worked-out Deal properties: Associated Contact / Customer and Last Activity Date.
-  const rows = React.useMemo(()=>deals.map(d => { const c = contactOfDeal(d);
-    return withAssocRecords({...toRow(d), contact:c ? c.name : '', customers:customers.filter(x => (x.dealIds || []).includes(d.id)).map(x => x.name).join(', '), lastActivity:latestActivityDate((activities || {})[d.id])},
-      'Contacts', c ? [contactView(c)] : []); }), [deals, pipelines, data.users, contacts, customers, activities]);
+  const rows = React.useMemo(()=>deals.map(d => { const cs = contactsOfDeal(d);
+    return withAssocRecords({...toRow(d), contact:cs.map(c => c.name).join(', '), customers:customers.filter(x => (x.dealIds || []).includes(d.id)).map(x => x.name).join(', '), lastActivity:latestActivityDate((activities || {})[d.id])},
+      'Contacts', cs.map(contactView)); }), [deals, pipelines, data.users, contacts, customers, activities]);
   const byId = React.useMemo(()=>new Map(deals.map(d => [d.id, d])), [deals]);
   const schema = React.useMemo(()=>withScopeFilters(withAssocFilters(dealSchema(props, pipelines, owners), contactAssoc), data, 'deals'), [props, pipelines, data, contactAssoc]);
 
@@ -380,7 +382,7 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
       returnTo: openRequest.onReturn || null});
   }, [openRequest && openRequest.nonce]);
   const closeDetail = () => { const back = detail && detail.returnTo; setDetail(null); if(back) back(); };
-  const contactOf = (d) => contacts.find(c => c.id === (byId.get(d.id) || d).contactId) || null;
+  const contactOf = (d) => contactsOfDeal(byId.get(d.id) || d)[0] || null;
   // Go to contact: the Contacts page with the deal's contact open (in the mode the deal is open in).
   const goToContact = (d) => { const c = contactOf(d); if(c && onOpenContact) onOpenContact(c.id, detail && detail.id === d.id ? detail.mode : 'panel'); };
   /* The deal ⋯ menu — the one record menu (DealActionsMenu); View settings only on the
@@ -438,40 +440,45 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
     if(!prev || owner === prev.owner) return;
     setDeals(ds => ds.map(d => d.id === id ? {...d, owner} : d));
   };
-  const save = (vals, assocList) => {
+  const save = (vals, assocList, links) => {
     const assoc = (assocList || []).find(a => a.object === 'contacts'), custLink = (assocList || []).find(a => a.object === 'customers');
     const amount = vals.amount === '' || vals.amount == null ? '' : Number(vals.amount);
     if(form.mode === 'edit'){
-      setDeals(ds => ds.map(d => d.id === form.id ? {...d, ...vals, amount} : d));
+      // Its contacts, as picked on the form (Associated Contact).
+      const picked = editLinks.length ? linkFieldIds(editLinks, links || {}).contacts : null;
+      setDeals(ds => ds.map(d => d.id === form.id ? {...d, ...vals, amount, ...(picked ? {contactIds:picked} : {})} : d));
     } else {
       const id = newRecordId('deals');   // never reused (store.jsx)
-      // Its contact: none, the one chosen, or the one created with it — else, linked to a customer, that customer's contact.
+      // Its contact: none, the one chosen, or the one created with it — else, linked to a customer, that customer's person.
       const linkedCustomer = custLink && custLink.existingId ? customers.find(c => c.id === custLink.existingId) : null;
-      const contactId = !assoc ? (linkedCustomer ? linkedCustomer.contactId ?? null : null)
+      const viaCustomer = linkedCustomer ? personIdOf(linkedCustomer) : null;
+      const contactId = !assoc ? (viaCustomer != null && takesDeal('contacts', {id:viaCustomer}) ? viaCustomer : null)
         : assoc.existingId != null && assoc.existingId !== '' ? assoc.existingId : onCreateContact ? onCreateContact(assoc.values) : null;
-      setDeals(ds => [...ds, {id, contactId, ...vals, amount, currency:vals.currency || defaultCurrency(), created:dealStamp(new Date())}]);
+      setDeals(ds => [...ds, {id, contactIds: contactId != null ? [contactId] : [], ...vals, amount, currency:vals.currency || defaultCurrency(), created:dealStamp(new Date())}]);
       setActivities(m => ({...m, [id]: []}));
-      // An existing customer without a deal: its deal (a customer has one deal).
-      if(custLink && custLink.existingId && onLinkCustomer) onLinkCustomer(custLink.existingId, {dealIds:[id]});
+      // An existing customer: the new deal joins its deals (when the link allows another).
+      if(custLink && custLink.existingId && onLinkCustomer) onLinkCustomer(custLink.existingId, {dealId:id});
     }
     showToast(`${typeSingular('deals', 'Deal')} ${form.mode === 'edit' ? 'saved' : 'added'}`);
     setForm(null);
   };
   const formOptions = dealFormOptions(data), adjust = dealFormAdjust(data);
-  /* Add deal: Create through associated record → Contact — any existing contact (a contact has
-     many deals), whose name, email and phone the deal takes, or a new one created with the deal;
-     → Customer — an existing customer that has no deal yet (a customer has one deal). */
+  /* Add deal: Create through associated record → Contact — an existing contact that can take
+     another deal (the link's type), whose name, email and phone the deal takes, or a new one
+     created with the deal; → Customer — an existing customer that can take another deal. */
   const creatable = creationAssociations(data, 'deals');
-  const hasDeal = (c) => (c.dealIds || []).some(id => deals.some(d => d.id === id));
+  const linkRecs = {contacts, deals, customers};
+  const takesDeal = (object, r) => canLink(linkRecs, object, r, 'deals', NEW_RECORD);
+  // Edit deal: its Associated Contact(s), as many as the link allows.
+  const editLinks = React.useMemo(() => form && form.mode === 'edit' && form.initial ? recordLinkFields(linkRecs, 'deals', form.initial, ['contacts']) : [], [form]);
   const association = [
     ...(creatable.includes('contacts') ? [{object:'contacts', noun:'contact',
-      existing:contacts.map(c => ({value:c.id, label: c.email ? `${c.name} · ${c.email}` : c.name})),
+      existing:contacts.filter(c => takesDeal('contacts', c)).map(c => ({value:c.id, label: c.email ? `${c.name} · ${c.email}` : c.name})),
       pull:(id) => { const c = contacts.find(x => x.id === id) || {}; return {name:c.name || '', email:c.email || '', phone:c.phone || ''}; },
       fields:objectFormProperties(data, 'contacts').filter(p => p.onCreate),
       optionsFor:(p) => ({owner:ownerUserOptions(data.users), contactType:CONTACT_TYPE_STAGES.map(s => s.value)})[p.key] || p.options || []}] : []),
     ...(creatable.includes('customers') ? [{object:'customers', noun:'customer', existingOnly:true,
-      existing:customers.filter(c => !hasDeal(c)).map(c => ({value:c.id, label:c.email ? `${c.name} · ${c.email}` : c.name})),
-      existingNote:'Customers that already have a deal aren’t listed — a customer has one deal.'}] : []),
+      existing:customers.filter(c => takesDeal('customers', c)).map(c => ({value:c.id, label:c.email ? `${c.name} · ${c.email}` : c.name}))}] : []),
   ];
 
   // A deal's activity as the acting user may see it (tool permissions on the deal).
@@ -515,7 +522,8 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
         overlay={(v) => violationMode && <ViolationPanel object="deals" pipelines={viewPipelines(v)} onClose={()=>setViolationMode(false)}/>}/>
       {form && <ContactFormModal mode={form.mode} initial={form.initial} properties={props} noun={typeNoun('deals', 'deal')}
         canEditField={form.mode === 'edit' ? (p)=>fieldEditCan('deals', form.initial, p) : undefined}
-        optionsFor={formOptions} adjust={adjust} association={association} onCancel={()=>setForm(null)} onSave={save}/>}
+        optionsFor={formOptions} adjust={adjust} association={association} onCancel={()=>setForm(null)} onSave={save}
+        links={editLinks} initialLinks={linkFieldValues(editLinks, {contacts:contactIdsOf(form.initial)})}/>}
       {changingOwner && <ChangeOwnerModal record={changingOwner} noun={typeSingular('deals', 'Deal')} users={owners} ownerName={ownerName} onClose={()=>setChangingOwner(null)}
         onSave={(owner) => { changeOwner(changingOwner.id, owner); setChangingOwner(null); }}/>}
       {dealBulk.bulkModal}
@@ -537,7 +545,7 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
         if(!dd) return null;
         const row = toRow(dd), acts = actsFor(dd);
         const view = {...row, amountText:dealCardRow(row).amount};
-        const contact = contacts.find(c => c.id === dd.contactId) || null;
+        const dcontacts = contactsOfDeal(dd), contact = dcontacts[0] || null;
         const settings = withDealPanelProperties(panelSettings, props);
         // Deal activity: the deal's own (with its contact); Contact activity: its contact's.
         const activityViews = {
@@ -545,7 +553,7 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
           sources:{own:activityFilterRows([{acts, contact, deal:dd}], data)},
           schemaFor:(tabId) => activityFilterSchema(tabId, data),
         };
-        return <RecordAccessCtx.Provider value={{object:'deals', record:dd}}><DealDetail key={dd.id} mode={detail.mode} deal={dd} view={view} acts={acts} contact={contact} activityViews={activityViews}
+        return <RecordAccessCtx.Provider value={{object:'deals', record:dd}}><DealDetail key={dd.id} mode={detail.mode} deal={dd} view={view} acts={acts} contact={contact} contacts={dcontacts} activityViews={activityViews}
           profiles={profileStore ? profileStore.profiles[profileHolderId('deals', dd)] : undefined} props={props} settings={settings}
           menu={dealMenu(dd, ()=>setPanelDraft(JSON.parse(JSON.stringify(settings))))}
           requestedTab={detail.tab} team={owners.map(u => u.name)}
@@ -571,12 +579,12 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
       {panelDraft && (() => {
         const dd = detail && byId.get(detail.id);
         const kind = dealPanelKind(props, (draft) => dd && (() => {
-          const row = toRow(dd), view = {...row, amountText:dealCardRow(row).amount}, c = contacts.find(x => x.id === dd.contactId) || null;
+          const row = toRow(dd), view = {...row, amountText:dealCardRow(row).amount}, cs = contactsOfDeal(dd), c = cs[0] || null;
           // The name row too, as in the Contact preview, so the Avatar subtitle shows.
           return <div style={{display:'flex', flexDirection:'column', gap:12}}>
-            <DealNameRow deal={dd} subtitle={dealSubtitle(dd, view, c, draft)}/>
+            <DealNameRow deal={dd} subtitle={dealSubtitle(dd, view, cs, draft)}/>
             <DealDetailBody deal={dd} view={view} acts={actsFor(dd)}
-              contact={c} settings={draft} props={props} onQuick={()=>{}} onOpenContact={()=>{}} onStub={()=>{}} onCopied={()=>{}}/>
+              contact={c} contacts={cs} settings={draft} props={props} onQuick={()=>{}} onOpenContact={()=>{}} onStub={()=>{}} onCopied={()=>{}}/>
           </div>;
         })());
         return <PanelSettingsModal kind={kind} draft={panelDraft} setDraft={setPanelDraft} onClose={()=>setPanelDraft(null)}

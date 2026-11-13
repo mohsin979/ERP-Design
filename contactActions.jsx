@@ -145,10 +145,11 @@ const OBJECT_QUICK_ACTIONS = {
   deals:     [...QUICK_TOOL_KEYS, 'owner', 'goToContact', 'createCustomer'],
   customers: [...QUICK_TOOL_KEYS, 'owner', 'createDeal', 'goToDeal'],
 };
-/* Deals → Customers is a parent–child relation: a customer has one deal. Create Deal shows only
-   while it has none; then Go to Deal (its parent deal) shows instead. */
+/* Deals → Customers is a parent–child relation. Create Deal shows while the customer can take
+   another deal (the link's type: by default it has one); Go to Deal (its first deal) once it has one. */
 const customerHasDeal = (c) => !!(c && (c.dealIds || []).length);
-const QUICK_ACTION_AVAILABLE = {customers:{createDeal:(r) => !customerHasDeal(r), goToDeal:(r) => customerHasDeal(r)}};
+const customerTakesDeal = (c) => !!c && (c.dealIds || []).length < linkRuleLimit('customers', 'deals');
+const QUICK_ACTION_AVAILABLE = {customers:{createDeal:(r) => customerTakesDeal(r), goToDeal:(r) => customerHasDeal(r)}};
 const quickActionAvailable = (object, key, record) => { const f = (QUICK_ACTION_AVAILABLE[object] || {})[key]; return !f || !record || f(record); };
 const OBJECT_NOUNS = {get contacts(){ return typeSingular('contacts', 'Contact'); }, get deals(){ return typeSingular('deals', 'Deal'); }, get customers(){ return typeSingular('customers', 'Customer'); }};
 // The Object's quick actions in the open workspace: none that goes to or creates a record type it doesn't have.
@@ -393,6 +394,24 @@ function RecordLinkField({link, value, onChange}){
   );
 }
 
+/* A record form's link fields (RecordLinkField) to the record types it's linked to, as the links'
+   types allow (dataModel.jsx linkRule): several when the record may have more than one; the choices
+   are the records that can still take it, and the ones it has. `records`: {contacts, deals,
+   customers}; `self`: the record with its links (NEW_RECORD when adding). Values: {[type]: id | ids}. */
+function recordLinkFields(records, object, self, others){
+  return others.filter(o => workspaceHasType(o) && linkRule(object, o)).map(o => {
+    const rule = linkRule(object, o), st = linkStoreOf(object, o), counts = new Map();
+    if(st.holder === object) (records[object] || []).forEach(x => (x[st.field] || []).forEach(id => counts.set(String(id), (counts.get(String(id)) || 0) + 1)));
+    const countOf = (r) => st.holder === object ? counts.get(String(r.id)) || 0 : linkedOf(records, o, r, object).length;
+    const options = (records[o] || []).filter(r => isLinked(object, self, o, r) || countOf(r) < rule.perY)
+      .map(r => ({value:r.id, label: o === 'contacts' && r.email ? `${r.name} · ${r.email}` : r.name}));
+    return {key:o, noun:typeNoun(o, o.replace(/s$/, '')), multiple:rule.perX > 1, options};
+  });
+}
+// A record's links as the fields' values, and the fields' values back as id lists ({[type]: ids}).
+const linkFieldValues = (fields, ids) => Object.fromEntries(fields.map(f => { const v = ids[f.key] || []; return [f.key, f.multiple ? v : v[0] ?? null]; }));
+const linkFieldIds = (fields, values) => Object.fromEntries(fields.map(f => { const v = values[f.key]; return [f.key, f.multiple ? v || [] : v != null && v !== '' ? [v] : []]; }));
+
 /* Add / Edit a record — Contacts, Deals and Customers alike — in the creation side panel
    (CreatePanelFrame): one field per row, label above its input; a field with two parts (a phone's
    country code and number, a timestamp's date and time) keeps them on its one row. Add shows the
@@ -452,4 +471,4 @@ function ContactFormModal({mode, initial, properties, owners, stages, onCancel, 
   );
 }
 
-Object.assign(window, {TOAST_MS, TOAST_ACTION_MS, customerHasDeal, quickActionAvailable, RecordFields, AssociatedCreation, RecordLinkField, RecordActionsMenu, StandardRecordMenu, RECORD_TOOLS, ChangeOwnerModal, associatedNote, QUICK_ACTION_DEFS, QUICK_TOOL_KEYS, OBJECT_QUICK_ACTIONS, objectQuickActions, OBJECT_NOUNS, quickActionLabel, quickActionLabels, normalizeQuickActions, defaultQuickActions, shownQuickActions, runQuickAction, copyAction, viewSettingsItem, contactCopyText, ContactActionsMenu, ContactFormModal, CopyToast, copyText, todayLabel});
+Object.assign(window, {TOAST_MS, TOAST_ACTION_MS, customerHasDeal, customerTakesDeal, quickActionAvailable, RecordFields, AssociatedCreation, RecordLinkField, recordLinkFields, linkFieldValues, linkFieldIds, RecordActionsMenu, StandardRecordMenu, RECORD_TOOLS, ChangeOwnerModal, associatedNote, QUICK_ACTION_DEFS, QUICK_TOOL_KEYS, OBJECT_QUICK_ACTIONS, objectQuickActions, OBJECT_NOUNS, quickActionLabel, quickActionLabels, normalizeQuickActions, defaultQuickActions, shownQuickActions, runQuickAction, copyAction, viewSettingsItem, contactCopyText, ContactActionsMenu, ContactFormModal, CopyToast, copyText, todayLabel});

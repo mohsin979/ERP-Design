@@ -297,7 +297,7 @@ const SETTINGS_SEARCH_KINDS = ['record', 'pipeline', 'property', 'stage'];
 const settingsSearchIndex = (data) => [
   ...(data.objects || []).map(o => ({kind:'record', id:o.id, name:o.name, meta:'Record', icon:'cube', page:'settings.objects'})),
   ...(data.pipelines || []).map(p => ({kind:'pipeline', id:p.id, name:p.label, meta:`Pipeline · ${objectName(data, p.objectId)}`, icon:'kanbanView', page:'settings.pipelines'})),
-  ...(data.properties || []).map(p => ({kind:'property', id:`${p.objectId}:${p.key}`, objectId:p.objectId, key:p.key, name:p.label, meta:`Property · ${objectName(data, p.objectId)}`, icon:'listBullets', page:'settings.properties'})),
+  ...(data.properties || []).filter(p => propertyShown(data, p)).map(p => ({kind:'property', id:`${p.objectId}:${p.key}`, objectId:p.objectId, key:p.key, name:p.label, meta:`Property · ${objectName(data, p.objectId)}`, icon:'listBullets', page:'settings.properties'})),
   ...(data.pipelines || []).flatMap(p => (p.stages || []).map(s => ({kind:'stage', id:`${p.id}:${s.id}`, pipelineId:p.id, stageId:s.id, name:s.label, meta:`Stage · ${p.label}`, icon:'forward', page:'settings.pipelines'}))),
 ];
 // Best first: the name exactly, then starting with the query, a word in it starting with it, containing it; then a match with its type ("deal stage").

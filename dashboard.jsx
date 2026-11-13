@@ -79,7 +79,7 @@ function dashBusinessData({deals = [], customers = [], contacts = [], accounting
   const ownerOf = new Map([...deals, ...customers, ...contacts].map(r => [String(r.id), r.owner]));
   deals.forEach(d => {
     const p = person(d.owner); if(!p) return;
-    const dc = d.createdAt || dashTime(d.created), c = contactById.get(String(d.contactId)), cc = c ? dashTime(c.created) : null;
+    const dc = d.createdAt || dashTime(d.created), c = contactById.get(String(personIdOf(d))), cc = c ? dashTime(c.created) : null;
     const days = (a, b) => a != null && b != null ? Math.max(0, (a - b) / DASH_DAY) : null;
     if(dc) p.ev.created.push({at:dc, contactToDeal:days(dc, cc)});
     // The deal's stage type, when it's closed: 'won' | 'lost' | 'undecided'.

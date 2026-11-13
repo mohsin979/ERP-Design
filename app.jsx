@@ -585,8 +585,7 @@ function App(){
     const d = {...DEFAULT_SETTINGS_DATA(), ...(tpl ? tpl.settings() : {})}, v2 = savedSlice('settings');
     const saved = v2 || WF_SAVED || {};
     // Sample pipelines and deals are added once; deleted ones stay deleted.
-    // Contacts → Deals is One-to-many (decided); settings saved before say Many-to-many.
-    const associations = ((v2 && v2.associations) || d.associations).map(a => a.id === 'as-contacts-deals' && a.type === 'Many-to-many' ? {...a, type:'One-to-many'} : a);
+    const associations = (v2 && v2.associations) || d.associations;
     // A new empty CRM instance: no users, workflows or email templates yet.
     const empty = !SEED && !v2 ? {...EMPTY_PEOPLE_DATA(), emailTemplates:[], emailSequences:[]} : {};
     const loaded = {...d, ...empty, ...(v2 || {})};
@@ -639,9 +638,9 @@ function App(){
     const v2 = savedSlice('deals'), DAY_TIME = /, \d{1,2}:\d{2}\s?[AP]M$/;
     const closeDay = (settingsData.properties || []).some(p => p.objectId === 'deals' && p.key === 'closeDate' && propertyTypeId(p.type) === 'Date');
     const legacy = !v2 && WF_SAVED && WF_SAVED.deals ? WF_SAVED.deals.map(d => linkSavedDeal(SPLIT_AC_PIPELINES.includes(d.pipeline) ? {...d, pipeline:'australia-canada'} : d)) : null;
-    // A deal's contact is optional (null: none); its owner is a user ID.
     return withBiz(withSampleValues(withStageEntry(withSeeded(v2 || legacy, seedList(SAMPLE_DEALS), prevSettings.seededDeals)), SAMPLE_DEALS(), ['email', 'phone', 'dealType', 'source', 'actualCloseDate']), 'deals')
-      .map(x => ({...x, contactId:x.contactId ?? null, owner:userIdOf(x.owner, settingsData.users)}))
+      // A deal's contacts (`contactIds`, none to start with); its owner is a user ID.
+      .map(x => ({...withContactIds(x), owner:userIdOf(x.owner, settingsData.users)}))
       // Postponed became an open stage (2026-11-11): deals saved in it lose the Actual Close Date it gave them, once.
       .map(x => savedSlice('postponedOpen') || x.stage !== 'postponed' || !x.actualCloseDate ? x : {...x, actualCloseDate:''})
       // Expected Close Date is a date (2026-11-11): one saved with a time keeps only its day.
@@ -671,7 +670,7 @@ function App(){
   // Sample calls, emails and notes for Run Customer Profile to read (a few sample contacts; added once).
   React.useEffect(() => { if(SEED) setContactActivities(m => withSampleProfileSources(m, contacts)); }, []);
   /* Customer records and their activity — here so contacts and deals can create customers and show
-     theirs. A customer's contact (`contactId`) and deals (`dealIds`) are optional links. Sample
+     theirs. A customer's contacts (`contactIds`) and deals (`dealIds`) are optional links. Sample
      customers are added once (deleted ones stay deleted); customers saved in the earlier shape are
      brought in line (migrateCustomer). */
   const [customers, setCustomersRaw] = React.useState(() => {
@@ -692,7 +691,7 @@ function App(){
   const [profiles, setProfiles] = usePersistedState('profiles', {});               // {contactId: {templateId: profile}} — one per person, shown on their deals too
   /* IDs are never reused: the counters start past every ID already in use — records, and the
      contacts deals or profiles still point at. */
-  ensureIdFloor('contacts', idFloorOf([...contacts, ...deals.filter(x => x.contactId != null).map(x => ({id:x.contactId})), ...Object.keys(profiles).map(Number).map(id => ({id}))]));
+  ensureIdFloor('contacts', idFloorOf([...contacts, ...deals.flatMap(x => contactIdsOf(x).map(id => ({id}))), ...Object.keys(profiles).map(Number).map(id => ({id}))]));
   ensureIdFloor('deals', idFloorOf(deals));
   ensureIdFloor('customers', idFloorOf(customers));
   /* Customer Profile forms (Settings → Customer Profile) and what each person's say:
@@ -701,6 +700,7 @@ function App(){
   setProfileFormsLive(settingsData.profileForms);
   const [profileFormData, setProfileFormData] = usePersistedState('profileFormData', {});
   setProfileHolders(profileFormData);   // whose profile a record shows (board.jsx profileHolderId)
+  setLinkAssociations(settingsData.associations);   // how many records each link allows (dataModel.jsx linkRule)
   /* Customer Profile is off for a person until templates are enabled for them (`_enabled`, in the
      order enabled — the first is what their profile shows to start with); `_type`: the one shown.
      Saved before this: the one chosen, then those with answers. Filling a template in enables it. */
@@ -732,8 +732,8 @@ function App(){
   const profileFormsStore = {forms:settingsData.profileForms || [], data:profileFormData, save:saveProfileForm, saveField:saveProfileField, typeOf:profileTypeOf, setType:setProfileType, enabledOf:profileEnabledOf, enable:enableProfiles, setEnabled:setEnabledProfiles,
     // The profile holder's activity: a contact's — a lead's or customer's own where it holds the profile (HOF Partners).
     // What the person said anywhere: a contact's own activity and its deals' and customers' (a lead's or customer's own, without Contacts).
-    activitiesOf:(cid) => contactActivities[cid] ? [...contactActivities[cid], ...deals.filter(d => d.contactId === cid).flatMap(d => dealActivities[d.id] || []),
-      ...customers.filter(x => x.contactId === cid).flatMap(x => customerActivities[x.id] || [])] : dealActivities[cid] || customerActivities[cid] || []};
+    activitiesOf:(cid) => contactActivities[cid] ? [...contactActivities[cid], ...deals.filter(d => contactIdsOf(d).some(id => sameId(id, cid))).flatMap(d => dealActivities[d.id] || []),
+      ...customers.filter(x => contactIdsOf(x).some(id => sameId(id, cid))).flatMap(x => customerActivities[x.id] || [])] : dealActivities[cid] || customerActivities[cid] || []};
   // `profiles`: what each person has filled in (Create Deal offers a profile when there's none).
   const profileStore = {profiles:profileFormData, facts:profileFacts};
   /* Permissions apply to the signed-in user. Registered for every permission check (usersTeams.jsx)
@@ -772,11 +772,11 @@ function App(){
      each record (forms.jsx), which also tells a Form Refill. */
   const [mergeSeparate, setMergeSeparate] = usePersistedState('mergeSeparate', []);
   const formSubs = React.useMemo(() => formSubmissionIndex(forms), [forms]);
-  const mergeIdx = React.useMemo(() => ({
-    contacts:mergeIndexOf('contacts', contacts, {separate:mergeSeparate, formIndex:formSubs}),
-    deals:mergeIndexOf('deals', deals, {separate:mergeSeparate, formIndex:formSubs}),
-    customers:mergeIndexOf('customers', customers, {separate:mergeSeparate, formIndex:formSubs}),
-  }), [contacts, deals, customers, mergeSeparate, formSubs]);
+  // Only record types with Merge Reporting on (Settings → Records) are matched.
+  const mergeIdx = React.useMemo(() => Object.fromEntries(Object.entries({contacts, deals, customers})
+    .filter(([object]) => mergeReportingOn(settingsData, object))
+    .map(([object, list]) => [object, mergeIndexOf(object, list, {separate:mergeSeparate, formIndex:formSubs})])),
+  [contacts, deals, customers, mergeSeparate, formSubs, settingsData.objects]);
   /* Last Contacted (a Contact's): its latest real touch — a connected call, a sent email or a held
      meeting, on the contact or on its deals and customers (activities.jsx isRealTouch) — kept in
      step with the activity. Written as a system value (no workflow event for each contact). */
@@ -784,8 +784,8 @@ function App(){
     const now = Date.now(), latest = new Map();
     const note = (cid, acts) => { if(cid == null) return; const t = latestTouch(acts, now); if(t){ const ms = new Date(t.at).getTime(); if(ms > (latest.get(cid) || 0)) latest.set(cid, ms); } };
     contacts.forEach(c => note(c.id, contactActivities[c.id]));
-    deals.forEach(d => note(d.contactId, dealActivities[d.id]));
-    customers.forEach(x => note(x.contactId, customerActivities[x.id]));
+    deals.forEach(d => contactIdsOf(d).forEach(cid => note(cid, dealActivities[d.id])));
+    customers.forEach(x => contactIdsOf(x).forEach(cid => note(cid, customerActivities[x.id])));
     const day = (t) => new Date(t).toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'});
     const label = (id) => latest.has(id) ? day(latest.get(id)) : '';
     // Last Activity Date is never before Last Contacted: the latest of its own activity and that touch.
@@ -802,16 +802,20 @@ function App(){
     profiles:profileFormData, profileFacts, accounting, invoices, quotes, forms, merge:mergeIdx});
   // Customers change through the engine too: owner history, stage entry and Customer workflows.
   const setDeals = engine.setDeals, setCustomers = engine.setCustomers;
-  /* Contacts ⇄ Deals. A contact's Associated Deals count is its deals (`contactId`), so the two
+  /* Contacts ⇄ Deals. A contact's Associated Deals count is the deals listing it (`contactIds`), so the two
      never disagree. Opening a record on the other page switches page and opens it there. */
   /* The system-generated Contact properties worked out here: Associated Deal / Customer (the
      linked records' names) and Contact Owner Assignment Date (from the owner history). */
   // Form Name / Form Submission Date: from the form submission that created each record (forms.jsx); Merge Status (merge.jsx).
-  const contactsWithDeals = React.useMemo(() => contacts.map(c => {
-    const ds = deals.filter(d => d.contactId === c.id), cs = customers.filter(x => x.contactId === c.id);
+  const contactsWithDeals = React.useMemo(() => {
+    // Each contact's deals and customers (the records listing it).
+    const byContact = (list) => { const m = new Map(); list.forEach(r => contactIdsOf(r).forEach(id => m.set(String(id), [...(m.get(String(id)) || []), r]))); return m; };
+    const dealsOf = byContact(deals), customersOf = byContact(customers);
+    return contacts.map(c => {
+    const ds = dealsOf.get(String(c.id)) || [], cs = customersOf.get(String(c.id)) || [];
     return {...c, dealCount:ds.length, customerCount:cs.length, deals:ds.map(d => d.name).join(', '), customers:cs.map(x => x.name).join(', '),
       ownerAssigned:ownerDates(c, contactActivities[c.id] || []).assigned, ...formRecordValues(formSubs, 'contacts', c.id), mergeStatus:mergeStatusIn(mergeIdx.contacts, c.id)};
-  }), [contacts, deals, customers, contactActivities, formSubs, mergeIdx]);
+  }); }, [contacts, deals, customers, contactActivities, formSubs, mergeIdx]);
   const dealsView = React.useMemo(() => deals.map(d => ({...d, ...(formSubs.size ? formRecordValues(formSubs, 'deals', d.id) : {}), mergeStatus:mergeStatusIn(mergeIdx.deals, d.id)})), [deals, formSubs, mergeIdx]);
   const customersView = React.useMemo(() => customers.map(c => ({...c, ...(formSubs.size ? formRecordValues(formSubs, 'customers', c.id) : {}), mergeStatus:mergeStatusIn(mergeIdx.customers, c.id)})), [customers, formSubs, mergeIdx]);
   const [recordLink, setRecordLink] = React.useState(null);   // {object:'contacts'|'deals', id, mode, tab, nonce}
@@ -827,14 +831,18 @@ function App(){
     // A tab with a form opens the full record (the side panel shows no tabs); the name alone, the side panel.
     setRecordLink({object, id:dealId, mode: tab ? 'full' : 'panel', tab, nonce:Date.now(), onReturn: keepEvent ? () => setEventAway(false) : null});
   };
-  const dealsFor = (contactId) => deals.filter(d => d.contactId === contactId).map(d => dealListRow(settingsData, d));
+  const dealsFor = (contactId) => deals.filter(d => contactIdsOf(d).some(id => sameId(id, contactId))).map(d => dealListRow(settingsData, d));
   // Activity views: a contact's deals' activity, and edits to an activity made from the other record.
-  const dealActivitiesFor = (contactId) => deals.filter(d => d.contactId === contactId).map(d => ({deal:d, acts:dealActivities[d.id] || []}));
+  const dealActivitiesFor = (contactId) => deals.filter(d => contactIdsOf(d).some(id => sameId(id, contactId))).map(d => ({deal:d, acts:dealActivities[d.id] || []}));
   const patchActivityIn = (setter) => (id, patch) => setter(m => Object.fromEntries(Object.entries(m).map(([k, list]) => [k, (list || []).map(a => a.id === id ? {...a, ...patch} : a)])));
-  // Create Deal from a contact: the deal is linked to the contact and starts with no activity.
-  const createDeal = (contact, vals) => {
+  // The records as they are now, for the links' limits (dataModel.jsx canLink).
+  const linkRecords = () => ({contacts, deals, customers});
+  /* Create Deal from a contact: the deal is linked to the contact (when the link allows another) and
+     starts with no activity. `picked`: the contacts chosen on its form instead. */
+  const createDeal = (contact, vals, picked) => {
     const amount = vals.amount === '' || vals.amount == null ? '' : Number(vals.amount);
-    const deal = {id:newRecordId('deals'), contactId:contact.id, ...vals, amount, currency:vals.currency || defaultCurrency(), created:dealStamp(new Date())};
+    const id = newRecordId('deals'), linked = contact.id != null && canLink(linkRecords(), 'contacts', contact, 'deals', {id, contactIds:[]});
+    const deal = {id, contactIds: picked || (linked ? [contact.id] : []), ...vals, amount, currency:vals.currency || defaultCurrency(), created:dealStamp(new Date())};
     setDealActivities(m => ({...m, [deal.id]: []}));
     setDeals(ds => [...ds, deal]);
     return deal;
@@ -847,12 +855,12 @@ function App(){
     setContactActivities(m => ({...m, [id]:[]}));
     return id;
   };
-  // Create Deal on a customer: the deal has the customer's contact (or none).
-  const createDealRecord = (vals, contactId) => createDeal({id:contactId ?? null}, vals);
+  // Create Deal on a customer: the deal has the contacts chosen on its form (or none).
+  const createDealRecord = (vals, contactIds = []) => createDeal({id:null}, vals, contactIds);
   /* Create Customer — on a contact (Contacts ↔ Customers), on a deal (Deals → Customers), or on
      the Customers page (no link). The form starts from the source record: its name, email and phone
      (a deal's, else its contact's) and its owner — all editable. */
-  const [customerForm, setCustomerForm] = React.useState(null);   // {initial, links:{contactId, dealIds}}
+  const [customerForm, setCustomerForm] = React.useState(null);   // {initial, links:{contactIds, dealIds}}
   const [appToast, setAppToast] = React.useState(null);
   const appToastTimer = React.useRef(null);
   const showAppToast = (message, action) => { setAppToast({message, action}); clearTimeout(appToastTimer.current); appToastTimer.current = setTimeout(()=>setAppToast(null), action ? TOAST_ACTION_MS : TOAST_MS); };
@@ -867,7 +875,7 @@ function App(){
     return () => { window.removeEventListener('hof-erp-stale', stale); window.removeEventListener('hof-erp-save-failed', failed); window.removeEventListener('hof-erp-save-ok', ok); };
   }, []);
   /* The links start from where it's created — on a deal: that deal, and the deal's contact; on a
-     contact: that contact — and can be changed in the form (any contact or none, any deals or none). */
+     contact: that contact (each when its link allows another) — and can be changed in the form. */
   const startCustomer = ({contact, deal} = {}) => {
     const src = deal || contact, person = contact || null;
     /* From a deal it starts as the workflow's Create Customer does: in the service pipeline for the
@@ -877,24 +885,26 @@ function App(){
     const fromDeal = deal ? {...(service ? {pipeline:service.id, stage:serviceStage ? serviceStage.id : ''} : {}), status:'Active'} : {};
     // Email and phone: the deal's own, else its contact's — editable in the form.
     setCustomerForm({initial: src ? {name:src.name || '', email:(deal && deal.email) || (person && person.email) || '', phone:(deal && deal.phone) || (person && person.phone) || '', owner:src.owner || '', ...fromDeal} : null,
-      links:{contactId: contact ? contact.id : null, dealIds: deal ? [deal.id] : []}});
+      links:{contactIds: contact && canLink(linkRecords(), 'contacts', contact, 'customers', NEW_RECORD) ? [contact.id] : [],
+        dealIds: deal && canLink(linkRecords(), 'deals', deal, 'customers', NEW_RECORD) ? [deal.id] : []}});
   };
   const saveCustomer = (vals, links) => {
     const id = newRecordId('customers');
     // From a deal: Customer Status Active unless the form set one (as the workflow's Create Customer).
     const status = vals.status || ((links.dealIds || []).length ? 'Active' : vals.status);
-    const c = {id, ...vals, ...(status ? {status} : {}), contactId:links.contactId ?? null, dealIds:links.dealIds || [], created:dealStamp(new Date())};
+    const c = {id, ...vals, ...(status ? {status} : {}), contactIds:links.contactIds || [], dealIds:links.dealIds || [], created:dealStamp(new Date())};
     setCustomerActivities(m => ({...m, [id]:[]}));
     setCustomers(cs => [...cs, c]);
     setCustomerForm(null);
     showAppToast(`Customer created · ${c.name}`, {label:'Open customer', onClick:()=>{ setAppToast(null); openRecord('customers', id, 'panel'); }});
   };
-  /* A deleted record's associated records stay, unlinked: a contact's deals lose their contact and
-     its customers drop it; a deal's customers lose their deal. */
+  /* A deleted record's associated records stay, unlinked: a contact's deals and customers drop it;
+     a deal's customers drop the deal. */
   const unlinkDeleted = (object, id) => {
     if(object === 'contacts'){
-      if(deals.some(d => d.contactId === id)) setDeals(ds => ds.map(d => d.contactId === id ? {...d, contactId:null} : d));
-      if(customers.some(c => c.contactId === id)) setCustomers(cs => cs.map(c => c.contactId === id ? {...c, contactId:null} : c));
+      const listed = (r) => contactIdsOf(r).some(x => sameId(x, id));
+      if(deals.some(listed)) setDeals(ds => ds.map(d => listed(d) ? withoutLinkId(d, 'contactIds', id) : d));
+      if(customers.some(listed)) setCustomers(cs => cs.map(c => listed(c) ? withoutLinkId(c, 'contactIds', id) : c));
     }
     if(object === 'deals' && customers.some(c => (c.dealIds || []).includes(id))) setCustomers(cs => cs.map(c => (c.dealIds || []).includes(id) ? {...c, dealIds:c.dealIds.filter(x => x !== id)} : c));
   };
@@ -902,24 +912,37 @@ function App(){
      each property that differed); the others' activity, associations, quotes, documents, payment
      plans, invoices, Customer Profile answers and form submissions move to it, and they're deleted.
      `changes` ({label, from, to}) go in its "Records merged" activity. */
-  const mergeRecords = (object, ids, values, changes) => {
+  const mergeRecords = (object, ids, values, changes, links = {}) => {
     const [keepId, ...goneIds] = ids, gone = new Set(goneIds.map(String));
     const isGone = (id) => id != null && gone.has(String(id));
     const all = {contacts:contactsWithDeals, deals, customers}[object];
     const names = goneIds.map(id => ({id, name:(all.find(r => String(r.id) === String(id)) || {}).name || ''}));
-    // The record: its chosen values (a merged customer has every merged customer's deals); the others go.
-    const dealIds = object === 'customers' ? [...new Set(customers.filter(c => String(c.id) === String(keepId) || isGone(c.id)).flatMap(c => c.dealIds || []))] : null;
+    /* Links (dataModel.jsx linkRule), each kind as the kept record may have it: where it may have
+       many, every merged record's; where only one, the one picked in the review (`links`: {type: id}),
+       the others unlinked. */
+    const raw = {contacts, deals, customers}, isMerged = (id) => sameId(id, keepId) || isGone(id);
+    const uniq = (list) => list.filter((id, i) => list.findIndex(x => sameId(x, id)) === i);
+    const own = {}, held = [];   // the links the kept record holds; the other records holding links to the merged ones
+    RECORD_OBJECTS.filter(o => o !== object && linkStoreOf(object, o) && linkRule(object, o)).forEach(o => {
+      const st = linkStoreOf(object, o), many = linkRule(object, o).perX > 1, picked = o in links;
+      if(st.holder === object){
+        const merged = [...raw[object].filter(r => sameId(r.id, keepId)), ...raw[object].filter(r => isGone(r.id))];
+        if(picked) own[st.field] = links[o] != null ? [links[o]] : [];
+        else if(many) own[st.field] = uniq(merged.flatMap(r => r[st.field] || []));
+      } else held.push({o, field:st.field, keep:(r) => !picked || sameId(r.id, links[o])});
+    });
+    // The record: its chosen values and links; the others go.
     const setOf = {contacts:engine.setContacts, deals:setDeals, customers:setCustomers}[object];
-    setOf(list => list.filter(r => !isGone(r.id)).map(r => String(r.id) === String(keepId) ? {...r, ...values, ...(dealIds ? {dealIds} : {})} : r));
+    setOf(list => list.filter(r => !isGone(r.id)).map(r => String(r.id) === String(keepId) ? {...r, ...values, ...own} : r));
     // A chosen Actual Close Date stays (a stage picked with it would otherwise stamp today's).
     if('actualCloseDate' in values) setOf(list => list.map(r => String(r.id) === String(keepId) ? {...r, actualCloseDate:values.actualCloseDate} : r));
-    // Associations: what pointed at a merged record points at the kept one.
-    if(object === 'contacts'){
-      if(deals.some(d => isGone(d.contactId))) setDeals(ds => ds.map(d => isGone(d.contactId) ? {...d, contactId:keepId} : d));
-      if(customers.some(c => isGone(c.contactId))) setCustomers(cs => cs.map(c => isGone(c.contactId) ? {...c, contactId:keepId} : c));
-    }
-    if(object === 'deals' && customers.some(c => (c.dealIds || []).some(isGone)))
-      setCustomers(cs => cs.map(c => (c.dealIds || []).some(isGone) ? {...c, dealIds:[...new Set(c.dealIds.map(x => isGone(x) ? keepId : x))]} : c));
+    // Records linked to a merged one: linked to the kept one instead (in the same place), or — not picked — unlinked.
+    held.forEach(({o, field, keep}) => {
+      const touches = (r) => (r[field] || []).some(isMerged);
+      if(!raw[o].some(touches)) return;
+      ({deals:setDeals, customers:setCustomers})[o](list => list.map(r => !touches(r) ? r
+        : {...r, [field]: keep(r) ? uniq(r[field].map(id => isMerged(id) ? keepId : id)) : r[field].filter(id => !isMerged(id))}));
+    });
     // Activity (files and emails are activities) moves, newest first, with the merge recorded.
     const key = object === 'contacts' ? 'contactId' : object === 'deals' ? 'dealId' : 'customerId';
     const acts = {contacts:contactActivities, deals:dealActivities, customers:customerActivities}[object];
@@ -985,13 +1008,16 @@ function App(){
     }, 15000);
     return () => clearInterval(t);
   }, []);
-  const customersFor = (contactId) => customers.filter(c => c.contactId === contactId).map(c => customerListRow(c, settingsData));
-  /* An existing customer linked to a new contact or deal ({contactId} | {dealIds:[id]}) — only when
-     it has none yet (a customer has one contact and one deal). */
-  const linkCustomer = (customerId, patch) => setCustomers(cs => cs.map(c => c.id !== customerId ? c
-    : 'contactId' in patch ? (c.contactId == null || !contacts.some(x => x.id === c.contactId) ? {...c, ...patch} : c)
-    : !(c.dealIds || []).some(id => deals.some(d => d.id === id)) ? {...c, ...patch} : c));
-  const linkDeal = (dealId, contactId) => setDeals(ds => ds.map(d => d.id === dealId && (d.contactId == null || !contacts.some(c => c.id === d.contactId)) ? {...d, contactId} : d));
+  const customersFor = (contactId) => customers.filter(c => contactIdsOf(c).some(id => sameId(id, contactId))).map(c => customerListRow(c, settingsData));
+  /* An existing customer or deal linked to a new contact or deal ({contactId} | {dealId}) — when the
+     link allows another (dataModel.jsx canLink). */
+  const linkCustomer = (customerId, {contactId, dealId}) => setCustomers(cs => cs.map(c => {
+    if(c.id !== customerId) return c;
+    const recs = {contacts, deals, customers:cs};
+    if(contactId != null) return canLink(recs, 'customers', c, 'contacts', {id:contactId}) ? withLinkId(c, 'contactIds', contactId) : c;
+    return dealId != null && canLink(recs, 'customers', c, 'deals', {id:dealId}) ? withLinkId(c, 'dealIds', dealId) : c;
+  }));
+  const linkDeal = (dealId, contactId) => setDeals(ds => ds.map(d => d.id === dealId && canLink({contacts, deals:ds, customers}, 'deals', d, 'contacts', {id:contactId}) ? withLinkId(d, 'contactIds', contactId) : d));
   // Objects sit in the navigation group they're assigned to (Settings → Objects).
   const crmNavWithObjects = React.useMemo(()=>navWithObjects(crmNav, settingsData.objects), [crmNav, settingsData.objects]);
   // Entering CRM with nothing open goes straight to its default page (the Dashboard) — no "Select an item" screen.
@@ -1046,7 +1072,7 @@ function App(){
     if(object === 'deals') return createDeal({id:null}, {amount:'', ...firstStage('deals'), ...vals, owner:'', source: formSource || ''}).id;
     const id = newRecordId('customers');
     setCustomerActivities(m => ({...m, [id]:[]}));
-    setCustomers(cs => [...cs, {id, ...firstStage('customers'), ...vals, owner:'', source: formSource || 'Manual', contactId:null, dealIds:[], created:dealStamp(new Date())}]);
+    setCustomers(cs => [...cs, {id, ...firstStage('customers'), ...vals, owner:'', source: formSource || 'Manual', contactIds:[], dealIds:[], created:dealStamp(new Date())}]);
     return id;
   };
   // A record's property edited in place (record side panels).
@@ -1125,7 +1151,7 @@ function App(){
           : crmActive === 'dashboard' ? <DashboardPage/>
           : <EmptyCrmCanvas activeId={crmActive} label={(settingsData.objects.find(o => o.id === crmActive) || {}).name}/>}
       </div>
-      {customerForm && <CustomerFormModal data={settingsData} initial={customerForm.initial} links={customerForm.links} contacts={contactsWithDeals} deals={deals}
+      {customerForm && <CustomerFormModal data={settingsData} initial={customerForm.initial} links={customerForm.links} contacts={contactsWithDeals} deals={deals} customers={customers}
         onCancel={()=>setCustomerForm(null)} onSave={saveCustomer}/>}
       {!saveNotice && <CopyToast message={appToast && appToast.message} action={appToast && appToast.action}/>}
     </div>

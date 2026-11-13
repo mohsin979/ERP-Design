@@ -21,11 +21,11 @@ function associatedRecords(hub, object, record){
   const all = (o) => (hub && hub.records[o]) || [];
   const byId = (o, id) => id == null ? null : all(o).find(r => String(r.id) === String(id)) || null;
   const self = byId(object, record.id) || record;
-  if(object === 'contacts') return {contacts:[], deals:all('deals').filter(d => String(d.contactId) === String(self.id)),
-    customers:all('customers').filter(c => String(c.contactId) === String(self.id))};
-  if(object === 'deals') return {contacts:[byId('contacts', self.contactId)].filter(Boolean), deals:[],
+  const listsMe = (r) => contactIdsOf(r).some(id => sameId(id, self.id)), contactsOf = (r) => contactIdsOf(r).map(id => byId('contacts', id)).filter(Boolean);
+  if(object === 'contacts') return {contacts:[], deals:all('deals').filter(listsMe), customers:all('customers').filter(listsMe)};
+  if(object === 'deals') return {contacts:contactsOf(self), deals:[],
     customers:all('customers').filter(c => (c.dealIds || []).some(id => String(id) === String(self.id)))};
-  return {contacts:[byId('contacts', self.contactId)].filter(Boolean), deals:(self.dealIds || []).map(id => byId('deals', id)).filter(Boolean), customers:[]};
+  return {contacts:contactsOf(self), deals:(self.dealIds || []).map(id => byId('deals', id)).filter(Boolean), customers:[]};
 }
 /* Rows for an associated feed: each record's activity (what the user may see), with the record. */
 const associatedFeedRows = (hub, object, records) => records.flatMap(r =>

@@ -1901,7 +1901,7 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
   const filteredContacts = React.useMemo(()=>{
     if(!dealAssoc) return applyFilters(contacts, filters, objectSchema.filterProps);
     // Filtered with each contact's deals alongside; the contacts themselves are what's listed.
-    const rows = contacts.map(c => withAssocRecords(c, 'Deals', deals.filter(d => d.contactId === c.id).map(d => dealRowOf(dealData, d))));
+    const rows = contacts.map(c => withAssocRecords(c, 'Deals', deals.filter(d => contactIdsOf(d).some(id => sameId(id, c.id))).map(d => dealRowOf(dealData, d))));
     const ok = new Set(applyFilters(rows, filters, objectSchema.filterProps).map(r => r.id));
     return contacts.filter(c => ok.has(c.id));
   }, [contacts, filters, objectSchema, deals, dealData]);
@@ -2047,8 +2047,8 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
          nothing computes one yet. */
       const record = newContactRecord(id, vals);
       setContacts(cs => [...cs, record]);
-      /* Associated records: a deal — an existing one without a contact, or a new one — and an
-         existing customer without a contact (a deal or customer has one contact). */
+      /* Associated records: a deal — an existing one that can take another contact, or a new one —
+         and an existing customer that can take another contact (the links' types). */
       (assoc || []).forEach(a => {
         if(a.object === 'deals'){
           if(a.existingId && onLinkDeal) onLinkDeal(a.existingId, id);
@@ -2061,19 +2061,17 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
     setContactForm(null);
   };
   const appliedFilterCount = React.useMemo(()=>countAppliedFilters(filters, objectSchema.filterProps), [filters, objectSchema]);
-  /* Add contact: Create through associated record → Deal — an existing deal that has no contact
-     yet (a deal has one contact), or a new deal created with the contact; → Customer — an existing
-     customer that has no contact yet (a customer has one contact). */
-  const hasContact = (r) => r.contactId != null && records.some(c => c.id === r.contactId);
+  /* Add contact: Create through associated record → Deal — an existing deal that can take another
+     contact (the link's type), or a new deal created with the contact; → Customer — an existing
+     customer that can take another contact. */
+  const takesContact = (object, r) => canLink({contacts:records, deals:deals || [], customers:customers || []}, 'contacts', NEW_RECORD, object, r);
   const creatable = dealData ? creationAssociations(dealData, 'contacts') : [];
   const association = [
     ...(deals && creatable.includes('deals') ? [{object:'deals', noun:'deal',
-      existing:deals.filter(d => !hasContact(d)).map(d => { const r = dealRowOf(dealData, d); return {value:d.id, label:`${d.name} · ${r.pipeline} · ${r.stage}`}; }),
-      existingNote:'Deals that already have a contact aren’t listed — a deal has one contact.',
+      existing:deals.filter(d => takesContact('deals', d)).map(d => { const r = dealRowOf(dealData, d); return {value:d.id, label:`${d.name} · ${r.pipeline} · ${r.stage}`}; }),
       fields:objectFormProperties(dealData, 'deals').filter(p => p.onCreate), optionsFor:dealFormOptions(dealData), adjust:dealFormAdjust(dealData)}] : []),
     ...(customers && creatable.includes('customers') ? [{object:'customers', noun:'customer', existingOnly:true,
-      existing:customers.filter(c => !hasContact(c)).map(c => ({value:c.id, label:c.email ? `${c.name} · ${c.email}` : c.name})),
-      existingNote:'Customers that already have a contact aren’t listed — a customer has one contact.'}] : []),
+      existing:customers.filter(c => takesContact('customers', c)).map(c => ({value:c.id, label:c.email ? `${c.name} · ${c.email}` : c.name}))}] : []),
   ];
 
   const persist = (id, patch) => setViews(vs => vs.map(v => v.id===id ? {...v, ...patch} : v));

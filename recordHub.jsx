@@ -19,13 +19,13 @@ const hubObjects = () => HUB_OBJECTS.filter(workspaceHasType);
 const HUB_NOUN = {get contacts(){ return typeSingular('contacts', 'Contact'); }, get deals(){ return typeSingular('deals', 'Deal'); }, get customers(){ return typeSingular('customers', 'Customer'); }};
 
 const hubRecord = (hub, object, id) => hub && ((hub.records[object] || []).find(r => r.id === id) || null);
-// Who a record's email and calls reach: the contact itself; a deal's contact, else its own details; a customer's own details, else its contact's.
+// Who a record's email and calls reach: the contact itself; a deal's person (its first contact), else its own details; a customer's own details, else its person's.
 function hubRecordPerson(hub, object, id){
   const r = hubRecord(hub, object, id);
   if(!r) return null;
   const contactOf = (cid) => cid != null ? hubRecord(hub, 'contacts', cid) : null;
   if(object === 'contacts') return {name:r.name, email:r.email || '', phone:r.phone || ''};
-  const c = contactOf(r.contactId);
+  const c = contactOf(personIdOf(r));
   if(object === 'customers') return {name:r.name, email:r.email || (c && c.email) || '', phone:r.phone || (c && c.phone) || ''};
   return {name: c ? c.name : r.name, email:(c && c.email) || r.email || '', phone:(c && c.phone) || r.phone || ''};
 }

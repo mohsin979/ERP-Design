@@ -7,7 +7,9 @@
                  navigation (navWithObjects, nav.jsx).
    Association — a relationship between two Objects, typed One-to-many / Many-to-one /
                  Many-to-many. Stored once ({a, b, type}, the type read from a's side); b sees the
-                 inverse. Any Object can be associated with any other.
+                 inverse. Any Object can be associated with any other, and every type can be
+                 changed (2026-11-13) — the records follow it (linkRule, canLink); a stricter type
+                 is blocked while existing links would break it.
    Property    — a field with a type that decides its input control, belonging to exactly ONE
                  Object: each Object has its own property instances (Contact Status and Deal Status
                  are separate properties with their own values / configuration). A property carries
@@ -36,23 +38,21 @@ const inverseRelationship = (t) => t === 'One-to-many' ? 'Many-to-one' : t === '
 const OBJECT_GROUPS = ['Marketing', 'Pre-Sales', 'Sales', 'Tools', 'Administrative'];
 
 const DEFAULT_OBJECTS = [
-  {id:'contacts',  name:'Contacts',  group:'Pre-Sales'},
+  {id:'contacts',  name:'Contacts',  group:'Pre-Sales', mergeReporting:true},
   {id:'deals',     name:'Deals',     group:'Pre-Sales'},
   {id:'customers', name:'Customers', group:'Sales'},
 ];
 // Objects that were defaults before and are removed from saved settings (they never had records).
 const REMOVED_DEFAULT_OBJECTS = ['forms', 'service'];
-/* Every link is optional — each record exists on its own:
-     Contacts → Deals      One-to-many: a contact has many deals, a deal at most one contact (deal.contactId).
-     Contacts → Customers  One-to-many: a contact has many customers, a customer at most one contact (customer.contactId).
-     Deals → Customers     One-to-many: a deal has many customers, a customer at most one deal (customer.dealIds: none or one). */
+/* Every link is optional — each record exists on its own. The defaults (each type can be changed):
+     Contacts → Deals      One-to-many: a contact has many deals, a deal at most one contact (deal.contactIds).
+     Contacts → Customers  One-to-many: a contact has many customers, a customer at most one contact (customer.contactIds).
+     Deals → Customers     One-to-many: a deal has many customers, a customer at most one deal (customer.dealIds). */
 const DEFAULT_ASSOCIATIONS = [
   {id:'as-contacts-deals',     a:'contacts',  b:'deals',     type:'One-to-many'},
   {id:'as-contacts-customers', a:'contacts',  b:'customers', type:'One-to-many'},
   {id:'as-deals-customers',    a:'deals',     b:'customers', type:'One-to-many'},
 ];
-// The relationship types as defined (settings saved earlier are brought in line).
-const DEFINED_ASSOCIATION_TYPES = {'as-contacts-deals':'One-to-many', 'as-contacts-customers':'One-to-many', 'as-deals-customers':'One-to-many'};
 
 /* The defined properties of Contacts, Deals and Customers. Some are entered by people (available
    during creation where marked); the rest are system-generated (`auto`): set by the system, never
@@ -169,8 +169,8 @@ const DEFAULT_PROPERTIES = () => [
   ...['contacts', 'deals', 'customers'].map(mergeRecordProperty),
   ...userDefaultProperties(),
 ];
-/* Settings saved before: Forms and Services go (with anything of theirs); the Deals–Customers
-   association is Deals ↔ Customers (Many-to-many), Contacts → Customers One-to-many; Customers
+/* Settings saved before: Forms and Services go (with anything of theirs); the Customers–Deals
+   association is Deals → Customers (One-to-many); Customers
    gets its properties; the Lead stages and Lead Status go; Customer Lifecycle gives way to the
    two service pipelines (added as new sample pipelines). Nothing
    that still exists is removed, and an Object deleted since isn't brought back. */
@@ -178,11 +178,12 @@ const DEFAULT_PROPERTIES = () => [
 const PROPERTY_SET_VERSION = 2;
 const migrateDataModel = (d) => {
   // The Automation navigation group is Administrative.
-  const objects = (d.objects || []).filter(o => !REMOVED_DEFAULT_OBJECTS.includes(o.id)).map(o => o.group === 'Automation' ? {...o, group:'Administrative'} : o);
+  const objects = (d.objects || []).filter(o => !REMOVED_DEFAULT_OBJECTS.includes(o.id)).map(o => o.group === 'Automation' ? {...o, group:'Administrative'} : o)
+    // Contacts start with Merge Cases Reporting on (2026-11-13); one switch (an earlier build had a second, `merge`).
+    .map(({merge:_, ...o}) => o.id === 'contacts' && o.mergeReporting === undefined ? {...o, mergeReporting:true} : o);
   const has = (id) => objects.some(o => o.id === id);
   const associations = (d.associations || [])
-    .map(a => a.id === 'as-customers-deals' ? {id:'as-deals-customers', a:'deals', b:'customers', type:'Many-to-many'} : a)
-    .map(a => DEFINED_ASSOCIATION_TYPES[a.id] && a.type !== DEFINED_ASSOCIATION_TYPES[a.id] ? {...a, type:DEFINED_ASSOCIATION_TYPES[a.id]} : a)
+    .map(a => a.id === 'as-customers-deals' ? {id:'as-deals-customers', a:'deals', b:'customers', type:'One-to-many'} : a)
     .filter(a => has(a.a) && has(a.b));
   /* The Types of Contact pipeline and property lose the Lead stages (Lead isn't part of the object
      model). Lead Status is a defined Contact property again (contacts kept their values). */
@@ -296,6 +297,81 @@ const DEFAULT_DATA_MODEL = () => ({
 });
 
 const objectAssociations = (data, objectId) => data.associations.filter(a => a.a === objectId || a.b === objectId);
+
+/* ── Record links ── the built-in associations are stored on the records, as lists of ids:
+   Contacts – Deals on the deal (`contactIds`), Contacts – Customers on the customer
+   (`contactIds`), Deals – Customers on the customer (`dealIds`). How many each side may have comes
+   from the association's type (Settings → Records): linkRule. The open CRM's associations are
+   set by App each render (setLinkAssociations). */
+const LINK_STORE = {
+  'contacts|deals':     {holder:'deals',     field:'contactIds', other:'contacts'},
+  'contacts|customers': {holder:'customers', field:'contactIds', other:'contacts'},
+  'customers|deals':    {holder:'customers', field:'dealIds',    other:'deals'},
+};
+const linkStoreOf = (x, y) => LINK_STORE[[x, y].sort().join('|')] || null;
+let LINK_ASSOCIATIONS = DEFAULT_ASSOCIATIONS;
+const setLinkAssociations = (list) => { LINK_ASSOCIATIONS = list || DEFAULT_ASSOCIATIONS; };
+const sameId = (a, b) => a != null && b != null && String(a) === String(b);
+// A deal's or customer's contacts; the first is the record's person (emails, quotes, invoices, Customer Profile, calls).
+const contactIdsOf = (r) => (r && r.contactIds) || [];
+const personIdOf = (r) => contactIdsOf(r)[0] ?? null;
+/* How many y one x may have and how many x one y may have (1 or Infinity) — null: x and y aren't
+   associated. One-to-many (from x): an x has many y, a y at most one x; Many-to-one: an x at most
+   one y, a y many x; Many-to-many: no limit. */
+const linkRule = (x, y, associations = LINK_ASSOCIATIONS) => {
+  const a = (associations || []).find(a => (a.a === x && a.b === y) || (a.a === y && a.b === x));
+  if(!a) return null;
+  const type = a.a === x ? a.type : inverseRelationship(a.type);
+  return {type, perX: type === 'Many-to-one' ? 1 : Infinity, perY: type === 'One-to-many' ? 1 : Infinity};
+};
+const linkRuleLimit = (x, y) => { const r = linkRule(x, y); return r ? r.perX : 0; };   // how many y an x may have
+// Is `xRec` (an x) linked to `yRec` (a y)?
+const isLinked = (x, xRec, y, yRec) => {
+  const st = linkStoreOf(x, y); if(!st || !xRec || !yRec) return false;
+  const [h, o] = st.holder === x ? [xRec, yRec] : [yRec, xRec];
+  return (h[st.field] || []).some(id => sameId(id, o.id));
+};
+// The y records linked to `rec` (an x). `records`: {contacts, deals, customers}.
+const linkedOf = (records, x, rec, y) => {
+  const st = linkStoreOf(x, y); if(!st || !rec) return [];
+  const list = (records && records[y]) || [];
+  if(st.holder === x) return (rec[st.field] || []).map(id => list.find(r => sameId(r.id, id))).filter(Boolean);
+  return list.filter(r => (r[st.field] || []).some(id => sameId(id, rec.id)));
+};
+// May `xRec` and `yRec` be linked — associated, not linked yet, and each still under its limit?
+const canLink = (records, x, xRec, y, yRec) => {
+  const rule = linkRule(x, y);
+  if(!rule || !xRec || !yRec || isLinked(x, xRec, y, yRec)) return false;
+  return linkedOf(records, x, xRec, y).length < rule.perX && linkedOf(records, y, yRec, x).length < rule.perY;
+};
+// A record being created (no links yet), for canLink.
+const NEW_RECORD = {id:'__new__', contactIds:[], dealIds:[]};
+// The link written on the record that holds it: `holderRec` with `id` added or removed.
+const withLinkId = (r, field, id) => (r[field] || []).some(x => sameId(x, id)) ? r : {...r, [field]:[...(r[field] || []), id]};
+const withoutLinkId = (r, field, id) => (r[field] || []).some(x => sameId(x, id)) ? {...r, [field]:r[field].filter(x => !sameId(x, id))} : r;
+// Links an x record and a y record: the holder's record with the link (null: not the holder).
+const linkPatch = (x, xRec, y, yRec) => { const st = linkStoreOf(x, y); if(!st) return null;
+  return st.holder === x ? {object:x, id:xRec.id, apply:(r) => withLinkId(r, st.field, yRec.id)} : {object:y, id:yRec.id, apply:(r) => withLinkId(r, st.field, xRec.id)}; };
+// A deal or customer saved with one contact (`contactId`) has it as its list (`contactIds`).
+const withContactIds = (r) => {
+  if(!r || (Array.isArray(r.contactIds) && !('contactId' in r))) return r;
+  const {contactId, ...rest} = r;
+  return {...rest, contactIds: Array.isArray(r.contactIds) ? r.contactIds : contactId != null ? [contactId] : []};
+};
+/* What a stricter type would break: for each side, how many records would hold more than it allows. */
+const linkBreaks = (records, a, type) => {
+  const st = linkStoreOf(a.a, a.b); if(!st) return [];
+  const perA = type === 'Many-to-one' ? 1 : Infinity, perB = type === 'One-to-many' ? 1 : Infinity;
+  const holderMax = st.holder === a.a ? perA : perB, otherMax = st.holder === a.a ? perB : perA;
+  // Only links to records that still exist count.
+  const holders = (records && records[st.holder]) || [], live = new Set(((records && records[st.other]) || []).map(r => String(r.id)));
+  const idsOf = (r) => (r[st.field] || []).filter(id => live.has(String(id))), perOther = new Map();
+  holders.forEach(r => idsOf(r).forEach(id => perOther.set(String(id), (perOther.get(String(id)) || 0) + 1)));
+  return [
+    {object:st.holder, of:st.other, n:holders.filter(r => idsOf(r).length > holderMax).length},
+    {object:st.other, of:st.holder, n:[...perOther.values()].filter(c => c > otherMax).length},
+  ].filter(x => x.n);
+};
 /* Objects a record can be created through (Create through associated object): the Objects it's
    associated with in Settings that have records today. */
 const RECORD_OBJECTS = ['contacts', 'deals', 'customers'];
@@ -304,8 +380,15 @@ const RECORD_OBJECTS = ['contacts', 'deals', 'customers'];
 const CREATION_PATHS = {contacts:['deals', 'customers'], deals:['contacts', 'customers'], customers:['deals']};
 const creationAssociations = (data, objectId) => objectAssociations(data, objectId).map(a => a.a === objectId ? a.b : a.a)
   .filter(o => RECORD_OBJECTS.includes(o) && (CREATION_PATHS[objectId] || []).includes(o));
+/* Merge (merge.jsx), per record type, one switch — Enable Merge Cases Reporting: its records get
+   Merge Status and its merge cases show (Merge Cases, top right). On for Contacts to start with, off
+   for every other record type until it's switched on. */
+const objectFlag = (data, objectId, key) => !!(((data && data.objects) || []).find(o => o.id === objectId) || {})[key];
+const mergeReportingOn = (data, objectId) => objectFlag(data, objectId, 'mergeReporting');
+// Merge Status shows only where Merge Reporting is on.
+const propertyShown = (data, p) => p.key !== 'mergeStatus' || mergeReportingOn(data, p.objectId);
 // A record type's properties in use — archived ones are hidden everywhere but Settings (allObjectProperties).
-const allObjectProperties = (data, objectId) => data.properties.filter(p => p.objectId === objectId);
+const allObjectProperties = (data, objectId) => data.properties.filter(p => p.objectId === objectId && propertyShown(data, p));
 const objectProperties = (data, objectId) => allObjectProperties(data, objectId).filter(p => !p.archived);
 // What a creation form reads: the Object's properties, required = available && mandatory.
 const objectFormProperties = (data, objectId) => objectProperties(data, objectId).map(p => ({...p, required:p.onCreate && p.mandatory}));
@@ -410,6 +493,14 @@ function CreationFormToggles({onCreate, mandatory, onChange, locked, lockedTitle
     </div>
   );
 }
+// A record type's merge switch (merge.jsx): Enable Merge Cases Reporting.
+function MergeToggle({on, onChange}){
+  return (
+    <div style={{display:'flex', alignItems:'center', gap:8, height:34, fontSize:12.5, color:T.gray600, whiteSpace:'nowrap'}}>
+      <UtToggle on={on} onChange={onChange}/> Enable Merge Cases Reporting
+    </div>
+  );
+}
 const lockedPropertyTitle = (p) => p && p.auto ? 'Set automatically by the system' : 'Required — always shown and mandatory';
 /* A property in the record type panel (Create Record, a record type's details): label, type, its
    type's settings, the creation-form toggles. An existing system property keeps its label and type
@@ -479,6 +570,11 @@ const typeShapeChanged = (a, b) => propertyTypeId(a.type) !== propertyTypeId(b.t
    {kind:'archive' | 'delete', before} | {kind:'unlink', association}. */
 function changeConsequences(data, records, change){
   const lines = [], blockers = [];
+  if(change.kind === 'retype'){
+    const a = change.association, one = (id) => objectName(data, id).replace(/s$/, '').toLowerCase();
+    linkBreaks(records, a, a.type).forEach(b => blockers.push(`${objectName(data, a.a)} → ${objectName(data, a.b)} can't be ${a.type} while ${holderNoun(data, b.object, b.n)} ${b.n === 1 ? 'has' : 'have'} more than one ${one(b.of)}.`));
+    return {lines, blockers};
+  }
   if(change.kind === 'unlink'){
     const a = change.association, n = associationLinkCount(records, a);
     lines.push(`${objectName(data, a.a)} ↔ ${objectName(data, a.b)} removed — ${n ? `${n.toLocaleString('en-US')} linked ${n === 1 ? 'record' : 'records'} will be unlinked (the records stay)` : 'no records are linked'}; Customer Profile and Accounting won't be shared between them.`);
@@ -509,8 +605,8 @@ function changeConsequences(data, records, change){
 }
 // How many links a relationship holds now (the defined ones store them on the records; others hold none yet).
 const ASSOCIATION_LINKS = {
-  'contacts|deals':     {count:(r) => (r.deals || []).filter(d => d.contactId != null).length,      unlink:[['deals', (d) => d.contactId != null ? {...d, contactId:null} : d]]},
-  'contacts|customers': {count:(r) => (r.customers || []).filter(c => c.contactId != null).length,  unlink:[['customers', (c) => c.contactId != null ? {...c, contactId:null} : c]]},
+  'contacts|deals':     {count:(r) => (r.deals || []).reduce((n, d) => n + contactIdsOf(d).length, 0),      unlink:[['deals', (d) => contactIdsOf(d).length ? {...d, contactIds:[]} : d]]},
+  'contacts|customers': {count:(r) => (r.customers || []).reduce((n, c) => n + contactIdsOf(c).length, 0),  unlink:[['customers', (c) => contactIdsOf(c).length ? {...c, contactIds:[]} : c]]},
   'customers|deals':    {count:(r) => (r.customers || []).reduce((n, c) => n + (c.dealIds || []).length, 0), unlink:[['customers', (c) => (c.dealIds || []).length ? {...c, dealIds:[]} : c]]},
 };
 const associationPair = (a) => [a.a, a.b].sort().join('|');
@@ -520,7 +616,7 @@ const associationLinkCount = (records, a) => { const l = ASSOCIATION_LINKS[assoc
 function useRecordEffects(setData, updateRecords){
   return (changes) => (changes || []).forEach(ch => {
     if(ch.kind === 'unlink'){ const l = ASSOCIATION_LINKS[associationPair(ch.association)]; if(l && updateRecords) l.unlink.forEach(([object, fn]) => updateRecords(object, rs => rs.map(fn))); return; }
-    if(ch.kind === 'archive') return;   // values stay
+    if(ch.kind === 'archive' || ch.kind === 'retype') return;   // values stay; a type change touches no record
     const p = ch.before, rewrite = ch.kind === 'delete' ? () => undefined
       : (v) => { const c = convertPropertyValue(p, ch.after, v); return c.cleared ? '' : c.value; };
     if(ch.kind === 'edit' && !typeShapeChanged(p, ch.after)) return;
@@ -602,7 +698,7 @@ function ObjectsSettings({data, setData, navigate, records = {}, updateRecords, 
         onCreate={(obj, assocs, props) => {
           // A new record type and its properties are their creator's.
           const by = CURRENT_USER.name;
-          setData(d => ({...d, objects:[...d.objects, {...obj, createdBy:by}], associations:[...d.associations, ...assocs], properties:[...d.properties, ...props.map(p => ({...p, createdBy:by}))]}));
+          setData(d => ({...d, objects:[...d.objects, {...obj, createdBy:by}], associations:[...d.associations, ...assocs], properties:withMergeStatus(obj, [...d.properties, ...props.map(p => ({...p, createdBy:by}))])}));
           setCreating(false);
         }}/>}
       {objectBulk.bulkModal}
@@ -614,8 +710,8 @@ function ObjectsSettings({data, setData, navigate, records = {}, updateRecords, 
           setData(d => ({...d, objects:d.objects.map(o => o.id === object.id ? object : o),
             associations:[...d.associations.filter(a => a.a !== object.id && a.b !== object.id), ...associations],
             // Each property where it was (its order across Settings kept); new ones after.
-            properties:[...d.properties.map(p => p.objectId === object.id ? properties.find(x => x.key === p.key) || null : p).filter(Boolean),
-              ...properties.filter(x => !d.properties.some(p => p.objectId === object.id && p.key === x.key))]}));
+            properties:withMergeStatus(object, [...d.properties.map(p => p.objectId === object.id ? properties.find(x => x.key === p.key) || (propertyShown(data, p) ? null : p) : p).filter(Boolean),
+              ...properties.filter(x => !d.properties.some(p => p.objectId === object.id && p.key === x.key))])}));
           setDetails(null);
         }}/>}
       {stub && <StubPanel title={stub} onClose={()=>setStub(null)} zIndex={110}/>}
@@ -626,6 +722,9 @@ function ObjectsSettings({data, setData, navigate, records = {}, updateRecords, 
 }
 
 /* A record type's details: the Create Record panel (RecordTypePanel), filled in and editable. */
+// Merge Reporting turned on for a record type without Merge Status (a new one): it gets it.
+const withMergeStatus = (object, properties) => object.mergeReporting && !properties.some(p => p.objectId === object.id && p.key === 'mergeStatus')
+  ? [...properties, mergeRecordProperty(object.id)] : properties;
 const RecordDetailsPanel = ({data, objectId, onClose, onSave, records}) => <RecordTypePanel data={data} objectId={objectId} onClose={onClose} onSave={onSave} records={records}/>;
 
 
@@ -717,14 +816,16 @@ function RecordTypePanel({data, objectId, onClose, onSave, records = {}}){
   const editing = !!obj;
   const initial = React.useMemo(() => ({
     name: obj ? obj.name : '', group: obj ? obj.group || '' : '',
+    merge: !!(obj && obj.mergeReporting),
     links: Object.fromEntries((obj ? objectAssociations(data, obj.id) : []).map(a => { const other = a.a === obj.id ? a.b : a.a;
-      return [other, {type: a.a === obj.id ? a.type : inverseRelationship(a.type), id:a.id, defined:!!DEFINED_ASSOCIATION_TYPES[a.id]}]; })),
+      return [other, {type: a.a === obj.id ? a.type : inverseRelationship(a.type), id:a.id}]; })),
     props: (obj ? allObjectProperties(data, obj.id) : []).map(p => ({...p, id:`ex-${p.key}`, existing:true, type:propertyTypeId(p.type), archived:!!p.archived,
       options: p.options && p.options.length ? [...p.options] : [''], range:p.range || {label:'', min:'', max:''}})),
   }), [objectId]);
   const [name, setName] = React.useState(initial.name);
   const [group, setGroup] = React.useState(initial.group);
   const [links, setLinks] = React.useState(initial.links);   // objectId → {type, id?, defined?}
+  const [merge, setMerge] = React.useState(initial.merge);   // Enable Merge Cases Reporting
   const [props, setProps] = React.useState(initial.props);
   const [review, setReview] = React.useState(null);   // {lines, blockers, result, changes} before saving
   const n = name.trim();
@@ -733,14 +834,13 @@ function RecordTypePanel({data, objectId, onClose, onSave, records = {}}){
   const setProp = (id, patch) => setProps(ps => ps.map(p => p.id === id ? {...p, ...patch} : p));
   const dupLabel = (p) => props.some(x => x !== p && x.label.trim() && x.label.trim().toLowerCase() === p.label.trim().toLowerCase());
   const propsOk = props.every(p => p.label.trim() && !dupLabel(p) && (p.system || typeConfigOk(p.type, p.options, p.range)));
-  const changed = !editing || JSON.stringify({name, group, links, props}) !== JSON.stringify(initial);
+  const changed = !editing || JSON.stringify({name, group, merge, links, props}) !== JSON.stringify({name:initial.name, group:initial.group, merge:initial.merge, links:initial.links, props:initial.props});
   const ok = !!n && !taken && !!group && propsOk && changed;
   const active = props.filter(p => !p.archived), archived = props.filter(p => p.archived);
   const build = () => {
     const id = obj ? obj.id : `obj-${n.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${Date.now()}`;
     const associations = Object.entries(links).map(([b, l]) => {
       const before = obj && objectAssociations(data, obj.id).find(a => a.id === l.id);
-      if(before && l.defined) return before;   // the defined ones stay as they are
       return before ? {...before, type: before.a === id ? l.type : inverseRelationship(l.type)} : {id:`as-${id}-${b}`, a:id, b, type:l.type};
     });
     const properties = props.map(p => {
@@ -756,8 +856,12 @@ function RecordTypePanel({data, objectId, onClose, onSave, records = {}}){
       ...properties.filter(p => before(p.key) && !before(p.key).archived && p.archived).map(p => ({kind:'archive', before:before(p.key)})),
       ...properties.filter(p => before(p.key) && !p.archived && typeShapeChanged(before(p.key), p)).map(p => ({kind:'edit', before:before(p.key), after:p})),
       ...objectAssociations(data, obj.id).filter(a => !associations.some(x => x.id === a.id)).map(a => ({kind:'unlink', association:a})),
+      // A link stored on the records whose type changes: blocked while existing links would break it.
+      ...associations.map(a => ({a, before:objectAssociations(data, obj.id).find(x => x.id === a.id)}))
+        .filter(({a, before}) => before && before.type !== a.type && linkStoreOf(a.a, a.b)).map(({a}) => ({kind:'retype', association:a})),
     ];
-    return {result:{object:{...(obj || {}), id, name:n, group}, associations, properties}, changes};
+    const {merge:_m, ...base} = obj || {};
+    return {result:{object:{...base, id, name:n, group, mergeReporting:merge}, associations, properties}, changes};
   };
   const save = () => {
     const {result, changes} = build();
@@ -789,18 +893,17 @@ function RecordTypePanel({data, objectId, onClose, onSave, records = {}}){
             <Field label="Group" wide><FormSelect value={group} placeholder="Select group" options={OBJECT_GROUPS} onChange={setGroup}/></Field>
             <Field label="Associated Records" wide><div>
               {/* Fixed-height rows (as the Add Team user list) — selecting doesn't change the height;
-                  the relationship shows as text + chevron. A defined association stays as it is. */}
-              {data.objects.filter(o => o.id !== objectId).map((o, i) => { const l = links[o.id], fixed = l && l.defined; return (
+                  the relationship shows as text + chevron. */}
+              {data.objects.filter(o => o.id !== objectId).map((o, i) => { const l = links[o.id]; return (
                 <div key={o.id} style={{display:'flex', alignItems:'center', gap:10, height:38, boxSizing:'border-box', borderTop: i ? `1px solid ${T.border}` : 'none'}}>
                   <label onClick={()=>toggle(o.id)} style={{flex:1, minWidth:0, display:'flex', alignItems:'center', gap:10, cursor:'pointer', fontSize:13, color:T.attioText, whiteSpace:'nowrap'}}>
                     <RowCheckbox checked={!!l} onChange={()=>toggle(o.id)}/>{o.name}
                   </label>
-                  {/* A link stored on the records keeps its relationship type (it's how they're linked). */}
-                  {l && (fixed ? <span title="How these records are linked" style={{fontSize:13, color:T.gray600, whiteSpace:'nowrap'}}>{l.type}</span>
-                    : <RelationshipPicker value={l.type} onChange={v=>setLinks(x => ({...x, [o.id]:{...x[o.id], type:v}}))}/>)}
+                  {l && <RelationshipPicker value={l.type} onChange={v=>setLinks(x => ({...x, [o.id]:{...x[o.id], type:v}}))}/>}
                 </div>
               ); })}
             </div></Field>
+            <Field label="Merge" wide><MergeToggle on={merge} onChange={setMerge}/></Field>
           </div>
 
           {/* Right — Properties: Add Property top-right; each property's Label and Type, its settings below. */}
@@ -876,7 +979,7 @@ function PropertiesSettings({data, setData, records = {}, updateRecords, onWorkf
   const [stub, setStub] = React.useState(null);
   const [fromObject] = React.useState(data.propertiesObjectId);
   React.useEffect(()=>{ if(data.propertiesObjectId) setData(d => ({...d, propertiesObjectId:null})); }, []);
-  const rows = data.properties.map(p => ({...p, id:`${p.objectId}:${p.key}`, objectName:objectName(data, p.objectId), type:propertyTypeId(p.type), createdBy:creatorOf(p)}));
+  const rows = data.properties.filter(p => propertyShown(data, p)).map(p => ({...p, id:`${p.objectId}:${p.key}`, objectName:objectName(data, p.objectId), type:propertyTypeId(p.type), createdBy:creatorOf(p)}));
   // Users' properties have no Properties permissions; the record types' follow Settings & Administration → Properties (by who created each).
   const propCan = (objectId, action, prop) => !ADMIN_RECORD_OBJECTS.includes(objectId) || adminPropertyCan(objectId, action, prop);
   const addableHolders = PROPERTY_HOLDERS(data).filter(o => propCan(o.id, 'add'));
@@ -1233,5 +1336,5 @@ function PipelinesSettings({data, setData, records = {}, onWorkflowOpen, target,
   );
 }
 
-Object.assign(window, {StageTypeSelect, CUSTOMER_PIPELINE_FOR_DEAL, REMOVED_PIPELINE_IDS, PipelinesSettings, DEFAULT_PIPELINES, objectPipelines, recordPipelines, recordInPipeline, DEAL_TYPES, PROPERTY_SET_VERSION, SYSTEM_PROPERTY_TYPES, PROPERTY_TYPES, RELATIONSHIP_TYPES, OBJECT_GROUPS, DEFAULT_DATA_MODEL, PropertyInput, storePropertyValue, inputPropertyValue,
+Object.assign(window, {LINK_STORE, linkStoreOf, setLinkAssociations, sameId, contactIdsOf, personIdOf, linkRule, linkRuleLimit, isLinked, linkedOf, canLink, withLinkId, withoutLinkId, linkPatch, withContactIds, linkBreaks, NEW_RECORD, mergeReportingOn, propertyShown, StageTypeSelect, CUSTOMER_PIPELINE_FOR_DEAL, REMOVED_PIPELINE_IDS, PipelinesSettings, DEFAULT_PIPELINES, objectPipelines, recordPipelines, recordInPipeline, DEAL_TYPES, PROPERTY_SET_VERSION, SYSTEM_PROPERTY_TYPES, PROPERTY_TYPES, RELATIONSHIP_TYPES, OBJECT_GROUPS, DEFAULT_DATA_MODEL, PropertyInput, storePropertyValue, inputPropertyValue,
   isEmptyValue, migrateDataModel, propertyFilterMeta, PROPERTY_HOLDERS, userDefaultProperties, customerDefaultProperties, customContactSchema, propertyFilterType, creationAssociations, RECORD_OBJECTS, objectFormProperties, ObjectsSettings, PropertiesSettings, inverseRelationship});
