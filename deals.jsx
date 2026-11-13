@@ -511,7 +511,7 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
           <button onClick={view.exportCsv} style={btn}><Icon name="export" size={13} color={T.gray600}/> Export</button>
           <button onClick={()=>setForm({mode:'add', initial:null})} title={`Add ${typeNoun('deals', 'deal')}`} style={toolbarIconButton}><Icon name="plus" size={14} color={T.gray800}/></button>
         </>}
-        filterControls={(v) => <ViolationsButton object="deals" pipelines={viewPipelines(v)} active={violationMode} onClick={()=>setViolationMode(!violationMode)}/>}
+        filterControls={(v) => <><MergeCasesButton object="deals"/><ViolationsButton object="deals" pipelines={viewPipelines(v)} active={violationMode} onClick={()=>setViolationMode(!violationMode)}/></>}
         overlay={(v) => violationMode && <ViolationPanel object="deals" pipelines={viewPipelines(v)} onClose={()=>setViolationMode(false)}/>}/>
       {form && <ContactFormModal mode={form.mode} initial={form.initial} properties={props} noun={typeNoun('deals', 'deal')}
         canEditField={form.mode === 'edit' ? (p)=>fieldEditCan('deals', form.initial, p) : undefined}

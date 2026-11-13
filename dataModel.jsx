@@ -125,6 +125,12 @@ const FORM_RECORD_PROPERTIES = [
   {key:'formSubmittedAt', label:'Form Submission Date', type:'Timestamp',        locked:true, auto:true, derived:true, width:200},
 ];
 const formRecordProperties = (objectId) => FORM_RECORD_PROPERTIES.map(p => ({...p, system:true, objectId, onCreate:false, mandatory:false}));
+/* Merge Status: the system's duplicate check (merge.jsx) — records of the same type sharing an email
+   or phone. The newest of them is Form Refill (a form submission created it) or Duplicate (added
+   any other way); the oldest, and every record with no match, Unique. Worked out, never edited. */
+const MERGE_STATUSES = ['Form Refill', 'Duplicate', 'Unique'];
+const mergeRecordProperty = (objectId) => ({key:'mergeStatus', label:'Merge Status', type:'Single Selection', options:MERGE_STATUSES, system:true, objectId,
+  onCreate:false, mandatory:false, locked:true, auto:true, derived:true, width:150});
 const CUSTOMER_PROPERTY_SETUP = [
   {key:'name',    label:'Customer Name',  type:'Single-Line Text', onCreate:true, mandatory:true, locked:true, formLabel:'Customer Name', placeholder:'Full name', width:220},
   {key:'pipeline', label:'Customer Pipeline', type:'Pipeline',     onCreate:true, mandatory:true, locked:true, half:true, width:190},
@@ -160,6 +166,7 @@ const DEFAULT_PROPERTIES = () => [
   ...DEAL_PROPERTY_SETUP.map(({onCreate = false, mandatory = false, locked = false, ...p}) => ({...p, system:true, objectId:'deals', onCreate, mandatory, locked})),
   ...customerDefaultProperties(),
   ...['contacts', 'deals', 'customers'].flatMap(formRecordProperties),
+  ...['contacts', 'deals', 'customers'].map(mergeRecordProperty),
   ...userDefaultProperties(),
 ];
 /* Settings saved before: Forms and Services go (with anything of theirs); the Deals–Customers
@@ -213,6 +220,8 @@ const migrateDataModel = (d) => {
   // Form Name and Form Submission Date, on each record type that doesn't have them yet.
   // (Not in a workspace whose template leaves them out — `noFormProperties`.)
   if(!d.noFormProperties) properties = [...properties, ...['contacts', 'deals', 'customers'].filter(has).flatMap(formRecordProperties).filter(fp => !properties.some(p => p.objectId === fp.objectId && p.key === fp.key))];
+  // Merge Status (2026-11-12), on each record type that doesn't have it yet.
+  properties = [...properties, ...['contacts', 'deals', 'customers'].filter(has).map(mergeRecordProperty).filter(mp => !properties.some(p => p.objectId === mp.objectId && p.key === mp.key))];
   // The sources gained Website Form (a Website RFQ or public-link submission).
   properties = properties.map(p => p.key === 'source' && ['contacts', 'deals', 'customers'].includes(p.objectId) && (p.options || []).length && !p.options.includes('Website Form') ? {...p, options:[...p.options, 'Website Form']} : p);
   /* Property types saved before are their new types (propertyTypes.jsx); the system properties

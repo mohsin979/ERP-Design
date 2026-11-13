@@ -1704,7 +1704,7 @@ function TableBoardSwitch({mode, onChange}){
   );
 }
 
-/* `filterControls`: on the far right of the filters row (e.g. Deals → Violations). */
+/* `filterControls`: on the far right of the filters row (e.g. Merge Cases, Workflow Violations). */
 function RecordToolbar({inset = 'page', views, activeViewId, onSelectView, viewControls, controls, search, onSearch, filters, setFilters, appliedFilterCount, filterControls}){
   const [showFilters, setShowFilters] = React.useState(false);
   const pad = TOOLBAR_INSETS[inset] || TOOLBAR_INSETS.page;
@@ -2123,7 +2123,7 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
           </button>
         </>}
         search={search} onSearch={setSearch} filters={filters} setFilters={setFilters} appliedFilterCount={appliedFilterCount}
-        filterControls={<ViolationsButton object="contacts" pipelines={[pipelineId]} active={contactViolationMode} onClick={()=>setContactViolationMode(!contactViolationMode)}/>}/>
+        filterControls={<><MergeCasesButton object="contacts"/><ViolationsButton object="contacts" pipelines={[pipelineId]} active={contactViolationMode} onClick={()=>setContactViolationMode(!contactViolationMode)}/></>}/>
 
       {/* The records, with the Violations list over them (as on Deals and Customers). */}
       <div style={{flex:1, minHeight:0, display:'flex', flexDirection:'column', position:'relative', overflow:'hidden'}}>

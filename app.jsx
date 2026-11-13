@@ -766,6 +766,17 @@ function App(){
   // Invoices: one per payment of a plan (invoices.jsx — InvoiceIssuer issues them); numbers never fall back below one used.
   const [invoices, setInvoices] = usePersistedState('invoices', []);
   ensureIdFloor('invoices', quoteSeqFloor(invoices));
+  /* Merge and Duplicate Detection (merge.jsx): each record type's merge cases and Merge Status —
+     records of the same type sharing an email or phone; `mergeSeparate`, the cases closed with Keep
+     Separate ({object, ids, at, by}). Form Name / Form Submission Date: the submission that created
+     each record (forms.jsx), which also tells a Form Refill. */
+  const [mergeSeparate, setMergeSeparate] = usePersistedState('mergeSeparate', []);
+  const formSubs = React.useMemo(() => formSubmissionIndex(forms), [forms]);
+  const mergeIdx = React.useMemo(() => ({
+    contacts:mergeIndexOf('contacts', contacts, {separate:mergeSeparate, formIndex:formSubs}),
+    deals:mergeIndexOf('deals', deals, {separate:mergeSeparate, formIndex:formSubs}),
+    customers:mergeIndexOf('customers', customers, {separate:mergeSeparate, formIndex:formSubs}),
+  }), [contacts, deals, customers, mergeSeparate, formSubs]);
   /* Last Contacted (a Contact's): its latest real touch — a connected call, a sent email or a held
      meeting, on the contact or on its deals and customers (activities.jsx isRealTouch) — kept in
      step with the activity. Written as a system value (no workflow event for each contact). */
@@ -788,22 +799,21 @@ function App(){
   const [overviewSettings, setOverviewSettings] = usePersistedState('overviewSettings', {});
   const engine = useWorkflowEngine({data:settingsData, setData:setSettingsData, deals, setDealsRaw, dealActivities, setDealActivities, setContacts,
     customers, setCustomersRaw, customerActivities, setCustomerActivities, contacts, contactActivities, setContactActivities,
-    profiles:profileFormData, profileFacts, accounting, invoices, quotes, forms});
+    profiles:profileFormData, profileFacts, accounting, invoices, quotes, forms, merge:mergeIdx});
   // Customers change through the engine too: owner history, stage entry and Customer workflows.
   const setDeals = engine.setDeals, setCustomers = engine.setCustomers;
   /* Contacts ⇄ Deals. A contact's Associated Deals count is its deals (`contactId`), so the two
      never disagree. Opening a record on the other page switches page and opens it there. */
   /* The system-generated Contact properties worked out here: Associated Deal / Customer (the
      linked records' names) and Contact Owner Assignment Date (from the owner history). */
-  // Form Name / Form Submission Date: from the form submission that created each record (forms.jsx).
-  const formSubs = React.useMemo(() => formSubmissionIndex(forms), [forms]);
+  // Form Name / Form Submission Date: from the form submission that created each record (forms.jsx); Merge Status (merge.jsx).
   const contactsWithDeals = React.useMemo(() => contacts.map(c => {
     const ds = deals.filter(d => d.contactId === c.id), cs = customers.filter(x => x.contactId === c.id);
     return {...c, dealCount:ds.length, customerCount:cs.length, deals:ds.map(d => d.name).join(', '), customers:cs.map(x => x.name).join(', '),
-      ownerAssigned:ownerDates(c, contactActivities[c.id] || []).assigned, ...formRecordValues(formSubs, 'contacts', c.id)};
-  }), [contacts, deals, customers, contactActivities, formSubs]);
-  const dealsView = React.useMemo(() => formSubs.size ? deals.map(d => ({...d, ...formRecordValues(formSubs, 'deals', d.id)})) : deals, [deals, formSubs]);
-  const customersView = React.useMemo(() => formSubs.size ? customers.map(c => ({...c, ...formRecordValues(formSubs, 'customers', c.id)})) : customers, [customers, formSubs]);
+      ownerAssigned:ownerDates(c, contactActivities[c.id] || []).assigned, ...formRecordValues(formSubs, 'contacts', c.id), mergeStatus:mergeStatusIn(mergeIdx.contacts, c.id)};
+  }), [contacts, deals, customers, contactActivities, formSubs, mergeIdx]);
+  const dealsView = React.useMemo(() => deals.map(d => ({...d, ...(formSubs.size ? formRecordValues(formSubs, 'deals', d.id) : {}), mergeStatus:mergeStatusIn(mergeIdx.deals, d.id)})), [deals, formSubs, mergeIdx]);
+  const customersView = React.useMemo(() => customers.map(c => ({...c, ...(formSubs.size ? formRecordValues(formSubs, 'customers', c.id) : {}), mergeStatus:mergeStatusIn(mergeIdx.customers, c.id)})), [customers, formSubs, mergeIdx]);
   const [recordLink, setRecordLink] = React.useState(null);   // {object:'contacts'|'deals', id, mode, tab, nonce}
   const openRecord = (object, id, mode, tab) => { setCrmActive(object); setRecordLink({object, id, mode, tab, nonce:Date.now()}); };
   /* A deal opened from a workflow event (its card, or the Violations panel): its side panel — or,
@@ -888,6 +898,59 @@ function App(){
     }
     if(object === 'deals' && customers.some(c => (c.dealIds || []).includes(id))) setCustomers(cs => cs.map(c => (c.dealIds || []).includes(id) ? {...c, dealIds:c.dealIds.filter(x => x !== id)} : c));
   };
+  /* Merge (merge.jsx): `ids` oldest first — the first is kept and takes `values` (the chosen value of
+     each property that differed); the others' activity, associations, quotes, documents, payment
+     plans, invoices, Customer Profile answers and form submissions move to it, and they're deleted.
+     `changes` ({label, from, to}) go in its "Records merged" activity. */
+  const mergeRecords = (object, ids, values, changes) => {
+    const [keepId, ...goneIds] = ids, gone = new Set(goneIds.map(String));
+    const isGone = (id) => id != null && gone.has(String(id));
+    const all = {contacts:contactsWithDeals, deals, customers}[object];
+    const names = goneIds.map(id => ({id, name:(all.find(r => String(r.id) === String(id)) || {}).name || ''}));
+    // The record: its chosen values (a merged customer has every merged customer's deals); the others go.
+    const dealIds = object === 'customers' ? [...new Set(customers.filter(c => String(c.id) === String(keepId) || isGone(c.id)).flatMap(c => c.dealIds || []))] : null;
+    const setOf = {contacts:engine.setContacts, deals:setDeals, customers:setCustomers}[object];
+    setOf(list => list.filter(r => !isGone(r.id)).map(r => String(r.id) === String(keepId) ? {...r, ...values, ...(dealIds ? {dealIds} : {})} : r));
+    // A chosen Actual Close Date stays (a stage picked with it would otherwise stamp today's).
+    if('actualCloseDate' in values) setOf(list => list.map(r => String(r.id) === String(keepId) ? {...r, actualCloseDate:values.actualCloseDate} : r));
+    // Associations: what pointed at a merged record points at the kept one.
+    if(object === 'contacts'){
+      if(deals.some(d => isGone(d.contactId))) setDeals(ds => ds.map(d => isGone(d.contactId) ? {...d, contactId:keepId} : d));
+      if(customers.some(c => isGone(c.contactId))) setCustomers(cs => cs.map(c => isGone(c.contactId) ? {...c, contactId:keepId} : c));
+    }
+    if(object === 'deals' && customers.some(c => (c.dealIds || []).some(isGone)))
+      setCustomers(cs => cs.map(c => (c.dealIds || []).some(isGone) ? {...c, dealIds:[...new Set(c.dealIds.map(x => isGone(x) ? keepId : x))]} : c));
+    // Activity (files and emails are activities) moves, newest first, with the merge recorded.
+    const key = object === 'contacts' ? 'contactId' : object === 'deals' ? 'dealId' : 'customerId';
+    const acts = {contacts:contactActivities, deals:dealActivities, customers:customerActivities}[object];
+    const log = {id:`merged-${keepId}-${Date.now()}`, [key]:keepId, type:'recordsMerged', at:new Date(), source:'you', by:CURRENT_USER.name, merged:names, changes};
+    // (The kept record's own list as it is now: the change above may have logged an owner or stage change.)
+    const moved = goneIds.flatMap(id => (acts[id] || []).map(a => ({...a, [key]:keepId})));
+    engine.value.api.editActivities(m => { const n = {...m, [keepId]:[log, ...(m[keepId] || []), ...moved].sort((a, b) => new Date(b.at) - new Date(a.at))};
+      goneIds.forEach(id => { delete n[id]; }); return n; });
+    // Quotes, documents, payment plans, invoices and form submissions on a merged record.
+    const repoint = (x) => x && x.object === object && isGone(x.recordId) ? {...x, recordId:keepId} : x;
+    if(quotes.some(q => repoint(q) !== q)) setQuotes(qs => qs.map(repoint));
+    if(documents.some(d => repoint(d) !== d)) setDocuments(ds => ds.map(repoint));
+    if(accounting.some(x => repoint(x) !== x)) setAccounting(list => list.map(repoint));
+    if(invoices.some(x => repoint(x) !== x)) setInvoices(list => list.map(repoint));
+    if(forms.some(f => (f.submissions || []).some(x => repoint(x) !== x))) setForms(fs => fs.map(f => (f.submissions || []).some(x => repoint(x) !== x) ? {...f, submissions:f.submissions.map(repoint)} : f));
+    /* Customer Profile answers, kept by the person's record (board.jsx profileHolderId): a merged
+       record's go to the kept one — where it has its own for the same template, its own stay. */
+    const holders = (m) => goneIds.filter(id => m[id] !== undefined);
+    const fold = (setter, m, combine) => { if(!holders(m).length) return;
+      setter(cur => { const n = {...cur}; let mine = n[keepId];
+        goneIds.forEach(id => { if(n[id] !== undefined){ mine = combine(n[id], mine || {}); delete n[id]; } });
+        n[keepId] = mine; return n; }); };
+    fold(setProfileFormData, profileFormData, (theirs, mine) => ({...theirs, ...mine, _enabled:[...new Set([...(mine._enabled || []), ...(theirs._enabled || [])])], _type:mine._type || theirs._type}));
+    fold(setProfileFacts, profileFacts, (theirs, mine) => ({...theirs, ...mine}));
+    fold(setProfiles, profiles, (theirs, mine) => ({...theirs, ...mine}));
+    // A merged record that had been kept separate from another: now the kept record is.
+    if(mergeSeparate.some(x => x.object === object && x.ids.some(isGone)))
+      setMergeSeparate(l => l.map(x => x.object === object && x.ids.some(isGone) ? {...x, ids:[...new Set(x.ids.map(i => isGone(i) ? keepId : i))]} : x));
+  };
+  // Keep Separate (merge.jsx): the case closes; its records aren't matched with each other again.
+  const keepSeparate = (object, ids) => setMergeSeparate(l => [...l, {object, ids, at:new Date().toISOString(), by:CURRENT_USER.name}]);
   /* Services (Tools → Services) and quotations (Quotes) — workspace records of their own. */
   const [services, setServices] = usePersistedState('services', () => SEED ? SAMPLE_SERVICES() : []);
   // Services saved before milestone prices: their price on the first milestone (services.jsx).
@@ -993,6 +1056,7 @@ function App(){
   const hubValue = {data:settingsData, records:{contacts:contactsWithDeals, deals:dealsView, customers:customersView}, updateRecord,
     activities:{contacts:contactActivities, deals:dealActivities, customers:customerActivities},
     add:hubAdd, update:hubUpdate, remove:hubRemove, openRecord, quotes, setQuotes, documents, setDocuments, services, setServices, forms, setForms, createRecord, setData:setSettingsData, accounting, setAccounting, invoices, setInvoices, overviewSettings, setOverviewSettings,
+    merge:{...mergeIdx, mergeRecords, keepSeparate},
     // A workflow violation's details: its Object's page with Workflow Violations open and it selected.
     openViolation:(object, id) => { setCrmActive(object); engine.value.openViolation(object, id); }};
   const withEngine = (el) => (

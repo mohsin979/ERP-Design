@@ -500,7 +500,7 @@ function CustomersModule({data, customers, setCustomers, activities, setActiviti
           <button onClick={view.exportCsv} style={btn}><Icon name="export" size={13} color={T.gray600}/> Export</button>
           <button onClick={()=>setForm({mode:'add', initial:null})} title="Add Customer" style={toolbarIconButton}><Icon name="plus" size={14} color={T.gray800}/></button>
         </>}
-        filterControls={(v) => <ViolationsButton object="customers" pipelines={viewPipelines(v)} active={violationMode} onClick={()=>setViolationMode(!violationMode)}/>}
+        filterControls={(v) => <><MergeCasesButton object="customers"/><ViolationsButton object="customers" pipelines={viewPipelines(v)} active={violationMode} onClick={()=>setViolationMode(!violationMode)}/></>}
         overlay={(v) => violationMode && <ViolationPanel object="customers" pipelines={viewPipelines(v)} onClose={()=>setViolationMode(false)}/>}/>
       {form && <CustomerFormModal data={data} mode={form.mode} initial={form.initial} contacts={contacts} deals={deals}
         links={form.mode === 'edit' ? {contactId:form.initial.contactId, dealIds:form.initial.dealIds} : null}

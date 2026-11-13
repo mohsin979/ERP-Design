@@ -192,7 +192,9 @@ function recordFormSubmission(rec){
   if(!rec) return null;
   const object = recordObjectOf(rec.id), key = `${object}:${object === 'contacts' ? Number(rec.id) : rec.id}`;
   if(WF_FORM_SUBS.has(key)) return WF_FORM_SUBS.get(key);
-  for(const f of (WF_LIVE.forms || [])){ const s = (f.submissions || []).find(x => x.object === object && String(x.recordId) === String(rec.id)); if(s) return {form:f, submission:s}; }
+  // A merged record carries several: the earliest created it (formSubmissionIndex).
+  const hits = (WF_LIVE.forms || []).flatMap(f => (f.submissions || []).filter(x => x.object === object && String(x.recordId) === String(rec.id)).map(s => ({form:f, submission:s})));
+  if(hits.length) return hits.reduce((a, b) => (new Date(b.submission.at).getTime() || 0) < (new Date(a.submission.at).getTime() || 0) ? b : a);
   return WF_FORM_PENDING && WF_FORM_PENDING.submission.object === object ? WF_FORM_PENDING : null;
 }
 /* The Form properties (Property Events → Form Property, and conditions): Form Name, Form
@@ -334,7 +336,7 @@ function conditionFields(data, w){
     : p.type === 'Pipeline stage' ? stages : (p.options || []).length ? p.options.map(o => ({value:o, label:o})) : (propertyTypeDef(p.type).options ? propertyTypeDef(p.type).options(p) : []);
   const props = objectProperties(data, objectId);
   const record = props.map(p => ({key:`prop:${p.key}`, group:`${objectName(data, objectId).replace(/s$/, '')} Properties`, label:p.label, kind:conditionKind(p),
-    prop:{...p, options:propOptions(p)}, options:propOptions(p), get:(env) => { const a = associatedNames(objectId, p.key, env.deal) ?? formRecordValue(p.key, env.deal); return a !== undefined ? a : env.deal[p.key]; }}));
+    prop:{...p, options:propOptions(p)}, options:propOptions(p), get:(env) => { const a = associatedNames(objectId, p.key, env.deal) ?? formRecordValue(p.key, env.deal) ?? mergeRecordValue(p.key, env.deal); return a !== undefined ? a : env.deal[p.key]; }}));
   const pipelineFields = objectPipelines(data, objectId).length ? [
     {key:'currentStage', group:'Pipeline', label:'Current Stage', kind:'choice', options:stages, get:(env) => env.deal.stage},
     ...(t && t.group === 'stage' && t.key !== 'stayAtStage' ? [{key:'previousStage', group:'Pipeline', label:'Previous Stage', kind:'choice', options:stages, get:(env) => env.previousStage || ''}] : []),
@@ -718,8 +720,8 @@ const useWorkflowEngineCtx = () => React.useContext(WorkflowEngineCtx);
 function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, setDealActivities, setContacts,
                             customers = [], setCustomersRaw, customerActivities = {}, setCustomerActivities,
                             contacts = [], contactActivities = {}, setContactActivities,
-                            profiles = {}, profileFacts = {}, accounting = [], invoices = [], quotes = [], forms = []}){
-  WF_LIVE = {profiles, facts:profileFacts, accounting, invoices, users:data.users || [], properties:data.properties || [], forms, workflows:data.workflows || []};
+                            profiles = {}, profileFacts = {}, accounting = [], invoices = [], quotes = [], forms = [], merge = null}){
+  WF_LIVE = {profiles, facts:profileFacts, accounting, invoices, users:data.users || [], properties:data.properties || [], forms, workflows:data.workflows || [], merge};
   const [es, setEs] = React.useState(() => withoutLegacyViolationStatus(withoutSuggestive(savedSlice('engine') || (WF_SAVED && WF_SAVED.engine) || EMPTY_ENGINE())));
   const esRef = React.useRef(es);
   const dataRef = React.useRef(data); dataRef.current = data;
@@ -2395,6 +2397,9 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
 
   const api = {
     addDealActivity, updateDealActivity, deleteRecordActivity,
+    /* Records merged (App's mergeRecords): their activity moves in one change — the same activity
+       objects in every store, so nothing is seen as new and no workflow runs on it. */
+    editActivities,
     /* Remedies (a workflow's guide): a new associated record, linked to the record — as Create
        Associated Record does, by a person; an existing one linked (a deal's or customer's contact, a
        customer's deal). The workflows then check their conditions again. */

@@ -112,7 +112,8 @@ const ADMIN_TOOL_SETTINGS = [{key:'email', label:'Email'}, {key:'calls', label:'
 const ADMIN_RECORD_OBJECTS = ['contacts', 'deals', 'customers'];
 /* ── Object permissions ── per Object (Contacts, Deals; Customers later), one shape:
      {enabled, create:{on}, view|edit|delete|merge|assign|createAssociated:{on, scope, life}}
-   Standard permissions: Create (on / off), then View, Edit, Delete and Merge. Administrative
+   Standard permissions: Create (on / off), then View, Edit, Delete and Merge (a merge case shows,
+   and can be merged or kept separate, when it covers every record in it — merge.jsx). Administrative
    (Full Seats only): Assign <Object> Owner and Create Associated Object. A scoped permission has a
    Type — Their <records>, Their Team <records>, All <records> — and, for Their / Their Team, a
    Permission Life: until the record is reassigned (the permission goes with the owner), or until

@@ -104,10 +104,13 @@ function submitFormValues(hub, engineCtx, form, via, values, at){
    are kept, so the records it created keep their Form Name and Form Submission Date (history). */
 const deletedForm = (f) => ({id:f.id, name:f.name, target:f.target, fields:[], sources:[], submissions:f.submissions || [], deleted:true, deletedAt:new Date()});
 /* The submission that created each record ("<object>:<id>" → {form, submission}): Form Name and
-   Form Submission Date on the record, and the Form properties in workflows. */
+   Form Submission Date on the record, and the Form properties in workflows. A record merged with
+   others (merge.jsx) carries their submissions too: the earliest is the one that created it. */
 const formSubmissionIndex = (forms) => {
-  const m = new Map();
-  (forms || []).forEach(f => (f.submissions || []).forEach(s => { if(s.recordId != null) m.set(`${s.object}:${s.recordId}`, {form:f, submission:s}); }));
+  const m = new Map(), at = (x) => new Date(x.submission.at).getTime() || 0;
+  (forms || []).forEach(f => (f.submissions || []).forEach(s => { if(s.recordId == null) return;
+    const k = `${s.object}:${s.recordId}`, hit = {form:f, submission:s};
+    if(!m.has(k) || at(hit) < at(m.get(k))) m.set(k, hit); }));
   return m;
 };
 const formRecordValues = (index, object, id) => {
