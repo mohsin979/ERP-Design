@@ -27,7 +27,7 @@
                  context — created since; a Pipeline — entered that pipeline since; a Stage —
                  entered that stage since (not necessarily a new record). The engine enforces it.
    (Additional conditions are off for now: not shown, not evaluated.)
-   On the canvas: CONTEXT (Record in: the branch → Object → Pipeline → Stage) → TRIGGER (each trigger's type
+   On the canvas: CONTEXT (Record in: the branch, "Migration | CRM" → Object → Pipeline → Stage) → TRIGGER (each trigger's type
    and summary) → ACTION (the actions, by name only).
    Selecting a block opens its configuration on the right. Each action can wait before it runs
    (the clock beside its delete icon; not Enroll in Email Sequence, whose emails carry their own schedule).
@@ -507,8 +507,10 @@ const WORKFLOW_CONTEXT_FIELDS = {
 };
 // The display name of a context value (e.g. 'us-niw' → 'US NIW').
 const workflowContextLabel = (data, key, ctx) => ((WORKFLOW_CONTEXT_FIELDS[key].options(data, ctx) || []).find(o => o.value === ctx[key]) || {}).label || '';
-// "Migration CRM → Deals → Total Amount → US NIW → CCL Sent": the branch first (levels added but not chosen yet are left out).
-const contextPathOf = (data, ctx) => [`${ACTIVE_CRM.name} CRM`, ...WORKFLOW_CONTEXT_LEVELS.filter(k => ctx && ctx[k]).map(k => workflowContextLabel(data, k, ctx))].join(' → ');
+// "Deals → Total Amount → US NIW → CCL Sent" (levels added but not chosen yet are left out).
+const contextLevelsOf = (data, ctx) => WORKFLOW_CONTEXT_LEVELS.filter(k => ctx && ctx[k]).map(k => workflowContextLabel(data, k, ctx)).join(' → ');
+// "Migration | CRM → Deals → …": the branch first, as the CRM sidebar's head names it (a run keeps this text).
+const contextPathOf = (data, ctx) => [`${ACTIVE_CRM.name} | CRM`, contextLevelsOf(data, ctx)].filter(Boolean).join(' → ');
 // A stage's name, in whichever pipeline it's in.
 const anyStageLabel = (data, id) => (((data.pipelines || []).flatMap(p => p.stages || [])).find(s => s.id === id) || {}).label || '';
 
@@ -1891,7 +1893,8 @@ function ContextSection({data, context, onChange}){
   );
   return cfgPart(null, (
     <div style={{display:'flex', flexDirection:'column', gap:8}}>
-      {row('Started from', <span style={{fontSize:13, color:T.attioText}}>{ACTIVE_CRM.name} CRM</span>)}
+      {/* The branch as the CRM sidebar's head shows it ("Migration | CRM", workspaces.jsx branchLabel). */}
+      {row('Started from', <span style={{fontSize:13, fontWeight:600, color:T.attioText, whiteSpace:'nowrap'}}>{branchLabel(ACTIVE_CRM.name, 'CRM')}</span>)}
       {WORKFLOW_CONTEXT_LEVELS.filter(has).map(k => {
         const f = WORKFLOW_CONTEXT_FIELDS[k];
         return row(f.label, <FormSelect value={ctx[k] || ''} placeholder={`Select ${f.label.toLowerCase()}`} options={f.options(data, ctx)} onChange={(v)=>set(k, v)}/>,
@@ -2107,8 +2110,8 @@ function WorkflowEditor({data, initial, onCancel, onSave, onDelete, onRename, on
     if(draft.actions.length) setSelected(draft.actions[0].id);
     else { setSelected('actions'); setAdding(true); }
   };
-  // The context as a path: Migration CRM → Deals → US NIW → Qualified Client.
-  const contextPath = contextPathOf(data, draft.context);
+  // The context as a path: Migration | CRM → Deals → US NIW → Qualified Client.
+  const contextLevels = contextLevelsOf(data, draft.context);
   // An action's timing shows while its clock is on (on by default when it already waits);
   // turning the clock off removes the wait, so what's shown is what applies.
   const timingShown = (a) => timingOpen[a.id] ?? Number((a.wait || {}).amount) > 0;
@@ -2305,7 +2308,8 @@ function WorkflowEditor({data, initial, onCancel, onSave, onDelete, onRename, on
             <WorkflowCard tab="CONTEXT" icon="cube" selected={selected === 'context'} onSelect={()=>setSelected('context')}>
               <div style={{display:'flex', flexDirection:'column', gap:2, minWidth:0}}>
                 <span style={{fontSize:11.5, color:T.attioMuted}}>Record in</span>
-                <span style={{fontSize:12.5, fontWeight:500, lineHeight:1.45, color: contextPath ? T.attioText : T.gray400}}>{contextPath || 'Select a context'}</span>
+                {/* The branch as the CRM sidebar's head shows it ("Migration | CRM", workspaces.jsx branchLabel), then the levels. */}
+                <span style={{fontSize:12.5, fontWeight:500, lineHeight:1.45, color:T.attioText}}><span style={{fontWeight:600}}>{branchLabel(ACTIVE_CRM.name, 'CRM')}</span>{contextLevels ? ` → ${contextLevels}` : ''}</span>
               </div>
             </WorkflowCard>
             </div>

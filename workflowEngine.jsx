@@ -3275,6 +3275,9 @@ const TRACE_STATUS = {
 const traceStatusPill = (status) => { const s = TRACE_STATUS[status] || TRACE_STATUS.unknown; return (
   <span style={{flexShrink:0, height:20, padding:'0 8px', borderRadius:9999, background:s.bg, color:s.color, fontSize:11.5, fontWeight:600, display:'inline-flex', alignItems:'center'}}>{s.label}</span>
 ); };
+// A run's context as the canvas shows it: the branch ("Migration | CRM") as the sidebar's head names it, then the levels.
+const traceContextOf = (text) => { const [head, ...rest] = String(text || '').split(' → '), m = head.match(/^(.*) \| (.*)$/);
+  return m ? <><span style={{fontWeight:600}}>{branchLabel(m[1], m[2])}</span>{rest.length ? ` → ${rest.join(' → ')}` : ''}</> : text; };
 function WorkflowTrace({trace, now, actions, restriction, replay}){
   const wrapRef = React.useRef(null), refs = React.useRef({rows:{}});
   const [geo, setGeo] = React.useState(null);
@@ -3340,7 +3343,7 @@ function WorkflowTrace({trace, now, actions, restriction, replay}){
         <WorkflowCard tab="CONTEXT" icon="cube" width={TRACE_W} selected={!!reached.context} bodyRef={el => refs.current.context = el}>
           <div style={{display:'flex', flexDirection:'column', gap:2}}>
             <span style={{fontSize:11.5, color:T.attioMuted}}>Record in</span>
-            <span style={{fontSize:12.5, fontWeight:500, lineHeight:1.45, color:T.attioText}}>{trace.context}</span>
+            <span style={{fontSize:12.5, fontWeight:500, lineHeight:1.45, color:T.attioText}}>{traceContextOf(trace.context)}</span>
           </div>
         </WorkflowCard>
         <WorkflowCard tab="CURRENT PARAMETERS" dark width={TRACE_W} bodyRef={el => refs.current.params = el}>
