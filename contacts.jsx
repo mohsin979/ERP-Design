@@ -1704,6 +1704,13 @@ function TableBoardSwitch({mode, onChange}){
   );
 }
 
+// A view pill (the toolbar's views; also status tabs that work like them, e.g. Payment Plans' Active / Paid / Frozen).
+const viewPillStyle = (isActive) => ({
+  border:`1px solid ${isActive ? T.black : T.borderStrong}`,
+  background: isActive ? T.black : '#fff', cursor:'pointer', fontSize:13,
+  padding:'6px 12px', borderRadius:8, fontWeight: isActive ? 600 : 500,
+  color: isActive ? '#fff' : T.gray800, flexShrink:0, fontFamily:'inherit',
+});
 /* `filterControls`: on the far right of the filters row (e.g. Merge Cases, Workflow Violations). */
 function RecordToolbar({inset = 'page', views, activeViewId, onSelectView, viewControls, controls, search, onSearch, filters, setFilters, appliedFilterCount, filterControls}){
   const [showFilters, setShowFilters] = React.useState(false);
@@ -1717,12 +1724,7 @@ function RecordToolbar({inset = 'page', views, activeViewId, onSelectView, viewC
         {views.map(v => {
           const isActive = activeViewId === v.id;
           return (
-            <button key={v.id} onClick={()=>onSelectView(v.id)} style={{
-              border:`1px solid ${isActive ? T.black : T.borderStrong}`,
-              background: isActive ? T.black : '#fff', cursor:'pointer', fontSize:13,
-              padding:'6px 12px', borderRadius:8, fontWeight: isActive ? 600 : 500,
-              color: isActive ? '#fff' : T.gray800, flexShrink:0, fontFamily:'inherit',
-            }}>{v.name}</button>
+            <button key={v.id} onClick={()=>onSelectView(v.id)} style={viewPillStyle(isActive)}>{v.name}</button>
           );
         })}
       </div>
@@ -2299,5 +2301,5 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
   );
 }
 
-Object.assign(window, {exportViewCsv, gridRowsOf, withScopeFilters, recordScopeFilterProps, newContactRecord, contactView, ownerUserOptions, assocFilterSchema, withAssocRecords, withAssocFilters, RecordToolbar, TableBoardSwitch, toolbarButton, toolbarIconButton, ContactsModule, RecordSchema, useRecordSchema, ContactsDataGrid, Pagination, SaveViewMenu, FilterModal,
+Object.assign(window, {viewPillStyle, exportViewCsv, gridRowsOf, withScopeFilters, recordScopeFilterProps, newContactRecord, contactView, ownerUserOptions, assocFilterSchema, withAssocRecords, withAssocFilters, RecordToolbar, TableBoardSwitch, toolbarButton, toolbarIconButton, ContactsModule, RecordSchema, useRecordSchema, ContactsDataGrid, Pagination, SaveViewMenu, FilterModal,
   TableSettingsModal, ViewSettingsDrawer, ConfirmOverwriteModal, SaveAsCopyModal, applyFilters, countAppliedFilters, EMPTY_FILTERS});

@@ -496,7 +496,7 @@ const DETAIL_MS = 320;
    CRM's records (USER_STATS, dashboard.jsx). */
 const OWNER_DESIGNATIONS = {'Super Admin':'Head of Sales', 'Admin':'Sales Manager', 'Team Lead':'Sales Team Lead', 'Sales Professional':'Sales Consultant',
   'Case Manager':'Case Manager', 'Petition Writer':'Petition Writer', 'Compliance':'Compliance Officer', 'Viewer':'Sales Associate'};
-// One language each (a Language property's value), in the same five places so the draws don't move.
+// A language each to start with (a Language property holds one or more), in the same five places so the draws don't move.
 const OWNER_LANGUAGES = ['Urdu', 'Arabic', 'Punjabi', 'Hindi', 'English'];
 const OWNER_COUNTRIES = ['Pakistan', 'United Arab Emirates', 'Pakistan', 'Canada', 'United Kingdom'];
 function ownerProfileMock(name, user){
@@ -516,9 +516,9 @@ function ownerProfileMock(name, user){
 // The user-managed properties when none are passed (Settings → Properties → Users has them).
 const OWNER_EDITABLE_PROPERTIES = [{key:'country', label:'Country', type:'Country'}, {key:'language', label:'Language', type:'Language'}, {key:'designation', label:'Designation', type:'Single-Line Text'}];
 /* An editable value in the panel's row, by its property's type: click to edit with the type's own
-   control; a pick (Country, Language, a selection, True / False) saves at once; the others save
+   control; a pick (Country, a selection, True / False) saves at once; the others save
    with Save or Enter (Esc cancels). An invalid value isn't saved — its error shows. */
-const SAVES_ON_PICK = ['Country', 'Language', 'Single Selection', 'User', 'Boolean'];
+const SAVES_ON_PICK = ['Country', 'Single Selection', 'User', 'Boolean'];
 /* `pencil`: an edit icon beside the value opens the editor — 'always' shown, or on 'hover' of the
    row (record side panels) — instead of clicking the value. `options`: labelled choices for the
    input ({value, label}; the property's `options` hold the values). `display`: the value as shown. */

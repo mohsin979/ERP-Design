@@ -207,8 +207,10 @@ const PROPERTY_TYPE_DEFS = [
   PT({id:'User', ...choiceValue, format:(v) => typeof userLabel === 'function' ? userLabel(v) || ptText(v) : ptText(v)}),
   PT({id:'Country', ...choiceValue, options:() => countryOptions(),
     validate:(v) => ptBlank(v) || COUNTRY_LIST.some(c => c.name === v) ? null : 'Choose a country'}),
-  PT({id:'Language', ...choiceValue, options:() => LANGUAGE_LIST,
-    validate:(v) => ptBlank(v) || LANGUAGE_LIST.includes(v) ? null : 'Choose a language'}),
+  // Language: one or more languages (a person speaks several) — a list, matched like Multi-Selection.
+  PT({id:'Language', compare:'multi', ops:ptOps('containsAny', 'containsAll', 'notContainsAny', 'isEmpty', 'isNotEmpty', 'changed', 'notChanged'),
+    options:() => LANGUAGE_LIST, empty:(v) => !ptList(v).length, store:(v) => ptList(v), load:(v) => ptList(v), format:(v) => ptList(v).join(', '),
+    validate:(v) => ptList(v).every(x => LANGUAGE_LIST.includes(x)) ? null : 'Choose from the languages'}),
   // System types: a record's pipeline and its stage (picked from the record type's pipelines).
   PT({id:'Pipeline', ...choiceValue, creatable:false}),
   PT({id:'Pipeline stage', ...choiceValue, creatable:false}),
@@ -271,8 +273,8 @@ function convertPropertyValue(fromP, toP, v){
     case 'Date': return keep(ptDay(text) !== null ? defOf('Date').store(defOf('Date').load(text)) : null);
     case 'Timestamp': return keep(!isNaN(new Date(text).getTime()) ? defOf('Timestamp').store(new Date(text)) : null);
     case 'Boolean': return ptBool(text) === null ? {value:'', cleared:true} : {value:ptBool(text), cleared:false};
-    case 'Multi-Selection': { const all = opts(defOf(to)), list = ptList(fromType === 'Multi-Selection' ? v : text).filter(x => all.includes(x)); return keep(list.length ? list : null); }
-    case 'Single Selection': case 'Country': case 'Language': return keep(pick(opts(defOf(to))) || null);
+    case 'Multi-Selection': case 'Language': { const all = opts(defOf(to)), list = ptList(['Multi-Selection', 'Language'].includes(fromType) ? v : text).filter(x => all.includes(x)); return keep(list.length ? list : null); }
+    case 'Single Selection': case 'Country': return keep(pick(opts(defOf(to))) || null);
     case 'User': { const u = (typeof USER_DIRECTORY !== 'undefined' ? USER_DIRECTORY : []).find(x => !x.deleted && (x.id === v || x.name.toLowerCase() === text.toLowerCase())); return keep(u ? u.id : null); }
     case 'Location': case 'Date Range': case 'Custom Range': case 'File Upload': return {value:'', cleared:true};
     default: return keep(text);   // the text types (Single- / Multi-Line Text, Email, URL, Phone Number) — if valid
@@ -293,6 +295,9 @@ function propertyValueMatches(p, opId, actual, value){
     if(opId === 'containsAny') return want.some(w => have.includes(w));
     if(opId === 'containsAll') return want.every(w => have.includes(w));
     if(opId === 'notContainsAny') return !want.some(w => have.includes(w));
+    // Saved while the property held one value (Language): Is / Is not.
+    if(opId === 'equals') return want.some(w => have.includes(w));
+    if(opId === 'notEquals') return !want.some(w => have.includes(w));
     return false;
   }
   if(compare === 'number' || compare === 'amount'){
@@ -435,13 +440,14 @@ function TypedPropertyInput({prop, value, onChange, options, invalid, autoFocus,
       ? <div style={stacked ? {display:'flex', flexDirection:'column', gap:10, paddingTop:4} : {display:'flex', flexWrap:'wrap', gap:'8px 16px', paddingTop:6}}>{opts.map(o => { const v = typeof o === 'string' ? o : o.value, l = typeof o === 'string' ? o : o.label; return radio(value === v, ()=>onChange(v), l); })}</div>
       : select(value, onChange, prop.placeholder || `Select ${String(prop.label || '').toLowerCase()}`);
     case 'Multi-Selection': return <MultiSelectMenu value={value} options={opts} onChange={onChange} invalid={invalid}/>;
+    case 'Language': return <MultiSelectMenu value={value} options={opts} onChange={onChange} invalid={invalid} placeholder="Select languages"/>;
     case 'File Upload': return (
       <div style={{display:'flex', alignItems:'center', gap:8}}>
         <input type="file" onChange={e=>onChange(e.target.files[0] ? e.target.files[0].name : '')} style={{...base, padding:'6px 10px', flex:1, minWidth:0}}/>
         {!ptBlank(value) && <span style={{fontSize:12.5, color:T.attioMuted, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', maxWidth:140}}>{value}</span>}
       </div>
     );
-    case 'User': case 'Country': case 'Language': case 'Pipeline': case 'Pipeline stage':
+    case 'User': case 'Country': case 'Pipeline': case 'Pipeline stage':
       return select(value, onChange, prop.placeholder || `Select ${String(prop.label || type).toLowerCase()}`);
     default: return <input autoFocus={autoFocus} type="text" value={ptText(value)} onChange={e=>onChange(e.target.value)} placeholder={prop.placeholder || ''} style={base}/>;
   }

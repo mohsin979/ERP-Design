@@ -12,18 +12,20 @@
                  fixed. A Stage in the context scopes every trigger to records currently in that
                  stage; a Property is the one Property Update triggers watch.
      Triggers  — the events that start a run, added in the Trigger node from a nested menu (the
-                 Add Action pattern): Property Events, Stage Events, Record Events, Activity
-                 Events; one or more, each configured on its own in the Trigger panel. Each
+                 Add Action pattern): Property Events, Stage Events, Record Events (New Record,
+                 Associated Record, Record Is Changed / Not Changed, Form Submitted, Record Is
+                 Duplicated — a Form Refill or a Duplicate, where the record type reports merge
+                 cases), Activity Events; one or more, each configured on its own in the Trigger panel. Each
                  trigger carries its own settings in `triggerConfig` (a property and its
                  condition; a stage — unless the context has one — and Stay at Stage's duration;
                  an activity property), adapted to the trigger and the context. With two or more,
                  `triggerMatch` relates them: 'all' — every trigger has fired for the record (in
                  any order; the run starts on the last one, then they're needed again) — or
                  'any' — any one of them fires.
-     Trigger Scope — which records the triggers apply to (`triggerScope`, one per workflow): New
+     Trigger Scope — which records the triggers apply to (`triggerScope`, one per workflow): All
+                 Records (what a workflow starts on, decided 2026-11-13) — existing ones too; New
                  Records — only records new to the context since the workflow was configured
-                 (`scopeSince`, stamped when it's saved with New Records); All Records — existing
-                 ones too. "New" follows the context: an Object (or Property, or Company-wide)
+                 (`scopeSince`, stamped when it's saved with New Records). "New" follows the context: an Object (or Property, or Company-wide)
                  context — created since; a Pipeline — entered that pipeline since; a Stage —
                  entered that stage since (not necessarily a new record). The engine enforces it.
    (Additional conditions are off for now: not shown, not evaluated.)
@@ -42,7 +44,9 @@
    Property-Based (Set Property Value, Prompt to Update Property, Clear Property Value), Pipeline
    and Stage (Move Stage Forward / Backward, Move to Specific Stage, Block Stage Entry), Activity-
    Based (Create Task, Enroll in Email Sequence, Exit Email Sequence, Schedule Meeting), Record Management (Create
-   Associated Record) and Administrative (Notify). Add Note was removed. Each plugs its
+   Associated Record, Merge Record — only with the Record Is Duplicated trigger; its rules are
+   merge.jsx's) and Administrative (Notify, Assign Record Owner). Add Note was removed. The panels
+   carry no explanatory copy (2026-11-13). Each plugs its
    configuration in through WORKFLOW_ACTION_CONFIGS; most hold one or more entries. Runs, events
    and Workflow Violations: workflowEngine.jsx.
 
@@ -187,6 +191,9 @@ const WORKFLOW_TRIGGER_GROUPS = [
     // None of the record's properties (its stage too) changed for the duration — once per quiet period.
     {key:'recordNotChanged', label:'Record Is Not Changed', icon:'clock', settings:['duration']},
     {key:'formSubmitted', label:'Form Submitted',   icon:'forms', settings:['form']},
+    /* The duplicate check marks the record (merge.jsx Merge Status) as the chosen type — Form Refill
+       or Duplicate. Offered where the record type reports merge cases (Settings → Records). */
+    {key:'recordDuplicated', label:'Record Is Duplicated', icon:'merge', settings:['duplicateType']},
   ]},
   {key:'activity', label:'Activity Events', icon:'activity', triggers:[
     {key:'emailEvents',   label:'Email Events',   icon:'envelope', settings:['activityProperty']},
@@ -198,6 +205,10 @@ const WORKFLOW_TRIGGER_GROUPS = [
     {key:'fileEvents',    label:'File Events',    icon:'files',    settings:['activityProperty']},
   ]},
 ];
+const DUPLICATE_TYPES = ['Form Refill', 'Duplicate'];
+// A trigger offered in the Add Trigger menu: Record Is Duplicated only with Merge Cases Reporting on for the record type.
+const triggerOffered = (key, data, context) => key !== 'recordDuplicated' || mergeReportingOn(data, (context || {}).object);
+const hasDuplicateTrigger = (w) => ((w && w.triggers) || []).some(t => t.trigger === 'recordDuplicated') || (w && w.trigger === 'recordDuplicated');
 // A group in a context: Company-wide, Property, Stage — the document's rules (see above).
 const triggerGroupAvailable = (g, context) => {
   const ctx = context || {};
@@ -305,15 +316,6 @@ const associatedRecordSummary = (data, w) => {
     return when ? `${x} is ${c.assocParam === 'notCreated' ? 'not created' : 'not changed'} ${when}` : '';
   }
   return `${x} is ${c.assocParam === 'changed' ? 'changed' : 'created'}`;
-};
-const associatedParamHelp = (data, ctx, c) => {
-  const x = c.associatedObject ? objectSingular(data, c.associatedObject).toLowerCase() : 'record', me = objectSingular(data, ctx.object).toLowerCase();
-  return ({
-    created:`A new ${x} is linked to this ${me}.`,
-    notCreated:`This ${me} has no ${x}.`,
-    changed:`A linked ${x} changes.`,
-    notChanged:`No linked ${x} changes`,
-  })[c.assocParam] || '';
 };
 /* Each save is a new version of the workflow (runs record the version they ran); a new workflow
    is active unless it was switched off before saving. Shared by the pipeline panel and the
@@ -469,9 +471,9 @@ const normalizeWorkflow = (w) => {
   });
   // Per-workflow permission lists and Override no longer exist — dropped (Workflows permissions apply).
   const {overrides:oldOverrides, permissions:oldPermissions, ...rest2} = kept;
-  /* Trigger Scope: a new workflow starts on New Records; one saved before the setting existed
-     keeps applying to all records, as it did. */
-  const triggerScope = TRIGGER_SCOPES.some(s => s.key === w.triggerScope) ? w.triggerScope : w.version ? 'all' : 'new';
+  /* Trigger Scope: a workflow starts on All Records (decided 2026-11-13 — it acts on the records
+     already there too) until New Record is chosen. */
+  const triggerScope = TRIGGER_SCOPES.some(s => s.key === w.triggerScope) ? w.triggerScope : 'all';
   /* Workflow type: a workflow saved before types existed takes the one its actions ran as — Enforce
      Rules when it blocks a stage or runs only automatic actions, else Track Violations. A new draft
      has none until it's chosen. */
@@ -483,7 +485,7 @@ const normalizeWorkflow = (w) => {
     appliesTo:Array.isArray(w.appliesTo) ? w.appliesTo : []};
 };
 /* Trigger Scope options (what a "new" record is in each context: see the header). */
-const TRIGGER_SCOPES = [{key:'new', label:'New Record'}, {key:'all', label:'All Records'}];
+const TRIGGER_SCOPES = [{key:'all', label:'All Records'}, {key:'new', label:'New Record'}];
 /* Each trigger as a single-trigger view of its workflow ({...workflow, trigger, triggerConfig,
    triggerId}) — what the per-trigger helpers (settings, summary, matching) read. */
 const workflowTriggerViews = (w) => { const n = normalizeWorkflow(w); return n.triggers.map(t => ({...n, trigger:t.trigger, triggerConfig:t.triggerConfig || {}, triggerId:t.id})); };
@@ -527,6 +529,7 @@ const triggerIssue = (data, w) => {
     : ctx.property ? `A Property context offers property triggers only.` : g.needsStage ? `${g.label} need a Stage in the context.`
     : g.noStage ? `${g.label} aren't available at a Stage — use the Record or Pipeline context.` : `${g.label} aren't available here.`};
   const objName = objectName(data, ctx.object);
+  if(t.key === 'recordDuplicated' && !mergeReportingOn(data, ctx.object)) return {message:`Merge Cases Reporting is off for ${objName}.`};
   if(t.key === 'associatedRecord' && c.associatedObject && !associatedObjectsOf(ctx.object).includes(c.associatedObject))
     return {message:`${objName} records don’t have an associated ${objectSingular(data, c.associatedObject)}. Choose the associated object.`};
   const timed = (t.key === 'associatedRecord' && associatedParamTimed(c.assocParam)) || (t.key === 'propertyUpdate' && isChangeOp(c.op));
@@ -566,8 +569,10 @@ const triggerIssue = (data, w) => {
   return null;
 };
 const PROPERTY_ACTIONS = ['setPropertyValue', 'clearProperty', 'promptUpdateProperty', 'promptClearProperty'], MOVE_STAGE_ACTIONS = ['moveStageForward', 'moveStageBackward', 'moveToStage'];
-const actionIssue = (data, a, context, typeKey) => {
+// `w`: the workflow (its triggers), where an action depends on them (Merge Record).
+const actionIssue = (data, a, context, typeKey, w) => {
   const ctx = context || {}, c = a.config || {};
+  if(a.type === 'mergeRecord' && w && !hasDuplicateTrigger(w)) return {message:'Merge Record needs the Record Is Duplicated trigger.'};
   // Add Note isn't a workflow action any more; one saved before stays until it's removed.
   if(a.type === 'addNote') return {message:'Add Note is no longer a workflow action. Remove it.'};
   if(typeKey && !actionFitsType(typeKey, a)){
@@ -639,7 +644,7 @@ const countRepeatable = (c) => !!c && (c.op === 'gt' || c.op === 'lt');
 const repeatStepLabel = (c) => (c || {}).op === 'lt' ? 'decrement' : 'increment';
 const triggersReady = (w, data) => { const views = workflowTriggerViews(w); return views.length > 0 && views.every(v => triggerReady(v, data)); };
 // Actions ready (what Go to Workflow Control needs): the triggers ready, and at least one action, none needing attention.
-const actionsReady = (w, data) => triggersReady(w, data) && (w.actions || []).length > 0 && w.actions.every(a => !actionIssue(data, a, w.context, w.type));
+const actionsReady = (w, data) => triggersReady(w, data) && (w.actions || []).length > 0 && w.actions.every(a => !actionIssue(data, a, w.context, w.type, w));
 // Save: the actions ready, and a workflow type (chosen in Workflow Control) that fits every one.
 const workflowReady = (w, data) => !!workflowTypeOf(w.type) && actionsReady(w, data);
 /* An action's Behavior, set beneath the action: the options each action offers (the first is
@@ -668,7 +673,11 @@ const ACTION_BEHAVIORS = {
   deleteRecord:           ['required'],
   updateAssociatedRecord: ['automatic'],
   classifyRecord:         ['automatic'],
-  assignOwner:            ['automatic'],
+  /* Assign Record Owner: Enforce Rules assigns; Track Violations proposes the owner — a violation on
+     the record, all of them in one Owner Assignments card (workflowEngine.jsx) to approve together. */
+  // Merge Record: the merge runs on its own, by the rules set on the action (no approval per case).
+  mergeRecord:            ['automatic'],
+  assignOwner:            ALL_BEHAVIORS,
   moveStageForward:       ALL_BEHAVIORS,
   moveStageBackward:      ALL_BEHAVIORS,
   moveToStage:            ALL_BEHAVIORS,
@@ -687,14 +696,8 @@ const behaviorOptions = (type, config) => { const o = ACTION_BEHAVIORS[type]; re
 const actionBehavior = (a) => { const opts = behaviorOptions(a.type, a.config); const b = (a.config || {}).behavior; return opts ? (opts.includes(b) ? b : opts[0]) : b || 'automatic'; };
 /* Beneath an action's settings: how it runs — set by the workflow's type (Enforce Rules:
    automatically; Track Violations: as the Workflow Violation's resolving action). */
-const behaviorField = (type, config, setConfig, single) => {
-  const opts = behaviorOptions(type, config);
-  if(!opts) return null;
-  const b = actionBehavior({type, config});
-  return cfgPart('How it runs', cfgHelp(single && b === 'automatic' ? single
-    : b === 'automatic' ? 'Enforce Rules: runs automatically when the triggers are met.'
-    : 'Track Violations: when the triggers are met, a Workflow Violation is raised on the record — doing this resolves it.'));
-};
+// Nothing is shown: the workflow's type says how its actions run (no explanatory copy in the panels).
+const behaviorField = () => null;
 const triggerReady = (w, data) => {
   const t = workflowTrigger(w.trigger), c = w.triggerConfig || {};
   if(!t || t.disabled || triggerIssue(data, w)) return false;
@@ -775,8 +778,8 @@ const triggerSummary = (data, w) => {
   if(t.key === 'propertyUpdate'){
     const base = propertyConditionSummary(data, w), sc = scopeOf(w.triggerConfig);
     if(!base) return '';
-    // Whose: the owner's (a record's) or a user's (Company-wide); any installment / payment terms.
-    return sc === 'owner' ? `${(w.context || {}).object ? 'Owner' : 'User'}'s ${base}` : sc === 'accounting' ? `Any ${base}` : base;
+    // Whose: the owner's (a record's) or a user's (Company-wide).
+    return sc === 'owner' ? `${(w.context || {}).object ? 'Owner' : 'User'}'s ${base}` : base;
   }
   const c = w.triggerConfig || {};
   if(['pipelineEntry', 'pipelineExit', 'stayInPipeline'].includes(t.key)){
@@ -786,6 +789,7 @@ const triggerSummary = (data, w) => {
   }
   if(t.key === 'recordNotChanged') return durationLabel(c) ? `Record is not changed for ${durationLabel(c).toLowerCase()}` : '';
   if(t.key === 'formSubmitted') return c.form ? `Form ${wfQuote(c.formName || 'selected')} is submitted` : 'Any form is submitted';
+  if(t.key === 'recordDuplicated') return c.duplicateType ? `Merge Status is ${wfQuote(c.duplicateType)}` : '';
   if(t.key === 'associatedRecord') return associatedRecordSummary(data, w);
   if(STAGE_SUMMARIES[t.key]){
     const stage = workflowStage(w);
@@ -824,6 +828,8 @@ const WORKFLOW_ACTIONS = [
     {key:'updateAssociatedRecord', label:'Update Associated Record', icon:'edit'},
     {key:'deleteRecord',           label:'Delete Record',            icon:'trash'},
     {key:'classifyRecord',         label:'Classify Record (AI)',     icon:'sparkle'},
+    // Only with the Record Is Duplicated trigger (actionOffered): the record's merge case is merged by the action's rules (merge.jsx).
+    {key:'mergeRecord',            label:'Merge Record',             icon:'merge'},
   ]},
   // Log vs live: Add Call Log / Create Meeting record what happened; Initiate Call / Schedule Meeting are live.
   {key:'activityActions', label:'Activity Based Actions', icon:'activity', children:[
@@ -845,8 +851,10 @@ const WORKFLOW_ACTIONS = [
 const RETIRED_ACTIONS = [{key:'addNote', label:'Add Note', icon:'notepad'}];
 const leafActions = (list) => list.flatMap(a => a.children ? leafActions(a.children) : [a]);
 const workflowAction = (key) => [...leafActions(WORKFLOW_ACTIONS), ...RETIRED_ACTIONS].find(a => a.key === key);
-// The Add Action menu for a type: only the actions that run its way.
-const actionsForType = (typeKey) => WORKFLOW_ACTIONS.map(g => ({...g, children:g.children.filter(a => actionFitsType(typeKey, {type:a.key, config:{}}))})).filter(g => g.children.length);
+// An action offered for a workflow: Merge Record only with the Record Is Duplicated trigger.
+const actionOffered = (key, w) => key !== 'mergeRecord' || hasDuplicateTrigger(w);
+// The Add Action menu for a workflow: only the actions that run its type's way (once chosen) and fit its triggers.
+const actionsForType = (typeKey, w) => WORKFLOW_ACTIONS.map(g => ({...g, children:g.children.filter(a => (!typeKey || actionFitsType(typeKey, {type:a.key, config:{}})) && actionOffered(a.key, w))})).filter(g => g.children.length);
 
 /* An action in one line, from what's configured: "Move to Postponed", "Set Deal Name to Ali Khan",
    "Clear Deal Close Date", "Prompt to Update Deal Name". The builder's Action node and the event
@@ -954,7 +962,7 @@ const actionSummary = (data, a, context) => {
       if(c.method === 'person' && c.user) return `Assign owner: ${assigneeLabel(data, c.user)}`;
       if(c.method === 'team' && c.team) return `Assign owner in turn within ${((data.teams || []).find(t => t.id === c.team) || {}).name || 'the team'}`;
       if(c.method === 'roundRobin' && (c.users || []).length) return `Assign owner round-robin (${plural(c.users.length, 'person')})`;
-      if(c.method === 'properties' && (c.rules || []).length) return 'Assign owner by User Properties';
+      if(c.method === 'properties' && (c.rules || []).length) return 'Assign owner by properties';
       return label;
     }
   }
@@ -1532,7 +1540,6 @@ function SetPropertyConfig(props){
   return (
     <div style={{padding:'4px 20px 20px', display:'flex', flexDirection:'column', gap:20}}>
       <PropertyEntries {...props} withValue/>
-      {actionBehavior({type:'setPropertyValue', config:props.config}) === 'required' && cfgHelp('The value that resolves the violation. Nothing changes until the record owner updates it.')}
       {behaviorField('setPropertyValue', props.config, props.setConfig)}
     </div>
   );
@@ -1661,7 +1668,6 @@ function ExitSequenceConfig({config, setConfig, data}){
   const c = config || {};
   return cfgPad(<>
     {cfgField('Email Sequence', <FormSelect value={c.sequenceId || ''} placeholder="Select sequence" options={emailSequencesOf(data).map(q => ({value:q.id, label:q.name}))} onChange={(v)=>setConfig({...c, sequenceId:v})}/>)}
-    {cfgHelp('The record’s emails still scheduled from this sequence are cancelled.')}
     {behaviorField('exitEmailSequence', c, setConfig)}
   </>);
 }
@@ -1689,15 +1695,9 @@ function AddCallLogConfig({config, setConfig}){
   </>);
 }
 /* Initiate Call — a live call the owner makes (Track Violations): resolved when a call is made through the dialer. */
-function InitiateCallConfig({config, setConfig}){
-  return cfgPad(<>{cfgHelp('The record owner is asked to call the record. The Workflow Violation is resolved when a call is made through the dialer.')}{behaviorField('initiateCall', config, setConfig)}</>);
-}
+function InitiateCallConfig(){ return null; }
 /* Delete Record — the owner is asked to delete the record (Track Violations), behind the usual confirmation and their delete permission. */
-function DeleteRecordConfig({config, setConfig, context}){
-  const ctx = context || {};
-  if(!ctx.object) return needsRecord(ctx);
-  return cfgPad(<>{cfgHelp('The record owner is asked to delete this record. They confirm it, and need permission to delete it — a workflow never deletes on its own.')}{behaviorField('deleteRecord', config, setConfig)}</>);
-}
+function DeleteRecordConfig({context}){ return needsRecord(context) || null; }
 /* Update Associated Record — the associated records of a type (the contact, its deals, its customers), set to values. */
 function UpdateAssociatedConfig({config, setConfig, data, context}){
   const c = config || {}, ctx = context || {};
@@ -1707,7 +1707,6 @@ function UpdateAssociatedConfig({config, setConfig, data, context}){
     {cfgField('Associated Record', <FormSelect value={c.object || ''} placeholder="Select record" options={targets.map(o => ({value:o, label:objectName(data, o).replace(/s$/, '')}))}
       onChange={(v)=>setConfig({...c, object:v, properties:[]})}/>)}
     {c.object && <PropertyEntries config={c} setConfig={setConfig} data={data} context={{object:c.object}} withValue/>}
-    {c.object && cfgHelp(`Every associated ${objectName(data, c.object).replace(/s$/, '').toLowerCase()} of the record is updated; the triggering record isn't.`)}
     {behaviorField('updateAssociatedRecord', c, setConfig)}
   </>);
 }
@@ -1720,24 +1719,23 @@ function ClassifyConfig({config, setConfig, data, context}){
   return cfgPad(<>
     {cfgField('Property', <FormSelect value={c.property || ''} placeholder="Select property" options={props.map(p => ({value:p.key, label:p.label}))} onChange={(v)=>setConfig({...c, property:v})}/>)}
     {prop && cfgPart('Possible values', cfgHelp((prop.options || []).join(' · ')))}
-    {cfgHelp('The AI reads the record’s data and sets the property to the value that fits — then it can be used in filters. (Mocked until an AI is connected; marked as AI in the run.)')}
     {behaviorField('classifyRecord', c, setConfig)}
   </>);
 }
-/* Assign Record Owner — to a person; in turn within a team; round-robin over an ordered list; or to a
-   user matching User Property conditions (several match: in turn among them; none: the owner stays). */
-const ASSIGN_METHODS = [
-  {key:'person', label:'Assign to a Person', description:'A specific sales professional.'},
-  {key:'team', label:'Within a Team', description:'The team’s members in turn, each time it runs.'},
-  {key:'roundRobin', label:'Round-Robin', description:'An ordered list, one after another, then back to the first.'},
-  {key:'properties', label:'Based on Owner Properties', description:'A user matching the conditions; several: in turn; none: the owner stays.'},
-];
+/* Assign Record Owner — to a person; in turn within a team; round-robin over an ordered list; or by
+   Multiple Properties: users matching every User Property condition, in turn — among everyone, or
+   (Among) only a team's members or an ordered list. None match: the owner stays. No explanatory
+   copy in the panel. */
+const ASSIGN_METHODS = [{key:'person', label:'Assign to a Person'}, {key:'team', label:'Within a Team'}, {key:'roundRobin', label:'Round-Robin'}, {key:'properties', label:'Multiple Properties'}];
+// All Users has a value of its own: the dropdown shows an empty value as nothing chosen.
+const ASSIGN_POOLS = [{value:'all', label:'All Users'}, {value:'team', label:'Within a Team'}, {value:'roundRobin', label:'Round-Robin'}];
 const assignOwnerReady = (c) => { c = c || {};
   return c.method === 'person' ? !!c.user : c.method === 'team' ? !!c.team : c.method === 'roundRobin' ? (c.users || []).length > 0
     : c.method === 'properties' ? (c.rules || []).length > 0 && c.rules.every(r => { const op = r.property && fieldOperatorOf(userPropertyFields(null).find(f => f.key === r.property), r.op);
-        return !!op && (op.noValue || (Array.isArray(r.value) ? r.value.length > 0 : String(r.value ?? '') !== '')); }) : false; };
+        return !!op && (op.noValue || (Array.isArray(r.value) ? r.value.length > 0 : String(r.value ?? '') !== '')); })
+      && (c.pool === 'team' ? !!c.team : c.pool === 'roundRobin' ? (c.users || []).length > 0 : true) : false; };
 function AssignOwnerConfig({config, setConfig, data, context}){
-  const c = {method:'', users:[], rules:[], ...config};
+  const c = {method:'', users:[], rules:[], pool:'', ...config};
   const set = (patch) => setConfig({...c, ...patch});
   const ctx = context || {};
   if(!ctx.object) return needsRecord(ctx);
@@ -1746,42 +1744,47 @@ function AssignOwnerConfig({config, setConfig, data, context}){
     style={{border:'none', background:'transparent', cursor: disabled ? 'default' : 'pointer', display:'flex', padding:4, opacity: disabled ? .35 : 1}}><Icon name={icon} size={12} color={T.gray600}/></button>;
   const userFields = userPropertyFields(data), fieldOf = (key) => userFields.find(f => f.key === key);
   const opsFor = (f) => fieldOperators(f, {withChange:false}).map(o => ({value:o.id, label:o.label}));
+  const teamField = cfgField('Team', <FormSelect value={c.team || ''} placeholder="Select team" options={(data.teams || []).map(t => ({value:t.id, label:t.name}))} onChange={(v)=>set({team:v})}/>);
+  const orderList = cfgPart('Order', <div style={{display:'flex', flexDirection:'column', gap:6}}>
+    {c.users.map((id, i) => (
+      <div key={id} style={{display:'flex', alignItems:'center', gap:8, fontSize:13, color:T.attioText}}>
+        <span style={{width:16, fontSize:12, color:T.gray400, fontVariantNumeric:'tabular-nums'}}>{i + 1}</span>
+        <Avatar name={assigneeLabel(data, id)} size={20}/><span style={{flex:1, minWidth:0}}>{assigneeLabel(data, id)}</span>
+        {iconBtn('arrowUp', 'Move up', ()=>{ const n = c.users.slice(); [n[i - 1], n[i]] = [n[i], n[i - 1]]; set({users:n}); }, i === 0)}
+        {iconBtn('arrowDown', 'Move down', ()=>{ const n = c.users.slice(); [n[i + 1], n[i]] = [n[i], n[i + 1]]; set({users:n}); }, i === c.users.length - 1)}
+        {iconBtn('close', 'Remove', ()=>set({users:c.users.filter(x => x !== id)}))}
+      </div>
+    ))}
+    <SearchableSelect value="" placeholder="Add a person" searchPlaceholder="Search users" options={users.filter(u => !c.users.includes(u.id)).map(u => ({value:u.id, label:u.name}))}
+      onChange={(id)=>id && set({users:[...c.users, id]})}/>
+  </div>);
   return cfgPad(<>
     {cfgPart('Method', <div role="radiogroup" aria-label="Assignment method" style={{display:'flex', flexDirection:'column', gap:8}}>
-      {ASSIGN_METHODS.map(m => <StRadioCard key={m.key} selected={c.method === m.key} title={m.label} description={m.description} onSelect={()=>set({method:m.key})}/>)}
+      {ASSIGN_METHODS.map(m => <StRadioCard key={m.key} selected={c.method === m.key} title={m.label} onSelect={()=>set({method:m.key})}/>)}
     </div>)}
     {c.method === 'person' && cfgField('Owner', <FormSelect value={c.user || ''} placeholder="Select person" options={users.map(u => ({value:u.id, label:u.name}))} onChange={(v)=>set({user:v})}/>)}
-    {c.method === 'team' && cfgField('Team', <FormSelect value={c.team || ''} placeholder="Select team" options={(data.teams || []).map(t => ({value:t.id, label:t.name}))} onChange={(v)=>set({team:v})}/>)}
-    {c.method === 'roundRobin' && cfgPart('Order', <div style={{display:'flex', flexDirection:'column', gap:6}}>
-      {c.users.map((id, i) => (
-        <div key={id} style={{display:'flex', alignItems:'center', gap:8, fontSize:13, color:T.attioText}}>
-          <span style={{width:16, fontSize:12, color:T.gray400, fontVariantNumeric:'tabular-nums'}}>{i + 1}</span>
-          <Avatar name={assigneeLabel(data, id)} size={20}/><span style={{flex:1, minWidth:0}}>{assigneeLabel(data, id)}</span>
-          {iconBtn('arrowUp', 'Move up', ()=>{ const n = c.users.slice(); [n[i - 1], n[i]] = [n[i], n[i - 1]]; set({users:n}); }, i === 0)}
-          {iconBtn('arrowDown', 'Move down', ()=>{ const n = c.users.slice(); [n[i + 1], n[i]] = [n[i], n[i + 1]]; set({users:n}); }, i === c.users.length - 1)}
-          {iconBtn('close', 'Remove', ()=>set({users:c.users.filter(x => x !== id)}))}
-        </div>
-      ))}
-      <SearchableSelect value="" placeholder="Add a person" searchPlaceholder="Search users" options={users.filter(u => !c.users.includes(u.id)).map(u => ({value:u.id, label:u.name}))}
-        onChange={(id)=>id && set({users:[...c.users, id]})}/>
-    </div>)}
-    {c.method === 'properties' && cfgPart('Eligible owners', <div style={{display:'flex', flexDirection:'column', gap:8}}>
-      {c.rules.map((r, i) => { const f = fieldOf(r.property); const setR = (patch) => set({rules:c.rules.map(x => x.id === r.id ? {...x, ...patch} : x)}); return (
-        <div key={r.id} style={{display:'flex', flexDirection:'column', gap:6, padding:10, border:`1px solid ${T.attioLine}`, borderRadius:8}}>
-          <div style={{display:'flex', gap:6, alignItems:'center'}}>
-            <div style={{flex:1, minWidth:0}}><FormSelect value={r.property || ''} placeholder="Select user property" options={userFields.map(x => ({value:x.key, label:x.label}))} onChange={(v)=>setR({property:v, op:'', value:''})}/></div>
-            {iconBtn('trash', 'Remove condition', ()=>set({rules:c.rules.filter(x => x.id !== r.id)}))}
+    {c.method === 'team' && teamField}
+    {c.method === 'roundRobin' && orderList}
+    {c.method === 'properties' && <>
+      {cfgPart('Conditions', <div style={{display:'flex', flexDirection:'column', gap:8}}>
+        {c.rules.map(r => { const f = fieldOf(r.property); const setR = (patch) => set({rules:c.rules.map(x => x.id === r.id ? {...x, ...patch} : x)}); return (
+          <div key={r.id} style={{display:'flex', flexDirection:'column', gap:6, padding:10, border:`1px solid ${T.attioLine}`, borderRadius:8}}>
+            <div style={{display:'flex', gap:6, alignItems:'center'}}>
+              <div style={{flex:1, minWidth:0}}><FormSelect value={r.property || ''} placeholder="Select property" options={userFields.map(x => ({value:x.key, label:x.label}))} onChange={(v)=>setR({property:v, op:'', value:''})}/></div>
+              {iconBtn('trash', 'Remove condition', ()=>set({rules:c.rules.filter(x => x.id !== r.id)}))}
+            </div>
+            {f && <div style={{display:'flex', gap:6}}>
+              <div style={{flex:'1 1 0', minWidth:0}}><FormSelect value={r.op || ''} placeholder="Select condition" options={opsFor(f)} onChange={(v)=>setR({op:v, value:''})}/></div>
+              <div style={{flex:'1 1 0', minWidth:0}}><ConditionValueInput compact prop={fieldProperty(f)} op={fieldOperatorOf(f, r.op)} value={r.value ?? ''} onChange={(v)=>setR({value:v})}/></div>
+            </div>}
           </div>
-          {f && <div style={{display:'flex', gap:6}}>
-            <div style={{flex:'1 1 0', minWidth:0}}><FormSelect value={r.op || ''} placeholder="Select condition" options={opsFor(f)} onChange={(v)=>setR({op:v, value:''})}/></div>
-            <div style={{flex:'1 1 0', minWidth:0}}><ConditionValueInput compact prop={fieldProperty(f)} op={fieldOperatorOf(f, r.op)} value={r.value ?? ''} onChange={(v)=>setR({value:v})}/></div>
-          </div>}
-        </div>
-      ); })}
-      <div><UnderlineAction label="+ Add condition" onClick={()=>set({rules:[...c.rules, {id:newEntryId('ar'), property:'', op:'', value:''}]})}/></div>
-      {cfgHelp('All conditions must hold. Several users match: assigned in turn among them. None match: the current owner stays (noted in the run).')}
-    </div>)}
-    {behaviorField('assignOwner', c, setConfig)}
+        ); })}
+        <div><UnderlineAction label="+ Add condition" onClick={()=>set({rules:[...c.rules, {id:newEntryId('ar'), property:'', op:'', value:''}]})}/></div>
+      </div>)}
+      {cfgField('Among', <FormSelect value={c.pool || 'all'} options={ASSIGN_POOLS} onChange={(v)=>set({pool:v || 'all'})}/>)}
+      {c.pool === 'team' && teamField}
+      {c.pool === 'roundRobin' && orderList}
+    </>}
   </>);
 }
 
@@ -1810,6 +1813,7 @@ const WORKFLOW_ACTION_CONFIGS = {
   deleteRecord:           {Config:DeleteRecordConfig},
   updateAssociatedRecord: {Config:UpdateAssociatedConfig},
   classifyRecord:         {Config:ClassifyConfig},
+  mergeRecord:            {Config:(props) => <MergeRecordConfig {...props}/>},   // merge.jsx (loaded later)
   assignOwner:            {Config:AssignOwnerConfig},
 };
 
@@ -1952,9 +1956,6 @@ function TriggerSettings({data, trig, context, config, onChange}){
         return <React.Fragment key={f}>
           {(pick || watched.property) && <TriggerPropertyCondition data={data} workflow={{context:ctx, trigger:trig.key, triggerConfig:watched}} property={pick || undefined}
             onChange={(patch)=>onChange({...watched, ...patch})}/>}
-          {sc === 'accounting' && cfgHelp('Read from the record’s payment plans in Accounting.')}
-          {sc === 'form' && cfgHelp('Read from the form submission that created the record (Marketing → Forms).')}
-          {sc === 'owner' && cfgHelp(ctx.object ? 'Checks the record owner’s User Properties.' : 'Checked for each user: the workflow runs for every user it holds for.')}
         </React.Fragment>;
       }
       case 'pipeline': return <React.Fragment key={f}>{cfgField('Pipeline', <FormSelect value={c.pipeline || ''} placeholder="Select pipeline"
@@ -1967,10 +1968,11 @@ function TriggerSettings({data, trig, context, config, onChange}){
         options={at.properties.filter(p => !p.unavailable || p.value === c.activityProperty).map(p => ({value:p.value, label:p.label}))} onChange={(v)=>set({activityProperty:v})}/>)}</React.Fragment>;
       case 'template': return <React.Fragment key={f}>{cfgField('Email Template', <FormSelect value={c.template || ''} placeholder="Any email"
         options={[{value:'', label:'Any email'}, ...emailTemplatesOf(data).map(t => ({value:t.id, label:t.name}))]} onChange={(v)=>set({template:v})}/>)}</React.Fragment>;
-      case 'agoDuration': return <React.Fragment key={f}>{cfgField('Sent', <DurationInput value={{amount:c.agoAmount || '', unit:c.agoUnit || 'Days'}} onChange={(d)=>set({agoAmount:d.amount, agoUnit:d.unit})}/>)}{cfgHelp('Fires that long after each email is sent.')}</React.Fragment>;
+      case 'agoDuration': return <React.Fragment key={f}>{cfgField('Sent', <DurationInput value={{amount:c.agoAmount || '', unit:c.agoUnit || 'Days'}} onChange={(d)=>set({agoAmount:d.amount, agoUnit:d.unit})}/>)}</React.Fragment>;
       case 'callOutcome': return <React.Fragment key={f}>{cfgField('Call Outcome', <FormSelect value={c.outcome || ''} placeholder="Any outcome"
         options={[{value:'', label:'Any outcome'}, ...['Connected', 'No answer', 'Left voicemail', 'Wrong number', 'Cancelled', 'Disconnected'].map(o => ({value:o, label:o}))]} onChange={(v)=>set({outcome:v})}/>)}</React.Fragment>;
       case 'form': return <TriggerFormField key={f} value={c.form || ''} onChange={(id, name)=>set({form:id, formName:name})}/>;
+      case 'duplicateType': return <React.Fragment key={f}>{cfgField('Duplication Type', <FormSelect value={c.duplicateType || ''} placeholder="Select type" options={DUPLICATE_TYPES} onChange={(v)=>set({duplicateType:v})}/>)}</React.Fragment>;
       // The associated Object, then its parameter — one row.
       case 'associatedObject': return <React.Fragment key={f}>
         <div style={{display:'flex', gap:8}}>
@@ -1980,7 +1982,7 @@ function TriggerSettings({data, trig, context, config, onChange}){
             options={ASSOCIATED_RECORD_PARAMS.map(x => ({value:x.value, label:x.label}))}
             onChange={(v)=>set({assocParam:v})}/>)}</div>
         </div>
-        {c.assocParam && cfgHelp(associatedParamHelp(data, ctx, c))}</React.Fragment>;
+</React.Fragment>;
       case 'assocParam': return null;
       // Is not created / Is not changed: When (the property trigger's control).
       case 'assocTiming': return <WhenField key={f} config={c} context={ctx} onChange={set}/>;
@@ -1995,15 +1997,13 @@ function TriggerSettings({data, trig, context, config, onChange}){
       ))}</React.Fragment>;
       // Only with Is more than / Is less than: every increment above, or every decrement below.
       case 'repeat': { if(!countRepeatable(c)) return null;
-        const n = countConditionComplete(c) ? Number(c.value) : null, step = repeatStepLabel(c);
-        const eg = n === null ? '' : c.op === 'gt' ? `${n + 1}, ${n + 2}, ${n + 3}…` : n > 0 ? [n - 1, n - 2, n - 3].filter(x => x >= 0).join(', ') + (n > 3 ? '…' : '') : '';
+        const step = repeatStepLabel(c);
         return (
           <div key={f} style={{display:'flex', flexDirection:'column', gap:4}}>
             <label style={{display:'flex', alignItems:'flex-start', gap:10, fontSize:13, color:T.attioText, lineHeight:1.45, cursor:'pointer'}}>
               <span style={{flex:1}}>Repeat this workflow with every {step}</span>
               <span style={{paddingTop:3}}><UtToggle on={!!c.repeat} onChange={(v)=>set({repeat:v})}/></span>
             </label>
-            {c.repeat && eg && cfgHelp(`Runs each time the count ${c.op === 'gt' ? 'goes up' : 'goes down'} to ${eg}`)}
           </div>
         ); }
     }
@@ -2201,7 +2201,7 @@ function WorkflowEditor({data, initial, onCancel, onSave, onDelete, onRename, on
               <div role="radiogroup" aria-label="Workflow Type" style={{display:'flex', flexDirection:'column', gap:8}}>
                 {WORKFLOW_TYPES.map(t => <StRadioCard key={t.key} selected={draft.type === t.key} title={t.label} description={t.description} onSelect={()=>setType(t.key)}/>)}
               </div>
-              {misfits.map(a => <React.Fragment key={a.id}>{attentionNote(actionIssue(data, a, draft.context, draft.type))}</React.Fragment>)}
+              {misfits.map(a => <React.Fragment key={a.id}>{attentionNote(actionIssue(data, a, draft.context, draft.type, draft))}</React.Fragment>)}
             </div>
           ))}
           {/* Trigger Scope — set per workflow, for all its triggers: which records they apply to. */}
@@ -2250,7 +2250,7 @@ function WorkflowEditor({data, initial, onCancel, onSave, onDelete, onRename, on
             {cfgField('After', <DurationInput value={action.wait || {amount:'', unit:'Days'}} onChange={(w)=>setAction(action.id, {wait:w})}/>)}
           </div>
         )}
-        {(() => { const issue = actionIssue(data, action, draft.context, draft.type); return issue && !issue.explained && <div style={{padding:'0 20px 16px'}}>{attentionNote(issue)}</div>; })()}
+        {(() => { const issue = actionIssue(data, action, draft.context, draft.type, draft); return issue && !issue.explained && <div style={{padding:'0 20px 16px'}}>{attentionNote(issue)}</div>; })()}
         {C ? <C.Config key={action.id} config={action.config} setConfig={(c)=>setAction(action.id, {config:c})} data={data} context={draft.context || {}} onStub={onStub || (()=>{})}/>
            : <div style={{padding:'0 20px', ...stTextB}}>Configuration for this action is not defined yet.</div>}
       </>);
@@ -2352,7 +2352,7 @@ function WorkflowEditor({data, initial, onCancel, onSave, onDelete, onRename, on
                 </button>
                 <MenuShell open={choosingTrigger} onClose={()=>setChoosingTrigger(false)} width={240}>
                   {WORKFLOW_TRIGGER_GROUPS.map(g => <ActionGroupItem key={g.key} disabled={!triggerGroupAvailable(g, draft.context)} onPick={addTrigger}
-                    group={{...g, children:(g.menu || g.triggers).map(m => g.key === 'property' ? {...m, disabled:!propertyScopeAvailable(m.key.split('|')[1], draft.context)} : m)}}/>)}
+                    group={{...g, children:(g.menu || g.triggers).filter(m => triggerOffered(m.key, data, draft.context)).map(m => g.key === 'property' ? {...m, disabled:!propertyScopeAvailable(m.key.split('|')[1], draft.context)} : m)}}/>)}
                 </MenuShell>
               </div>}
             </WorkflowCard>
@@ -2364,10 +2364,10 @@ function WorkflowEditor({data, initial, onCancel, onSave, onDelete, onRename, on
                 const d = workflowAction(a.type) || {label:a.type, icon:'sparkle'};
                 const on = selected === a.id;
                 return (
-                  <div key={a.id} onClick={()=>setSelected(a.id)} style={{border:`1.5px solid ${actionIssue(data, a, draft.context, draft.type) ? T.red : on ? T.blue : T.border}`, borderRadius:10, padding:'8px 10px', cursor:'pointer', background:'#fff'}}>
+                  <div key={a.id} onClick={()=>setSelected(a.id)} style={{border:`1.5px solid ${actionIssue(data, a, draft.context, draft.type, draft) ? T.red : on ? T.blue : T.border}`, borderRadius:10, padding:'8px 10px', cursor:'pointer', background:'#fff'}}>
                     {/* The action in one line (actionSummary), kept in step with the panel. */}
                     <div title={actionSummary(data, a, draft.context)}>{blockLine(d.icon, actionSummary(data, a, draft.context), null, readOnly ? null : nodeTrash(`Remove ${d.label}`, ()=>removeAction(a.id)))}</div>
-                    {actionIssue(data, a, draft.context, draft.type) && attentionFlag}
+                    {actionIssue(data, a, draft.context, draft.type, draft) && attentionFlag}
                   </div>
                 );
               })}
@@ -2377,7 +2377,7 @@ function WorkflowEditor({data, initial, onCancel, onSave, onDelete, onRename, on
                 </button>
                 {/* With a type chosen (Workflow Control), only the actions that run its way. */}
                 <MenuShell open={adding} onClose={()=>setAdding(false)} width={240}>
-                  {(typeInfo ? actionsForType(draft.type) : WORKFLOW_ACTIONS).map(a => a.children
+                  {actionsForType(typeInfo ? draft.type : null, draft).map(a => a.children
                     ? <ActionGroupItem key={a.key} group={a} onPick={addAction}/>
                     : <MenuItem key={a.key} icon={<Icon name={a.icon} size={14} color={T.gray600}/>} label={a.label} onClick={()=>addAction(a.key)}/>)}
                 </MenuShell>

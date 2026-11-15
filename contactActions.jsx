@@ -88,7 +88,8 @@ const viewSettingsItem = (onViewSettings) => onViewSettings && {label:'Side Pane
 /* ── The record ⋯ menu ── one structure for Contacts, Deals and Customers, named for the record:
      Tools          Call, Email, Meeting, Task, Note, File, Quote (by tool permission)
      Create         Create Deal, Create Customer (only where the Object can create them)
-     Record         Copy Email, Edit <Record>, Edit <Record> Owner, Copy Phone Number, Copy <Record>, Enrich <Record>
+     Record         Copy Email, Edit <Record>, Edit <Record> Owner, Copy Phone Number, Copy <Record>, Enrich <Record>,
+                    Split <Record> (a record others were merged into, with the Merge permission — merge.jsx)
      View Settings  (only where the menu opens from the record)
      Delete         Delete <Record>
    `onTool(key)`: what a tool does is the Object's (the record's tab, its form, the call window…).
@@ -96,7 +97,10 @@ const viewSettingsItem = (onViewSettings) => onViewSettings && {label:'Side Pane
 const RECORD_TOOLS = [['call', 'Call'], ['email', 'Email'], ['meeting', 'Meeting'], ['task', 'Task'], ['note', 'Note'], ['file', 'File'], ['quote', 'Quote']];
 function StandardRecordMenu({object, record, noun, email, phone, copyText:copied, onTool, onCreateDeal, createDealDisabled, onCreateCustomer, onGoToDeal,
                              onEdit, onOwner, onEnrich, onDelete, onCopied, onViewSettings, visible = true}){
-  return (
+  const hub = useRecordHub();
+  const [splitting, setSplitting] = React.useState(null);   // the merge being split
+  const merged = record && recordCan(object, record, 'merge') ? mergeSplitEntry(hub, object, record.id) : null;
+  return (<>
     <RecordActionsMenu title={`${noun} actions`} visible={visible} groups={[
       onTool ? RECORD_TOOLS.filter(([k]) => canAdd(object, record, k)).map(([k, label]) => ({label, onClick:()=>onTool(k)})) : [],
       [onCreateDeal && workspaceHasType('deals') && {label:quickActionLabel(object, 'createDeal'), disabled:!!createDealDisabled, onClick:onCreateDeal},
@@ -107,11 +111,13 @@ function StandardRecordMenu({object, record, noun, email, phone, copyText:copied
        onOwner && {label:`Edit ${noun} Owner`, onClick:onOwner},
        {label:'Copy Phone Number', onClick:copyAction(phone, 'phone number', onCopied)},
        {label:`Copy ${noun}`, onClick:copyAction(copied, noun.toLowerCase(), onCopied)},
-       onEnrich && {label:`Enrich ${noun}`, onClick:onEnrich}],
+       onEnrich && {label:`Enrich ${noun}`, onClick:onEnrich},
+       merged && {label:`Split ${noun}`, onClick:()=>setSplitting(merged)}],
       [viewSettingsItem(onViewSettings)],
       [onDelete && {label:`Delete ${noun}`, danger:true, onClick:onDelete}],
     ]}/>
-  );
+    {splitting && <SplitRecordPanel object={object} entry={splitting} onClose={()=>setSplitting(null)}/>}
+  </>);
 }
 function ContactActionsMenu({contact, onEdit, onDelete, onEnrich, onCopied, onTool, onOwner, onCreateRecord, onViewSettings, visible=true}){
   return (

@@ -39,6 +39,7 @@ const ACTIVITY_TYPES = {
   document:    {label:'Document',     icon:'files'},       // a document created, sent or signed for the record (documents.jsx)
   payment:     {label:'Payment',      icon:'coins'},       // a One-Time payment marked Paid or Unpaid, its amount changed, or the payment type switched (accounting.jsx)
   recordsMerged: {label:'Records merged', icon:'merge'},   // other records merged into this one: their names and the values replaced (merge.jsx)
+  recordsSplit:  {label:'Records split',  icon:'merge'},   // a merge split again: the records this one was merged with (merge.jsx)
 };
 /* The contact-facing types, used to seed each contact's mock history. */
 const CARD_ACTIVITY_ORDER = ['email', 'call', 'meeting', 'task', 'note'];
@@ -337,6 +338,7 @@ function activityHeadline(a){
     case 'payment':     return a.from || a.to ? `${a.from || '—'} → ${a.to || '—'}` : a.detail || '';
     case 'workflow':    return a.title;
     case 'recordsMerged': return (a.merged || []).map(m => m.name || 'Unnamed').join(', ');
+    case 'recordsSplit': return (a.records || []).map(m => m.name || 'Unnamed').join(', ');
   }
   return '';
 }
@@ -428,6 +430,7 @@ function activityLines(a, contact, context = 'all'){
     case 'taskReassigned': return {lead:act('Task reassigned', 'by'), detail:activityHeadline(a), when};
     case 'payment': return {lead:act(a.action || 'Payment', 'by'), detail:activityHeadline(a), when};
     case 'recordsMerged': return {lead:act('Records merged', 'by'), detail:activityHeadline(a), when};
+    case 'recordsSplit': return {lead:act('Records split', 'by'), detail:activityHeadline(a), when};
     case 'workflow': return {lead:act('Workflow ran'), detail:a.title, when};
     case 'file': return a.origin === 'received'
       ? {lead:act(all ? 'File received' : 'Received', 'from'), detail:a.name, when}
@@ -647,6 +650,7 @@ function HistoryItem({a, last}){
     case 'ownerChange': title = `${userLabel(a.from) || 'No owner'} → ${userLabel(a.to) || 'No owner'}`; break;
     case 'stageChange': case 'customerCreated': case 'taskReassigned': title = activityHeadline(a); break;
     case 'recordsMerged': title = `Merged ${activityHeadline(a)}`; break;
+    case 'recordsSplit': title = `Split from ${activityHeadline(a)}`; break;
     case 'payment': title = `${a.action || 'Payment'} · ${activityHeadline(a)}`; break;
     case 'workflow':    title = a.title; body = a.body; break;
   }

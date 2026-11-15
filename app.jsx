@@ -771,12 +771,17 @@ function App(){
      Separate ({object, ids, at, by}). Form Name / Form Submission Date: the submission that created
      each record (forms.jsx), which also tells a Form Refill. */
   const [mergeSeparate, setMergeSeparate] = usePersistedState('mergeSeparate', []);
+  /* Every merge, kept whole so it can be split (merge.jsx): {id, object, keptId, at, by, records —
+     each merged record as it was, the kept one first —, values, ownLinks, held, activityIds, owned,
+     profiles, logId, split?}. A record others were merged into reads Merged until it's split. */
+  const [mergeHistory, setMergeHistory] = usePersistedState('mergeHistory', []);
   const formSubs = React.useMemo(() => formSubmissionIndex(forms), [forms]);
   // Only record types with Merge Reporting on (Settings → Records) are matched.
   const mergeIdx = React.useMemo(() => Object.fromEntries(Object.entries({contacts, deals, customers})
     .filter(([object]) => mergeReportingOn(settingsData, object))
-    .map(([object, list]) => [object, mergeIndexOf(object, list, {separate:mergeSeparate, formIndex:formSubs})])),
-  [contacts, deals, customers, mergeSeparate, formSubs, settingsData.objects]);
+    .map(([object, list]) => [object, mergeIndexOf(object, list, {separate:mergeSeparate, formIndex:formSubs,
+      merged:new Set(mergeHistory.filter(h => !h.split && h.object === object).map(h => String(h.keptId)))})])),
+  [contacts, deals, customers, mergeSeparate, mergeHistory, formSubs, settingsData.objects]);
   /* Last Contacted (a Contact's): its latest real touch — a connected call, a sent email or a held
      meeting, on the contact or on its deals and customers (activities.jsx isRealTouch) — kept in
      step with the activity. Written as a system value (no workflow event for each contact). */
@@ -797,9 +802,10 @@ function App(){
   }, [contacts, deals, customers, contactActivities, dealActivities, customerActivities]);
   // Overview View Settings per record type — pinned Highlights and Snapshots (overviewSettings.jsx).
   const [overviewSettings, setOverviewSettings] = usePersistedState('overviewSettings', {});
+  const mergeRecordsRef = React.useRef(null);   // the merge below, for the workflow action Merge Record
   const engine = useWorkflowEngine({data:settingsData, setData:setSettingsData, deals, setDealsRaw, dealActivities, setDealActivities, setContacts,
     customers, setCustomersRaw, customerActivities, setCustomerActivities, contacts, contactActivities, setContactActivities,
-    profiles:profileFormData, profileFacts, accounting, invoices, quotes, forms, merge:mergeIdx});
+    profiles:profileFormData, profileFacts, accounting, invoices, quotes, forms, merge:mergeIdx, mergeRecordsRef});
   // Customers change through the engine too: owner history, stage entry and Customer workflows.
   const setDeals = engine.setDeals, setCustomers = engine.setCustomers;
   /* Contacts ⇄ Deals. A contact's Associated Deals count is the deals listing it (`contactIds`), so the two
@@ -851,8 +857,8 @@ function App(){
      it), and an existing deal without a contact linked to a new contact. */
   const createContact = (values) => {
     const id = newRecordId('contacts');
+    setContactActivities(m => ({...m, [id]:[]}));   // first: what a workflow logs as the contact is created (an owner assigned) is kept
     engine.setContacts(cs => [...cs, newContactRecord(id, values)]);   // through the engine: New Record Added
-    setContactActivities(m => ({...m, [id]:[]}));
     return id;
   };
   // Create Deal on a customer: the deal has the contacts chosen on its form (or none).
@@ -911,26 +917,43 @@ function App(){
   /* Merge (merge.jsx): `ids` oldest first — the first is kept and takes `values` (the chosen value of
      each property that differed); the others' activity, associations, quotes, documents, payment
      plans, invoices, Customer Profile answers and form submissions move to it, and they're deleted.
-     `changes` ({label, from, to}) go in its "Records merged" activity. */
-  const mergeRecords = (object, ids, values, changes, links = {}) => {
+     `changes` ({label, from, to}) go in its "Records merged" activity. `by`: who merged (a workflow's
+     Merge Record names itself). The merge is kept whole (`mergeHistory`) so it can be split. */
+  const mergeActKey = (object) => object === 'contacts' ? 'contactId' : object === 'deals' ? 'dealId' : 'customerId';
+  const mergeRecords = (object, ids, values, changes, links = {}, {by} = {}) => {
     const [keepId, ...goneIds] = ids, gone = new Set(goneIds.map(String));
     const isGone = (id) => id != null && gone.has(String(id));
-    const all = {contacts:contactsWithDeals, deals, customers}[object];
-    const names = goneIds.map(id => ({id, name:(all.find(r => String(r.id) === String(id)) || {}).name || ''}));
+    // The records and their activity as they are right now (a workflow may have just changed them).
+    const live = engine.value.api.live(), raw = {contacts:live.contacts, deals:live.deals, customers:live.customers}, acts = live.activities;
+    const before = ids.map(id => raw[object].find(r => sameId(r.id, id))).filter(Boolean);
+    if(before.length !== ids.length) return;
+    const names = goneIds.map(id => ({id, name:(before.find(r => sameId(r.id, id)) || {}).name || ''}));
     /* Links (dataModel.jsx linkRule), each kind as the kept record may have it: where it may have
        many, every merged record's; where only one, the one picked in the review (`links`: {type: id}),
        the others unlinked. */
-    const raw = {contacts, deals, customers}, isMerged = (id) => sameId(id, keepId) || isGone(id);
+    const isMerged = (id) => sameId(id, keepId) || isGone(id);
     const uniq = (list) => list.filter((id, i) => list.findIndex(x => sameId(x, id)) === i);
     const own = {}, held = [];   // the links the kept record holds; the other records holding links to the merged ones
     RECORD_OBJECTS.filter(o => o !== object && linkStoreOf(object, o) && linkRule(object, o)).forEach(o => {
       const st = linkStoreOf(object, o), many = linkRule(object, o).perX > 1, picked = o in links;
       if(st.holder === object){
-        const merged = [...raw[object].filter(r => sameId(r.id, keepId)), ...raw[object].filter(r => isGone(r.id))];
         if(picked) own[st.field] = links[o] != null ? [links[o]] : [];
-        else if(many) own[st.field] = uniq(merged.flatMap(r => r[st.field] || []));
+        else if(many) own[st.field] = uniq(before.flatMap(r => r[st.field] || []));
       } else held.push({o, field:st.field, keep:(r) => !picked || sameId(r.id, links[o])});
     });
+    // What each merged record had, for a split: its activity, quotes, documents, plans, invoices and form submissions; the links others held to it.
+    const on = (id) => (x) => x && x.object === object && sameId(x.recordId, id);
+    const ownedBy = (list) => Object.fromEntries(ids.map(id => [id, (list || []).filter(on(id)).map(x => x.id)]));
+    const logId = `merged-${keepId}-${Date.now()}`;
+    const entry = {id:`mh-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`, object, keptId:keepId, at:new Date().toISOString(), by:by || CURRENT_USER.name,
+      records:before, values, ownLinks:own, logId,
+      held:held.flatMap(({o, field}) => raw[o].filter(r => (r[field] || []).some(isMerged)).map(r => ({object:o, id:r.id, field, ids:(r[field] || []).filter(isMerged)}))),
+      activityIds:Object.fromEntries(ids.map(id => [id, (acts[id] || []).map(a => a.id)])),
+      owned:{quotes:ownedBy(quotes), documents:ownedBy(documents), accounting:ownedBy(accounting), invoices:ownedBy(invoices), submissions:ownedBy(forms.flatMap(f => f.submissions || []))},
+      profiles:{formData:Object.fromEntries(ids.filter(id => profileFormData[id] !== undefined).map(id => [id, profileFormData[id]])),
+        facts:Object.fromEntries(ids.filter(id => profileFacts[id] !== undefined).map(id => [id, profileFacts[id]])),
+        profiles:Object.fromEntries(ids.filter(id => profiles[id] !== undefined).map(id => [id, profiles[id]]))}};
+    setMergeHistory(l => [...l, entry]);
     // The record: its chosen values and links; the others go.
     const setOf = {contacts:engine.setContacts, deals:setDeals, customers:setCustomers}[object];
     setOf(list => list.filter(r => !isGone(r.id)).map(r => String(r.id) === String(keepId) ? {...r, ...values, ...own} : r));
@@ -944,9 +967,8 @@ function App(){
         : {...r, [field]: keep(r) ? uniq(r[field].map(id => isMerged(id) ? keepId : id)) : r[field].filter(id => !isMerged(id))}));
     });
     // Activity (files and emails are activities) moves, newest first, with the merge recorded.
-    const key = object === 'contacts' ? 'contactId' : object === 'deals' ? 'dealId' : 'customerId';
-    const acts = {contacts:contactActivities, deals:dealActivities, customers:customerActivities}[object];
-    const log = {id:`merged-${keepId}-${Date.now()}`, [key]:keepId, type:'recordsMerged', at:new Date(), source:'you', by:CURRENT_USER.name, merged:names, changes};
+    const key = mergeActKey(object);
+    const log = {id:logId, [key]:keepId, type:'recordsMerged', at:new Date(), source: by ? 'team' : 'you', by:by || CURRENT_USER.name, merged:names, changes};
     // (The kept record's own list as it is now: the change above may have logged an owner or stage change.)
     const moved = goneIds.flatMap(id => (acts[id] || []).map(a => ({...a, [key]:keepId})));
     engine.value.api.editActivities(m => { const n = {...m, [keepId]:[log, ...(m[keepId] || []), ...moved].sort((a, b) => new Date(b.at) - new Date(a.at))};
@@ -971,6 +993,63 @@ function App(){
     // A merged record that had been kept separate from another: now the kept record is.
     if(mergeSeparate.some(x => x.object === object && x.ids.some(isGone)))
       setMergeSeparate(l => l.map(x => x.object === object && x.ids.some(isGone) ? {...x, ids:[...new Set(x.ids.map(i => isGone(i) ? keepId : i))]} : x));
+  };
+  mergeRecordsRef.current = mergeRecords;
+  /* Split (merge.jsx): the records of a merge come back as they were, and what's new since goes
+     where `assign` says ({item key: record id} — mergeSplitItems; the kept record unless set).
+     Written straight to the stores: a split restores, so no workflow runs on it. */
+  const splitRecords = (entryId, assign = {}) => {
+    const entry = mergeHistory.find(h => h.id === entryId && !h.split);
+    if(!entry) return;
+    const {object, keptId} = entry, ids = entry.records.map(r => r.id), goneIds = ids.filter(id => !sameId(id, keptId));
+    const live = engine.value.api.live(), cur = live[object].find(r => sameId(r.id, keptId));
+    if(!cur) return;
+    const items = mergeSplitItems({data:settingsData, records:{contacts:live.contacts, deals:live.deals, customers:live.customers}, activities:{[object]:live.activities},
+      quotes, documents, accounting, forms}, entry) || [];
+    const toOf = (k) => { const id = assign[k]; return ids.find(x => sameId(x, id)) ?? keptId; };
+    const isMerged = (id) => ids.some(x => sameId(x, id));
+    // Each record as it was, plus what's assigned to it: values changed since, records linked since.
+    const restored = Object.fromEntries(entry.records.map(r => [String(r.id), {...r}]));
+    items.filter(it => it.key.startsWith('prop:')).forEach(it => { const k = it.key.slice(5), r = restored[String(toOf(it.key))];
+      r[k] = cur[k]; if(k === 'amount') r.currency = cur.currency; if(k === 'stage'){ r.pipeline = cur.pipeline; r.stageEnteredAt = cur.stageEnteredAt; } });
+    const linkItems = items.filter(it => it.key.startsWith('link:')).map(it => { const [, o, ...rest] = it.key.split(':'); return {o, id:rest.join(':'), to:toOf(it.key)}; });
+    linkItems.forEach(({o, id, to}) => { const st = linkStoreOf(object, o); if(st.holder !== object) return;
+      const r = restored[String(to)], real = (cur[st.field] || []).find(x => sameId(x, id)); r[st.field] = [...(r[st.field] || []), real]; });
+    const rawSet = {contacts:setContacts, deals:setDealsRaw, customers:setCustomersRaw};
+    rawSet[object](list => list.flatMap(r => sameId(r.id, keptId) ? entry.records.map(x => restored[String(x.id)]) : isMerged(r.id) ? [] : [r]));
+    // The links others hold: back to the record each was linked to; one linked since, to the record chosen.
+    RECORD_OBJECTS.filter(o => o !== object && linkStoreOf(object, o) && linkStoreOf(object, o).holder === o).forEach(o => {
+      const field = linkStoreOf(object, o).field, was = (entry.held || []).filter(h => h.object === o), since = linkItems.filter(x => x.o === o);
+      rawSet[o](list => list.map(r => { const h = was.find(x => sameId(x.id, r.id)), n = since.find(x => sameId(x.id, r.id));
+        if(!h && !n) return r;
+        const rest = (r[field] || []).filter(id => !isMerged(id));
+        return {...r, [field]: h ? [...h.ids, ...rest] : [n.to, ...rest]}; }));
+    });
+    // Activity: each record's own goes back to it; what was added since, where it's assigned; the rest (the record's history) stays on the first.
+    const key = mergeActKey(object), all = live.activities[keptId] || [], at = new Date();
+    const home = new Map(); Object.entries(entry.activityIds || {}).forEach(([id, list]) => list.forEach(a => home.set(String(a), id)));
+    const ownerOf = (a) => home.has(String(a.id)) ? home.get(String(a.id)) : SPLIT_ACTIVITY_TYPES.includes(a.type) ? toOf(`activity:${a.id}`) : keptId;
+    const namesOf = (id) => entry.records.filter(r => !sameId(r.id, id)).map(r => ({id:r.id, name:r.name || ''}));
+    const lists = Object.fromEntries(ids.map(id => [id, [{id:`split-${id}-${at.getTime()}`, [key]:id, type:'recordsSplit', at, source:'you', by:CURRENT_USER.name, records:namesOf(id)},
+      ...all.filter(a => sameId(ownerOf(a), id)).map(a => sameId(a[key], id) ? a : {...a, [key]:id})]]));
+    engine.value.api.editActivities(m => ({...m, ...lists}));
+    // Quotes, documents, payment plans and form submissions: back to their record, or where they're assigned; invoices follow their plan.
+    const homeOf = (type, x) => { const lists = (entry.owned || {})[type] || {}, id = Object.keys(lists).find(k => lists[k].some(v => String(v) === String(x.id)));
+      return id !== undefined ? ids.find(v => sameId(v, id)) : null; };
+    const mine = (x) => x && x.object === object && sameId(x.recordId, keptId);
+    const move = (type, itemKey) => (x) => { if(!mine(x)) return x; const to = homeOf(type, x) ?? toOf(`${itemKey}:${x.id}`); return sameId(to, keptId) ? x : {...x, recordId:to}; };
+    const planTo = new Map(accounting.filter(mine).map(sc => [sc.id, move('accounting', 'plan')(sc).recordId]));
+    setQuotes(qs => qs.map(move('quotes', 'quote')));
+    setDocuments(ds => ds.map(move('documents', 'document')));
+    setAccounting(list => list.map(move('accounting', 'plan')));
+    setInvoices(list => list.map(v => mine(v) && planTo.has(v.planId) && !sameId(planTo.get(v.planId), keptId) ? {...v, recordId:planTo.get(v.planId)} : v));
+    setForms(fs => fs.map(f => (f.submissions || []).some(mine) ? {...f, submissions:f.submissions.map(move('submissions', 'submission'))} : f));
+    // Customer Profile answers: the others' come back as they were (the first record keeps what it has now).
+    const back = (setter, saved) => { const mineIds = goneIds.filter(id => (saved || {})[id] !== undefined); if(mineIds.length) setter(cur => ({...cur, ...Object.fromEntries(mineIds.map(id => [id, saved[id]]))})); };
+    back(setProfileFormData, (entry.profiles || {}).formData); back(setProfileFacts, (entry.profiles || {}).facts); back(setProfiles, (entry.profiles || {}).profiles);
+    // Split on purpose: the records aren't matched with each other again.
+    setMergeSeparate(l => [...l, {object, ids, at:at.toISOString(), by:CURRENT_USER.name}]);
+    setMergeHistory(l => l.map(h => h.id === entryId ? {...h, split:{at:at.toISOString(), by:CURRENT_USER.name}} : h));
   };
   // Keep Separate (merge.jsx): the case closes; its records aren't matched with each other again.
   const keepSeparate = (object, ids) => setMergeSeparate(l => [...l, {object, ids, at:new Date().toISOString(), by:CURRENT_USER.name}]);
@@ -1082,7 +1161,7 @@ function App(){
   const hubValue = {data:settingsData, records:{contacts:contactsWithDeals, deals:dealsView, customers:customersView}, updateRecord,
     activities:{contacts:contactActivities, deals:dealActivities, customers:customerActivities},
     add:hubAdd, update:hubUpdate, remove:hubRemove, openRecord, quotes, setQuotes, documents, setDocuments, services, setServices, forms, setForms, createRecord, setData:setSettingsData, accounting, setAccounting, invoices, setInvoices, overviewSettings, setOverviewSettings,
-    merge:{...mergeIdx, mergeRecords, keepSeparate},
+    merge:{...mergeIdx, mergeRecords, keepSeparate, history:mergeHistory, splitRecords},
     // A workflow violation's details: its Object's page with Workflow Violations open and it selected.
     openViolation:(object, id) => { setCrmActive(object); engine.value.openViolation(object, id); }};
   const withEngine = (el) => (

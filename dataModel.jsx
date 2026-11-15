@@ -127,8 +127,9 @@ const FORM_RECORD_PROPERTIES = [
 const formRecordProperties = (objectId) => FORM_RECORD_PROPERTIES.map(p => ({...p, system:true, objectId, onCreate:false, mandatory:false}));
 /* Merge Status: the system's duplicate check (merge.jsx) — records of the same type sharing an email
    or phone. The newest of them is Form Refill (a form submission created it) or Duplicate (added
-   any other way); the oldest, and every record with no match, Unique. Worked out, never edited. */
-const MERGE_STATUSES = ['Form Refill', 'Duplicate', 'Unique'];
+   any other way); the oldest, and every record with no match, Unique — or Merged, once other
+   records were merged into it (2026-11-13; until it's split again). Worked out, never edited. */
+const MERGE_STATUSES = ['Unique', 'Duplicate', 'Form Refill', 'Merged'];
 const mergeRecordProperty = (objectId) => ({key:'mergeStatus', label:'Merge Status', type:'Single Selection', options:MERGE_STATUSES, system:true, objectId,
   onCreate:false, mandatory:false, locked:true, auto:true, derived:true, width:150});
 const CUSTOMER_PROPERTY_SETUP = [
@@ -223,6 +224,8 @@ const migrateDataModel = (d) => {
   if(!d.noFormProperties) properties = [...properties, ...['contacts', 'deals', 'customers'].filter(has).flatMap(formRecordProperties).filter(fp => !properties.some(p => p.objectId === fp.objectId && p.key === fp.key))];
   // Merge Status (2026-11-12), on each record type that doesn't have it yet.
   properties = [...properties, ...['contacts', 'deals', 'customers'].filter(has).map(mergeRecordProperty).filter(mp => !properties.some(p => p.objectId === mp.objectId && p.key === mp.key))];
+  // Merge Status gained Merged (2026-11-13).
+  properties = properties.map(p => p.key === 'mergeStatus' && !(p.options || []).includes('Merged') ? {...p, options:MERGE_STATUSES} : p);
   // The sources gained Website Form (a Website RFQ or public-link submission).
   properties = properties.map(p => p.key === 'source' && ['contacts', 'deals', 'customers'].includes(p.objectId) && (p.options || []).length && !p.options.includes('Website Form') ? {...p, options:[...p.options, 'Website Form']} : p);
   /* Property types saved before are their new types (propertyTypes.jsx); the system properties

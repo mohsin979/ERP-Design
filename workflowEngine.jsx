@@ -15,6 +15,11 @@
                   workflow (chain depth ≤ 5, a workflow never runs twice for the same deal in one
                   chain — "Loop prevented").
 
+   Record events also come from outside a record's own changes: Customer Profile, Accounting and
+   the owner's User Properties (emitScoped), the days passing (overdue payments —
+   checkOverduePayments) and the duplicate check (Record Is Duplicated — the merge watch). The
+   action Merge Record merges the record's merge case by its rules (App's merge, merge.jsx).
+
    Deal pipelines only. Forward / Backward compare the pipeline's ordered stages; closed stages
    (Stage Type Won, Lost or Undecided — board.jsx) are outside that order. Every deal keeps when it entered its
    stage (stageEnteredAt), whether or not any workflow uses it.
@@ -248,47 +253,70 @@ const PROFILE_TRIGGER_FIELDS = () => [
   // Each Customer Profile form field: the person's current answer (WF_LIVE.profiles: their filled forms).
   ...PROFILE_FORM_TRIGGER_FIELDS(),
 ];
-/* Accounting properties — each read across the record's Payment Plans (Accounting), oldest first:
-   totals summed (in their currency; plans in different currencies, in the default one); a frozen
-   plan counts what was received on it, not what's left. Installments in schedule order, frozen
-   plans' left out. An installment whose rest moved to a balance installment counts through that
-   balance (it carries what's left). A record with no plan reads Unpaid where a status is asked
-   (decided 2026-11-12). `all`: the condition holds when every installment's value meets it. */
+/* Accounting properties (decided 2026-11-13: the full set, named by payment — a One-Time and a
+   Recurring plan have payments too) — each read across the record's Payment Plans (Accounting),
+   oldest first: amounts summed (in their currency; plans in different currencies, in the default
+   one); a frozen plan counts what was received on it, not what's left. Payments in schedule order,
+   frozen plans' left out. A payment whose rest moved to a balance payment counts through that
+   balance (it carries what's left). Overdue: not fully paid, its due date before today. A record
+   with no plan reads Unpaid where a payment status is asked (decided 2026-11-12), no plans as 0 and
+   everything else empty. `money`: an amount (shown with its currency); `timed`: its value changes
+   as days pass, so the scheduler checks it (checkOverduePayments); `all`: the condition holds when
+   every payment's value meets it. The keys saved before keep their name (…Installment…). */
 const PAYMENT_STATUS_OPTIONS = ['Unpaid', 'Partially Paid', 'Paid'].map(v => ({value:v, label:v}));
+const PLAN_STATUS_OPTIONS = ['Active', 'Paid', 'Frozen'].map(v => ({value:v, label:v}));   // accounting.jsx PLAN_STATES
 const termsInOrder = (terms) => [...terms].sort((a, b) => (toTime(a.createdAt) || 0) - (toTime(b.createdAt) || 0));
 const termsCurrency = (terms) => { const cs = [...new Set(terms.map(scheduleCurrency))]; return cs.length === 1 ? cs[0] : defaultCurrency(); };
-const termsTotals = (terms) => { const cur = termsCurrency(terms), money = (n, s) => scheduleCurrency(s) === cur ? n : toDefaultCurrency(n, scheduleCurrency(s));
+// An amount of plan `s` in the currency the record's totals read in.
+const termsMoney = (terms) => { const cur = termsCurrency(terms); return (n, s) => scheduleCurrency(s) === cur ? n : toDefaultCurrency(n, scheduleCurrency(s)); };
+const termsTotals = (terms) => { const money = termsMoney(terms);
   return terms.reduce((t, s) => { const x = scheduleTotals(s), out = s.frozen ? 0 : x.outstanding;
     return {total:r2(t.total + money(s.frozen ? x.received : x.total, s)), received:r2(t.received + money(x.received, s)), outstanding:r2(t.outstanding + money(out, s))}; }, {total:0, received:0, outstanding:0}); };
 const liveInstallments = (terms) => termsInOrder(terms.filter(s => !s.frozen)).flatMap(s => (s.installments || []).filter(i => !(s.installments || []).some(x => x.parentId === i.id)).map(i => ({s, i})));
 const installmentStatusLabel = (s, i) => (PAYMENT_STATUS[installmentState(s, i).status] || {}).label || '';
-const nextInstallment = (terms) => liveInstallments(terms).find(({s, i}) => installmentState(s, i).status !== 'paid') || null;
-// The installment that carries what's left of `i`: the last of its balance installments (itself without one).
+const paymentPaid = ({s, i}) => installmentState(s, i).status === 'paid';
+const nextInstallment = (terms) => liveInstallments(terms).find(x => !paymentPaid(x)) || null;
+const overduePayments = (terms) => { const today = ymdOf(new Date()); return liveInstallments(terms).filter(x => !paymentPaid(x) && /^\d{4}-\d{2}-\d{2}$/.test(x.i.dueDate || '') && x.i.dueDate < today); };
+// The payment that carries what's left of `i`: the last of its balance payments (itself without one).
 const balanceEndOf = (s, i) => { let cur = i, next; while((next = (s.installments || []).find(x => x.parentId === cur.id))) cur = next; return cur; };
-/* The first installment's status, through its balance: Paid once the balance is paid, Partially Paid
+/* The first payment's status, through its balance: Paid once the balance is paid, Partially Paid
    while part of it is still owed. */
 const firstInstallmentLabel = (s, i) => { const end = balanceEndOf(s, i);
   return end === i ? installmentStatusLabel(s, i) : installmentState(s, end).status === 'paid' ? PAYMENT_STATUS.paid.label : PAYMENT_STATUS.partial.label; };
+const withPlans = (read) => (terms) => terms.length ? read(terms) : '';
 const ACCOUNTING_TRIGGER_FIELDS = [
-  {key:'totalAmount',   label:'Total Amount',      kind:'number', level:'record', readRecord:(terms) => terms.length ? termsTotals(terms).total : ''},
-  {key:'totalReceived', label:'Total Received',    kind:'number', level:'record', readRecord:(terms) => terms.length ? termsTotals(terms).received : ''},
-  {key:'outstanding',   label:'Total Outstanding', kind:'number', level:'record', readRecord:(terms) => terms.length ? termsTotals(terms).outstanding : ''},
-  /* The record's first installment — the first one of its earliest payment terms (empty with none):
-     the payment the client makes to start (e.g. before Payment Made). */
-  {key:'firstInstallmentStatus', label:'First Installment Status', kind:'select', level:'record', options:PAYMENT_STATUS_OPTIONS,
+  // Amounts.
+  {key:'totalAmount',       label:'Total Amount',        kind:'number', money:true, level:'record', readRecord:withPlans(terms => termsTotals(terms).total)},
+  {key:'totalReceived',     label:'Total Received',      kind:'number', money:true, level:'record', readRecord:withPlans(terms => termsTotals(terms).received)},
+  {key:'outstanding',       label:'Total Outstanding',   kind:'number', money:true, level:'record', readRecord:withPlans(terms => termsTotals(terms).outstanding)},
+  {key:'overdueAmount',     label:'Overdue Amount',      kind:'number', money:true, timed:true, level:'record',
+   readRecord:withPlans(terms => { const money = termsMoney(terms); return r2(overduePayments(terms).reduce((n, {s, i}) => n + money(installmentState(s, i).outstanding, s), 0)); })},
+  {key:'nextPaymentAmount', label:'Next Payment Amount', kind:'number', money:true, level:'record',
+   readRecord:(terms) => { const n = nextInstallment(terms); return n ? installmentState(n.s, n.i).outstanding : ''; }},
+  // Counts.
+  {key:'paymentPlans',    label:'Number of Payment Plans',    kind:'number', level:'record', readRecord:(terms) => terms.length},
+  {key:'payments',        label:'Number of Payments',         kind:'number', level:'record', readRecord:withPlans(terms => liveInstallments(terms).length)},
+  {key:'paidPayments',    label:'Number of Paid Payments',    kind:'number', level:'record', readRecord:withPlans(terms => liveInstallments(terms).filter(paymentPaid).length)},
+  {key:'unpaidPayments',  label:'Number of Unpaid Payments',  kind:'number', level:'record', readRecord:withPlans(terms => liveInstallments(terms).filter(x => !paymentPaid(x)).length)},
+  {key:'overduePayments', label:'Number of Overdue Payments', kind:'number', timed:true, level:'record', readRecord:withPlans(terms => overduePayments(terms).length)},
+  // Dates: the next payment still to be paid (in schedule order), the schedule's final payment, the latest payment received.
+  {key:'nextInstallmentDueDate', label:'Next Payment Due Date', kind:'date', level:'record',
+   readRecord:(terms) => { const n = nextInstallment(terms); return n ? n.i.dueDate || '' : ''; }},
+  {key:'lastInstallmentDueDate', label:'Last Payment Due Date', kind:'date', level:'record',
+   readRecord:(terms) => { const l = liveInstallments(terms).slice(-1)[0]; return l ? l.i.dueDate || '' : ''; }},
+  {key:'lastPaymentDate', label:'Last Payment Received Date', kind:'date', level:'record',
+   readRecord:(terms) => terms.flatMap(s => (s.installments || []).flatMap(i => (i.payments || []).map(p => p.paidOn || ''))).filter(Boolean).sort().slice(-1)[0] || ''},
+  // Statuses: each plan's (any may match); the first payment — the first one of the earliest plan (the payment that starts the sale); the next; all.
+  {key:'planStatus', label:'Payment Plan Status', kind:'select', level:'installments', options:PLAN_STATUS_OPTIONS,
+   readAll:(terms) => termsInOrder(terms).map(s => (PLAN_STATES.find(st => st.id === planState(s)) || {}).name || '')},
+  {key:'firstInstallmentStatus', label:'First Payment Status', kind:'select', level:'record', options:PAYMENT_STATUS_OPTIONS,
    readRecord:(terms) => { if(!terms.length) return PAYMENT_STATUS.unpaid.label;
      const s = termsInOrder(terms.filter(x => !x.frozen))[0], i = s && (s.installments || []).find(x => !x.parentId);
      return i ? firstInstallmentLabel(s, i) : ''; }},
-  // The next installment still to be paid (in schedule order): its status, its due date.
-  {key:'nextInstallmentStatus', label:'Next Installment Status', kind:'select', level:'record', options:PAYMENT_STATUS_OPTIONS,
+  {key:'nextInstallmentStatus', label:'Next Payment Status', kind:'select', level:'record', options:PAYMENT_STATUS_OPTIONS,
    readRecord:(terms) => { if(!terms.length) return PAYMENT_STATUS.unpaid.label; const n = nextInstallment(terms); return n ? installmentStatusLabel(n.s, n.i) : ''; }},
-  {key:'allInstallmentStatuses', label:'All Installment Statuses', kind:'select', level:'installments', all:true, options:PAYMENT_STATUS_OPTIONS,
+  {key:'allInstallmentStatuses', label:'All Payment Statuses', kind:'select', level:'installments', all:true, options:PAYMENT_STATUS_OPTIONS,
    readAll:(terms) => !terms.length ? [PAYMENT_STATUS.unpaid.label] : liveInstallments(terms).map(({s, i}) => installmentStatusLabel(s, i))},
-  {key:'nextInstallmentDueDate', label:'Next Installment Due Date', kind:'date', level:'record',
-   readRecord:(terms) => { const n = nextInstallment(terms); return n ? n.i.dueDate || '' : ''; }},
-  // The payment schedule's final installment.
-  {key:'lastInstallmentDueDate', label:'Last Installment Due Date', kind:'date', level:'record',
-   readRecord:(terms) => { const l = liveInstallments(terms).slice(-1)[0]; return l ? l.i.dueDate || '' : ''; }},
 ];
 // A record's Payment Plans (Accounting), and one property's values across them (any may match).
 // A customer with a deal reads its deal's (accounting.jsx termsHolderOf).
@@ -430,15 +458,11 @@ const whenPhrase = (c, ctx, periodWord = 'within') => {
 function WhenField({config, context, onChange}){
   const c = config || {}, ctx = context || {}, hasStage = !!(ctx.pipeline && ctx.stage), when = conditionWhen(c);
   const options = CONDITION_WHEN.filter(o => o.value !== 'stage' || hasStage || when === 'stage');
-  const help = {stage:'Checks records already in this stage and records entering it.',
-    period:`Counted from when the record ${hasStage ? 'enters this stage' : ctx.pipeline ? 'enters this pipeline' : 'is created'}.`,
-    lifecycle:'Checked across the record’s whole lifecycle until it’s met.'}[when];
   return (
     <div style={{display:'flex', flexDirection:'column', gap:10}}>
       {cfgField('When', <FormSelect value={when} placeholder="Select when" options={options}
         onChange={(v)=>onChange({when:v, inStage:v === 'stage', ...(v === 'period' ? {changeUnit:c.changeUnit || 'Days'} : {})})}/>)}
       {when === 'period' && <DurationInput units={PROPERTY_CHANGE_UNITS} value={{amount:c.changeAmount || '', unit:c.changeUnit || 'Days'}} onChange={(d)=>onChange({changeAmount:d.amount, changeUnit:d.unit})}/>}
-      {help && cfgHelp(help)}
     </div>
   );
 }
@@ -546,6 +570,7 @@ const countMeets = (c, x) => { const n = Number(c.value); return c.op === 'gt' ?
    Quotes): the record's quotations in Quotes. */
 const countedOf = (p, deal, acts) => {
   if(p.quotes) return deal ? (WF_LIVE.quotes || []).filter(q => q.object === recordObjectOf(deal.id) && String(q.recordId) === String(deal.id)).filter(p.counts) : [];
+  if(!p.counts) return [];   // not a count (each Meeting Scheduled, Task Created, Note Added)
   const own = acts || [];
   // The record's person's (its first contact's) activity too.
   const withContact = p.withContact && deal && recordObjectOf(deal.id) !== 'contacts' && personIdOf(deal) != null ? ((WF_LIVE.acts || {})[String(personIdOf(deal))] || []) : [];
@@ -569,6 +594,8 @@ const entryStateHolds = (w, deal, data, acts) => {
   const p = activityTriggerProperty(w.trigger, c.activityProperty);
   return !!p && !!p.counts && !p.each && !c.repeat && countMeets(c, countedOf(p, deal, acts).length);
 };
+// A record's Merge Status now (merge.jsx), for Record Is Duplicated.
+const duplicateStatusOf = (rec) => !rec ? '' : mergeStatusIn(WF_LIVE.merge && WF_LIVE.merge[recordObjectOf(rec.id)], rec.id);
 const isStageQuietTrigger = (v) => v.trigger === 'propertyUpdate' && v.triggerConfig.op === 'notChanged' && !!v.triggerConfig.inStage && !!v.context.stage;
 /* Records associated with each other: a deal's or customer's contacts (`contactIds`), a customer's
    deals (`dealIds`). */
@@ -616,6 +643,8 @@ const TRIGGER_MATCHERS = {
       && ((c.assocParam === 'created' && ev.type === 'associatedRecordCreated') || (c.assocParam === 'changed' && ev.type === 'associatedRecordChanged')); },
   recordUpdated:(w, ev, deal) => ev.type === 'recordUpdated' && inContext(w, deal),
   recordNotChanged:() => false,   // the scheduler's (checkQuietRecords)
+  // Record Is Duplicated: the duplicate check marked the record as the chosen type (the engine's merge watch emits it).
+  recordDuplicated:(w, ev, deal) => ev.type === 'recordDuplicated' && ev.attrs.status === (w.triggerConfig || {}).duplicateType && inContext(w, deal),
   formSubmitted:(w, ev, deal) => ev.type === 'formSubmitted' && (!(w.triggerConfig || {}).form || ev.attrs.formId === w.triggerConfig.form) && inContext(w, deal),
   // Pipeline Entry / Exit: into or out of the context's pipeline (or the trigger's own; else any).
   pipelineEntry:(w, ev) => ev.type === 'pipelineEntry' && (!workflowPipeline(w) || ev.pipelineId === workflowPipeline(w)),
@@ -719,7 +748,7 @@ const useWorkflowEngineCtx = () => React.useContext(WorkflowEngineCtx);
 function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, setDealActivities, setContacts,
                             customers = [], setCustomersRaw, customerActivities = {}, setCustomerActivities,
                             contacts = [], contactActivities = {}, setContactActivities,
-                            profiles = {}, profileFacts = {}, accounting = [], invoices = [], quotes = [], forms = [], merge = null}){
+                            profiles = {}, profileFacts = {}, accounting = [], invoices = [], quotes = [], forms = [], merge = null, mergeRecordsRef = null}){
   WF_LIVE = {profiles, facts:profileFacts, accounting, invoices, users:data.users || [], properties:data.properties || [], forms, workflows:data.workflows || [], merge};
   const [es, setEs] = React.useState(() => withoutLegacyViolationStatus(withoutSuggestive(savedSlice('engine') || (WF_SAVED && WF_SAVED.engine) || EMPTY_ENGINE())));
   const esRef = React.useRef(es);
@@ -747,7 +776,12 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
     const split = (list, object) => list.filter(r => recordObjectOf(r.id) === object);
     if(!same(split(prev, 'deals'), split(next, 'deals'))) setDealsRaw(split(next, 'deals'));
     if(setCustomersRaw && !same(split(prev, 'customers'), split(next, 'customers'))) setCustomersRaw(split(next, 'customers'));
-    if(setContacts && !same(split(prev, 'contacts'), split(next, 'contacts'))) setContacts(split(next, 'contacts').map(contactStored));
+    if(setContacts && !same(split(prev, 'contacts'), split(next, 'contacts'))){
+      // Each view keeps its stored contact, and the engine's own list follows — so a change made right after (a merge, a person's edit) starts from this one.
+      const stored = split(next, 'contacts').map(v => { const c = contactStored(v); viewRaw.current.set(v, c); return c; });
+      contactsRef.current = stored;
+      setContacts(stored);
+    }
   };
   // One Object's records changed by `upd` (a list or list → list): the engine's one change path.
   // Contacts' own changes come as stored contacts (number ids); they're seen as views here.
@@ -766,6 +800,8 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
     const mine = all.filter(r => recordObjectOf(r.id) === object);
     return [...all.filter(r => recordObjectOf(r.id) !== object), ...(typeof upd === 'function' ? upd(mine) : upd)];
   }, chain);
+  // The records as stored, by record type, as they are right now (contacts with their own ids).
+  const liveRecords = () => ({contacts:contactsRef.current, deals:dealsRef.current.filter(r => recordObjectOf(r.id) === 'deals'), customers:dealsRef.current.filter(r => recordObjectOf(r.id) === 'customers')});
   const [openPromptId, setOpenPromptId] = React.useState(null);
   // Opened from the Violations panel's card (`direct`): a violation that needs a form opens the form itself.
   const [promptDirect, setPromptDirect] = React.useState(false);
@@ -1000,6 +1036,8 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
     const ev = {id:wfNewId('ev'), at:Date.now(), objectId:recordObjectOf(partial.recordId), ...partial, batch:batchRef.current, chain: chain || {id:wfNewId('ch'), depth:0, visited:[]}};
     commit(s => ({...s, events:[ev, ...s.events].slice(0, 300)}));
     if(WF_PROPERTY_EVENTS.includes(ev.type)) endRequiredValueViolations(ev.recordId);
+    // A proposed owner (Assign Record Owner · Track Violations) ends once the record's owner is set any other way.
+    if(WF_PROPERTY_EVENTS.includes(ev.type) && ev.attrs.property === 'owner') endViolations(p => p.kind === 'assignOwner' && p.dealId === ev.recordId, () => ['done', 'Owner assigned']);
     if(ev.type === 'associatedRecordCreated' || ev.type === 'associatedRecordChanged') endAssociatedViolations(ev);
     if(ev.type === 'callMade') endViolations(p => p.kind === 'initiateCall' && p.dealId === ev.recordId, () => ['done', `Call made${ev.attrs && ev.attrs.outcome ? ` · ${ev.attrs.outcome}` : ''}`]);
     dispatch(ev);
@@ -1088,7 +1126,11 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
       const acts = actsOf(deal.id);
       const holding = workflowTriggerViews(w).filter(v => !fired.some(f => f.triggerId === v.triggerId) && !(v.trigger === 'propertyUpdate' && isChangeOp((v.triggerConfig || {}).op))
         && entryStateHolds(v, deal, dataRef.current, acts)).map(v => v.triggerId);
-      const ids = [...new Set([...(((esRef.current.triggerProgress || {})[key]) || []), ...fired.map(v => v.triggerId), ...holding])];
+      /* A state trigger marked earlier counts only while it still holds — Amount > 20,000 and
+         Amount < 30,000 is a range: 45,000 doesn't meet it because 5,000 once did. */
+      const views = workflowTriggerViews(w), lapsed = (id) => { const v = views.find(x => x.triggerId === id);
+        return !!v && isStateTrigger(v) && !fired.some(f => f.triggerId === id) && !entryStateHolds(v, deal, dataRef.current, acts); };
+      const ids = [...new Set([...(((esRef.current.triggerProgress || {})[key]) || []).filter(id => !lapsed(id)), ...fired.map(v => v.triggerId), ...holding])];
       const done = w.triggers.every(t => ids.includes(t.id));
       commit(s => { const tp = {...(s.triggerProgress || {})}; if(done) delete tp[key]; else tp[key] = ids; return {...s, triggerProgress:tp}; });
       if(!done) return;
@@ -1727,6 +1769,21 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
       }
       /* Assign Record Owner: a person; in turn within a team; round-robin over a list; or a user
          matching the owner conditions (several: in turn; none: the owner stays — noted). */
+      /* Merge Record (with Record Is Duplicated): the record's merge case — every record it matches,
+         oldest first — merged by the action's rules (merge.jsx mergeByRules): each property takes
+         the chosen record's value (First — the oldest — or Latest — the newest), else the nearest one's that has one;
+         the first is kept. The run goes on with the kept record. */
+      case 'mergeRecord': {
+        const object = recordObjectOf(deal.id), idx = WF_LIVE.merge && WF_LIVE.merge[object];
+        const mc = idx && idx.cases.find(x => x.ids.some(id => String(id) === String(deal.id)));
+        const live = liveRecords(), recs = mc ? mc.ids.map(id => live[object].find(r => String(r.id) === String(id))).filter(Boolean) : [];
+        if(recs.length < 2 || !mergeRecordsRef || !mergeRecordsRef.current) return {status:'skipped', result:'No matching record to merge'};
+        const plan = mergeByRules(data, object, recs, live, c.rules || {});
+        mergeRecordsRef.current(object, recs.map(r => r.id), plan.values, plan.changes, plan.links, {by:`${w.name || workflowTitle(data, w)} (workflow)`, workflowId:w.id});
+        const keptId = object === 'contacts' ? String(recs[0].id) : recs[0].id, name = plan.values.name ?? recs[0].name ?? '';
+        if(keptId !== deal.id) patchRun(run.id, r => ({...r, dealId:keptId, dealName:name}));
+        return {status:'done', result:`Merged ${recs.length} ${typePlural(object, 'Records').toLowerCase()} into ${name || 'the first'}`};
+      }
       case 'assignOwner': {
         const active = (data.users || []).filter(u => u.status === 'Activated').map(u => u.id), key = `${w.id}:${action.id}`;
         let to = null, how = '';
@@ -1740,12 +1797,16 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
           if(!pool.length) return {status:'skipped', result:'No active users in the list'};
           to = nextInTurn(key, pool, deal.owner); how = ' · round-robin';
         } else if(c.method === 'properties'){
-          const pool = active.filter(id => (c.rules || []).every(r => ownerRuleHolds(data, id, r)));
+          // Among: everyone, a team's members, or an ordered list — those meeting every condition, in turn.
+          const among = c.pool === 'team' ? (data.users || []).filter(u => u.teamId === c.team).map(u => u.id) : c.pool === 'roundRobin' ? (c.users || []) : active;
+          const pool = among.filter(id => active.includes(id) && (c.rules || []).every(r => ownerRuleHolds(data, id, r)));
           if(!pool.length) return {status:'done', result:`No user matches the owner conditions · ${owner || 'the owner'} stays the owner`};
           to = nextInTurn(key, pool, deal.owner); how = pool.length > 1 ? ` · in turn among ${pool.length} matching users` : ' · the matching user';
         }
         if(!to) return {status:'skipped', result:'No owner chosen'};
         if(to === deal.owner) return {status:'done', result:`${userName(data, to)} is already the owner${how}`};
+        // Track Violations: the owner is proposed (their turn is taken now), and assigned once it's approved.
+        if(prompt) return prompted([createPrompt(run, step, deal, 'assignOwner', `Assign to ${userName(data, to)}`, {to, how})], 'approval');
         applyPatch(deal, {owner:to}, run);
         return {status:'done', result:`Owner → ${userName(data, to)}${how}`};
       }
@@ -1845,6 +1906,12 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
         return;
       }
       case 'clearProperty': applyPatch(deal, Object.fromEntries(p.payload.keys.map(k => [k, ''])), run); outcome = 'Cleared'; break;
+      // A proposed owner approved (resolved first: the owner change would otherwise end it).
+      case 'assignOwner': {
+        resolvePrompt(id, 'done', `Owner → ${userName(data, p.payload.to)}${p.payload.how || ''} · approved by ${CURRENT_USER.name}`);
+        if(p.payload.to !== deal.owner) applyPatch(deal, {owner:p.payload.to}, run, {byPerson:true});
+        return;
+      }
       case 'moveStage': {
         // Move to Specific Pipeline carries its pipeline; the others stay in the record's.
         const pipe = p.payload.pipeline || deal.pipeline, patch = pipe !== deal.pipeline ? {pipeline:pipe, stage:p.payload.stage} : {stage:p.payload.stage};
@@ -2053,6 +2120,19 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
   /* Company-wide workflows (User Property triggers only): each activated user is checked — when
      the triggers hold for them (All / Any), the workflow runs once for that user (again only after
      they stop holding); its actions are Notify ("the user" is the person it's about). */
+  /* Overdue Amount and Number of Overdue Payments change as days pass (a due date goes by) as well as
+     with the plans: each record's values are kept (`accTimed`) and a change is evaluated like any
+     Accounting change. The first reading of a record is its starting point. */
+  function checkOverduePayments(){
+    const timed = ACCOUNTING_TRIGGER_FIELDS.filter(f => f.timed), seen = esRef.current.accTimed || {}, changed = [];
+    [...new Set((WF_LIVE.accounting || []).map(t => `${t.object}|${t.recordId}`))].forEach(k => {
+      const [object, rid] = k.split('|'), rec = dealsRef.current.find(r => recordObjectOf(r.id) === object && String(r.id) === rid);
+      if(rec) timed.forEach(f => { const key = `${k}|${f.key}`, v = accountingValues(rec, f).join(', '); if(seen[key] !== v) changed.push({rec, f, key, from:seen[key], to:v}); });
+    });
+    if(!changed.length) return;
+    commit(s => ({...s, accTimed:{...(s.accTimed || {}), ...Object.fromEntries(changed.map(x => [x.key, x.to]))}}));
+    changed.filter(x => x.from !== undefined).forEach(x => emitScoped(x.rec.id, 'accounting', x.f.key, x.from, x.to));
+  }
   function checkCompanyUsers(){
     const data = dataRef.current;
     (data.workflows || []).map(normalizeWorkflow).filter(w => w.active !== false && w.triggers.length && !(w.context || {}).object).forEach(w => {
@@ -2088,6 +2168,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
     checkQuietRecords(now);
     checkAssociatedQuiet(now);
     checkEmailsAgo(now);
+    checkOverduePayments();
     checkCompanyUsers();
     settleEntryViolations();
     esRef.current.runs.filter(r => r.status === 'waiting' && r.checkAt && r.checkAt <= now).forEach(r => checkStay(r.id));
@@ -2154,8 +2235,9 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
      property's value, a count of activity) run now, as they would the moment those became true; so
      do those already sitting where an entry trigger leads: in the stage (Stage Entry Moving Forward
      or Backward — how they got there isn't known, so both), in the pipeline (Pipeline Entry), or
-     simply existing (New Record). Moments (a stage or pipeline exit, a change, a form submitted, a
-     particular email sent, Repeat) apply from their next occurrence; time-based ones (Stay at
+     marked by the duplicate check (Record Is Duplicated). Moments (a record created — New Record
+     never replays on the records already there —, a stage or pipeline exit, a change, a form
+     submitted, a particular email sent, Repeat) apply from their next occurrence; time-based ones (Stay at
      Stage, not changed for…) are checked by the scheduler for every record. Block Stage Entry:
      records already in the stage it blocks aren't moved — each gets a violation to change the
      values that keep it out (resolved once they no longer hold, or as it leaves the stage).
@@ -2164,13 +2246,13 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
     if(v.trigger === 'propertyUpdate') return !!c.property && !isChangeOp(c.op);
     const p = activityTriggerProperty(v.trigger, c.activityProperty);
     return !!p && !!p.counts && !p.each && !p.template && !c.repeat; };
-  const ENTRY_TRIGGERS = ['stageEntryForward', 'stageEntryBackward', 'pipelineEntry', 'recordCreated'];
+  const ENTRY_TRIGGERS = ['stageEntryForward', 'stageEntryBackward', 'pipelineEntry', 'recordDuplicated'];
   const appliesToExisting = (v) => ENTRY_TRIGGERS.includes(v.trigger) || isStateTrigger(v);
   // The triggers that already hold for a record sitting in the workflow's context.
   const heldByExisting = (w, d, data, acts) => workflowTriggerViews(w).filter(v => {
     if(v.trigger === 'stageEntryForward' || v.trigger === 'stageEntryBackward') return d.pipeline === workflowPipeline(v) && d.stage === workflowStage(v);
     if(v.trigger === 'pipelineEntry') return !!d.pipeline && (!workflowPipeline(v) || d.pipeline === workflowPipeline(v));
-    if(v.trigger === 'recordCreated') return inContext(v, d);
+    if(v.trigger === 'recordDuplicated') return inContext(v, d) && duplicateStatusOf(d) === (v.triggerConfig || {}).duplicateType;
     return isStateTrigger(v) && entryStateHolds(v, d, data, acts);
   });
   function backfillAllRecords(raw){
@@ -2188,6 +2270,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
     const heldFor = (d) => !blocks ? heldByExisting(w, d, data, actsOf(d.id))
       : views.filter(v => isEntry(v) ? d.pipeline === workflowPipeline(v) && d.stage === workflowStage(v) : blockStateHolds(v, d, data, actsOf(d.id), dealsRef.current, lastChangedAt));
     dealsRef.current.filter(d => recordObjectOf(d.id) === w.context.object && inContext(w, d) && inTriggerScope(w, d)).forEach(d => {
+      if(!getDeal(d.id)) return;   // gone meanwhile (merged by this workflow's run on another record)
       const holding = heldFor(d);
       if(!holding.length || (all && holding.length !== views.length)) return;
       fire(w, holding, d, () => ({...baseRun(holding[holding.length - 1], d, {chain:{id:wfNewId('ch'), depth:0, visited:[]}, previousStage:null, change:null}), existingRecord:true}));
@@ -2266,10 +2349,31 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
         const [object, rid] = k.split('|'), rec = dealsRef.current.find(r => recordObjectOf(r.id) === object && String(r.id) === String(rid));
         if(!rec) return;
         const vals = (list, f) => { const keep = WF_LIVE; WF_LIVE = {...WF_LIVE, accounting:list}; try { return accountingValues(rec, f).join(', '); } finally { WF_LIVE = keep; } };
-        ACCOUNTING_TRIGGER_FIELDS.forEach(f => { const a = vals(before, f), b = vals(now, f); if(a !== b) emitScoped(rec.id, 'accounting', f.key, a, b); });
+        // (Overdue values also change as days pass: checkOverduePayments owns them.)
+        ACCOUNTING_TRIGGER_FIELDS.filter(f => !f.timed).forEach(f => { const a = vals(before, f), b = vals(now, f); if(a !== b) emitScoped(rec.id, 'accounting', f.key, a, b); });
       });
+      checkOverduePayments();
     }
   }, [profiles, profileFacts, accounting]);
+  /* Record Is Duplicated: the duplicate check (merge.jsx — App works it out from the records) marks a
+     record Form Refill or Duplicate — as it's created, or as its email or phone comes to match
+     another's. Each record once per status; a record type just switched to reporting starts from
+     what's there (All Records checks those when a workflow is saved). */
+  const mergeSeen = React.useRef(null);
+  React.useEffect(() => {
+    const prev = mergeSeen.current;
+    mergeSeen.current = merge;
+    if(!merge || !prev || prev === merge) return;
+    Object.entries(merge).forEach(([object, idx]) => {
+      const was = prev[object];
+      if(!was || !idx || !idx.status) return;
+      idx.status.forEach((status, id) => {
+        if(!DUPLICATE_TYPES.includes(status) || was.status.get(id) === status) return;
+        const rec = dealsRef.current.find(r => recordObjectOf(r.id) === object && String(r.id) === String(id));
+        if(rec) emit({type:'recordDuplicated', recordId:rec.id, pipelineId:rec.pipeline, attrs:{status}});
+      });
+    });
+  }, [merge]);
   /* Create Customer (a violation on a deal): done once a customer is created for the deal after it
      was raised — from the violation, from the deal's menu or anywhere else (a deal can have several,
      so one it already had doesn't count) — checked whenever records change. */
@@ -2401,6 +2505,8 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
 
   const api = {
     addDealActivity, updateDealActivity, deleteRecordActivity,
+    // The records (stored shape) and every record's activity as they are right now — a merge, or a split, reads them (App's closures may be a change behind).
+    live: () => ({...liveRecords(), activities:actsRef.current}),
     /* Records merged (App's mergeRecords): their activity moves in one change — the same activity
        objects in every store, so nothing is seen as new and no workflow runs on it. */
     editActivities,
@@ -2758,6 +2864,7 @@ function triggerExpectation(data, v, deal, acts, attempt){
   }
   if(v.trigger === 'stageExit') return {expected:`Stay in “${stageName}”`, current:`Left “${stageName}”`};
   if(v.trigger === 'recordCreated') return {expected:'—', current:'Record created'};
+  if(v.trigger === 'recordDuplicated') return {expected:'—', current:`Record is a ${c.duplicateType || 'duplicate'}`};
   if(v.trigger === 'associatedRecord'){
     const x = objectName(data, c.associatedObject || '').replace(/s$/, ''), when = whenPhrase(c, v.context) || '';
     if(c.assocParam === 'notCreated') return {expected:`Associated ${x} created ${when}`, current:`No associated ${x}`};
@@ -2771,6 +2878,8 @@ function triggerExpectation(data, v, deal, acts, attempt){
       const tpl = emailTemplatesOf(data).find(t => t.id === c.template) || {};
       return {expected:`Email “${tpl.name || 'template'}” not ${p.template}`, current:`Email “${tpl.name || 'template'}” ${p.template}`};
     }
+    // Each one (Meeting Scheduled, Task Created, Note Added): the event itself, not a count.
+    if(!p.counts) return {expected:'—', current:p.label};
     const n = countedOf(p, deal, acts).length, noun = `Number of ${p.noun}`.toLowerCase();
     const N = sentence(noun);
     if(c.repeat && !countConditionComplete(c)) return {expected:`No new ${p.noun.toLowerCase()}`, current:`${N} = ${n}`};
@@ -2882,7 +2991,7 @@ const canDeleteRecord = (rec) => {
 /* ── Prompts ── */
 const pendingPrompts = (ctx, match) => ctx ? ctx.state.prompts.filter(p => p.status === 'pending' && match(p)) : [];
 const PROMPT_ICON = {blockEntry:'lock', setProperty:'edit', clearProperty:'close', moveStage:'forward', addNote:'notepad', scheduleMeeting:'calendar', createRecord:'cube', createTask:'tasks', sendEmail:'envelope',
-  logMeeting:'calendar', logCall:'call', initiateCall:'call', deleteRecord:'trash'};
+  logMeeting:'calendar', logCall:'call', initiateCall:'call', deleteRecord:'trash', assignOwner:'userSwitch'};
 
 /* Violations (Required actions) are red. */
 const VIOLATION_TONE = {color:T.red, bg:'#FEF3F2', border:'#FDA29B'};
@@ -2951,6 +3060,7 @@ function violationExplanation(data, p){
     logCall: () => `A call must be logged${at}`,
     initiateCall: () => `A call must be made${at}`,
     deleteRecord: () => `The ${single(object).toLowerCase()} must be deleted`,
+    assignOwner: () => `The ${single(object).toLowerCase()} must be assigned to ${userName(data, pay.to) || 'its owner'}`,
     blockEntry: () => `Its values must change to stay${at.replace(' at the', ' in the')}`,
   }[p.kind];
   return sentence(required ? required() : p.title);
@@ -3775,7 +3885,8 @@ function ViolationsButton({active, onClick, object = 'deals', pipelines}){
   );
 }
 /* Violation Mode: the Violations panel on the right — one compact card per violation (the record, the
-   workflow, Action Required). Selecting a card shows how its workflow evaluated the record on the
+   workflow, Action Required); every proposed owner together in one Owner Assignments card, which
+   opens their table (OwnerAssignmentsPanel). Selecting a card shows how its workflow evaluated the record on the
    left, over the page (ViolationTracePane); selecting it again, or closing, returns to the page. */
 function ViolationPanel({onClose, object = 'deals', pipelines}){
   const ctx = useWorkflowEngineCtx();
@@ -3795,15 +3906,19 @@ function ViolationPanel({onClose, object = 'deals', pipelines}){
   React.useEffect(() => { const p = ctx && ctx.state.prompts.find(x => x.id === selected); if(focusRecord) focusRecord(p ? p.dealId : null); }, [selected]);
   React.useEffect(() => () => { if(focusRecord) focusRecord(null); }, []);
   const [editing, setEditing] = React.useState(null);   // {deal, prop}: a violation's Edit <property>
+  const [assigning, setAssigning] = React.useState(false);   // the Owner Assignments table is open
   if(!ctx) return null;
   if(!violationsAvailable(ctx, object, pipelines)) return null;
-  const list = dealViolations(ctx, object, pipelines).sort((a, b) => b.createdAt - a.createdAt);
+  const every = dealViolations(ctx, object, pipelines).sort((a, b) => b.createdAt - a.createdAt);
+  // Proposed owners (Assign Record Owner · Track Violations) are one card — Owner Assignments — not one each.
+  const owners = every.filter(p => p.kind === 'assignOwner'), list = every.filter(p => p.kind !== 'assignOwner');
   const resolve = (p) => p.kind === 'initiateCall' ? startViolationCall(ctx, p) : PROMPT_NEEDS_INPUT.includes(p.kind) ? ctx.openPrompt(p.id, {direct:true}) : ctx.api.completePrompt(p.id, {});
   const current = list.find(p => p.id === viewing) || null;
   // Choosing a card: its record is pointed out on the page (the diagram, if open, closes so the page shows).
   const select = (id) => { setViewing(null); setSelected(s => s === id ? null : id); };
   return (<>
     {current && <ViolationTracePane p={current} onClose={()=>setViewing(null)}/>}
+    {assigning && owners.length > 0 && <OwnerAssignmentsPanel violations={owners} object={object} onClose={()=>setAssigning(false)}/>}
     <div data-violation-panel="" onMouseDown={e=>e.stopPropagation()} style={{position:'absolute', top:0, right:0, bottom:0, width:VIOLATION_PANEL_W, zIndex:30, background:'#fff',
       borderLeft:`1px solid ${T.border}`, boxShadow:'-8px 0 24px rgba(16,24,40,.08)', display:'flex', flexDirection:'column'}}>
       <div style={{display:'flex', alignItems:'center', gap:8, height:52, padding:'0 12px 0 16px', borderBottom:`1px solid ${T.border}`, flexShrink:0}}>
@@ -3816,7 +3931,16 @@ function ViolationPanel({onClose, object = 'deals', pipelines}){
       </div>
       {editing && <EditPropertyModal deal={editing.deal} prop={editing.prop} violation={editing.violation} onClose={()=>setEditing(null)}/>}
       <div style={{flex:1, minHeight:0, overflowY:'auto', padding:12, display:'flex', flexDirection:'column', gap:8}}>
-        {!list.length && <div style={{padding:'32px 8px', textAlign:'center', fontSize:13, color:T.gray400}}>No workflow violations</div>}
+        {!every.length && <div style={{padding:'32px 8px', textAlign:'center', fontSize:13, color:T.gray400}}>No workflow violations</div>}
+        {owners.length > 0 && (
+          <button data-owner-assignments="" onClick={()=>setAssigning(true)} style={{display:'flex', alignItems:'center', gap:10, width:'100%', padding:16, border:`1px solid ${T.border}`, borderRadius:12, background:'#fff',
+            cursor:'pointer', textAlign:'left', fontFamily:'inherit', flexShrink:0}}>
+            <Icon name="userSwitch" size={15} color={T.red}/>
+            <span style={{flex:1, minWidth:0, fontSize:14, fontWeight:600, color:T.attioText}}>Owner Assignments</span>
+            <span style={{minWidth:18, height:18, padding:'0 5px', boxSizing:'border-box', borderRadius:9999, background:T.red, color:'#fff', fontSize:11, fontWeight:700,
+              display:'inline-flex', alignItems:'center', justifyContent:'center'}}>{owners.length}</span>
+          </button>
+        )}
         {list.map(p => {
           const deal = ctx.deals.find(d => d.id === p.dealId);
           return (
@@ -3830,6 +3954,40 @@ function ViolationPanel({onClose, object = 'deals', pipelines}){
   </>);
 }
 const VIOLATION_PANEL_W = 360;
+/* Owner Assignments (the Violations panel's one card for every proposed owner): the records and the
+   owner each would get, by the workflow's own logic; filtered by owner; Approve assigns the ones
+   shown. No copy — the table is the whole of it. */
+function OwnerAssignmentsPanel({violations, object, onClose}){
+  const ctx = useWorkflowEngineCtx(), hub = useRecordHub();
+  const [user, setUser] = React.useState('');
+  const nameOf = (id) => userName(ctx.data, id) || 'Unknown';
+  const users = [...new Set(violations.map(p => p.payload.to))].map(id => ({value:id, label:nameOf(id)})).sort((a, b) => a.label.localeCompare(b.label));
+  const rows = violations.filter(p => !user || p.payload.to === user);
+  const noun = typeSingular(object, 'Record'), plural = typePlural(object, 'Records');
+  const approve = () => { const n = rows.length; rows.forEach(p => ctx.api.completePrompt(p.id, {}));
+    if(hub) hub.toast(`Owners assigned · ${n} ${(n === 1 ? noun : plural).toLowerCase()}`);
+    if(n === violations.length) onClose(); else setUser(''); };
+  const cell = {padding:'10px 12px', borderBottom:`1px solid ${T.border}`, minWidth:0, display:'flex', alignItems:'center', gap:8, fontSize:13, color:T.attioText};
+  const head = {...cell, background:T.headerBg, fontSize:12, fontWeight:600, color:T.attioMuted};
+  return (
+    <CreatePanelFrame title="Owner Assignments" onClose={onClose} placement="fixed" width="min(640px, calc(100vw - 72px))" zIndex={95}
+      actions={<StCta label="Approve" disabled={!rows.length} onClick={approve}/>}>
+      <div style={{display:'flex', flexDirection:'column', gap:12}}>
+        <div style={{width:240}}><FormSelect value={user || 'all'} options={[{value:'all', label:'All Users'}, ...users]} ariaLabel="Filter by owner" onChange={(v)=>setUser(!v || v === 'all' ? '' : v)}/></div>
+        <div style={{display:'grid', gridTemplateColumns:'minmax(0, 1fr) minmax(0, 1fr)', border:`1px solid ${T.border}`, borderRadius:10, overflow:'hidden'}}>
+          <div style={head}>{noun}</div>
+          <div style={head}>Owner</div>
+          {rows.map((p, i) => { const rec = ctx.deals.find(d => d.id === p.dealId), last = i === rows.length - 1 ? {borderBottom:'none'} : null; return (
+            <React.Fragment key={p.id}>
+              <div style={{...cell, ...last}}><span style={{overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{(rec && rec.name) || p.dealName || `Unnamed ${noun}`}</span></div>
+              <div style={{...cell, ...last}}><Avatar name={nameOf(p.payload.to)} size={20}/><span style={{overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{nameOf(p.payload.to)}</span></div>
+            </React.Fragment>
+          ); })}
+        </div>
+      </div>
+    </CreatePanelFrame>
+  );
+}
 /* The Violation Card (Violations panel): the record and the workflow, a divider, Action Required. */
 function ViolationCard({p, ev, on, onSelect, onResolve, editProp, onEdit}){
   return (

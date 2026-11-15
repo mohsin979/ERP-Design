@@ -61,15 +61,16 @@ function extendedValue(key, record){
   const v = ((((WF_LIVE.profiles || {})[cid] || {})[formId] || {}).values || {})[fieldId];
   return v == null ? '' : v;
 }
-// Accounting figures are money (right-aligned in tables, with their currency).
-const extendedIsMoney = (key) => String(key).startsWith('acc:') && (ACCOUNTING_TRIGGER_FIELDS.find(a => a.key === key.slice(4)) || {}).kind === 'number';
+// Accounting amounts are money (right-aligned in tables, with their currency); its counts are plain numbers.
+const extendedIsMoney = (key) => String(key).startsWith('acc:') && !!(ACCOUNTING_TRIGGER_FIELDS.find(a => a.key === key.slice(4)) || {}).money;
 // As shown: money in its plans' currency (in different ones: the default), dates as dates, profile answers as the Customer Profile shows them.
 function extendedValueText(key, record){
   const v = extendedValue(key, record);
   if(v === '' || v == null) return '';
   if(key.startsWith('acc:')){
     const f = ACCOUNTING_TRIGGER_FIELDS.find(a => a.key === key.slice(4)) || {};
-    if(f.kind === 'number') return fmtMoney(Number(v), termsCurrency(recordPlansOf(WF_LIVE.accounting, recordObjectOf(record.id), record)));
+    if(f.money) return fmtMoney(Number(v), termsCurrency(recordPlansOf(WF_LIVE.accounting, recordObjectOf(record.id), record)));
+    if(f.kind === 'number') return Number(v).toLocaleString('en-US');
     if(f.kind === 'date') return /^\d{4}-\d{2}-\d{2}$/.test(String(v)) ? ptFmtDay(v) : String(v);
     return String(v);
   }

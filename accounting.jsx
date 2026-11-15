@@ -712,18 +712,10 @@ function PaymentScheduleCard({schedule, canEdit, invoices, quote, doc, onPay, on
   return (
     <div style={{borderBottom:`1px solid ${T.border}`, paddingBottom:8}}>
       <div style={{padding:'16px 24px 14px', display:'flex', flexDirection:'column', gap:12}}>
+        {/* The KPIs, ⋯ on the right; under them one line: its number, when and by whom it was made. */}
         <div style={{display:'flex', alignItems:'flex-start', gap:8}}>
-          <div style={{flex:1, minWidth:0, display:'flex', flexDirection:'column', gap:2}}>
-            <div style={{display:'flex', alignItems:'center', gap:8, minWidth:0, flexWrap:'wrap'}}>
-              <span style={{fontSize:14, fontWeight:600, color:T.attioText, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{planTitle(schedule)}{type === 'recurring' && schedule.plan ? ` · ${RECURRING_FREQUENCY[schedule.plan.frequency] || 'Monthly'}` : ''}</span>
-              {frozen && <StatusPill status="frozen" map={{frozen:{label:`Frozen ${fmtQuoteDate(schedule.frozen.at)}`, tone:'info'}}}/>}
-              {/* A subscription until cancelled, once cancelled: nothing invoiced after the day. */}
-              {schedule.cancelledOn && <StatusPill status="cancelled" map={{cancelled:{label:`Cancelled ${fmtQuoteDate(schedule.cancelledOn)}`, tone:'danger'}}}/>}
-              {/* Made from a quote or a document: links to it. */}
-              {schedule.source === 'quote' && <PlanSourcePill icon="quote" label={`From ${schedule.quoteNumber || 'Quote'}`} target={quote} onOpen={onOpenQuote}/>}
-              {schedule.source === 'document' && <PlanSourcePill icon="files" label={`From ${schedule.documentNumber || 'Document'}`} target={doc} onOpen={onOpenDocument}/>}
-            </div>
-            <span style={{fontSize:12, color:T.attioMuted}}>Created {fmtQuoteDate(schedule.createdAt)} by {schedule.createdBy}{(schedule.revision || 1) > 1 ? ` · Revision ${schedule.revision}` : ''}</span>
+          <div style={{flex:1, minWidth:0, display:'flex', gap:8, flexWrap:'wrap'}}>
+            {summary('Total', t.total)}{summary('Received', t.received, '#027A48')}{summary('Outstanding', t.outstanding, t.outstanding > 0 ? '#B54708' : null)}
           </div>
           {/* Edit: at any time, frozen too (what's paid stays as it is); not once cancelled. A
               subscription until cancelled: Cancel Subscription, once. */}
@@ -733,8 +725,14 @@ function PaymentScheduleCard({schedule, canEdit, invoices, quote, doc, onPay, on
               ...(planOngoing(schedule.plan) && !schedule.cancelledOn ? [{label:'Cancel Subscription', danger:true, onClick:onCancelSubscription}] : [])]}/>
           )}
         </div>
-        <div style={{display:'flex', gap:8, flexWrap:'wrap'}}>
-          {summary('Total', t.total)}{summary('Received', t.received, '#027A48')}{summary('Outstanding', t.outstanding, t.outstanding > 0 ? '#B54708' : null)}
+        <div style={{display:'flex', alignItems:'center', gap:8, minWidth:0, flexWrap:'wrap'}}>
+          <span style={{fontSize:12, color:T.attioMuted}}>{schedule.number ? `${schedule.number} · ` : ''}Created {fmtQuoteDate(schedule.createdAt)} by {schedule.createdBy}</span>
+          {frozen && <StatusPill status="frozen" map={{frozen:{label:`Frozen ${fmtQuoteDate(schedule.frozen.at)}`, tone:'info'}}}/>}
+          {/* A subscription until cancelled, once cancelled: nothing invoiced after the day. */}
+          {schedule.cancelledOn && <StatusPill status="cancelled" map={{cancelled:{label:`Cancelled ${fmtQuoteDate(schedule.cancelledOn)}`, tone:'danger'}}}/>}
+          {/* Made from a quote or a document: links to it. */}
+          {schedule.source === 'quote' && <PlanSourcePill icon="quote" label={`From ${schedule.quoteNumber || 'Quote'}`} target={quote} onOpen={onOpenQuote}/>}
+          {schedule.source === 'document' && <PlanSourcePill icon="files" label={`From ${schedule.documentNumber || 'Document'}`} target={doc} onOpen={onOpenDocument}/>}
         </div>
       </div>
       {oneTime ? <OneTimePaymentRow schedule={schedule} canAct={canPay} invoice={invoiceOf(schedule.installments[0] || {})} head={head} cell={cell} num={num} clip={clip} actionsCol={actionsCol} onPay={onPay} onView={onView} onOpenInvoice={onOpenInvoice}/> : (
@@ -825,8 +823,10 @@ function OneTimePaymentRow({schedule, canAct, invoice, head, cell, num, clip, ac
   );
 }
 
-/* ── The record's Accounting tab ── its Payment Plans in three tabs (Active, Paid, Frozen), Add
-   Payment Plan, each plan's side panel, payments and invoices. */
+/* ── The record's Accounting tab ── its Payment Plans in three status pills (Active, Paid, Frozen —
+   the look of Tools → Tasks' views; no heading), Add Payment Plan beside them, each plan's side
+   panel, payments and invoices. A plan shows its KPIs (Total, Received, Outstanding) with ⋯, then
+   one line: its number, when and by whom it was made (and Frozen / Cancelled / From …). */
 // A customer with a deal: the deal's Payment Plans (termsHolderOf), as the deal shows them.
 function AccountingTab({object, record}){
   const hub = useRecordHub(), holder = termsHolderOf(object, record);
@@ -999,12 +999,12 @@ function RecordAccounting({object, record}){
   if(!can('view')) return <div style={{flex:1, padding:'48px 24px', textAlign:'center', fontSize:13, color:T.gray400}}>You don't have access to this record's payment plans.</div>;
   return (
     <div style={{flex:1, minHeight:0, minWidth:0, display:'flex', flexDirection:'column', position:'relative'}}>
-      <div style={{display:'flex', alignItems:'center', gap:10, padding:'12px 20px', borderBottom:`1px solid ${T.border}`, flexShrink:0}}>
-        <span style={{fontSize:13, fontWeight:600, color:T.attioText}}>Payment Plans</span>
+      {/* Active / Paid / Frozen as status pills (as Tools → Tasks' views), Add Payment Plan on the right. */}
+      <div style={{display:'flex', alignItems:'center', gap:8, padding:'12px 20px', borderBottom:`1px solid ${T.border}`, flexShrink:0}}>
+        {PLAN_STATES.map(st => <button key={st.id} onClick={()=>setTab(st.id)} style={viewPillStyle(tab === st.id)}>{st.name}</button>)}
         <div style={{flex:1}}/>
         {can('create') && <button onClick={()=>setEditing({isNew:true})} style={{...btnPrimarySm(), display:'inline-flex', alignItems:'center', gap:6}}><Icon name="plus" size={13} color="#fff"/> Add Payment Plan</button>}
       </div>
-      <PrimaryTabs inset="settings" items={PLAN_STATES} active={tab} onSelect={setTab}/>
       <div style={{flex:1, minHeight:0, overflowY:'auto', paddingBottom:32, display:'flex', flexDirection:'column'}}>
         {shown.map(card)}
         {!shown.length && <EmptyState compact title={`No ${tab} payment plans`}/>}
