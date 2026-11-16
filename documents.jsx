@@ -580,12 +580,12 @@ function PublicSignPage({route}){
   );
 }
 /* A document signed by everyone: each payment plan in it becomes a Payment Plan on its record (once
-   each — `documentId` and the element's id), on the record that holds its plans, dated from the
+   each — `documentId` and the element's id), on its record, dated from the
    signing; with no record, none. Its invoices due by then are issued at once (invoices.jsx). */
 function plansFromDocument(hub, d){
   const rec = d.recordId != null && d.object ? hubRecord(hub, d.object, d.recordId) : null;
   if(!rec) return;
-  const h = termsHolderOf(d.object, rec), signedOn = dayOf(d.signedAt);
+  const h = {object:d.object, id:rec.id}, signedOn = dayOf(d.signedAt);
   let list = hub.accounting || [];
   const made = bodyEmbeds(d.body).filter(e => e.kind === 'payment').map(e => ({eid:e.id, data:(d.embeds || {})[e.id]})).filter(x => x.data)
     .filter(x => !list.some(s => s.documentId === d.id && s.embedId === x.eid)).map(({eid, data}) => {

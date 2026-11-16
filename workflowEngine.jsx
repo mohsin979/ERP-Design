@@ -319,7 +319,7 @@ const ACCOUNTING_TRIGGER_FIELDS = [
    readAll:(terms) => !terms.length ? [PAYMENT_STATUS.unpaid.label] : liveInstallments(terms).map(({s, i}) => installmentStatusLabel(s, i))},
 ];
 // A record's Payment Plans (Accounting), and one property's values across them (any may match).
-// A customer with a deal reads its deal's (accounting.jsx termsHolderOf).
+// A record's own plans and those shared with it — the records above and below it (accounting.jsx planScopeOf).
 const recordPaymentTerms = (rec) => rec ? recordPlansOf(WF_LIVE.accounting, recordObjectOf(rec.id), rec) : [];
 const accountingValues = (rec, f) => f.level === 'installments' ? f.readAll(recordPaymentTerms(rec))
   : [f.readRecord(recordPaymentTerms(rec))];
@@ -2180,9 +2180,13 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
   /* Overdue Amount and Number of Overdue Payments change as days pass (a due date goes by) as well as
      with the plans: each record's values are kept (`accTimed`) and a change is evaluated like any
      Accounting change. The first reading of a record is its starting point. */
+  // The records that show any of these plans: each plan's own record and the ones it's shared with.
+  const planShownOn = (plans) => { const recs = dealsRef.current, own = [...new Set(plans.map(t => `${t.object}|${t.recordId}`))];
+    return [...new Set(own.flatMap(k => { const [object, rid] = k.split('|'), rec = recs.find(r => recordObjectOf(r.id) === object && String(r.id) === rid);
+      return rec ? planScopeOf(object, rec, recs) : [k]; }))]; };
   function checkOverduePayments(){
     const timed = ACCOUNTING_TRIGGER_FIELDS.filter(f => f.timed), seen = esRef.current.accTimed || {}, changed = [];
-    [...new Set((WF_LIVE.accounting || []).map(t => `${t.object}|${t.recordId}`))].forEach(k => {
+    planShownOn(WF_LIVE.accounting || []).forEach(k => {
       const [object, rid] = k.split('|'), rec = dealsRef.current.find(r => recordObjectOf(r.id) === object && String(r.id) === rid);
       if(rec) timed.forEach(f => { const key = `${k}|${f.key}`, v = accountingValues(rec, f).join(', '); if(seen[key] !== v) changed.push({rec, f, key, from:seen[key], to:v}); });
     });
@@ -2380,7 +2384,8 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
 
   /* Customer Profile and Accounting change outside the engine (the profile wizard, the Accounting
      tab): each changed value is evaluated on its records — a person's profile on the contact and
-     on that contact's deals and customers; payment terms on their record. */
+     on that contact's deals and customers; a payment plan on every record that shows it (its own,
+     and the records above and below it). */
   const liveSeen = React.useRef({profiles, facts:profileFacts, accounting});
   React.useEffect(() => {
     const prev = liveSeen.current;
@@ -2398,11 +2403,11 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
       });
     }
     if(prev.accounting !== accounting){
-      const keyOf = (t) => `${t.object}|${t.recordId}`;
-      const keys = [...new Set([...(accounting || []), ...(prev.accounting || [])].map(keyOf))];
-      keys.forEach(k => {
-        const now = (accounting || []).filter(t => keyOf(t) === k), before = (prev.accounting || []).filter(t => keyOf(t) === k);
-        if(now.length === before.length && now.every((t, i) => t === before[i])) return;
+      // The plans that changed (added, edited, gone), then every record that shows one of them.
+      const was = new Map((prev.accounting || []).map(t => [t.id, t])), ids = new Set((accounting || []).map(t => t.id));
+      const touched = [...(accounting || []).filter(t => was.get(t.id) !== t), ...(prev.accounting || []).filter(t => !ids.has(t.id))];
+      const now = accounting || [], before = prev.accounting || [];
+      planShownOn(touched).forEach(k => {
         const [object, rid] = k.split('|'), rec = dealsRef.current.find(r => recordObjectOf(r.id) === object && String(r.id) === String(rid));
         if(!rec) return;
         const vals = (list, f) => { const keep = WF_LIVE; WF_LIVE = {...WF_LIVE, accounting:list}; try { return accountingValues(rec, f).join(', '); } finally { WF_LIVE = keep; } };
@@ -3187,7 +3192,7 @@ function RecordViolationsProvider({record, children}){
   const value = React.useMemo(() => {
     if(!list.length) return EMPTY_RECORD_VIOLATIONS;
     const object = recordObjectOf(id);
-    const terms = hub ? (hub.accounting || []).filter(s => s.object === object && String(s.recordId) === String(id)) : [];
+    const terms = hub ? recordPlansOf(hub.accounting, object, record, hub.records) : [];   // its own and those shared with it
     const out = {list, object, props:{}, tabs:{}, installments:{}};
     const add = (map, k, line) => { (map[k] = map[k] || []).includes(line) || map[k].push(line); };
     list.forEach(p => {

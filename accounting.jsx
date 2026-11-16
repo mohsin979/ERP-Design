@@ -53,7 +53,14 @@
    and its proof — an uploaded screenshot (≤2 MB) and / or a payment gateway or reference link (one
    of them required). A part payment's balance is expected today or later.
 
-   A customer with a deal shows its deal's Payment Plans (termsHolderOf): one set for the sale.
+   Whose plans a record shows (planScopeOf; decided 2026-11-16): its own, those of every record
+   above it and of every record below it — Contact → Deal → Customer, by their links, whatever the
+   link's type — and never a sibling's. A contact's show on its deals and customers; a deal's on its
+   contacts and its customers, not on the contact's other deals; a customer's on its deals and
+   contacts, not on the deal's other customers. It's one plan wherever it shows: edited, frozen and
+   paid from any of them (its activity on the record it was added to), named there by a tag with
+   that record, and counted in each one's Accounting properties — the dashboard and Goals count a
+   plan once.
 
    Recording payments and editing plans need edit access to the record; everyone who can see
    it sees its plans. A record with payments recorded can't be deleted (recordHasPayments) —
@@ -98,13 +105,44 @@ const PAYMENT_TYPE_LABEL = {'one-time':'One-Time Payment', installments:'Install
 const PAYMENT_TYPES = [['one-time', 'One-Time'], ['installments', 'Installment'], ['recurring', 'Recurring']];
 const RECURRING_FREQUENCY = {weekly:'Weekly', monthly:'Monthly', yearly:'Yearly'};
 const paymentTypeOf = (s) => s.paymentType === 'subscription' ? 'recurring' : s.paymentType || (s.source === 'manual' && (s.installments || []).length === 1 && !s.installments[0].dueDate ? 'one-time' : 'installments');
-/* Whose Payment Plans a record shows: a customer with a deal shows its deal's (one set for the sale
-   — the Accounting tab, the Accounting columns and workflows all read them); anything else its own. */
-const termsHolderOf = (object, record) => object === 'customers' && record && (record.dealIds || []).length ? {object:'deals', id:record.dealIds[0]} : {object, id:record ? record.id : null};
-// Whether a record has payments recorded (in any of its plans): such a record can't be deleted.
+/* Whose Payment Plans a record shows (see the header): its own, and those of the records above
+   and below it — Contact → Deal → Customer, by their links — never a sibling's. `records`:
+   {contacts, deals, customers}, or the workflow engine's one list of them all (WF_LIVE.records). */
+const planLinksMemo = new WeakMap();   // a records list → who's linked to whom, worked out once
+function planLinks(records){
+  const flat = Array.isArray(records), key = flat ? records : (records && records.deals) || null;
+  const customersIn = flat ? null : (records && records.customers) || [];
+  const hit = key && planLinksMemo.get(key);
+  if(hit && hit.customers === customersIn) return hit;
+  const deals = flat ? records.filter(r => recordObjectOf(r.id) === 'deals') : key || [];
+  const customers = flat ? records.filter(r => recordObjectOf(r.id) === 'customers') : customersIn;
+  const push = (m, k, v) => { k = String(k); m.has(k) ? m.get(k).push(v) : m.set(k, [v]); };
+  const links = {customers:customersIn, contactDeals:new Map(), contactCustomers:new Map(), dealCustomers:new Map(), dealContacts:new Map()};
+  deals.forEach(d => { links.dealContacts.set(String(d.id), contactIdsOf(d)); contactIdsOf(d).forEach(c => push(links.contactDeals, c, d.id)); });
+  customers.forEach(c => { contactIdsOf(c).forEach(x => push(links.contactCustomers, x, c.id)); (c.dealIds || []).forEach(d => push(links.dealCustomers, d, c.id)); });
+  if(key) planLinksMemo.set(key, links);
+  return links;
+}
+// The records whose plans a record shows, as "<object>|<id>" (itself first). The same records show its own plans.
+function planScopeOf(object, record, records = WF_LIVE.records){
+  if(!record) return [];
+  const l = planLinks(records), id = String(record.id), of = (m, k) => m.get(String(k)) || [], as = (o) => (x) => `${o}|${x}`;
+  const own = `${object}|${id}`;
+  if(object === 'contacts'){ const deals = of(l.contactDeals, id);
+    return [...new Set([own, ...deals.map(as('deals')), ...[...of(l.contactCustomers, id), ...deals.flatMap(d => of(l.dealCustomers, d))].map(as('customers'))])]; }
+  if(object === 'deals') return [...new Set([own, ...contactIdsOf(record).map(as('contacts')), ...of(l.dealCustomers, id).map(as('customers'))])];
+  if(object === 'customers'){ const deals = record.dealIds || [];
+    return [...new Set([own, ...deals.map(as('deals')), ...[...contactIdsOf(record), ...deals.flatMap(d => of(l.dealContacts, d))].map(as('contacts'))])]; }
+  return [own];
+}
+// Whether a record has payments recorded (in a plan of its own): such a record can't be deleted.
 const recordHasPayments = (object, id, list = WF_LIVE.accounting) => (list || []).some(s => s.object === object && String(s.recordId) === String(id) && hasPayments(s));
-// The plans a record shows (a customer with a deal: its deal's).
-const recordPlansOf = (list, object, record) => { const h = termsHolderOf(object, record); return (list || []).filter(s => s.object === h.object && String(s.recordId) === String(h.id)); };
+// The plans a record shows: its own, then those shared with it (planScopeOf).
+const plansByRecordMemo = new WeakMap();
+const plansByRecord = (list) => { let m = list && plansByRecordMemo.get(list);
+  if(!m){ m = new Map(); (list || []).forEach(s => { const k = `${s.object}|${s.recordId}`; m.has(k) ? m.get(k).push(s) : m.set(k, [s]); }); if(list) plansByRecordMemo.set(list, m); }
+  return m; };
+const recordPlansOf = (list, object, record, records) => { const by = plansByRecord(list); return planScopeOf(object, record, records).flatMap(k => by.get(k) || []); };
 // A plan's payments that carry what's owed: each one, or the balance its rest moved to.
 const livePayments = (s) => (s.installments || []).filter(i => !(s.installments || []).some(x => x.parentId === i.id));
 /* Where a plan is (the Accounting tab's tabs): Frozen; Paid — every payment reconciled and nothing
@@ -302,14 +340,13 @@ const withSignedOn = (s, on) => refreshSchedule(s, {signedOn:on});
 const rollSubscription = (s) => s && planOngoing(s.plan) && !s.archived ? refreshSchedule(s) : s;
 /* A quote signed (quotes.jsx): the plans waiting for it — on its record and set to Quote Signed — get
    their dates, and the quote's own Payment Plan is made (once; with payment terms and a total), on
-   the record that holds its plans, dated from the signing — its invoices due by then are issued at
+   its record, dated from the signing — its invoices due by then are issued at
    once (invoices.jsx). A quote saved before plans has no invoice dates: each payment is invoiced on
    its due date. */
 function plansOnQuoteSigned(hub, quote, signedAt){
-  const on = dayOf(signedAt), rec = hubRecord(hub, quote.object, quote.recordId), h = rec ? termsHolderOf(quote.object, rec) : null;
-  const holder = h && hubRecord(hub, h.object, h.id);
+  const on = dayOf(signedAt), holder = hubRecord(hub, quote.object, quote.recordId);
   const make = holder && (quote.payment || (quote.installments || []).length) && quoteTotal(quote) > 0 && !(hub.accounting || []).some(s => s.quoteId === quote.id);
-  const made = make ? scheduleFromQuote({...quote, status:'signed', signedAt}, h.object, holder) : null;
+  const made = make ? scheduleFromQuote({...quote, status:'signed', signedAt}, quote.object, holder) : null;
   const plan = made ? {...made, number:nextPlanNumber(hub.accounting), revision:1, createdAt:new Date(), createdBy:'System',
     ...(made.plan ? {} : {installments:made.installments.map(x => x.dueDate && !x.invoiceDate ? {...x, invoiceDate:x.dueDate} : x)})} : null;
   hub.setAccounting(list => [...list.map(s => !s.plan || (s.plan.issue || {}).type === 'date' || s.signedOn
@@ -677,9 +714,9 @@ const InvoiceLink = ({invoice, onOpen}) => invoice
       style={{...formTextAction, fontWeight:400, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', padding:0}}>{invoice.number}</button>
   : <span style={{color:T.attioMuted}}>—</span>;
 // A source pill: the quote or document a plan was made from (gone if it was deleted).
-function PlanSourcePill({icon, label, target, onOpen}){
+function PlanSourcePill({icon, label, target, onOpen, title}){
   return (<>
-    <button type="button" disabled={!target} onClick={()=>target && onOpen(target)} title={target ? target.number : undefined}
+    <button type="button" disabled={!target} onClick={()=>target && onOpen(target)} title={target ? title || target.number : undefined}
       style={{display:'inline-flex', alignItems:'center', gap:5, border:'none', fontFamily:'inherit', fontSize:11.5, fontWeight:500, padding:'2px 8px', borderRadius:9999,
         background:T.blueLight, color:T.blue, whiteSpace:'nowrap', cursor: target ? 'pointer' : 'default'}}>
       <Icon name={icon} size={11} color={T.blue}/>
@@ -688,7 +725,7 @@ function PlanSourcePill({icon, label, target, onOpen}){
   </>);
 }
 // `canEdit`: edit the plan and record payments (Payment Plans → Edit); a frozen plan takes no payments.
-function PaymentScheduleCard({schedule, canEdit, invoices, quote, doc, onPay, onView, onEdit, onOpenQuote, onOpenDocument, onCancelSubscription, onOpenInvoice}){
+function PaymentScheduleCard({schedule, canEdit, invoices, owner, onOpenRecord, quote, doc, onPay, onView, onEdit, onOpenQuote, onOpenDocument, onCancelSubscription, onOpenInvoice}){
   const t = scheduleTotals(schedule), type = paymentTypeOf(schedule), oneTime = type === 'one-time', frozen = !!schedule.frozen;
   const [showArchived, setShowArchived] = React.useState(false);
   const mine = planInvoices(invoices, schedule.id), archived = mine.filter(v => v.status === 'archived');
@@ -733,6 +770,8 @@ function PaymentScheduleCard({schedule, canEdit, invoices, quote, doc, onPay, on
           {/* Made from a quote or a document: links to it. */}
           {schedule.source === 'quote' && <PlanSourcePill icon="quote" label={`From ${schedule.quoteNumber || 'Quote'}`} target={quote} onOpen={onOpenQuote}/>}
           {schedule.source === 'document' && <PlanSourcePill icon="files" label={`From ${schedule.documentNumber || 'Document'}`} target={doc} onOpen={onOpenDocument}/>}
+          {/* Shared with this record: the record it was added to. */}
+          {owner && owner.record && <PlanSourcePill icon={owner.object} label={owner.record.name} title={typeSingular(owner.object, 'Record')} target={owner.record} onOpen={(r)=>onOpenRecord(owner.object, r)}/>}
         </div>
       </div>
       {oneTime ? <OneTimePaymentRow schedule={schedule} canAct={canPay} invoice={invoiceOf(schedule.installments[0] || {})} head={head} cell={cell} num={num} clip={clip} actionsCol={actionsCol} onPay={onPay} onView={onView} onOpenInvoice={onOpenInvoice}/> : (
@@ -826,13 +865,10 @@ function OneTimePaymentRow({schedule, canAct, invoice, head, cell, num, clip, ac
 /* ── The record's Accounting tab ── its Payment Plans in three status pills (Active, Paid, Frozen —
    the look of Tools → Tasks' views; no heading), Add Payment Plan beside them, each plan's side
    panel, payments and invoices. A plan shows its KPIs (Total, Received, Outstanding) with ⋯, then
-   one line: its number, when and by whom it was made (and Frozen / Cancelled / From …). */
-// A customer with a deal: the deal's Payment Plans (termsHolderOf), as the deal shows them.
-function AccountingTab({object, record}){
-  const hub = useRecordHub(), holder = termsHolderOf(object, record);
-  const deal = holder.object !== object ? (((hub && hub.records) || {}).deals || []).find(d => d.id === holder.id) : null;
-  return deal ? <RecordAccounting key={deal.id} object="deals" record={deal}/> : <RecordAccounting object={object} record={record}/>;
-}
+   one line: its number, when and by whom it was made (and Frozen / Cancelled / From … / the record
+   it was added to, when that's another one). */
+// The plans are the record's own and those shared with it (planScopeOf); a new one is the record's own.
+function AccountingTab({object, record}){ return <RecordAccounting object={object} record={record}/>; }
 /* Terms saved before plans open as a plan (planOf): their payments, by place, are the plan's — the
    first the deposit (one alone: the payment), the next Installment 1, 2… (`planIdsOf`: the plan's id
    for each, in order). */
@@ -855,19 +891,22 @@ function RecordAccounting({object, record}){
   // Payment Plans permissions (Records → <Object> → Accounting), by the record's owner.
   const can = (action) => paymentTermsCan(action, object, record);
   const canEdit = can('edit');
-  const all = (hub.accounting || []).filter(s => s.object === object && String(s.recordId) === String(record.id));
+  const all = recordPlansOf(hub.accounting, object, record, hub.records);
+  // A plan shared with this record: the record it was added to (its tag).
+  const ownerOf = (s) => s.object === object && sameId(s.recordId, record.id) ? null
+    : {object:s.object, record:((hub.records || {})[s.object] || []).find(r => sameId(r.id, s.recordId)) || null};
   const invoices = hub.invoices || [];
   const time = (s) => new Date(s.createdAt).getTime() || 0;
   const shown = all.filter(s => planState(s) === tab).sort((a, b) => time(b) - time(a));
-  // Plan changes, payments and switches, in the record's activity (Payment).
-  const logPayment = (action, change) => hub.add(object, record.id, {type:'payment', action, ...change, source:'you', by:CURRENT_USER.name});
+  // Plan changes, payments and switches, in the activity (Payment) of the record the plan was added to.
+  const logPayment = (plan, action, change) => hub.add(plan.object, plan.recordId, {type:'payment', action, ...change, source:'you', by:CURRENT_USER.name});
   /* Recording a payment (not on a frozen plan): its invoice — issued now if it has none yet — is
      Paid; a part payment archives it (keeping what was received) and the balance is a new payment,
      invoiced today (InvoiceIssuer). */
   const savePayment = (scheduleId, instId, v) => {
     const base = all.find(s => s.id === scheduleId), inst0 = base && base.installments.find(x => x.id === instId);
     if(!inst0 || base.frozen || !(Number(v.amount) > 0) || installmentState(base, inst0).status !== 'unpaid') return;   // a payment is more than 0; forward only
-    if(paymentTypeOf(base) === 'one-time') logPayment('Marked Paid', {detail:`${fmtMoney(v.amount, scheduleCurrency(base))} · Paid on ${fmtQuoteDate(v.paidOn)}`});
+    if(paymentTypeOf(base) === 'one-time') logPayment(base, 'Marked Paid', {detail:`${fmtMoney(v.amount, scheduleCurrency(base))} · Paid on ${fmtQuoteDate(v.paidOn)}`});
     const today = ymdOf(new Date()), at = new Date();
     const payment = {id:acId('pay'), amount:v.amount, paidOn:v.paidOn, recordedAt:at, recordedBy:CURRENT_USER.name, evidence:(v.evidence.file || v.evidence.link) ? v.evidence : null};
     const invoice = currentInvoiceOf(invoices, base.id, instId) || issueInvoices(hub, [{s:base, inst:inst0, on:today}])[0];
@@ -903,7 +942,7 @@ function RecordAccounting({object, record}){
       installments:s.installments.map(x => x.id === instId ? {...x, payments:[]} : x)}));
     hub.setInvoices(list => list.map(x => x.planId === scheduleId && x.instId === instId && x.status === 'paid'
       ? (({paidOn, paymentId, paidAt, ...rest}) => ({...rest, status:'issued', reversals:[...(x.reversals || []), {amount, paidOn, reversedAt:at.toISOString(), reversedBy:CURRENT_USER.name}]}))(x) : x));
-    logPayment('Marked Unpaid', {detail:`${fmtMoney(amount, scheduleCurrency(base))} paid on ${fmtQuoteDate(pays[pays.length - 1].paidOn)} reversed`});
+    logPayment(base, 'Marked Unpaid', {detail:`${fmtMoney(amount, scheduleCurrency(base))} paid on ${fmtQuoteDate(pays[pays.length - 1].paidOn)} reversed`});
     setPaying(null);
     hub.toast('Payment marked as unpaid');
   };
@@ -917,7 +956,7 @@ function RecordAccounting({object, record}){
       paymentType:plan.paymentType, currency:plan.currency, total:r2(installments.reduce((a, x) => a + x.amount, 0)), plan, ...(signedOn ? {signedOn} : {}), installments, revision:1,
       ...(freeze ? {frozen:{at, by:CURRENT_USER.name}, freezes:[{action:'frozen', at, by:CURRENT_USER.name}]} : {})};
     hub.setAccounting(list => [...list, s]);
-    logPayment('Payment plan created', {detail:`${planTitle(s)} · ${fmtMoney(s.total, s.currency)}${freeze ? ' · frozen' : ''}`});
+    logPayment(s, 'Payment plan created', {detail:`${planTitle(s)} · ${fmtMoney(s.total, s.currency)}${freeze ? ' · frozen' : ''}`});
     setEditing(null); setTab(freeze ? 'frozen' : 'active');
     hub.toast(freeze ? `${s.number} saved and frozen` : `${s.number} saved`);
   };
@@ -951,8 +990,8 @@ function RecordAccounting({object, record}){
       revisions:[...(s0.revisions || []), {revision:s0.revision || 1, paymentType:was, currency:scheduleCurrency(s0), total:s0.total, plan:s0.plan || null, savedAt:at, savedBy:CURRENT_USER.name}]};
     hub.setAccounting(list => list.map(s => s.id === s0.id ? next : s));
     hub.setInvoices(list => archiveChangedInvoices(list, next));
-    if(was !== plan.paymentType) logPayment('Payment type changed', {from:PAYMENT_TYPE_LABEL[was], to:PAYMENT_TYPE_LABEL[plan.paymentType]});
-    logPayment('Payment plan edited', {detail:`${planTitle(next)} · revision ${next.revision} · ${fmtMoney(total, plan.currency)}`});
+    if(was !== plan.paymentType) logPayment(s0, 'Payment type changed', {from:PAYMENT_TYPE_LABEL[was], to:PAYMENT_TYPE_LABEL[plan.paymentType]});
+    logPayment(s0, 'Payment plan edited', {detail:`${planTitle(next)} · revision ${next.revision} · ${fmtMoney(total, plan.currency)}`});
     setEditing(null);
     hub.toast(`${s0.number || 'Payment plan'} saved`);
   };
@@ -963,7 +1002,7 @@ function RecordAccounting({object, record}){
     const s0 = all.find(s => s.id === id); if(!s0 || !!s0.frozen === on) return;
     const at = new Date(), by = CURRENT_USER.name;
     hub.setAccounting(list => list.map(s => s.id !== id ? s : {...s, frozen: on ? {at, by} : null, freezes:[...(s.freezes || []), {action: on ? 'frozen' : 'unfrozen', at, by}]}));
-    logPayment(on ? 'Payment plan frozen' : 'Payment plan unfrozen', {detail:planTitle(s0)});
+    logPayment(s0, on ? 'Payment plan frozen' : 'Payment plan unfrozen', {detail:planTitle(s0)});
     hub.toast(on ? `${s0.number} frozen` : `${s0.number} unfrozen`);
   };
   /* Cancel Subscription (until cancelled): from the day chosen nothing more is invoiced — the cycles
@@ -972,7 +1011,7 @@ function RecordAccounting({object, record}){
   const cancelSubscription = (id, on) => {
     const s0 = all.find(s => s.id === id); if(!s0 || !planOngoing(s0.plan) || s0.cancelledOn) return;
     hub.setAccounting(list => list.map(s => s.id === id ? refreshSchedule(s, {cancelledOn:on}) : s));
-    logPayment('Subscription cancelled', {detail:`${planTitle(s0)} · no invoices after ${fmtQuoteDate(on)}`});
+    logPayment(s0, 'Subscription cancelled', {detail:`${planTitle(s0)} · no invoices after ${fmtQuoteDate(on)}`});
     setCancelling(null);
     hub.toast('Subscription cancelled');
   };
@@ -989,7 +1028,7 @@ function RecordAccounting({object, record}){
   const editingPlan = editingSchedule ? {...planOf(editingSchedule), currency:editingSchedule.currency || (scheduleTotals(editingSchedule).total > 0 ? LEGACY_CURRENCY : defaultCurrency()),
     ...(editingPaid ? {paid:{id:editingPaid.id, amount:installmentState(editingSchedule, editingPaid).received, invoiceDate:editingPaid.invoiceDate || editingPaid.invoicedAt || '', dueDate:editingPaid.dueDate || ''}} : {})} : null;
   const card = (s) => (
-    <PaymentScheduleCard key={s.id} schedule={s} canEdit={canEdit} invoices={invoices}
+    <PaymentScheduleCard key={s.id} schedule={s} canEdit={canEdit} invoices={invoices} owner={ownerOf(s)} onOpenRecord={(o, r)=>hub.openRecord(o, r.id)}
       quote={s.source === 'quote' ? (hub.quotes || []).find(q => q.id === s.quoteId) || null : null}
       doc={s.source === 'document' ? (hub.documents || []).find(d => d.id === s.documentId) || null : null}
       onPay={(inst)=>setPaying({scheduleId:s.id, instId:inst.id})} onView={(inst)=>setViewing({scheduleId:s.id, instId:inst.id})}
@@ -1031,5 +1070,5 @@ function RecordAccounting({object, record}){
 }
 
 Object.assign(window, {RECURRING_FREQUENCY, rollSubscription, refreshSchedule, planOngoing, newPaymentPlan, planSchedule, planTotal, planOk, planOf, planOfShares, normalizePlan, invoicedOn, dayOf,
-  plansOnQuoteSigned, PaymentTermsFields, PaymentPlanTable, PAYMENT_TYPE_LABEL, paymentTypeOf, scheduleCurrency, hasPayments, recordHasPayments, termsHolderOf, recordPlansOf, livePayments,
+  plansOnQuoteSigned, PaymentTermsFields, PaymentPlanTable, PAYMENT_TYPE_LABEL, paymentTypeOf, scheduleCurrency, hasPayments, recordHasPayments, planScopeOf, recordPlansOf, livePayments,
   PLAN_STATES, planState, nextPlanNumber, planTitle, migratePlans, defaultTermsOf, unpackPaymentTerms, AccountingTab, ACCOUNTING_RECORD_TYPES, installmentState, scheduleTotals});
