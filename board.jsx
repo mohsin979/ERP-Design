@@ -210,9 +210,9 @@ const initialsOf = (name) => name.split(/\s+/).slice(0,2).map(w=>w[0]).join('').
 function relatedValue(key, contact, acts){
   if(key === 'owner') return contact.owner || null;
   if(key === 'company') return contact.company || null;
-  if(key === 'ownerAssigned' || key === 'ownerChanged'){
+  if(key === 'ownerAssigned' || key === 'ownerChanged' || key === 'ownerAssignedBy'){
     const d = ownerDates(contact, acts);
-    return (key === 'ownerAssigned' ? d.assigned : d.changed) || null;
+    return (key === 'ownerAssigned' ? d.assigned : key === 'ownerAssignedBy' ? d.assignedBy : d.changed) || null;
   }
   if(key === 'deals') return contact.dealCount ? String(contact.dealCount) : null;
   // Any other property, as text: a Location, Currency or range is stored as an object; Yes / No and 0 show too.

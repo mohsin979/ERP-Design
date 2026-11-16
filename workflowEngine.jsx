@@ -46,13 +46,23 @@ const WF_UNIT_MS = {Hours:WF_DAY / 24, Days:WF_DAY, Weeks:7 * WF_DAY, Months:30 
 const wfDurationMs = (d) => (Number(d && d.amount) || 0) * (WF_UNIT_MS[d && d.unit] || WF_DAY);
 /* A sequence's emails go one after another: each one's delay counts from the email before it, so
    its schedule from enrolment is the sum of the delays so far (in hours when any step is in hours,
-   else days); a step's time of day stays its own. */
+   else days; a month is 30 days); a step's time of day stays its own. An email on a Specific Date
+   (`when:'date'`, 2026-11-16) goes that day, and the emails after it count from that day: their
+   schedule carries the `date` it counts from. */
 const sequenceSchedules = (seq) => {
-  const steps = (seq && seq.emails) || [], inHours = steps.some(e => (e.delay || {}).unit === 'Hours');
-  const per = {Hours:1, Days:24, Weeks:168};
-  let total = 0;
-  return steps.map(e => { const d = e.delay || {}; total += (Number(d.amount) || 0) * (per[d.unit] || 24);
-    return {amount: inHours ? total : total / 24, unit: inHours ? 'Hours' : 'Days', time:d.time || ''}; });
+  const steps = (seq && seq.emails) || [], inHours = steps.some(e => e.when !== 'date' && (e.delay || {}).unit === 'Hours');
+  const per = {Hours:1, Days:24, Weeks:168, Months:720};
+  let total = 0, date = '';
+  return steps.map(e => { const d = e.delay || {};
+    if(e.when === 'date' && e.date){ date = e.date; total = 0; }
+    else total += (Number(d.amount) || 0) * (per[d.unit] || 24);
+    return {amount: inHours ? total : total / 24, unit: inHours ? 'Hours' : 'Days', time:d.time || '', ...(date ? {date} : {})}; });
+};
+// When a scheduled email goes: its delay from now — or from its schedule's date (that day at 9:00 AM, else its own time of day).
+const scheduledSendAt = (schedule, immediate) => {
+  const s = schedule || {}, at = new Date(s.date && !immediate ? new Date(`${s.date}T09:00:00`).getTime() + wfDurationMs(s) : Date.now() + (immediate ? 0 : wfDurationMs(s)));
+  if(!immediate && s.time){ const [h, m] = s.time.split(':').map(Number); at.setHours(h, m, 0, 0); }
+  return at;
 };
 const wfNewId = (p) => `${p}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 const WF_MAX_DEPTH = 5;
@@ -222,6 +232,17 @@ const formRecordValue = (key, rec) => {
   const s = recordFormSubmission(rec);
   return !s ? '' : key === 'formName' ? s.form.name : storePropertyValue({type:'Timestamp'}, new Date(s.submission.at));
 };
+/* Property history (2026-11-16): a changed property is kept on its record as a Property change —
+   what it was and what it is now, by a person or a workflow (named). Not a merge's own changes
+   (Records merged keeps those): it writes inside withoutPropertyHistory. */
+let WF_QUIET_HISTORY = false;
+const withoutPropertyHistory = (fn) => { const was = WF_QUIET_HISTORY; WF_QUIET_HISTORY = true; try { return fn(); } finally { WF_QUIET_HISTORY = was; } };
+// A property's value as the record shows it: an amount with its currency, a user by name; '' when blank.
+const propertyValueText = (p, rec, raw) => { const ck = amountCurrencyKey(p), type = propertyTypeId(p.type);
+  if(isBlank(raw)) return '';
+  return ck ? moneyText(raw, rec[ck]) : type === 'User' ? userLabel(raw) : ['Date', 'Timestamp'].includes(type) ? String(raw) : String(formatPropertyValueOf(p, raw) ?? ''); };
+// A record's Owner Assigned By (a derived record property, from its owner history; undefined for any other).
+const ownerRecordValue = (key, rec) => key !== 'ownerAssignedBy' ? undefined : !rec ? '' : ownerDates(rec, (WF_LIVE.acts || {})[rec.id] || []).assignedBy;
 /* A user's User Properties: their own properties (Settings → Properties → Users — Country,
    Language, Designation and any added), each with its type; then the system-generated metrics. */
 const userPropertyFields = (data) => [
@@ -364,7 +385,7 @@ function conditionFields(data, w){
     : p.type === 'Pipeline stage' ? stages : (p.options || []).length ? p.options.map(o => ({value:o, label:o})) : (propertyTypeDef(p.type).options ? propertyTypeDef(p.type).options(p) : []);
   const props = objectProperties(data, objectId);
   const record = props.map(p => ({key:`prop:${p.key}`, group:`${objectName(data, objectId).replace(/s$/, '')} Properties`, label:p.label, kind:conditionKind(p),
-    prop:{...p, options:propOptions(p)}, options:propOptions(p), get:(env) => { const a = associatedNames(objectId, p.key, env.deal) ?? formRecordValue(p.key, env.deal) ?? mergeRecordValue(p.key, env.deal); return a !== undefined ? a : env.deal[p.key]; }}));
+    prop:{...p, options:propOptions(p)}, options:propOptions(p), get:(env) => { const a = associatedNames(objectId, p.key, env.deal) ?? formRecordValue(p.key, env.deal) ?? mergeRecordValue(p.key, env.deal) ?? ownerRecordValue(p.key, env.deal); return a !== undefined ? a : env.deal[p.key]; }}));
   const pipelineFields = objectPipelines(data, objectId).length ? [
     {key:'currentStage', group:'Pipeline', label:'Current Stage', kind:'choice', options:stages, get:(env) => env.deal.stage},
     ...(t && t.group === 'stage' && t.key !== 'stayAtStage' ? [{key:'previousStage', group:'Pipeline', label:'Previous Stage', kind:'choice', options:stages, get:(env) => env.previousStage || ''}] : []),
@@ -958,7 +979,9 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
       const p = prev.find(x => x.id === dRaw.id), d1 = recordSystemValues(dataRef.current, p, dRaw, now);
       const allProps = allPropsOf(d1), props = allProps.filter(pr => !['stage', 'pipeline'].includes(pr.key));
       // A new deal keeps its exact creation time (`created` is shown to the minute) — Trigger Scope counts from it.
-      const d0 = p || d1.createdAt ? d1 : {...d1, createdAt:now};
+      const d0c = p || d1.createdAt ? d1 : {...d1, createdAt:now};
+      // A new record keeps who gave it its owner (Owner Assigned By).
+      const d0 = !p && d0c.owner && !d0c.ownerSetBy && !WF_QUIET_HISTORY ? {...d0c, ownerSetBy:changedBy().by} : d0c;
       // Property changes on an existing deal (a new deal isn't a property change); each property's
       // last change time is kept on the deal (`changedAt`) for Is changed / Is not changed.
       const changedKeys = p ? props.filter(pr => !same(p[pr.key], d0[pr.key])).map(pr => pr.key) : [];
@@ -997,6 +1020,17 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
       // Its open violations go to the new owner (they're the record owner's to resolve).
       if(esRef.current.prompts.some(p => p.status === 'pending' && p.dealId === c.deal.id && p.userId === c.from))
         commit(st => ({...st, prompts:st.prompts.map(p => p.status === 'pending' && p.dealId === c.deal.id && p.userId === c.from ? {...p, userId:c.to || null} : p)}));
+    });
+    /* Property history: each value a person or a workflow changed, as it read before and after. The
+       owner and the stage have their own history (a contact's Contact Type is its stage); values
+       the system sets itself aren't kept. A revert leaves none: it takes the workflow's own away
+       (its effects), and the record reads as before. */
+    if(!WF_QUIET_HISTORY && !(chain && chain.revert)) propChanges.filter(c => c.property !== 'owner' && !(c.property === 'contactType' && recordObjectOf(c.deal.id) === 'contacts' && contactPipe)).forEach(c => {
+      const pr = allPropsOf(c.deal).find(x => x.key === c.property);
+      if(!pr || pr.auto || pr.derived) return;
+      const before = prev.find(x => x.id === c.deal.id) || c.deal;
+      addActivity(c.deal.id, {id:wfNewId('prp'), ...recordKey(c.deal.id), type:'propertyChange', at:new Date(now), property:pr.key, label:pr.label,
+        from:propertyValueText(pr, before, c.from), to:propertyValueText(pr, c.deal, c.to), ...changedBy()});
     });
     /* Stage history: every move of an existing record (a person's, or a workflow's — named), with
        the stages' names as they were. */
@@ -1383,35 +1417,44 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
   // Sends (or schedules) a workflow's emails on the deal; returns what happened.
   /* An email goes only to someone: the record's email address (when it has one) and the people
      chosen; with no one to send to it isn't sent or logged ("skipped"). {{first_name}} is the
-     record's person's first name, as in the composer (emails.jsx). */
+     record's person's first name and a fetched property the record's value, as in the composer
+     (emails.jsx); the signature is the sender's — the record's owner. A sequence's emails share
+     their enrollment (`enrollId`): how far it has got is read from them (templates.jsx). */
   function sendEmails(deal, emails, run, workflowId){
     const data = dataRef.current, owner = userName(data, deal.owner);
-    let sent = 0, scheduled = 0, skipped = 0;
-    const person = {name:deal.name || ''};
+    let sent = 0, scheduled = 0, skipped = 0, passed = 0;
+    const person = {name:deal.name || ''}, enrollId = wfNewId('en');
+    const byObject = (o) => dealsRef.current.filter(r => recordObjectOf(r.id) === o);
+    const tokens = {object:recordObjectOf(deal.id), record:deal, records:{contacts:byObject('contacts'), deals:byObject('deals'), customers:byObject('customers')}, data};
     emails.forEach(e => {
       const tpl = emailTemplatesOf(data).find(t => t.id === e.templateId) || {};
-      const sendAt = new Date(Date.now() + (e.immediate ? 0 : wfDurationMs(e.schedule)));
-      if(!e.immediate && e.schedule && e.schedule.time){ const [h, m] = e.schedule.time.split(':').map(Number); sendAt.setHours(h, m, 0, 0); }
+      const sendAt = scheduledSendAt(e.schedule, e.immediate);
+      // An email set for a Specific Date (or counted from one) that has already passed isn't sent (decided 2026-11-16); the rest carry on.
+      if(!e.immediate && e.schedule && e.schedule.date && sendAt.getTime() <= Date.now()){ passed++; return; }
       const now = !!e.immediate || sendAt.getTime() <= Date.now();
       const to = (e.recipients || []).map(r => r === 'recordEmail' ? String(deal.email || '').trim() : userName(data, resolvePerson(data, deal, r))).filter(Boolean);
       if(!to.length){ skipped++; return; }
       const subject = fillFirstName((e.email && e.email.subject) || tpl.subject || tpl.name, person);
       /* The HTML is kept as written (shown in its frame); `body` is its text (lists, search). A
          template (and so a sequence's email) goes as the template is — its format, content and
-         signature (emails.jsx emailHtmlOf), with a Simple Text Body's attachments. */
-      const content = tpl.id ? templateContentOf(tpl) : null;
-      const html = fillFirstName((e.email && e.email.html) || (content ? emailHtmlOf(content) : ''), person);
+         signature (emails.jsx emailHtmlOf), with a Simple Text Body's attachments. A sequence
+         email's own copy (templates.jsx Edit Email: `email` with a format) goes in its place; a
+         workflow's own copy is its HTML as edited. */
+      const own = e.email && e.email.format ? templateContentOf(e.email) : null;
+      const content = own || (tpl.id ? templateContentOf(tpl) : null);
+      const html = fillEmailTokens(fillFirstName(!own && e.email && e.email.html ? withSenderSignature(e.email.html, owner) : content ? emailHtmlOf(content, undefined, owner) : '', person), tokens);
       const attachments = content && content.format === 'simple' ? content.attachments : [];
       const act = {id:wfNewId('we'), ...recordKey(deal.id), type:'email', at: now ? new Date() : sendAt, direction:'sent', title:subject, body:htmlText(html),
         html:html || null, ...(attachments.length ? {attachments} : {}),
         // Cc / Bcc: typed on the workflow's email (its action) or when enrolling by hand — kept as lists, only when filled.
-        templateId:e.templateId, sequenceId:e.sequenceId || null, to, ...emailCopiesOf(e.cc, e.bcc),
+        templateId:e.templateId, sequenceId:e.sequenceId || null, ...(e.sequenceId ? {enrollId} : {}), to, ...emailCopiesOf(e.cc, e.bcc),
         status: now ? 'sent' : 'scheduled', scheduledFor:sendAt, source:'team', by:owner, viaWorkflow:workflowId, ...(workflowId && run && run.id ? {runId:run.id} : {})};
       addActivity(deal.id, act);
       if(now){ sent++; emit({type:'emailSent', recordId:deal.id, pipelineId:deal.pipeline, attrs:{activityId:act.id, templateId:e.templateId}}, childChain(run)); }
       else { scheduled++; emit({type:'emailScheduled', recordId:deal.id, pipelineId:deal.pipeline, attrs:{activityId:act.id, templateId:e.templateId}}, childChain(run)); }
     });
-    return [sent && `${plural(sent, 'email')} sent`, scheduled && `${plural(scheduled, 'email')} scheduled`, skipped && `${plural(skipped, 'email')} skipped (no recipient)`].filter(Boolean).join(', ');
+    return [sent && `${plural(sent, 'email')} sent`, scheduled && `${plural(scheduled, 'email')} scheduled`, skipped && `${plural(skipped, 'email')} skipped (no recipient)`,
+      passed && `${plural(passed, 'email')} skipped (date passed)`].filter(Boolean).join(', ');
   }
   // Nothing went out (no one to send to): the step is skipped, not done.
   const emailsResult = (text) => /^\d+ emails? skipped/.test(text) ? {status:'skipped', result:text} : {status:'done', result:text};
@@ -2610,10 +2653,18 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
       if(!deal || !seq || !String(deal.email || '').trim()) return false;
       if(enrolledIn(deal.id, seq.id)) return 'already';
       const when = sequenceSchedules(seq);
-      const emails = seq.emails.map((e, i) => ({id:`se-${i}`, immediate:!(when[i].amount > 0) && !when[i].time, recipients:['recordEmail'], templateId:e.templateId, email:null,
+      const emails = seq.emails.map((e, i) => ({id:`se-${i}`, immediate:!(when[i].amount > 0) && !when[i].time && !when[i].date, recipients:['recordEmail'], templateId:e.templateId, email:e.email || null,
         cc:(copies || {}).cc, bcc:(copies || {}).bcc, sequenceId:seq.id, schedule:when[i]}));
       sendEmails(deal, emails, {chain:{id:wfNewId('ch'), depth:0, visited:[]}}, null);
       return 'enrolled';
+    },
+    /* Exit an email sequence by hand (Settings → Templates → Email Sequences → Enrolled): the
+       record's emails still scheduled from it aren't sent — they leave its activity, as the
+       workflow action does. → how many were cancelled. */
+    exitSequence: (recordId, sequenceId) => {
+      const pending = actsOf(recordId).filter(a => a.type === 'email' && a.status === 'scheduled' && a.sequenceId === sequenceId);
+      if(pending.length) editActivities(m => ({...m, [recordId]:(m[recordId] || []).filter(a => !pending.some(x => x.id === a.id))}));
+      return pending.length;
     },
     // A form submission about to create its record (forms.jsx submitFormValues): seen by workflows as the record is created.
     beginFormSubmission: (form, submission) => { WF_FORM_PENDING = {form, submission}; },
@@ -4363,5 +4414,5 @@ function WorkflowBell(){
   );
 }
 
-Object.assign(window, {STATUS_PILLS, sequenceSchedules, violationTargets, RecordViolationsProvider, useRecordViolations, ViolationMark, ViolationNotice, AutomationNotice, recordAutomations, recordObjectOf, recordKey, recordNoun, ACTIVITY_RECORD_OBJECTS, withSeeded, PROPERTY_CHANGE_OPERATORS, PROPERTY_CHANGE_UNITS, triggerPropertyOperators, isChangeOp, conditionsValid, triggerConditionComplete, TriggerPropertyCondition, CONDITION_OPERATORS, conditionKind, useWorkflowEngine, WorkflowEngineCtx, useWorkflowEngineCtx, WF_SAVED, reviveActivities, withStageEntry, ConditionsEditor, WorkflowRuns,
+Object.assign(window, {withoutPropertyHistory, STATUS_PILLS, sequenceSchedules, violationTargets, RecordViolationsProvider, useRecordViolations, ViolationMark, ViolationNotice, AutomationNotice, recordAutomations, recordObjectOf, recordKey, recordNoun, ACTIVITY_RECORD_OBJECTS, withSeeded, PROPERTY_CHANGE_OPERATORS, PROPERTY_CHANGE_UNITS, triggerPropertyOperators, isChangeOp, conditionsValid, triggerConditionComplete, TriggerPropertyCondition, CONDITION_OPERATORS, conditionKind, useWorkflowEngine, WorkflowEngineCtx, useWorkflowEngineCtx, WF_SAVED, reviveActivities, withStageEntry, ConditionsEditor, WorkflowRuns,
   DealPromptMarker, WorkflowPromptModal, WorkflowBell, ViolationsButton, ViolationPanel, WorkflowNotices, AutomaticActionModal, workflowExpectations, workflowContextPath, orderedStages, stageMoveDirection, workflowTitle, conditionFields, evalConditions});

@@ -35,14 +35,15 @@
                     (a name; a new CRM branch starts empty, with the standard record types), then
                     its branches — name, members (a link: Users showing them), created — with
                     ⋯ Rename. A new branch goes to everyone for now (else to the one adding it).
-   For now everyone is a Super Admin with every branch (EVERYONE_SUPER_ADMIN): the product is
+   For now everyone is a Super Admin with every branch (EVERYONE_SUPER_ADMIN) — and joins each CRM
+   branch as a Super Admin on a Full Seat (usersTeams.jsx withSessionMember): the product is
    designed from that view; narrower access comes later.
    Design-system pattern (ERP Settings): a settings page carries no title or explanation that
    repeats the menu it's opened from — only its controls (search, actions, the table).
 
-   Brand (CRM → Marketing → Brand): each CRM branch's own (decided 2026-11-11; a branch without one
+   Brand (CRM → Settings → Brand): each CRM branch's own (decided 2026-11-11; a branch without one
    shows the Organization's until its Brand is saved) — set by CRM administrators: the company logo,
-   brand colours (used on quotations and documents), the company email signature and the digital
+   brand colours (used on quotations and documents), each person's own email signature and the digital
    letterhead. */
 
 const ALLOWED_EMAIL_DOMAINS = ['hofmigration.com', 'hof-global.com'];
@@ -622,7 +623,7 @@ function LoginScreen(){
   );
 }
 
-/* ── Brand (CRM → Marketing → Brand) ── four sections, switched with the Settings tabs (as in
+/* ── Brand (CRM → Settings → Brand) ── four sections, switched with the Settings tabs (as in
    Users & Teams): Logo, Color System, Email Signature, Digital Letterhead. Each is saved on the
    open CRM branch's brand (updateBrand); CRM administrators edit, everyone else sees them. */
 const BRAND_SECTIONS = [
@@ -746,11 +747,12 @@ function useBrandDraft({brand, admin, toast, setActions, key, blank, label, vali
   return [draft, (k, v) => setDraft(d => ({...d, [k]:v}))];
 }
 
-/* Email Signature: the company's reusable signature — the form, and the signature as it will
-   read at the end of an email. The logo is the company logo (Logo), shown or not. "Additional info"
-   reads under the address. Emails use it as configured (emails.jsx:
-   beneath a Simple Text Body, at the end of the Default HTML Template, added to a custom HTML
-   email when asked). */
+/* Email Signature: always personal (2026-11-16). This is the signature of the person looking at
+   it — every field theirs to set: name, designation, email, phone, website, company address,
+   additional info, and the company logo (Logo), shown or not. Saved on their user (`signature`);
+   until then it starts as their name, Designation and email. Every email they send ends with
+   it (emails.jsx emailSignatureOf) unless Include Email Signature is turned off on that email.
+   The preview is the signature as their emails carry it. */
 const SIGNATURE_FIELDS = [
   {key:'name', label:'Name', placeholder:'e.g. Asim Ali', required:true}, {key:'designation', label:'Designation', placeholder:'e.g. Senior Migration Consultant'},
   {key:'email', label:'Email', placeholder:'name@hofmigration.com'}, {key:'phone', label:'Phone', placeholder:'+971 4 000 0000'},
@@ -758,42 +760,38 @@ const SIGNATURE_FIELDS = [
   {key:'additional', label:'Additional Info', multiline:true},
 ];
 const SIGNATURE_BLANK = {includeLogo:true, name:'', designation:'', email:'', phone:'', website:'', address:'', additional:''};
-function EmailSignatureBlock({sig, brand}){
-  const line = {fontSize:13, color:T.attioText, lineHeight:1.5};
-  const contact = [sig.email, sig.phone, sig.website].filter(Boolean);
-  const logo = sig.includeLogo;
-  return (
-    <div style={{display:'flex', gap:16, alignItems:'center'}}>
-      {logo && <div style={{flexShrink:0}}><BrandLogoMark brand={brand} height={40}/></div>}
-      <div style={{minWidth:0, paddingLeft: logo ? 16 : 0, borderLeft: logo ? `2px solid ${T.attioLine}` : 'none'}}>
-        <div style={{...line, fontWeight:600, color: sig.name ? T.attioText : T.attioFaint}}>{sig.name || 'Name'}</div>
-        {sig.designation && <div style={{...line, color:T.attioMuted}}>{sig.designation}</div>}
-        {contact.length > 0 && <div style={{...line, marginTop:6}}>{contact.join('  ·  ')}</div>}
-        {sig.address && <div style={{...line, color:T.attioMuted, whiteSpace:'pre-line'}}>{sig.address}</div>}
-        {sig.additional && <div style={{...line, color:T.attioMuted, whiteSpace:'pre-line'}}>{sig.additional}</div>}
-      </div>
-    </div>
-  );
-}
-function BrandSignatureSection(props){
-  const {brand, admin} = props;
-  const [sig, set] = useBrandDraft({...props, key:'signature', blank:SIGNATURE_BLANK, label:'Email signature', valid:(d) => !!d.name.trim() && brandEmailOk(d.email)});
+/* The sample CRM's saved signatures, by user (2026-11-16: Waleed's, as he set it) — given to that
+   user while they have none of their own (app.jsx); what they save since is kept. */
+const SAMPLE_SIGNATURES = {
+  'waleed-bin-zaman': {includeLogo:true, name:'Waleed bin Zaman', designation:'CEO', email:'waleed.binzaman@hof-global.com', phone:'+971 626266626',
+    website:'https://hofmigration.com/', address:'1408, Opal Tower, Burj Khalifa Blvd\nBusiness Bay, Dubai, UAE', additional:''},
+};
+function BrandSignatureSection({brand, toast, setActions, data, setData}){
+  const me = ((data && data.users) || []).find(u => u.name === CURRENT_USER.name);
+  const saved = emailSignatureOf();
+  const [sig, setSig] = React.useState(saved);
+  const set = (k, v) => setSig(d => ({...d, [k]:v}));
+  const dirty = JSON.stringify(sig) !== JSON.stringify(saved), valid = !!sig.name.trim() && brandEmailOk(sig.email);
+  React.useEffect(() => setActions(<BrandActions admin={!!me && !!setData} dirty={dirty} valid={valid} onCancel={()=>setSig(saved)}
+    onSave={()=>{ const mine = Object.fromEntries(Object.entries(sig).map(([k, v]) => [k, typeof v === 'string' ? v.trim() : v]));
+      setData(d => ({...d, users:(d.users || []).map(u => u.id === me.id ? {...u, signature:mine} : u)})); setSig(mine); toast('Email signature saved'); }}/>),
+    [JSON.stringify(sig), JSON.stringify(saved)]);
   return (
     <BrandSplit
       form={<>
         <Field label="Logo">
-          <label style={{display:'flex', alignItems:'center', gap:8, paddingTop:7, fontSize:13, color:T.attioText, cursor: admin ? 'pointer' : 'default'}}>
-            <UtToggle on={sig.includeLogo} onChange={(v)=>admin && set('includeLogo', v)}/> Show the company logo
+          <label style={{display:'flex', alignItems:'center', gap:8, paddingTop:7, fontSize:13, color:T.attioText, cursor:'pointer'}}>
+            <UtToggle on={sig.includeLogo} onChange={(v)=>set('includeLogo', v)}/> Show the company logo
           </label>
         </Field>
         {SIGNATURE_FIELDS.map(f => (
-          <Field key={f.key} label={f.label} required={f.required}>{brandTextField(sig[f.key], (v)=>set(f.key, v), f.placeholder, {multiline:f.multiline, disabled:!admin, invalid: f.key === 'email' && !brandEmailOk(sig.email)})}</Field>
+          <Field key={f.key} label={f.label} required={f.required}>{brandTextField(sig[f.key], (v)=>set(f.key, v), f.placeholder, {multiline:f.multiline, invalid: f.key === 'email' && !brandEmailOk(sig.email)})}</Field>
         ))}
       </>}
       preview={
         <div style={{background:'#fff', border:`1px solid ${T.attioLine}`, borderRadius:10, padding:'18px 20px', maxWidth:560}}>
           <div style={{fontSize:13, color:T.attioMuted, lineHeight:1.6, marginBottom:16}}>Kind regards,</div>
-          <EmailSignatureBlock sig={sig} brand={brand}/>
+          <div dangerouslySetInnerHTML={{__html:signatureEmailHtml(sig, brand)}}/>
         </div>
       }/>
   );
@@ -846,7 +844,7 @@ function BrandLetterheadSection(props){
   );
 }
 
-function BrandPage(){
+function BrandPage({data, setData}){
   useOrg();
   const brand = orgBrand();
   const admin = isCrmAdmin();
@@ -863,12 +861,15 @@ function BrandPage(){
         {actions && <div style={{display:'flex', alignItems:'center', gap:8, paddingBottom:8}}>{actions}</div>}
       </div>
       <div style={{maxWidth: section === 'signature' || section === 'letterhead' ? 'none' : 820, marginTop:4}}>
-        <Section key={section} brand={brand} admin={admin} toast={toast} setActions={setActions}/>
+        <Section key={section} brand={brand} admin={admin} toast={toast} setActions={setActions} data={data} setData={setData}/>
       </div>
       <CopyToast message={message}/>
     </SettingsPage>
   );
 }
+
+// Brand is a CRM Settings page (Settings → Brand; nav.jsx).
+SETTINGS_PAGES['settings.brand'] = BrandPage;
 
 Object.assign(window, {useOrg, setOrg, updateOrg, updateBrand, orgUsers, orgUserByEmail, signedInOrgUser, isOrgAdmin, isCrmAdmin, instanceName, peopleInstance,
   myCrmInstances, myPeopleInstances, peopleInstancesOf, activePeople, crmRedirect, setOrgUsers, joinOrganization, leaveCrm, syncOrgUsers, crmUsersToAdd, allEmployees, hasEmployeeStores, saveEmployees,

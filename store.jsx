@@ -116,7 +116,7 @@ const DB = (() => {
                the one with the sample data (Migration), `template` a CRM setup to start from
                (Redberry Consultancy: WORKSPACE_TEMPLATES, workspaces.jsx); any other starts empty,
                with the standard record types. `brand` (decided 2026-11-11): the branch's own brand
-               (CRM → Marketing → Brand: the company logo, colours, email signature and letterhead —
+               (CRM → Settings → Brand: the company logo, colours, email signature and letterhead —
                its quotations, documents and emails); without one, the Organization's, until its
                Brand is first saved (Redberry Consultancy starts with its own);
      people  — the People branches [{id, name, createdAt}];
@@ -252,7 +252,7 @@ function saveOrgRegistry(patch){
 }
 // Opening another CRM branch (or signing in or out) loads its own store: the page starts over.
 function reloadInto(patch){ if(appStoreTimer) writeAppStore(); saveOrgRegistry(patch); DB.flush(); window.location.reload(); }
-// The open CRM branch's brand (CRM → Marketing → Brand; without its own, the Organization's), its colours filled in — quotations, documents, emails.
+// The open CRM branch's brand (CRM → Settings → Brand; without its own, the Organization's), its colours filled in — quotations, documents, emails.
 const crmBrandOf = (crmId) => { const c = ORG_REGISTRY.crm.find(x => x.id === crmId); return (c && c.brand) || ORG_REGISTRY.org.brand || {}; };
 const orgBrand = () => { const b = crmBrandOf(ORG_REGISTRY.crmId); return {...b, name:ORG_REGISTRY.org.name, colors:{...DEFAULT_BRAND(), ...(b.colors || {})}}; };
 const APP_STORE_KEY = crmStoreKey(ACTIVE_CRM.id);

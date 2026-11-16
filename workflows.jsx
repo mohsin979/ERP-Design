@@ -969,8 +969,9 @@ const actionSummary = (data, a, context) => {
   return label;
 };
 
-/* Email templates until the Templates page exists (Settings → Templates is not defined yet).
-   Each is a branded HTML email: {id, name, subject, html}. Text-bearing elements are h1, p, li
+/* The sample email templates (the sample CRM's; mocked 2026-11-16 — five, each different: its
+   format, its fetched properties, CTAs, an attachment, who made it and who it's assigned to).
+   The Custom HTML one is a branded HTML file (brandedEmail): text-bearing elements are h1, p, li
    and a (never nested), which is what "Edit text" makes editable. */
 const EMAIL_LOGO_SVG = (() => {
   const v = LOGO_VARIANTS.main, h = 22;
@@ -978,7 +979,7 @@ const EMAIL_LOGO_SVG = (() => {
     + `<path d="${HOF_MARK_PATHS[0]}" fill="${T.black}"/><path d="${HOF_MARK_PATHS[1]}" fill="${T.black}" stroke="${T.black}" stroke-width="0.444"/>`
     + `<g transform="translate(0 ${v.wordmarkDy})"><path d="${v.wordmark}" fill="${T.black}"/></g></svg>`;
 })();
-const brandedEmail = ({title, paragraphs, list, cta}) => {
+const brandedEmail = ({title, paragraphs, list, cta, signed = true}) => {
   const p = (t) => `<p style="margin:0 0 14px;font-size:15px;line-height:1.65;color:#2B2B2E">${t}</p>`;
   return `<div style="font-family:'DM Sans',Arial,sans-serif;background:#fff;color:#2B2B2E">`
     + `<div style="height:4px;background:${T.blue}"></div>`
@@ -988,7 +989,7 @@ const brandedEmail = ({title, paragraphs, list, cta}) => {
     + p('Hi {{first_name}},') + paragraphs.map(p).join('')
     + (list ? `<ul style="margin:0 0 18px;padding-left:20px">${list.map(li => `<li style="margin:0 0 8px;font-size:15px;line-height:1.6;color:#2B2B2E">${li}</li>`).join('')}</ul>` : '')
     + (cta ? `<div style="margin:26px 0 30px"><a href="#" style="display:inline-block;background:${T.black};color:#fff;text-decoration:none;font-size:14px;font-weight:600;padding:12px 22px;border-radius:8px">${cta}</a></div>` : '')
-    + p('Kind regards,') + `<p style="margin:0 0 28px;font-size:15px;line-height:1.65;color:#2B2B2E;font-weight:600">The HOF Migration team</p>`
+    + (signed ? p('Kind regards,') + `<p style="margin:0 0 28px;font-size:15px;line-height:1.65;color:#2B2B2E;font-weight:600">The HOF Migration team</p>` : '')
     + `</div>`
     + `<div style="padding:22px 40px 26px;background:#F6F6F7">`
     + `<p style="margin:0 0 6px;font-size:12px;line-height:1.6;color:#6B6B72">HOF Migration · Global migration services</p>`
@@ -996,43 +997,76 @@ const brandedEmail = ({title, paragraphs, list, cta}) => {
     + `<a href="#" style="font-size:12px;color:#6B6B72;text-decoration:underline">Unsubscribe</a>`
     + `</div></div>`;
 };
+// A fetched property as the email body keeps it (emails.jsx Fetch Property).
+const sampleToken = (key, label) => `<span data-token="${key}">${label}</span>`;
 const DEFAULT_EMAIL_TEMPLATES = [
-  {id:'et-welcome', name:'Welcome to US NIW', subject:'Welcome to your US NIW journey', html:brandedEmail({
-    title:'Welcome to your US NIW journey',
-    paragraphs:['Thank you for choosing HOF Migration for your US National Interest Waiver application. We are delighted to be part of this next step with you.',
-      'Over the coming weeks your dedicated consultant will guide you through every stage of the process. Here is what happens next:'],
-    list:['Your consultant will contact you within two working days.', 'You will receive your Client Care Letter to review and sign.', 'We will share a personalised document checklist for your petition.'],
-    cta:'View Your Client Portal'})},
-  {id:'et-ccl', name:'Client Care Letter', subject:'Your Client Care Letter', html:brandedEmail({
-    title:'Your Client Care Letter is ready',
-    paragraphs:['Your Client Care Letter sets out the scope of our services, the fees agreed and how we will work together on your case.',
-      'Please read it carefully and sign it in your client portal. If anything is unclear, reply to this email and your consultant will be happy to help.'],
-    cta:'Review and Sign'})},
-  {id:'et-payment', name:'Payment Reminder', subject:'A reminder about your payment', html:brandedEmail({
-    title:'Your next payment is due soon',
-    paragraphs:['This is a friendly reminder that your next instalment is due soon. Keeping your payments up to date helps us keep your case moving without delays.',
-      'You can review your payment schedule and pay securely from your client portal.'],
-    cta:'View Payment Schedule'})},
-  {id:'et-followup', name:'Consultation Follow-up', subject:'Following up on your consultation', html:brandedEmail({
-    title:'Thank you for your consultation',
-    paragraphs:['It was great speaking with you. As discussed, here is a short summary of the points we covered and the next steps for your application.'],
-    list:['Your eligibility for the US National Interest Waiver.', 'The evidence we recommend gathering for your petition.', 'The expected timeline from filing to decision.'],
-    cta:'Book Your Next Call'})},
+  {id:'et-welcome', name:'Welcome to US NIW', subject:'Welcome to your US NIW journey', createdBy:'Waleed bin Zaman', format:'html',
+    body:`<p>Hi ${sampleToken('contacts:name', 'Contact · Full Name')},</p>`
+      + `<p>Welcome to HOF. Your US National Interest Waiver case is now open, and your consultant ${sampleToken('contacts:owner', 'Contact · Contact Owner')} will guide you through every step.</p>`
+      + `<p>Your client portal holds your documents, your payment schedule and the progress of your petition.</p>`
+      + `<p><a data-cta="primary" href="https://portal.hofmigration.com">View Your Client Portal</a></p>`
+      + `<p>If you have a question at any point, reply to this email.</p>`},
+  {id:'et-ccl', name:'Client Care Letter', subject:'Your Client Care Letter', createdBy:'Abdullah Saith', format:'simple', assignedTo:{teams:[{id:'team-abdullah', off:[]}], users:[]},
+    body:`<p>Dear ${sampleToken('contacts:name', 'Contact · Full Name')},</p>`
+      + `<p>Your Client Care Letter for ${sampleToken('deals:name', 'Deal · Deal Name')} is attached. It sets out the scope of our services, the agreed fee of ${sampleToken('deals:amount', 'Deal · Deal Amount')} and how we will work together.</p>`
+      + `<p>Please read it carefully, sign it and send it back. If anything is unclear, reply to this email and we will help.</p>`,
+    attachments:[{id:'att-sample-ccl', name:'Client Care Letter.pdf', size:184320, mime:'application/pdf'}]},
+  {id:'et-payment', name:'Payment Reminder', subject:'A reminder about your payment', createdBy:'Hamza Siddiqui', format:'html',
+    body:`<p>Hi ${sampleToken('contacts:name', 'Contact · Full Name')},</p>`
+      + `<p>This is a friendly reminder that your next payment of ${sampleToken('acc:nextPaymentAmount', 'Accounting · Next Payment Amount')} is due on ${sampleToken('acc:nextInstallmentDueDate', 'Accounting · Next Payment Due Date')}.</p>`
+      + `<p>Your balance still to pay is ${sampleToken('acc:outstanding', 'Accounting · Total Outstanding')}. Paying on time keeps your case moving without delays.</p>`
+      + `<p><a data-cta="primary" href="https://portal.hofmigration.com/pay">Pay Now</a></p>`
+      + `<p><a data-cta="secondary" href="https://portal.hofmigration.com/payments">View Payment Schedule</a></p>`},
+  {id:'et-followup', name:'Consultation Follow-up', subject:'Following up on your consultation', createdBy:'Ali Noor', format:'simple', assignedTo:{teams:[], users:['ali-noor', 'anaya-malik', 'usman-tariq']},
+    body:`<p>Hi {{first_name}},</p>`
+      + `<p>It was great speaking with you. Here is a short summary of what we covered and the next steps for your application from ${sampleToken('contacts:country', 'Contact · Country')}:</p>`
+      + `<ul><li>Your eligibility for the US National Interest Waiver.</li><li>The evidence we recommend gathering for your petition.</li><li>The expected timeline from filing to decision.</li></ul>`
+      + `<p>You can <a href="https://hofmigration.com/book">book your next call</a> whenever you are ready.</p>`},
+  {id:'et-documents', name:'Document Request', subject:'Documents we need from you', createdBy:'Waleed bin Zaman', format:'custom', fileName:'document-request.html', includeSignature:true,
+    html:brandedEmail({signed:false, title:'We need a few documents',
+      paragraphs:['To keep your petition on schedule, please upload the documents below to your client portal within the next seven days.'],
+      list:['A copy of your passport, valid for at least six months.', 'Your degree certificates and transcripts.', 'Three letters of recommendation.'],
+      cta:'Upload Documents'})},
 ];
 // Saved templates, else the sample CRM instance's (another instance starts with none).
 const emailTemplatesOf = (data) => data.emailTemplates || (ACTIVE_CRM.sample ? DEFAULT_EMAIL_TEMPLATES : []);
-/* Email Sequences — reusable: an ordered list of {templateId, delay}; no recipients. */
+/* Email Sequences — reusable: an ordered list of {templateId, delay}; no recipients. The sample
+   CRM's five (mocked 2026-11-16). */
 const DEFAULT_EMAIL_SEQUENCES = [
-  {id:'es-onboarding', name:'US NIW Onboarding', emails:[
+  {id:'es-onboarding', name:'US NIW Onboarding', createdBy:'Waleed bin Zaman', emails:[
     {templateId:'et-welcome',  delay:{amount:'1', unit:'Days'}},
     {templateId:'et-ccl',      delay:{amount:'1', unit:'Weeks'}},
     {templateId:'et-followup', delay:{amount:'2', unit:'Weeks'}},
   ]},
-  {id:'es-payment', name:'Payment Follow-up', emails:[
+  {id:'es-payment', name:'Payment Follow-up', createdBy:'Hamza Siddiqui', emails:[
     {templateId:'et-payment',  delay:{amount:'3', unit:'Days'}},
     {templateId:'et-payment',  delay:{amount:'1', unit:'Weeks'}},
   ]},
+  {id:'es-documents', name:'Document Chase', createdBy:'Abdullah Saith', emails:[
+    {templateId:'et-documents', delay:{amount:'1', unit:'Days'}},
+    {templateId:'et-documents', delay:{amount:'3', unit:'Days'}},
+    {templateId:'et-followup',  delay:{amount:'1', unit:'Weeks'}},
+    {templateId:'et-documents', delay:{amount:'2', unit:'Weeks'}},
+  ]},
+  {id:'es-consultation', name:'Consultation Nurture', createdBy:'Ali Noor', emails:[
+    {templateId:'et-followup', delay:{amount:'4', unit:'Hours'}},
+    {templateId:'et-welcome',  delay:{amount:'48', unit:'Hours'}},
+  ]},
+  {id:'es-ccl', name:'Client Care Letter Reminder', createdBy:'Abdullah Saith', emails:[
+    {templateId:'et-ccl',      delay:{amount:'2', unit:'Days'}},
+    {templateId:'et-ccl',      delay:{amount:'5', unit:'Days'}},
+    {templateId:'et-followup', delay:{amount:'1', unit:'Weeks'}},
+  ]},
 ];
+/* The sample templates and sequences join what a sample CRM has saved, once (`mockEmails`): by
+   id, never over one edited since (the four earlier sample templates, saved as they were, give
+   way to their new versions) — deleted later, they stay deleted. */
+const MOCK_EMAILS_VERSION = 1;
+const withMockEmails = (d) => { const ts = d.emailTemplates || [], qs = d.emailSequences || [];
+  const stale = (t) => !t.format && DEFAULT_EMAIL_TEMPLATES.some(m => m.id === t.id);
+  return {mockEmails:MOCK_EMAILS_VERSION,
+    emailTemplates:[...ts.filter(t => !stale(t)), ...DEFAULT_EMAIL_TEMPLATES.filter(m => !ts.some(t => t.id === m.id && !stale(t)))],
+    emailSequences:[...qs, ...DEFAULT_EMAIL_SEQUENCES.filter(m => !qs.some(q => q.id === m.id))]}; };
 const emailSequencesOf = (data) => data.emailSequences || (ACTIVE_CRM.sample ? DEFAULT_EMAIL_SEQUENCES : []);
 
 /* Side-panel header — the Contact side panel's name row: title (17/600), a muted line under it,
@@ -1160,6 +1194,11 @@ function ScheduleRows({value, onChange, disabled}){
   return (
     <div aria-disabled={disabled || undefined} {...(disabled ? {inert:''} : {})}
       style={{display:'flex', flexDirection:'column', gap:8, opacity: disabled ? .45 : 1, pointerEvents: disabled ? 'none' : 'auto', transition:'opacity 120ms'}}>
+      {/* A sequence's Specific Date (templates.jsx): the day this email counts from. */}
+      {v.date && <div style={{display:'flex', alignItems:'center', gap:8}}>
+        {cfgRowLabel('On')}
+        <div style={{flex:1, minWidth:0}}><DateField required value={v.date} onChange={(d)=>onChange({...v, date:d})}/></div>
+      </div>}
       <div style={{display:'flex', alignItems:'center', gap:8}}>
         {cfgRowLabel('After')}
         <div style={{flex:1, minWidth:0}}><DurationInput units={SCHEDULE_EMAIL_UNITS} value={v} onChange={(d)=>onChange({...v, amount:d.amount, unit:d.unit})}/></div>
@@ -1357,7 +1396,8 @@ function EmailChoice({entry, setEntry, data, onStub}){
       createLabel="Add Email Template" onCreate={()=>onStub('Add Email Template')} onClose={()=>setModal(null)}
       items={templates.map(t => ({id:t.id, title:t.name, detail:t.subject}))}
       onPick={(id)=>{ setEntry({...entry, templateId:id, email:null}); setModal(null); }}/>}
-    {modal === 'view' && tpl && <ViewEmailModal name={tpl.name} email={entry.email || {subject:tpl.subject, html:tpl.html}} onClose={()=>setModal(null)}
+    {modal === 'view' && tpl && <ViewEmailModal name={tpl.name} email={entry.email && !entry.email.format ? entry.email   // its own edited HTML; else the template (or a sequence's own copy) as it reads
+        : {subject:(entry.email || tpl).subject || tpl.name, html:emailHtmlOf(templateContentOf(entry.email || tpl))}} onClose={()=>setModal(null)}
       onSave={(email)=>{ setEntry({...entry, email}); setModal(null); }}/>}
   </>);
 }
@@ -1378,7 +1418,8 @@ function ScheduleEmailConfig({config, setConfig, data, onStub}){
     const kept = emails.filter(e => !e.sequenceId && e.templateId);
     // Each email's schedule counts from the workflow running: the sequence's delays added up (workflowEngine.jsx).
     const when = sequenceSchedules(seq);
-    setConfig({...config, sequenceId:id, emails:[...seq.emails.map((e, i) => ({...newScheduledEmail(), sequenceId:id, templateId:e.templateId, schedule:{...newSchedule(), ...when[i]}})), ...kept]});
+    // (An email the sequence edited — its own copy — comes as the sequence has it.)
+    setConfig({...config, sequenceId:id, emails:[...seq.emails.map((e, i) => ({...newScheduledEmail(), sequenceId:id, templateId:e.templateId, ...(e.email ? {email:e.email} : {}), schedule:{...newSchedule(), ...when[i]}})), ...kept]});
     setChoosing(false);
   };
   return (
@@ -2511,4 +2552,4 @@ const WorkflowEditorOverlay = (props) => (
 );
 
 Object.assign(window, {WORKFLOWS_CLEARED, canWorkflow, restoreWorkflowVersionIn, WorkflowVersions, renameWorkflowIn, RenameWorkflowModal, newWorkflowDraft, workflowOriginLabel, WorkflowEditorHost, WorkflowEditorOverlay, WORKFLOW_TYPES, workflowTypeOf, actionFitsType, WORKFLOW_OBJECTS, workflowsAvailableFor, saveWorkflowIn, setWorkflowActiveIn, deleteWorkflowIn, behaviorOptions, actionsReady, ACTION_BEHAVIORS, BEHAVIOR_OPTIONS, actionBehavior, triggersReady, triggerIssue, actionIssue, WORKFLOW_CONTEXT_LEVELS, workflowTriggerViews, triggersMatchAll, triggerReady, LEGACY_TRIGGER_ID, normalizeTriggerEntry, triggerSummary, activityTriggerProperty, COUNT_OPERATORS, triggerGroupAvailable, DEFAULT_EMAIL_SEQUENCES, emailSequencesOf, workflowContextLabel, ACTIVITY_TRIGGER_TYPES, workflowPipeline, workflowStage, normalizeWorkflow, triggerProperties, contextPathOf, triggerDetail, triggerSettingFields, WORKFLOW_TRIGGER_GROUPS, WORKFLOW_CONTEXT_FIELDS, WORKFLOW_ACTIONS, WORKFLOW_ACTION_CONFIGS, DEFAULT_EMAIL_TEMPLATES,
-  workflowTrigger, workflowAction, actionSummary, workflowReady, emailTemplatesOf, SidePanelHeader, WorkflowCard, WorkflowEditor, ScheduleEmailConfig});
+  workflowTrigger, workflowAction, actionSummary, workflowReady, emailTemplatesOf, MOCK_EMAILS_VERSION, withMockEmails, SidePanelHeader, WorkflowCard, WorkflowEditor, ScheduleEmailConfig});

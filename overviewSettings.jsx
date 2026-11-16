@@ -47,9 +47,9 @@ const poolItem = (pool, id) => { for(const c of pool) for(const g of c.groups){ 
 function recordHighlightText(object, key, {record, view, acts, contact, hub}){
   const prop = objectProperties(hub.data, object).find(p => p.key === key);
   const nameOf = (list) => list.map(x => x.name).filter(Boolean).join(', ');
-  if(key === 'ownerAssigned' || key === 'ownerChanged'){
-    const o = object === 'contacts' ? ownerDates(record, acts) : ownerDates({owner:view.owner, created:dateOnly(record.created)}, acts);
-    return key === 'ownerAssigned' ? o.assigned : o.changed;
+  if(key === 'ownerAssigned' || key === 'ownerChanged' || key === 'ownerAssignedBy'){
+    const o = object === 'contacts' ? ownerDates(record, acts) : ownerDates({owner:view.owner, created:dateOnly(record.created), ownerSetBy:record.ownerSetBy}, acts);
+    return key === 'ownerAssigned' ? o.assigned : key === 'ownerAssignedBy' ? o.assignedBy : o.changed;
   }
   if(object !== 'contacts'){
     if(key === 'owner') return view.owner || '';

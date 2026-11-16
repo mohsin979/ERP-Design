@@ -591,7 +591,8 @@ function App(){
     const loaded = {...d, ...empty, ...(v2 || {})};
     /* Permissions saved in an earlier shape (Contacts only; Records only) are completed: per-Object
        permissions, then the other categories by the holder's preset (levelOfPreset). */
-    const base = {...loaded, users:(loaded.users || []).map(u => ({...u, permissions:normalizePermissions(u.permissions, levelOfPreset(u.preset))})),
+    // (A sample user with a sample email signature and none of their own gets it — workspaces.jsx SAMPLE_SIGNATURES.)
+    const base = {...loaded, users:(loaded.users || []).map(u => ({...u, ...(SEED && !u.signature && SAMPLE_SIGNATURES[u.id] ? {signature:SAMPLE_SIGNATURES[u.id]} : {}), permissions:normalizePermissions(u.permissions, levelOfPreset(u.preset))})),
       presets:(loaded.presets || []).map(x => ({...x, permissions:normalizePermissions(x.permissions, levelOfPreset(x.name))}))};
     // The signed-in person is one of this CRM's users (added when they aren't yet).
     // One identity per person across the Organization: the signed-in person joins under their shared name.
@@ -608,7 +609,9 @@ function App(){
       workflows: saved.workflowsCleared === WORKFLOWS_CLEARED ? (saved.workflows || []) : [], workflowsCleared:WORKFLOWS_CLEARED,
       pipelines:withSeeded(saved.pipelines && saved.pipelines.filter(p => !SPLIT_AC_PIPELINES.includes(p.id)), d.pipelines, saved.seededPipelines), seededPipelines:d.pipelines.map(p => p.id),
       seededDeals:SAMPLE_DEALS().map(x => x.id), seededContacts:SAMPLE_CONTACTS.map(c => c.id), seededCustomers:SAMPLE_CUSTOMERS().map(c => c.id),
-      ...(!v2 && saved.emailTemplates ? {emailTemplates:saved.emailTemplates} : {})});
+      ...(!v2 && saved.emailTemplates ? {emailTemplates:saved.emailTemplates} : {}),
+      // The sample email templates and sequences, once (workflows.jsx withMockEmails).
+      ...(SEED && loaded.mockEmails !== MOCK_EMAILS_VERSION ? withMockEmails(loaded) : {})});
   });
   // Times show in the signed-in person's time zone (theirs, else Settings → Defaults') — before anything is formatted.
   applyTimeZone(settingsData.defaults);
@@ -683,6 +686,14 @@ function App(){
     const saved = savedSlice('customerActivities');
     return withTaskStatuses(withBizMap(saved ? {...Object.fromEntries(Object.entries(sample).filter(([id]) => !(id in saved) && !(prevSettings.seededCustomers || []).includes(id))), ...saved} : sample, 'customerActivities'), prevSettings.taskPipelines);
   });
+  // Sample enrollments in the sample email sequences: added once, with the sequences (templates.jsx).
+  React.useEffect(() => {
+    if(!SEED || prevSettings.mockEmails === MOCK_EMAILS_VERSION) return;
+    const add = sampleSequenceEnrollments({contacts, deals, customers}, settingsData);
+    const into = (list) => (m) => Object.keys(list).length ? {...m, ...Object.fromEntries(Object.entries(list).map(([id, acts]) =>
+      [id, [...acts.filter(a => !(m[id] || []).some(x => x.id === a.id)), ...(m[id] || [])].sort((a, b) => new Date(b.at) - new Date(a.at))]))} : m;
+    setContactActivities(into(add.contacts)); setDealActivities(into(add.deals)); setCustomerActivities(into(add.customers));
+  }, []);
   // Sample tasks saved before they had descriptions get theirs (activities.jsx).
   React.useEffect(() => { setContactActivities(withSampleTaskDescriptions); setDealActivities(withSampleTaskDescriptions); setCustomerActivities(withSampleTaskDescriptions); }, []);
   React.useEffect(() => { persistSlice('customers', customers); }, [customers]);
@@ -811,7 +822,7 @@ function App(){
   /* Contacts ⇄ Deals. A contact's Associated Deals count is the deals listing it (`contactIds`), so the two
      never disagree. Opening a record on the other page switches page and opens it there. */
   /* The system-generated Contact properties worked out here: Associated Deal / Customer (the
-     linked records' names) and Contact Owner Assignment Date (from the owner history). */
+     linked records' names), Owner Assignment Date and Owner Assigned By (from the owner history). */
   // Form Name / Form Submission Date: from the form submission that created each record (forms.jsx); Merge Status (merge.jsx).
   const contactsWithDeals = React.useMemo(() => {
     // Each contact's deals and customers (the records listing it).
@@ -819,11 +830,13 @@ function App(){
     const dealsOf = byContact(deals), customersOf = byContact(customers);
     return contacts.map(c => {
     const ds = dealsOf.get(String(c.id)) || [], cs = customersOf.get(String(c.id)) || [];
+    const od = ownerDates(c, contactActivities[c.id] || []);
     return {...c, dealCount:ds.length, customerCount:cs.length, deals:ds.map(d => d.name).join(', '), customers:cs.map(x => x.name).join(', '),
-      ownerAssigned:ownerDates(c, contactActivities[c.id] || []).assigned, ...formRecordValues(formSubs, 'contacts', c.id), mergeStatus:mergeStatusIn(mergeIdx.contacts, c.id)};
+      ownerAssigned:od.assigned, ownerAssignedBy:od.assignedBy, ...formRecordValues(formSubs, 'contacts', c.id), mergeStatus:mergeStatusIn(mergeIdx.contacts, c.id)};
   }); }, [contacts, deals, customers, contactActivities, formSubs, mergeIdx]);
-  const dealsView = React.useMemo(() => deals.map(d => ({...d, ...(formSubs.size ? formRecordValues(formSubs, 'deals', d.id) : {}), mergeStatus:mergeStatusIn(mergeIdx.deals, d.id)})), [deals, formSubs, mergeIdx]);
-  const customersView = React.useMemo(() => customers.map(c => ({...c, ...(formSubs.size ? formRecordValues(formSubs, 'customers', c.id) : {}), mergeStatus:mergeStatusIn(mergeIdx.customers, c.id)})), [customers, formSubs, mergeIdx]);
+  // Owner Assigned By, on Deals and Customers as on Contacts (from the owner history).
+  const dealsView = React.useMemo(() => deals.map(d => ({...d, ownerAssignedBy:ownerDates(d, dealActivities[d.id] || []).assignedBy, ...(formSubs.size ? formRecordValues(formSubs, 'deals', d.id) : {}), mergeStatus:mergeStatusIn(mergeIdx.deals, d.id)})), [deals, dealActivities, formSubs, mergeIdx]);
+  const customersView = React.useMemo(() => customers.map(c => ({...c, ownerAssignedBy:ownerDates(c, customerActivities[c.id] || []).assignedBy, ...(formSubs.size ? formRecordValues(formSubs, 'customers', c.id) : {}), mergeStatus:mergeStatusIn(mergeIdx.customers, c.id)})), [customers, customerActivities, formSubs, mergeIdx]);
   const [recordLink, setRecordLink] = React.useState(null);   // {object:'contacts'|'deals', id, mode, tab, nonce}
   const openRecord = (object, id, mode, tab) => { setCrmActive(object); setRecordLink({object, id, mode, tab, nonce:Date.now()}); };
   /* A deal opened from a workflow event (its card, or the Violations panel): its side panel — or,
@@ -956,9 +969,12 @@ function App(){
     setMergeHistory(l => [...l, entry]);
     // The record: its chosen values and links; the others go.
     const setOf = {contacts:engine.setContacts, deals:setDeals, customers:setCustomers}[object];
+    // (Its replaced values are kept by Records merged, below — not as Property changes too.)
+    withoutPropertyHistory(() => {
     setOf(list => list.filter(r => !isGone(r.id)).map(r => String(r.id) === String(keepId) ? {...r, ...values, ...own} : r));
     // A chosen Actual Close Date stays (a stage picked with it would otherwise stamp today's).
     if('actualCloseDate' in values) setOf(list => list.map(r => String(r.id) === String(keepId) ? {...r, actualCloseDate:values.actualCloseDate} : r));
+    });
     // Records linked to a merged one: linked to the kept one instead (in the same place), or — not picked — unlinked.
     held.forEach(({o, field, keep}) => {
       const touches = (r) => (r[field] || []).some(isMerged);
@@ -1213,8 +1229,6 @@ function App(){
           // Automation → Workflows: every configured workflow (workflowsPage.jsx).
           : crmActive === 'workflows' ? (workflowCan('view') ? <WorkflowsPage data={settingsData} setData={setSettingsData}/>
             : <div style={{flex:1, display:'flex', alignItems:'center', justifyContent:'center', fontSize:13, color:T.gray400}}>You don't have access to Workflows.</div>)
-          // Marketing → Brand: the workspace logo and brand colours (workspaces.jsx).
-          : crmActive === 'brand' ? <BrandPage/>
           // Marketing → Forms: lead forms, their builder and connections (forms.jsx).
           : crmActive === 'forms' ? <FormsPage/>
           // Tools: every call, task, email, meeting and note in the workspace (tools.jsx); quotations; the service catalog.

@@ -125,6 +125,11 @@ const FORM_RECORD_PROPERTIES = [
   {key:'formSubmittedAt', label:'Form Submission Date', type:'Timestamp',        locked:true, auto:true, derived:true, width:200},
 ];
 const formRecordProperties = (objectId) => FORM_RECORD_PROPERTIES.map(p => ({...p, system:true, objectId, onCreate:false, mandatory:false}));
+/* Owner Assigned By (2026-11-16): who gave the record its current owner — a person, or a workflow
+   by name — on Contacts, Deals and Customers alike. Worked out from the owner history
+   (contactDetail.jsx ownerDates), never edited. */
+const ownerRecordProperty = (objectId) => ({key:'ownerAssignedBy', label:'Owner Assigned By', type:'Single-Line Text', system:true, objectId,
+  onCreate:false, mandatory:false, locked:true, auto:true, derived:true, width:200});
 /* Merge Status: the system's duplicate check (merge.jsx) — records of the same type sharing an email
    or phone. The newest of them is Form Refill (a form submission created it) or Duplicate (added
    any other way); the oldest, and every record with no match, Unique — or Merged, once other
@@ -167,6 +172,7 @@ const DEFAULT_PROPERTIES = () => [
   ...DEAL_PROPERTY_SETUP.map(({onCreate = false, mandatory = false, locked = false, ...p}) => ({...p, system:true, objectId:'deals', onCreate, mandatory, locked})),
   ...customerDefaultProperties(),
   ...['contacts', 'deals', 'customers'].flatMap(formRecordProperties),
+  ...['contacts', 'deals', 'customers'].map(ownerRecordProperty),
   ...['contacts', 'deals', 'customers'].map(mergeRecordProperty),
   ...userDefaultProperties(),
 ];
@@ -222,6 +228,8 @@ const migrateDataModel = (d) => {
   // Form Name and Form Submission Date, on each record type that doesn't have them yet.
   // (Not in a workspace whose template leaves them out — `noFormProperties`.)
   if(!d.noFormProperties) properties = [...properties, ...['contacts', 'deals', 'customers'].filter(has).flatMap(formRecordProperties).filter(fp => !properties.some(p => p.objectId === fp.objectId && p.key === fp.key))];
+  // Owner Assigned By (2026-11-16), on each record type that doesn't have it yet.
+  properties = [...properties, ...['contacts', 'deals', 'customers'].filter(has).map(ownerRecordProperty).filter(op => !properties.some(p => p.objectId === op.objectId && p.key === op.key))];
   // Merge Status (2026-11-12), on each record type that doesn't have it yet.
   properties = [...properties, ...['contacts', 'deals', 'customers'].filter(has).map(mergeRecordProperty).filter(mp => !properties.some(p => p.objectId === mp.objectId && p.key === mp.key))];
   // Merge Status gained Merged (2026-11-13).

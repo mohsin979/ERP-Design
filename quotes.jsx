@@ -57,7 +57,7 @@ function keepQuoteBrand(){
   return id;
 }
 const quoteBrand = (q) => (q && q.brandId && quoteBrandsOf()[q.brandId]) || orgBrand();
-// The brand's saved Digital Letterhead (Marketing → Brand), or null while none is saved.
+// The brand's saved Digital Letterhead (Settings → Brand), or null while none is saved.
 const quoteLetterhead = (b) => b && b.letterhead && !b.letterhead.dataUrl && b.letterhead.companyName ? b.letterhead : null;
 // The brand's logo, whole (uncropped); without one uploaded, the HOF logo the Brand page shows.
 const BrandLogo = ({brand, height = 28}) => brand.logo
@@ -168,16 +168,17 @@ const SAMPLE_QUOTES = (services) => {
 function QuoteStatusPill({status}){ return <StatusPill status={status} map={QUOTE_STATUS}/>; }
 
 /* The quotation as the customer sees it — in the Organization's brand (logo, primary and secondary
-   colours from Marketing → Brand) on its Digital Letterhead: the logo with the company's name,
+   colours from Settings → Brand) on its Digital Letterhead: the logo with the company's name,
    address, additional info and contact lines, the quotation's number under them and the footer
    note at the end (without a saved letterhead, the logo with the number beside it). Then who it's
    for, the services and their milestones, the money (subtotal, discount, VAT, total), the payment
    terms, the terms and conditions, and — when an e-signature is required — the customer's
-   signature section. */
+   signature section. A quote template's preview (templates.jsx) is the same page with sample
+   details: `quote.sampleRecord` stands in for its record. */
 function QuoteDocument({quote}){
   const hub = useRecordHub();
   const brand = quoteBrand(quote);
-  const record = hubRecord(hub, quote.object, quote.recordId);
+  const record = quote.sampleRecord || hubRecord(hub, quote.object, quote.recordId);
   const t = quoteTotals(quote), cur = quoteCurrency(quote);
   const muted = {fontSize:12, color:T.attioMuted};
   const section = {fontSize:11, fontWeight:700, letterSpacing:.6, textTransform:'uppercase', color:brand.colors.secondary, marginBottom:10};
@@ -267,7 +268,7 @@ function QuoteDocument({quote}){
 /* A document on the brand's letterhead (Quotes, Documents — documents.jsx): the brand's top line;
    the logo with the letterhead's company information and, under them, `label` and `number` (no
    letterhead saved: the label and number beside the logo); the content; the letterhead's footer
-   note (else its company name and website), as on Marketing → Brand. `noNumber` (Documents): no
+   note (else its company name and website), as on Settings → Brand. `noNumber` (Documents): no
    label and number at the top; `beneathLogo`: what goes under the logo instead (a document's
    number and date). */
 function BrandedDocument({brand, label, number, children, noNumber, beneathLogo}){
@@ -314,7 +315,7 @@ function InstallmentsTable({installments, total, currency}){
     ))}
   </>);
 }
-// The letterhead's company information, right of the logo (Marketing → Brand → Digital Letterhead).
+// The letterhead's company information, right of the logo (Settings → Brand → Digital Letterhead).
 function QuoteLetterheadBlock({lh}){
   const small = {fontSize:12, color:T.gray600, lineHeight:1.5};
   return (

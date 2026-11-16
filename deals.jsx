@@ -495,7 +495,7 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
   return (
     /* Laid out exactly as Contacts: no wrapper fill or padding, the page inset toolbar. */
     <div style={{flex:1, minWidth:0, minHeight:0, display:'flex', flexDirection:'column', position:'relative', overflow:'hidden'}}>
-      <RecordViewsModule inset="page" schema={fullSchema} rows={rows} columns={props.map(p => p.key)}
+      <RecordViewsModule inset="page" viewCounts schema={fullSchema} rows={rows} columns={props.map(p => p.key)}
         defaultViews={[{id:'dv-all', name:`All ${typePlural('deals', 'Deals')}`, sort:{key:'name', dir:'asc'}}]}
         board={{pipelines, defaultPipelineId:pipelines[0] && pipelines[0].id,
           cardSettings:{defaults:DEFAULT_DEAL_CARD_SETTINGS,

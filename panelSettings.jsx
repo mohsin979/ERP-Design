@@ -25,6 +25,7 @@ const PANEL_QUICK_ACTIONS = quickActionLabels('contacts');
 const PANEL_PROPERTIES = [
   {key:'owner',         label:'Contact Owner'},
   {key:'ownerAssigned', label:'Owner Assignment Date'},
+  {key:'ownerAssignedBy', label:'Owner Assigned By'},
   {key:'ownerChanged',  label:'Owner Change Date'},
   {key:'contactType',   label:'Type of Contact'},
   {key:'profileType',   label:'Customer Profile Type'},
@@ -43,7 +44,7 @@ const PANEL_PROPERTIES = [
    ones — owner dates, Associated Deals — keep theirs), then every other Contact property (name,
    email and phone are the panel's header). Like Deals: a property added since the settings were
    saved joins the end — a custom one shown, a built-in one hidden (the default panel is unchanged). */
-const CONTACT_PANEL_DERIVED = {ownerAssigned:'Owner Assignment Date', ownerChanged:'Owner Change Date', deals:'Associated Deals', customers:'Associated Customers', profileType:'Customer Profile Type'};
+const CONTACT_PANEL_DERIVED = {ownerAssigned:'Owner Assignment Date', ownerAssignedBy:'Owner Assigned By', ownerChanged:'Owner Change Date', deals:'Associated Deals', customers:'Associated Customers', profileType:'Customer Profile Type'};
 const contactPanelProperties = (props) => {
   const prop = (k) => (props || []).find(p => p.key === k);
   const base = PANEL_PROPERTIES.filter(p => CONTACT_PANEL_DERIVED[p.key] || !props || prop(p.key))
@@ -52,10 +53,15 @@ const contactPanelProperties = (props) => {
     .map(p => ({key:p.key, label:p.label, system:!!p.system}));
   return [...base, ...extra];
 };
+// Properties added since a panel's settings were saved: at the end — Owner Assigned By beside Owner Assignment Date.
+const withAddedPanelProperties = (list, added) => {
+  const by = added.find(p => p.key === 'ownerAssignedBy'), at = list.findIndex(p => p.key === 'ownerAssigned'), rest = added.filter(p => p !== by);
+  return by && at >= 0 ? [...list.slice(0, at + 1), by, ...list.slice(at + 1), ...rest] : [...list, ...added];
+};
 const withContactPanelProperties = (settings, props) => {
   const known = settings.contactProperties.map(p => p.key);
   const added = contactPanelProperties(props).filter(p => !known.includes(p.key)).map(p => ({key:p.key, enabled:!p.system}));
-  return added.length ? {...settings, contactProperties:[...settings.contactProperties, ...added]} : settings;
+  return added.length ? {...settings, contactProperties:withAddedPanelProperties(settings.contactProperties, added)} : settings;
 };
 
 /* Defaults reproduce today's panel: the four quick actions, the summary, View Activity (now a

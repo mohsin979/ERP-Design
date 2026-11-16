@@ -21,7 +21,10 @@
    defined yet (placeholder): Export, and the Seats, Teams and Permission Presets tabs.
    Edit Permissions follows the seat model (SEAT_TYPES): seat first (with remaining seats), then
    the seat's access options, then — for manual access — the preset and the permission editor
-   (PERMISSION_CATEGORIES). */
+   (PERMISSION_CATEGORIES).
+   Assigning to people (AssignPeopleFields / AssignPeopleModal, at the end of the file): the one
+   pattern for giving something to people — teams, whose members can be unticked, and single
+   users. Email templates use it (templates.jsx). */
 
 /* User status (a select property) and the default views built on it — the Contacts view
    system: each view is a saved filter on Status, managed like any Contacts view. */
@@ -507,21 +510,35 @@ function memberFromSession(session, presets, preset = SUPER_ADMIN){
     permissions: p ? JSON.parse(JSON.stringify(p.permissions)) : DEFAULT_CONTACT_PERMISSIONS()};
 }
 /* The signed-in person is in `people`'s Users; added when they aren't — and among the employees,
-   unless already one (in their own People instance). Whoever starts an empty CRM instance is its
-   Super Admin on a Full Seat; anyone else opening it joins as a member with no preset and no seat
-   (so no access) until an administrator sets them up. Their ID is their Organization ID. */
+   unless already one (in their own People instance). Their ID is their Organization ID.
+   For now (EVERYONE_SUPER_ADMIN, workspaces.jsx — decided 2026-11-16) whoever signs in joins as a
+   Super Admin on a Full Seat: a free one, else one more than the count. Someone who joined before
+   that and was never set up (no seat, no preset) gets the same the next time they open it; a
+   user an administrator has set up keeps their seat and preset.
+   Without it: whoever starts an empty CRM instance is its Super Admin on a Full Seat; anyone else
+   opening it joins as a member with no preset and no seat (so no access) until an administrator
+   sets them up. */
 function withSessionMember(people, session, preset = SUPER_ADMIN){
   if(!session || !session.email) return people;
   const email = session.email.toLowerCase();
-  if(people.users.some(u => String(u.email || '').toLowerCase() === email)) return people;
+  const everyone = typeof EVERYONE_SUPER_ADMIN !== 'undefined' && EVERYONE_SUPER_ADMIN;
+  // A Full Seat for `uid`: a free one, else (`extra`) one more than the count.
+  const fullSeat = (seats, uid, extra) => { const free = seats.findIndex(st => st.type === 'Full Seat' && !st.assigneeId);
+    return free >= 0 ? seats.map((st, i) => i === free ? {...st, assigneeId:uid} : st)
+      : extra ? [...seats, {id:`${SEAT_PREFIX['Full Seat']}${seats.filter(st => st.type === 'Full Seat').length + 1}`, type:'Full Seat', assigneeId:uid}] : seats; };
+  const me = people.users.find(u => String(u.email || '').toLowerCase() === email);
+  if(me){
+    if(!everyone || me.preset || me.status === 'Deactivated' || seatOfUser(people.seats, me.id)) return people;
+    const full = memberFromSession(session, people.presets, SUPER_ADMIN);
+    return {...people, users:people.users.map(u => u === me ? {...u, preset:full.preset, access:full.access, permissions:full.permissions} : u), seats:fullSeat(people.seats, me.id, true)};
+  }
   const starter = !people.users.length, org = typeof orgUserByEmail === 'function' ? orgUserByEmail(email) : null;
-  let u = starter ? memberFromSession(session, people.presets, preset)
+  let u = starter || everyone ? memberFromSession(session, people.presets, starter ? preset : SUPER_ADMIN)
     : {...memberFromSession(session, people.presets, ''), access:'manual', permissions:normalizePermissions(DEFAULT_CONTACT_PERMISSIONS(), levelOfPreset(''))};
   if(org && org.id) u = {...u, id:org.id};
   if(people.users.some(x => x.id === u.id)) u = {...u, id:`${u.id}-${Date.now().toString(36)}`};
   // The starter takes a free Full Seat (none is made beyond the seats there are).
-  const free = starter ? people.seats.findIndex(st => st.type === 'Full Seat' && !st.assigneeId) : -1;
-  const seats = free >= 0 ? people.seats.map((st, i) => i === free ? {...st, assigneeId:u.id} : st) : people.seats;
+  const seats = starter || everyone ? fullSeat(people.seats, u.id, everyone) : people.seats;
   const employees = people.people || [], employee = employees.some(p => String(p.email || '').toLowerCase() === email) ? employees
     : [...employees, {id:`p-${u.id}`, name:u.name, email:u.email, ...(org && org.peopleId ? {peopleId:org.peopleId} : {})}];
   return {...people, users:[...people.users, u], seats, people:employee};
@@ -644,7 +661,7 @@ function UsersTeamsSettings({data, setData}){
 /* `saveView:false` leaves out Save View (View Settings stays) — e.g. Settings → Pipelines. */
 /* `flushTop`: the page's top padding is cancelled too (a table that opens the page, with nothing
    above it), so the views row has the same space above and below. */
-function RecordViewsModule({schema, rows, defaultViews, columns, savedViews = true, saveView = true, actions, filterControls, overlay, initialFilters, initialViewId, focus, board, inset = 'settings', storeKey, flushTop, children}){
+function RecordViewsModule({schema, rows, defaultViews, columns, savedViews = true, saveView = true, viewCounts, actions, filterControls, overlay, initialFilters, initialViewId, focus, board, inset = 'settings', storeKey, flushTop, children}){
   const [views, setViews] = usePersistedState(storeKey || `views:${defaultViews[0].id}`, ()=>defaultViews.map((v, i) => makeRecordView(v.id, v.name, columns, {filters:v.filters || {nodes:[]}, sort:v.sort || null, isDefault:i === 0,
     ...(board ? {pipelineId:v.pipelineId || board.defaultPipelineId, ...(board.cardSettings ? {cardSettings:board.cardSettings.defaults()} : {})} : {})})));
   const [activeViewId, setActiveViewId] = React.useState(initialViewId || defaultViews[0].id);
@@ -683,7 +700,9 @@ function RecordViewsModule({schema, rows, defaultViews, columns, savedViews = tr
   const persist = (id, patch) => setViews(vs => vs.map(v => v.id === id ? {...v, ...patch} : v));
   const filtered = React.useMemo(()=>applyFilters(rows, st.filters, schema.filterProps), [rows, st.filters]);
   const appliedFilterCount = countAppliedFilters(st.filters, schema.filterProps);
-  const visibleViews = views.filter(v => !v.hidden);
+  // `viewCounts` (Deals, Customers — as Contacts): each view's name with how many records it lists (contacts.jsx viewRowCount).
+  const visibleViews = React.useMemo(()=>views.filter(v => !v.hidden).map(v => !viewCounts ? v : {...v, count:viewRowCount(rows, v.filters, v.search, schema)}),
+    [views, viewCounts, rows, schema]);
   const btn = toolbarButton;
   /* What's in view, for `filterControls` / `overlay` given as functions: the Board's pipeline, or
      (Table) the listed rows. */
@@ -1714,4 +1733,71 @@ function SavePresetModal({seat, presets, onCancel, onSave}){
   );
 }
 
-Object.assign(window, {countLink, iconBtn, UserEditPanel, saveUserProfileIn, nameFromEmail, memberFromSession, withSessionMember, EMPTY_PEOPLE_DATA, RecordAccessCtx, useRecordAccess, normalizePermissions, setAccessContext, accessUser, toolCan, visibleActivities, activityCan, canAdd, PERMISSION_TOOLS, EditPresetDrawer, PermissionMatrixEditor, UsersTeamsSettings, UsersModule, SeatsModule, TeamsModule, PresetsModule, RecordViewsModule, SAMPLE_USERS, SAMPLE_PEOPLE_DATA, EditPermissionsDrawer});
+/* ── Assigning to people ── one pattern wherever something is given to people (2026-11-16; an
+   email template, templates.jsx): teams and single users. A team brings its members, all ticked —
+   untick the ones it isn't for; a person joining the team later has it too. Users are added one
+   by one. Kept as {teams:[{id, off:[user IDs unticked]}], users:[user IDs]}; no one chosen is no
+   assignment. */
+const assignmentEmpty = (a) => !a || (!(a.teams || []).length && !(a.users || []).length);
+const teamMembersOf = (data, teamId) => (data.users || []).filter(u => u.teamId === teamId && u.status !== 'Deactivated');
+// Everyone it's assigned to (user IDs).
+const assignedUserIds = (a, data) => assignmentEmpty(a) ? [] : [...new Set([
+  ...(a.teams || []).flatMap(t => teamMembersOf(data, t.id).filter(u => !(t.off || []).includes(u.id)).map(u => u.id)), ...(a.users || [])])];
+// On one line: "Ali's Team (3 of 4), Hira Javed" — "Everyone" while it's assigned to no one.
+const assignmentLabel = (a, data) => assignmentEmpty(a) ? 'Everyone' : [
+  ...(a.teams || []).map(t => { const team = (data.teams || []).find(x => x.id === t.id), all = teamMembersOf(data, t.id), on = all.filter(u => !(t.off || []).includes(u.id)).length;
+    return team ? `${team.name}${on < all.length ? ` (${on} of ${all.length})` : ''}` : null; }),
+  ...(a.users || []).map(id => userLabel(id))].filter(Boolean).join(', ');
+function AssignPeopleFields({value, onChange, data}){
+  const a = {teams:[], users:[], ...(value || {})};
+  const set = (patch) => onChange({...a, ...patch});
+  const teams = data.teams || [], people = (data.users || []).filter(u => u.status !== 'Deactivated');
+  const setTeam = (id, patch) => set({teams:a.teams.map(t => t.id === id ? {...t, ...patch} : t)});
+  const remove = (title, onClick) => <button type="button" title={title} aria-label={title} onClick={onClick} style={{border:'none', background:'transparent', cursor:'pointer', display:'flex', padding:4}}><Icon name="close" size={12} color={T.gray600}/></button>;
+  const person = {display:'flex', alignItems:'center', gap:8, fontSize:13, color:T.attioText, minWidth:0};
+  return <>
+    <div><label style={fieldLabel}>Teams</label>
+      <div style={{display:'flex', flexDirection:'column', gap:8}}>
+        {a.teams.map(t => { const team = teams.find(x => x.id === t.id), members = teamMembersOf(data, t.id), off = t.off || [];
+          return team && (
+            <div key={t.id} style={{border:`1px solid ${T.attioLine}`, borderRadius:8, padding:'8px 10px', display:'flex', flexDirection:'column', gap:6}}>
+              <div style={{display:'flex', alignItems:'center', gap:8}}>
+                <span style={{flex:1, minWidth:0, fontSize:13, fontWeight:600, color:T.attioText}}>{team.name}</span>
+                {remove(`Remove ${team.name}`, ()=>set({teams:a.teams.filter(x => x.id !== t.id)}))}
+              </div>
+              <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'6px 12px'}}>
+              {members.map(u => { const toggle = () => setTeam(t.id, {off: off.includes(u.id) ? off.filter(x => x !== u.id) : [...off, u.id]}); return (
+                <label key={u.id} onClick={e=>{ e.preventDefault(); toggle(); }} style={{...person, cursor:'pointer'}}>
+                  <RowCheckbox checked={!off.includes(u.id)} onChange={toggle}/><Avatar name={u.name} size={20}/><span style={{minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{u.name}</span>
+                </label>); })}
+              </div>
+            </div>); })}
+        <FormSelect value="" placeholder="Add a team" options={teams.filter(t => !a.teams.some(x => x.id === t.id)).map(t => ({value:t.id, label:t.name}))}
+          onChange={(id)=>id && set({teams:[...a.teams, {id, off:[]}]})} ariaLabel="Add a team"/>
+      </div>
+    </div>
+    <div><label style={fieldLabel}>Users</label>
+      <div style={{display:'flex', flexDirection:'column', gap:6}}>
+        {a.users.map(id => (
+          <div key={id} style={person}>
+            <Avatar name={userLabel(id)} size={20}/><span style={{flex:1, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{userLabel(id)}</span>
+            {remove(`Remove ${userLabel(id)}`, ()=>set({users:a.users.filter(x => x !== id)}))}
+          </div>
+        ))}
+        <SearchableSelect value="" placeholder="Add a person" searchPlaceholder="Search users" options={people.filter(u => !a.users.includes(u.id)).map(u => ({value:u.id, label:u.name}))}
+          onChange={(id)=>id && set({users:[...a.users, id]})}/>
+      </div>
+    </div>
+  </>;
+}
+/* The window it's done in: `title` ("Assign Template"), the fields, Cancel / the title again. */
+function AssignPeopleModal({title, value, data, onCancel, onSave}){
+  const [a, setA] = React.useState(() => ({teams:[], users:[], ...(value || {})}));
+  return (
+    <StModal title={title} primary={title} width={480} onCancel={onCancel} onSubmit={()=>onSave(a)}>
+      <AssignPeopleFields value={a} onChange={setA} data={data}/>
+    </StModal>
+  );
+}
+
+Object.assign(window, {assignmentEmpty, assignedUserIds, assignmentLabel, AssignPeopleFields, AssignPeopleModal, countLink, iconBtn, UserEditPanel, saveUserProfileIn, nameFromEmail, memberFromSession, withSessionMember, EMPTY_PEOPLE_DATA, RecordAccessCtx, useRecordAccess, normalizePermissions, setAccessContext, accessUser, toolCan, visibleActivities, activityCan, canAdd, PERMISSION_TOOLS, EditPresetDrawer, PermissionMatrixEditor, UsersTeamsSettings, UsersModule, SeatsModule, TeamsModule, PresetsModule, RecordViewsModule, SAMPLE_USERS, SAMPLE_PEOPLE_DATA, EditPermissionsDrawer});

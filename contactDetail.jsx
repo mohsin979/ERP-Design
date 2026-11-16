@@ -122,7 +122,10 @@ const fmtInfoDate = (d) => d ? d.toLocaleDateString('en-US', {month:'short', day
 /* Owner dates come from the contact's own history, not stored fields:
      Owner Change Date     — the most recent Owner change activity; blank if the owner never changed.
      Owner Assignment Date — when the current owner got the contact: the latest change *to* them,
-                             or the Create Date if they have owned it since it was created. */
+                             or the Create Date if they have owned it since it was created.
+     Owner Assigned By     — who made that assignment (2026-11-16): the person, or the workflow by
+                             name, as the Owner change reads; for an owner the record was created
+                             with, whoever created it (`ownerSetBy`, stamped since — blank before). */
 function ownerDates(contact, acts){
   const changes = acts.filter(a => a.type === 'ownerChange');   // acts are newest first
   const lastChange = changes[0];
@@ -130,6 +133,7 @@ function ownerDates(contact, acts){
   const toCurrent = changes.find(a => userLabel(a.to) === userLabel(contact.owner));
   return {
     assigned: !contact.owner ? '' : toCurrent ? fmtInfoDate(toCurrent.at) : (contact.created || ''),
+    assignedBy: !contact.owner ? '' : toCurrent ? (toCurrent.by || '') : (contact.ownerSetBy || ''),
     changed:  lastChange ? fmtInfoDate(lastChange.at) : '',
   };
 }
@@ -200,6 +204,7 @@ function ContactInfo({contact, acts, onStub, keys, onOpenDeals, onOpenCustomers,
   const special = {
     owner:         {value:contact.owner, open:(v)=>onStub(`Contact Owner · ${v}`), ownerLink:true},
     ownerAssigned: {value:owner.assigned},
+    ownerAssignedBy: {value:owner.assignedBy},
     ownerChanged:  {value:owner.changed},
     deals:         {value: contactDeals.length ? String(contactDeals.length) : '', deals:contactDeals},
     customers:     {value: contactCustomers.length ? String(contactCustomers.length) : '', customers:contactCustomers},

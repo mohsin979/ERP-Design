@@ -480,7 +480,8 @@ function Dropdown({value, options, onChange, placeholder, controlStyle, invalid,
   const open = () => {
     if(disabled || !btnRef.current) return;
     const r = btnRef.current.getBoundingClientRect(), h = Math.min(PANEL_MAX, rows.length * 32 + 12);
-    setPos({top: window.innerHeight - r.bottom < h + 8 && r.top > h + 8 ? r.top - h - 4 : r.bottom + 4, left:r.left, width:Math.max(r.width, 160)});
+    const width = Math.max(r.width, 160);   // kept inside the window: a control near the right edge (the page dropdown) opens leftwards
+    setPos({top: window.innerHeight - r.bottom < h + 8 && r.top > h + 8 ? r.top - h - 4 : r.bottom + 4, left:Math.max(8, Math.min(r.left, window.innerWidth - width - 8)), width});
     setActive(Math.max(0, rows.findIndex(x => !x.header && same(x.value))));
   };
   const close = () => setPos(null);

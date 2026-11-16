@@ -9,13 +9,12 @@
    scheduled emails appear on the record at once, and its workflows see them (Email Events).
    Scheduled emails go out when their time comes. For several records at once (the Board's Email
    All / Email Selected) the email is written once and sent to each record on its own —
-   {{first_name}} filled in for each; a record without an email address is skipped.
+   {{first_name}} and its fetched properties filled in for each; a record without an email
+   address is skipped.
 
    Email formats — one model for every email the CRM writes: a template (and so a sequence's
    emails, which use their templates), a workflow's template email and the composer:
-     Simple Text Body       rich text and attachments; the email signature (Brand → Email
-                            Signature) is put beneath the text when it starts — part of the text,
-                            so any of it can be erased;
+     Simple Text Body       rich text and attachments, then the signature;
      Default HTML Template  rich text, with Primary / Secondary CTA buttons between paragraphs,
                             set in the default branded layout (a quiet card: the company logo, the
                             text, then the signature) — the text is edited on its own;
@@ -24,7 +23,23 @@
                             has it starts with the box off, and it's never added again.
    Content {format, body, attachments, html, fileName, includeSignature}; emailHtmlOf() is the
    email as sent and previewed. Templates saved before formats keep the HTML they had: they read
-   as Custom HTML, with no signature added.
+   as Custom HTML.
+
+   The signature (2026-11-16): always personal. Every email ends with its sender's own signature,
+   as they set it in Settings → Brand → Email Signature (kept on their user, `signature`): name,
+   designation, email, phone, website, company address — each contact line with its icon — then
+   additional info, and the company logo, shown or not. Until they set it, it's their name,
+   Designation and email. It's added as the email is shown or sent, never kept in the text, so a
+   template assigned to five people ends with each one's own; a template's preview shows that of
+   the person looking at it. Include Email Signature (every format; on to start with) leaves it
+   out — on a template, on a sequence's email, or as an email is written.
+
+   Fetch Property (2026-11-16): a record's value written into the text — a Contact, Deal or
+   Customer property, an Accounting property or a Customer Profile property (extendedProps.jsx).
+   In the body it's a chip (SPAN data-token="<record type>:<property>" | "acc:<key>" |
+   "pf:<form>:<field>", richText.jsx); as the email goes out it's the value on the record the
+   email is on — a property of another record type reads its first linked record of that type —
+   and nothing where the record has no value. A template's own preview shows the chip.
 
    Tools → Emails is every email in the workspace: Inbox (received), Sent and Scheduled, with
    the record each belongs to (tools.jsx). Nothing is really sent: there is no mailbox behind
@@ -34,36 +49,109 @@ const emailFirstName = (name) => String(name || '').trim().split(/\s+/)[0] || ''
 // {{first_name}} filled in for the person an email goes to.
 const fillFirstName = (s, person) => String(s || '').replace(/\{\{\s*first_name\s*\}\}/g, emailFirstName(person && person.name) || 'there');
 
+/* ── Fetch Property ── (see the header) */
+const EMAIL_TOKEN_OBJECTS = {contacts:'Contact', deals:'Deal', customers:'Customer'};
+// Where a property is fetched from: the workspace's record types, then Accounting and Customer Profile.
+const emailTokenSources = () => [...hubObjects().map(o => ({value:o, label:typeSingular(o, EMAIL_TOKEN_OBJECTS[o])})), {value:'acc', label:'Accounting'}, {value:'pf', label:'Customer Profile'}];
+// A source's properties: [{value: the token's key, label, section}] — a Customer Profile property under its form.
+function emailTokenOptions(data, source){
+  if(EMAIL_TOKEN_OBJECTS[source]) return objectProperties(data, source).filter(p => !p.archived).map(p => ({value:`${source}:${p.key}`, label:p.label}));
+  const group = extendedPropertyGroups().find(g => g.id === (source === 'acc' ? 'accounting' : 'profile'));
+  return ((group && group.groups) || []).flatMap(g => g.items.map(it => ({value:it.key, label:it.label, ...(g.label ? {section:g.label} : {})})));
+}
+// The chip that goes into the text: "Contact · Full Name" (the editor makes it one piece once it's in).
+const emailTokenHtml = (key, label) => `<span data-token="${emailEsc(key)}">${emailEsc(label)}</span>`;
+/* A fetched property's value on a record, as the record shows it. `ctx` {object, record, records
+   {contacts, deals, customers}, data}: the record the email is on. */
+function emailTokenValue(key, ctx){
+  const {object, record, records, data} = ctx || {};
+  if(!record) return '';
+  if(/^(acc|pf):/.test(key)) return String(extendedValueText(key, record) ?? '');
+  const [source, prop] = [key.slice(0, key.indexOf(':')), key.slice(key.indexOf(':') + 1)];
+  const rec = source === object ? record : linkedOf(records, object, record, source)[0];
+  if(!rec) return '';
+  if(prop === 'owner') return userLabel(rec.owner);
+  return (recordInfoFields({data}, source, rec).find(f => f.key === prop) || {}).value || '';
+}
+const EMAIL_TOKEN_SPAN = /<span[^>]*\sdata-token="([^"]+)"[^>]*>[\s\S]*?<\/span>/g;
+// The email with its fetched properties filled in for the record (nothing where it has no value).
+const fillEmailTokens = (html, ctx) => !ctx || !ctx.record ? html : String(html || '').replace(EMAIL_TOKEN_SPAN, (_, key) => emailEsc(emailTokenValue(key.replace(/&amp;/g, '&'), ctx)));
+/* Fetch Property: where the property is from, then the property. */
+function FetchPropertyModal({data, onCancel, onPick}){
+  const sources = emailTokenSources();
+  const [source, setSource] = React.useState(sources[0].value);
+  const [key, setKey] = React.useState('');
+  const options = React.useMemo(() => emailTokenOptions(data, source), [source]);
+  const picked = options.find(o => o.value === key);
+  const from = (sources.find(x => x.value === source) || {}).label;
+  return ReactDOM.createPortal(
+    <StModal title="Fetch Property" primary="Fetch Property" canSubmit={!!picked} onCancel={onCancel}
+      onSubmit={()=>picked && onPick(key, `${picked.section || from} · ${picked.label}`)}>
+      <div><label style={fieldLabel}>Property Of</label>
+        <FormSelect value={source} options={sources} onChange={(v)=>{ if(v){ setSource(v); setKey(''); } }} ariaLabel="Property of"/></div>
+      <div><label style={fieldLabel}>Property</label>
+        <SearchableSelect value={key} options={options} placeholder="Select property" searchPlaceholder="Search properties" onChange={setKey}/></div>
+    </StModal>, document.body);
+}
+
 /* ── Email formats ── (see the header) */
 const EMAIL_FORMATS = [{value:'simple', label:'Simple Text Body'}, {value:'html', label:'Default HTML Template'}, {value:'custom', label:'Custom HTML Template'}];
 const emailFormatLabel = (f) => (EMAIL_FORMATS.find(x => x.value === f) || {}).label || '';
 const EMAIL_FONT = "-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',Helvetica,Arial,sans-serif";
 const emailEsc = (t) => String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const emailLines = (t) => emailEsc(t).replace(/\n/g, '<br>');
-// The configured email signature (Brand → Email Signature), or none while it has no name.
-const emailSignatureOf = () => { const s = orgBrand().signature; return s && !s.dataUrl && String(s.name || '').trim() ? {...SIGNATURE_BLANK, ...s} : null; };
-// The signature as rich text — what a Simple Text Body starts with, beneath the text.
-const signatureRichHtml = (sig) => !sig ? '' : sanitizeRichText(
+// The signature Brand kept before signatures were personal (its phone, website, address and additional info start each person's off).
+const brandSignatureOf = () => { const s = orgBrand().signature; return s && !s.dataUrl ? {...SIGNATURE_BLANK, ...s} : null; };
+/* The signature an email ends with (see the header): its sender's own, as they saved it — else
+   their name, Designation and email. `who`: the sender — a user's ID or name; the person signed
+   in without one. */
+const emailSignatureOf = (who) => {
+  const find = (v) => v ? USER_DIRECTORY.find(u => !u.deleted && (u.id === v || u.name === v)) : null;
+  const u = find(who) || find(CURRENT_USER.name) || {name:CURRENT_USER.name, email:CURRENT_USER.email, preset:CURRENT_USER.role};
+  if(u.signature) return {...SIGNATURE_BLANK, ...u.signature};
+  const was = brandSignatureOf() || {};
+  return {...SIGNATURE_BLANK, includeLogo:was.includeLogo !== false, name:u.name, designation:ownerProfileMock(u.name, u).designation || u.preset || '', email:u.email || '',
+    phone:was.phone || '', website:was.website || '', address:was.address || '', additional:was.additional || ''};
+};
+// A signature as rich text: how a Simple Text Body kept the Brand's (it had a name then) before 2026-11-16 — taken out where it's found.
+const signatureRichHtml = (sig) => !sig || !String(sig.name || '').trim() ? '' : sanitizeRichText(
   `<p><b>${emailEsc(sig.name)}</b>${sig.designation ? `<br>${emailLines(sig.designation)}` : ''}</p>`
   + ([sig.email, sig.phone, sig.website].some(Boolean) ? `<p>${[sig.email, sig.phone, sig.website].filter(Boolean).map(emailEsc).join(' · ')}</p>` : '')
   + (sig.address || sig.additional ? `<p>${[sig.address, sig.additional].filter(Boolean).map(emailLines).join('<br>')}</p>` : ''));
 // The company logo (Brand → Logo) as an image in an email; the HOF lockup until one is uploaded.
 const emailLogoImg = (brand, height) => `<img src="${brand.logo || `data:image/svg+xml;charset=utf-8,${encodeURIComponent(logoSvgString('main', height, '#1D1D1F'))}`}" alt="${emailEsc(brand.name || '')}"`
   + ` height="${height}" style="display:block;height:${height}px;width:auto;max-width:${height * 7}px;border:0">`;
-// The signature as it ends an HTML email (marked, so it's never added twice).
+// The contact lines' icons (email, phone, website, address), drawn into the email itself.
+const SIGNATURE_ICONS = {
+  email:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3.5 7.5 8.5 6 8.5-6"/>',
+  phone:'<path d="M21 16.5v2.6a1.9 1.9 0 0 1-2.1 1.9 18.6 18.6 0 0 1-8.1-2.9 18.3 18.3 0 0 1-5.6-5.6A18.6 18.6 0 0 1 2.3 4.3 1.9 1.9 0 0 1 4.2 2.3h2.6a1.9 1.9 0 0 1 1.9 1.6c.1.9.3 1.8.7 2.6a1.9 1.9 0 0 1-.4 2L7.9 9.6a15 15 0 0 0 5.6 5.6l1.1-1.1a1.9 1.9 0 0 1 2-.4c.8.3 1.7.6 2.6.7a1.9 1.9 0 0 1 1.8 2.1z"/>',
+  website:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/>',
+  address:'<path d="M12 21.5s7-6.3 7-11.5a7 7 0 1 0-14 0c0 5.2 7 11.5 7 11.5z"/><circle cx="12" cy="10" r="2.6"/>',
+};
+const signatureIcon = (kind) => `<img src="data:image/svg+xml;charset=utf-8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#6E6E73" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${SIGNATURE_ICONS[kind]}</svg>`)}"`
+  + ` width="13" height="13" alt="" style="display:block;width:13px;height:13px;border:0">`;
+/* The signature as it ends an email (marked, so it's never added twice): the logo, shown or not;
+   the name, the designation; the email, phone, website and address, each with its icon; then the
+   additional info. */
 function signatureEmailHtml(sig, brand){
   if(!sig) return '';
   const muted = 'color:#6E6E73', cell = `font-family:${EMAIL_FONT};font-size:13px;line-height:1.5;color:#1D1D1F;vertical-align:middle`;
-  const contact = [sig.email, sig.phone, sig.website].filter(Boolean).map(emailEsc).join(' &middot; ');   // wraps on a narrow screen
+  const line = (kind, value) => !String(value || '').trim() ? '' : `<tr><td style="padding:2px 8px 2px 0;vertical-align:top"><div style="padding-top:3px">${signatureIcon(kind)}</div></td>`
+    + `<td style="padding:2px 0;font-family:${EMAIL_FONT};font-size:13px;line-height:1.5;color:#1D1D1F;word-break:break-word">${emailLines(String(value).trim())}</td></tr>`;
+  const lines = line('email', sig.email) + line('phone', sig.phone) + line('website', sig.website) + line('address', sig.address);
   const text = `<div style="font-weight:600">${emailEsc(sig.name)}</div>`
     + (sig.designation ? `<div style="${muted}">${emailLines(sig.designation)}</div>` : '')
-    + (contact ? `<div style="margin-top:6px">${contact}</div>` : '')
-    + (sig.address ? `<div style="${muted}">${emailLines(sig.address)}</div>` : '')
-    + (sig.additional ? `<div style="${muted}">${emailLines(sig.additional)}</div>` : '');
+    + (lines ? `<table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-top:6px">${lines}</table>` : '')
+    + (sig.additional ? `<div style="${muted};margin-top:6px">${emailLines(sig.additional)}</div>` : '');
   return `<table data-hof-signature="1" role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse"><tr>`
     + (sig.includeLogo ? `<td style="padding:0 16px 0 0;border-right:2px solid #E8E8ED;vertical-align:middle">${emailLogoImg(brand, 24)}</td><td style="padding:0 0 0 16px;${cell}">` : `<td style="${cell}">`)
-    + text + `</td></tr></table>`;
+    + text + `</td></tr><!--/hof-signature--></table>`;
 }
+// A Simple Text Body saved with the Brand's signature in its text (before 2026-11-16), without it.
+const withoutKeptSignature = (body) => { const kept = signatureRichHtml(brandSignatureOf()), html = String(body || '');
+  return kept && html.includes(kept) ? html.replace(kept, '').replace(/(<p><br><\/p>)+$/i, '') : html; };
+// An email kept as HTML (a workflow's own copy of its email), with its sender's signature in place of the one it was saved with.
+const withSenderSignature = (html, who, brand = orgBrand()) => String(html || '').replace(/<table data-hof-signature="1"[\s\S]*?(<!--\/hof-signature--><\/table>|<\/table>)/i, () => signatureEmailHtml(emailSignatureOf(who), brand));
 // Whether an HTML email already ends with the signature: ours (marked), or its name and email written in.
 const hasEmailSignature = (html, sig) => /data-hof-signature/i.test(html || '')
   || !!(sig && sig.email && html && html.toLowerCase().includes(sig.email.toLowerCase()) && html.includes(sig.name));
@@ -78,6 +166,8 @@ function emailStyledBody(html, brand, size){
   box.querySelectorAll('p, div').forEach(n => n.setAttribute('style', `margin:0 0 ${gap}px`));
   box.querySelectorAll('ul, ol').forEach(n => n.setAttribute('style', `margin:0 0 ${gap}px;padding-left:22px${n.getAttribute('type') === 'a' ? ';list-style-type:lower-alpha' : ''}`));
   box.querySelectorAll('li').forEach(n => n.setAttribute('style', 'margin:0 0 6px'));
+  // A fetched property, until it's filled in (a template's own preview): a chip.
+  box.querySelectorAll('span[data-token]').forEach(n => n.setAttribute('style', 'background:#EEF2FF;color:#3538CD;border-radius:5px;padding:1px 6px;white-space:nowrap'));
   box.querySelectorAll('a').forEach(a => {
     const kind = a.getAttribute('data-cta');
     if(!kind){ a.setAttribute('style', `color:${brand.colors.secondary};text-decoration:underline`); return; }
@@ -90,47 +180,43 @@ function emailStyledBody(html, brand, size){
   return box.innerHTML;
 }
 /* The email as sent and previewed. Default HTML Template: the card on a light ground — logo,
-   text, a hairline, the signature. Nothing else is assumed of the layout. */
-function emailHtmlOf(c, brand = orgBrand()){
-  const sig = emailSignatureOf();
+   text, a hairline, the signature. Nothing else is assumed of the layout. `who`: its sender (the
+   signature is theirs). */
+function emailHtmlOf(c, brand = orgBrand(), who){
+  const sig = emailSignatureOf(who);
   if(c.format === 'custom'){
     const html = String(c.html || '');
-    if(!c.includeSignature || !sig || !html || hasEmailSignature(html, sig)) return html;
+    if(!c.includeSignature || !html || hasEmailSignature(html, sig)) return html;
     const block = `<div style="padding:24px 0 0">${signatureEmailHtml(sig, brand)}</div>`;
     return /<\/body>/i.test(html) ? html.replace(/<\/body>/i, `${block}</body>`) : html + block;
   }
+  const body = withoutKeptSignature(c.body), signed = c.includeSignature !== false;
   if(c.format === 'html') return `<div style="margin:0;padding:40px 16px;background:#F5F5F7;font-family:${EMAIL_FONT}">`
     + `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;margin:0 auto;background:#FFFFFF;border-radius:18px;border-collapse:separate;table-layout:fixed">`
     + `<tr><td style="padding:34px 44px 0">${emailLogoImg(brand, 22)}</td></tr>`
-    + `<tr><td style="padding:30px 44px ${sig ? 14 : 34}px;font-family:${EMAIL_FONT};font-size:16px;line-height:1.65;color:#1D1D1F;letter-spacing:-0.01em;word-wrap:break-word;overflow-wrap:break-word">${emailStyledBody(c.body, brand, 16)}</td></tr>`
-    + (sig ? `<tr><td style="padding:0 44px"><div style="height:1px;line-height:1px;font-size:0;background:#E8E8ED">&nbsp;</div></td></tr><tr><td style="padding:24px 44px 34px;word-wrap:break-word;overflow-wrap:break-word">${signatureEmailHtml(sig, brand)}</td></tr>` : '')
+    + `<tr><td style="padding:30px 44px ${signed ? 14 : 34}px;font-family:${EMAIL_FONT};font-size:16px;line-height:1.65;color:#1D1D1F;letter-spacing:-0.01em;word-wrap:break-word;overflow-wrap:break-word">${emailStyledBody(body, brand, 16)}</td></tr>`
+    + (signed ? `<tr><td style="padding:0 44px"><div style="height:1px;line-height:1px;font-size:0;background:#E8E8ED">&nbsp;</div></td></tr><tr><td style="padding:24px 44px 34px;word-wrap:break-word;overflow-wrap:break-word">${signatureEmailHtml(sig, brand)}</td></tr>` : '')
     + `</table></div>`;
-  return `<div style="font-family:${EMAIL_FONT};font-size:15px;line-height:1.6;color:#1D1D1F">${emailStyledBody(c.body, brand, 15)}</div>`;
+  return `<div style="font-family:${EMAIL_FONT};font-size:15px;line-height:1.6;color:#1D1D1F">${emailStyledBody(body, brand, 15)}${signed ? `<div style="padding:10px 0 0">${signatureEmailHtml(sig, brand)}</div>` : ''}</div>`;
 }
 // The email as one line of text (lists, search).
 const emailTextOf = (c) => richTextPlain(c.format === 'custom' ? String(c.html || '').replace(/<(style|script|head|title)[\s\S]*?<\/\1>/gi, ' ') : c.body);
-// A new email: Simple Text Body, the signature beneath an empty first line.
-const newEmailContent = (sig = emailSignatureOf()) => ({format:'simple', body:'<p><br></p>' + signatureRichHtml(sig), attachments:[], html:'', fileName:'', includeSignature:true});
-/* Another format: the signature goes into a Simple Text Body (if it isn't there) and out of the
-   others, which add it themselves; the text stays — CTAs as plain links in a Simple Text Body
-   (they're the Default HTML Template's). */
-function switchEmailFormat(c, format, sig = emailSignatureOf()){
-  const s = signatureRichHtml(sig);
+// A new email: Simple Text Body, an empty first line (what's typed is a paragraph from the start).
+const newEmailContent = () => ({format:'simple', body:'<p><br></p>', attachments:[], html:'', fileName:'', includeSignature:true});
+// Another format: the text stays — CTAs as plain links in a Simple Text Body (they're the Default HTML Template's).
+function switchEmailFormat(c, format){
   let body = sanitizeRichText(richHtmlOf(c.body || ''));
   if(format === 'simple') body = body.replace(/\sdata-cta="(primary|secondary)"/g, '');
-  const has = !!s && body.includes(s);
-  if(format === 'simple' && s && !has) body = (richIsEmpty(body) ? '<p><br></p>' : body) + s;
-  if(format !== 'simple' && has) body = body.replace(s, '').replace(/(<p><br><\/p>)+$/i, '');
   return {...c, format, body};
 }
 const emailContentReady = (c) => c.format === 'custom' ? !!String(c.html || '').trim() : !richIsEmpty(c.body);
 // What's kept of an email's content (a template): only what its format uses.
 const emailContentToSave = (c) => ({format:c.format, body: c.format === 'custom' ? '' : c.body, attachments: c.format === 'simple' ? (c.attachments || []) : [],
-  html: c.format === 'custom' ? c.html : '', fileName: c.format === 'custom' ? (c.fileName || '') : '', includeSignature: c.format === 'custom' ? !!c.includeSignature : true});
-// A template's content; one saved before formats is its HTML as it was (Custom HTML, no signature added).
+  html: c.format === 'custom' ? c.html : '', fileName: c.format === 'custom' ? (c.fileName || '') : '', includeSignature:c.includeSignature !== false});
+// A template's content; one saved before formats is its HTML as it was (Custom HTML).
 const templateContentOf = (t) => t.format
-  ? {format:t.format, body:t.body || '', attachments:t.attachments || [], html:t.html || '', fileName:t.fileName || '', includeSignature:t.includeSignature !== false}
-  : {format:'custom', body:'', attachments:[], html:t.html || richHtmlOf(t.body || ''), fileName:'', includeSignature:false};
+  ? {format:t.format, body:withoutKeptSignature(t.body), attachments:t.attachments || [], html:t.html || '', fileName:t.fileName || '', includeSignature:t.includeSignature !== false}
+  : {format:'custom', body:'', attachments:[], html:t.html || richHtmlOf(t.body || ''), fileName:'', includeSignature:t.includeSignature !== false};
 
 // Attachments as chips (a file opens / downloads); `onRemove` adds ×.
 function EmailAttachmentList({list, onRemove}){
@@ -199,22 +285,27 @@ function EmailHtmlUpload({c, setValue}){
   );
 }
 /* The content fields, by format: Email Format, then the rich text (Default HTML adds the CTAs)
-   with Attachments (Simple Text Body), or the HTML file with Include email signature in body. */
+   with Attachments (Simple Text Body), or the HTML file; then Include Email Signature. */
 function EmailContentFields({value:c, setValue}){
-  const toggleSig = () => setValue(x => ({...x, includeSignature:!x.includeSignature}));
+  const toggleSig = () => setValue(x => ({...x, includeSignature:x.includeSignature === false}));
+  const hub = useRecordHub();
+  const [fetching, setFetching] = React.useState(false);
+  const insertRef = React.useRef(null);   // the editor's insert, for the property picked in the modal
+  const tools = ({insert, keep}) => <button type="button" onMouseDown={e=>{ e.preventDefault(); keep(); }} onClick={()=>{ insertRef.current = insert; setFetching(true); }}
+    style={{...btnSecondarySm, height:26, padding:'0 10px'}}>Fetch Property</button>;
+  const fetched = (key, label) => { const insert = insertRef.current; setFetching(false); if(insert) setTimeout(() => insert(`${emailTokenHtml(key, label)}&nbsp;`), 0); };
   return <>
+    {fetching && <FetchPropertyModal data={(hub && hub.data) || {}} onCancel={()=>setFetching(false)} onPick={fetched}/>}
     <Field label="Email Format"><FormSelect value={c.format} options={EMAIL_FORMATS} onChange={(v)=>v && v !== c.format && setValue(x => switchEmailFormat(x, v))}/></Field>
-    {c.format === 'custom' ? <>
-      <Field label="HTML File"><EmailHtmlUpload c={c} setValue={setValue}/></Field>
-      <Field label="">
-        <div onClick={toggleSig} style={{display:'inline-flex', alignItems:'center', gap:8, paddingTop:7, fontSize:13, color:T.attioText, cursor:'pointer', userSelect:'none'}}>
-          <span onClick={e=>e.stopPropagation()} style={{display:'flex'}}><UtToggle on={!!c.includeSignature} onChange={toggleSig}/></span> Include Email Signature in Body
-        </div>
-      </Field>
-    </> : <>
-      <Field label="Body" wide><RichTextEditor value={c.body} onChange={(v)=>setValue(x => ({...x, body:v}))} minHeight={280} ctas={c.format === 'html'} ariaLabel="Email body"/></Field>
+    {c.format === 'custom' ? <Field label="HTML File"><EmailHtmlUpload c={c} setValue={setValue}/></Field> : <>
+      <Field label="Body" wide><RichTextEditor value={c.body} onChange={(v)=>setValue(x => ({...x, body:v}))} minHeight={280} ctas={c.format === 'html'} tools={tools} ariaLabel="Email body"/></Field>
       {c.format === 'simple' && <Field label="Attachments"><EmailAttachmentsField list={c.attachments || []} update={(fn)=>setValue(x => ({...x, attachments:fn(x.attachments || [])}))}/></Field>}
     </>}
+    <Field label="">
+      <div onClick={toggleSig} style={{display:'inline-flex', alignItems:'center', gap:8, paddingTop:7, fontSize:13, color:T.attioText, cursor:'pointer', userSelect:'none'}}>
+        <span onClick={e=>e.stopPropagation()} style={{display:'flex'}}><UtToggle on={c.includeSignature !== false} onChange={toggleSig}/></span> Include Email Signature
+      </div>
+    </Field>
   </>;
 }
 // The preview: the subject, the email as it will read (its format and signature), its attachments.
@@ -271,7 +362,8 @@ function EmailComposer({object, id, replyTo, forward, recipients, onSent, onClos
   const [target, setTarget] = React.useState(() => object && id != null ? {object, id} : {object:object || hubObjects()[0], id:null});
   const fixed = !!(object && id != null);
   const person = target.id != null ? hubRecordPerson(hub, target.object, target.id) : null;
-  const templates = emailTemplatesOf(hub.data);
+  // The templates the person may use: theirs, the ones assigned to them, and those assigned to no one (templates.jsx).
+  const templates = emailTemplatesOf(hub.data).filter(t => templateUsable(t, hub.data));
   const base = replyTo || forward;
   /* A reply goes back to whoever wrote: an email the team sent is answered to its recipients (and
      its Cc), one received to the record's address; a forward starts with no one. */
@@ -280,7 +372,7 @@ function EmailComposer({object, id, replyTo, forward, recipients, onSent, onClos
   const [cc, setCc] = React.useState(() => replyTo && (replyTo.cc || []).length ? replyTo.cc.join(', ') : ''), [bcc, setBcc] = React.useState('');
   const [templateId, setTemplateId] = React.useState('');
   const [subject, setSubject] = React.useState(() => base ? `${forward ? 'Fwd' : 'Re'}: ${String(base.title || '').replace(/^(Re|Fwd):\s*/i, '')}` : '');
-  /* A new email (Simple Text Body, the signature beneath); a forward carries the message under it —
+  /* A new email (Simple Text Body); a forward carries the message under it —
      who sent it, when, its subject, the message as written and its attachments. */
   const forwarded = React.useMemo(() => !forward ? '' : sanitizeRichText(`<p>---------- Forwarded message ----------</p>`
     + `<p>From: ${forward.direction === 'received' ? (person && (person.name || person.email)) || 'Client' : forward.by || CURRENT_USER.name}<br>`
@@ -296,10 +388,10 @@ function EmailComposer({object, id, replyTo, forward, recipients, onSent, onClos
   const [error, setError] = React.useState('');
   // A record picked here fills in its email.
   React.useEffect(() => { if(!fixed && !forward) setTo((person && person.email) || ''); }, [target.object, target.id]);
-  /* A template brings its subject, format and content (its signature as it has it). {{first_name}}
-     stays as written until the email is sent, then it's the recipient's — so changing the record
-     after picking the template still greets the right person (the preview shows it filled in). A
-     forward keeps the forwarded message under the template. */
+  /* A template brings its subject, format and content. {{first_name}} and its fetched properties
+     stay as written until the email is sent, then they're the record's — so changing the record
+     after picking the template still greets the right person (the preview shows them filled in).
+     A forward keeps the forwarded message under the template. */
   const pickTemplate = (tid) => {
     setTemplateId(tid || '');
     const tpl = templates.find(t => t.id === tid);
@@ -308,7 +400,9 @@ function EmailComposer({object, id, replyTo, forward, recipients, onSent, onClos
     setSubject(tpl.subject || tpl.name || '');
     setContent(forward ? {...c, body:(c.body || '') + forwarded, attachments:[...(c.attachments || []), ...(forward.attachments || [])]} : c);
   };
-  const named = (v) => person && typeof v === 'string' ? fillFirstName(v, person) : v;
+  // `v` as it reads for a record: its person's first name, its fetched properties.
+  const filledFor = (v, t, p) => typeof v !== 'string' ? v : fillEmailTokens(p ? fillFirstName(v, p) : v, {object:t.object, record:hubRecord(hub, t.object, t.id), records:hub.records, data:hub.data});
+  const named = (v) => target.id != null ? filledFor(v, target, person) : v;
   const validTo = EMAIL_ADDRESS.test(to.trim());
   const ready = (many ? reach.length > 0 : target.id != null && validTo) && emailListValid(cc) && emailListValid(bcc) && !!subject.trim() && emailContentReady(content);
   const send = (later) => {
@@ -320,9 +414,9 @@ function EmailComposer({object, id, replyTo, forward, recipients, onSent, onClos
     }
     const newIdOf = `email-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const attachments = content.format === 'simple' ? (content.attachments || []) : [];
-    // The email as it goes to one address; `p`: the person {{first_name}} is filled in for.
-    const emailOf = (newId, address, p) => {
-      const named = (v) => p && typeof v === 'string' ? fillFirstName(v, p) : v;
+    // The email as it goes to one address; `t` / `p`: the record and the person it's filled in for.
+    const emailOf = (newId, address, p, t) => {
+      const named = (v) => filledFor(v, t, p);
       const c = {...content, body:named(content.body), html:named(content.html)};
       return {id:newId, type:'email', direction:'sent', title:named(subject).trim(), body:emailTextOf(c), html:emailHtmlOf(c), format:content.format,
         ...(attachments.length ? {attachments} : {}), to:[address], ...emailCopiesOf(cc, bcc), source:'you', by:CURRENT_USER.name,
@@ -330,13 +424,13 @@ function EmailComposer({object, id, replyTo, forward, recipients, onSent, onClos
         ...(replyTo ? {replyToId:replyTo.id} : {}), ...(forward ? {forwardOfId:forward.id} : {})};
     };
     if(many){
-      reach.forEach((r, i) => hub.add(r.object, r.id, emailOf(`${newIdOf}-${i}`, r.person.email.trim(), r.person)));
+      reach.forEach((r, i) => hub.add(r.object, r.id, emailOf(`${newIdOf}-${i}`, r.person.email.trim(), r.person, r)));
       const skipped = many.length - reach.length;
       hub.toast(`Email ${later ? 'scheduled for' : 'sent to'} ${bulkPlural(reach.length, manyNoun)}${skipped ? ` · ${skipped} skipped` : ''}`);
       if(onSent) onSent();
       return onClose(later ? 'scheduled' : 'sent');
     }
-    hub.add(target.object, target.id, emailOf(newIdOf, to.trim(), person));
+    hub.add(target.object, target.id, emailOf(newIdOf, to.trim(), person, target));
     hub.toast(later ? 'Email scheduled' : 'Email sent');
     onClose(later ? 'scheduled' : 'sent', newIdOf, target);
   };
@@ -445,5 +539,5 @@ function EmailThreadView({thread, open: openId, contact}){
   );
 }
 
-Object.assign(window, {EmailComposer, emailListValid, emailCopiesOf, EmailListInput, fillFirstName, EMAIL_FORMATS, emailFormatLabel, emailSignatureOf, signatureEmailHtml, emailHtmlOf, emailTextOf, newEmailContent,
+Object.assign(window, {fillEmailTokens, emailTokenHtml, withSenderSignature, FetchPropertyModal, EmailComposer, emailListValid, emailCopiesOf, EmailListInput, fillFirstName, EMAIL_FORMATS, emailFormatLabel, emailSignatureOf, signatureEmailHtml, emailHtmlOf, emailTextOf, newEmailContent,
   switchEmailFormat, emailContentReady, emailContentToSave, templateContentOf, EmailAttachmentList, EmailContentFields, EmailPreview, EmailSplit, EMAIL_PANEL_W, emailFirstName, emailSubjectKey, emailThreadsOf, emailThreadOf, threadedEmailRows, EmailHtmlFrame, EmailBody, EmailThreadView});

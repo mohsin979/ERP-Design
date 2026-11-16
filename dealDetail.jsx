@@ -55,6 +55,7 @@ const DEAL_PANEL_SECTIONS = {
 const DEAL_PANEL_BASE_PROPERTIES = [
   {key:'owner',         label:'Deal Owner'},
   {key:'ownerAssigned', label:'Owner Assignment Date'},
+  {key:'ownerAssignedBy', label:'Owner Assigned By'},
   {key:'ownerChanged',  label:'Owner Change Date'},
   {key:'pipeline',      label:'Pipeline'},
   {key:'stage',         label:'Deal Stage'},
@@ -94,7 +95,7 @@ const defaultDealPanelSettings = (props) => ({
 const withDealPanelProperties = (settings, props) => {
   const known = settings.dealProperties.map(p => p.key);
   const added = dealPanelProperties(props).filter(p => !known.includes(p.key)).map(p => ({key:p.key, enabled:true}));
-  return added.length ? {...settings, dealProperties:[...settings.dealProperties, ...added]} : settings;
+  return added.length ? {...settings, dealProperties:withAddedPanelProperties(settings.dealProperties, added)} : settings;
 };
 const dealPanelKind = (props, renderPreview) => ({
   object:'deals', sections:DEAL_PANEL_SECTIONS, quickActionLabels:quickActionLabels('deals'),
@@ -136,11 +137,12 @@ const nextActivityDate = (acts) => {
 
 /* `view`: the deal as shown — owner, pipeline and stage as names, the amount with its currency. */
 function DealInfo({deal, view, acts, contacts = [], customers = [], keys, props, onOpenContact, onOpenCustomer, onStub}){
-  const owner = ownerDates({owner:view.owner, created:dateOnly(deal.created)}, acts);
+  const owner = ownerDates({owner:view.owner, created:dateOnly(deal.created), ownerSetBy:deal.ownerSetBy}, acts);
   const hub = useRecordHub();
   const rows = {
     owner:         {value:view.owner, owner:true},
     ownerAssigned: {value:owner.assigned},
+    ownerAssignedBy: {value:owner.assignedBy},
     ownerChanged:  {value:owner.changed},
     pipeline:      {value:view.pipeline},
     stage:         {value:view.stage},

@@ -1268,17 +1268,13 @@ function ContactsDataGrid({rows, columnOrder, setColumnOrder, sort, setSort, sea
   );
 }
 
-/* Pagination — matches the Prev / numbered pages / Next pattern from the Figma Users & Teams
-   reference table. */
+/* Pagination — Prev, the page as a dropdown (every page, the open one shown; decided 2026-11-16 —
+   it was numbered buttons), Next. */
 /* `selectedCount` renders at the bottom-left of this bar — the selection readout lives here
    rather than in a banner above the grid, so selecting rows never shifts the table down. */
 function Pagination({page, totalPages, onChange, totalRows, selectedCount=0, noun='contact', nounPlural, bulk}){
   if (totalRows === 0) return null;
-  const pages = [];
-  for (let i=1; i<=totalPages; i++){
-    if (i===1 || i===totalPages || Math.abs(i-page)<=1) pages.push(i);
-    else if (pages[pages.length-1] !== '…') pages.push('…');
-  }
+  const pages = Array.from({length:totalPages}, (_, i) => ({value:i + 1, label:String(i + 1)}));
   const btnStyle = (active) => ({
     minWidth:28, height:28, padding:'0 8px', borderRadius:6, border:`1px solid ${active ? T.blue : T.borderStrong}`,
     background: active ? T.blueLight : '#fff', color: active ? T.blue : T.gray800, fontSize:13,
@@ -1292,9 +1288,10 @@ function Pagination({page, totalPages, onChange, totalRows, selectedCount=0, nou
       </div>
       <div style={{display:'flex', alignItems:'center', gap:6, flexShrink:0}}>
         <button disabled={page===1} onClick={()=>onChange(page-1)} style={{...btnStyle(false), opacity: page===1?0.4:1, cursor: page===1?'default':'pointer'}}>← Prev</button>
-        {pages.map((p,i)=> p==='…'
-          ? <span key={'e'+i} style={{color:T.gray400, padding:'0 4px'}}>…</span>
-          : <button key={p} onClick={()=>onChange(p)} style={btnStyle(p===page)}>{p}</button>)}
+        <div style={{width:72}}>
+          <Dropdown value={page} options={pages} onChange={(p)=>onChange(Number(p))} required ariaLabel="Page" disabled={totalPages < 2}
+            controlStyle={{height:28, padding:'0 8px', borderRadius:6, border:`1px solid ${T.borderStrong}`, background:'#fff', fontSize:13, fontFamily:'inherit'}}/>
+        </div>
         <button disabled={page===totalPages} onClick={()=>onChange(page+1)} style={{...btnStyle(false), opacity: page===totalPages?0.4:1, cursor: page===totalPages?'default':'pointer'}}>Next →</button>
       </div>
     </div>
@@ -1704,6 +1701,14 @@ function TableBoardSwitch({mode, onChange}){
   );
 }
 
+/* How many records a view lists: its filters, then its search (as the grid searches — gridRowsOf).
+   Shown in brackets after the view's name on Contacts, Deals and Customers — "All Contacts (1,089)" —
+   for every view, new ones included (decided 2026-11-16). It's the view as saved: a search or a
+   filter not saved to it yet doesn't change its number. */
+const viewRowCount = (rows, filters, search, schema) => {
+  const list = applyFilters(rows, filters || EMPTY_FILTERS(), schema.filterProps), q = String(search || '').trim().toLowerCase();
+  return !q ? list.length : list.filter(r => (schema.searchKeys || CONTACTS_SCHEMA.searchKeys).some(k => String(r[k] || '').toLowerCase().includes(q))).length;
+};
 // A view pill (the toolbar's views; also status tabs that work like them, e.g. Payment Plans' Active / Paid / Frozen).
 const viewPillStyle = (isActive) => ({
   border:`1px solid ${isActive ? T.black : T.borderStrong}`,
@@ -1724,7 +1729,7 @@ function RecordToolbar({inset = 'page', views, activeViewId, onSelectView, viewC
         {views.map(v => {
           const isActive = activeViewId === v.id;
           return (
-            <button key={v.id} onClick={()=>onSelectView(v.id)} style={viewPillStyle(isActive)}>{v.name}</button>
+            <button key={v.id} onClick={()=>onSelectView(v.id)} style={viewPillStyle(isActive)}>{v.name}{v.count != null && ` (${v.count.toLocaleString('en-US')})`}</button>
           );
         })}
       </div>
@@ -1900,13 +1905,15 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
 
   // Board cards' activity: what the acting user may see on each contact (tool permissions).
   const shownActivities = Object.fromEntries(contacts.map(c => [c.id, visibleActivities('contacts', c, activities[c.id])]));
+  // Filtered with each contact's deals alongside (their filters); the contacts themselves are what's listed.
+  const filterRows = React.useMemo(()=> !dealAssoc ? contacts
+    : contacts.map(c => withAssocRecords(c, 'Deals', deals.filter(d => contactIdsOf(d).some(id => sameId(id, c.id))).map(d => dealRowOf(dealData, d)))),
+    [contacts, dealAssoc, deals, dealData]);
   const filteredContacts = React.useMemo(()=>{
     if(!dealAssoc) return applyFilters(contacts, filters, objectSchema.filterProps);
-    // Filtered with each contact's deals alongside; the contacts themselves are what's listed.
-    const rows = contacts.map(c => withAssocRecords(c, 'Deals', deals.filter(d => contactIdsOf(d).some(id => sameId(id, c.id))).map(d => dealRowOf(dealData, d))));
-    const ok = new Set(applyFilters(rows, filters, objectSchema.filterProps).map(r => r.id));
+    const ok = new Set(applyFilters(filterRows, filters, objectSchema.filterProps).map(r => r.id));
     return contacts.filter(c => ok.has(c.id));
-  }, [contacts, filters, objectSchema, deals, dealData]);
+  }, [contacts, filterRows, filters, objectSchema]);
 
   /* Owners are Users (Settings → Users & Teams): activated users, stored by ID. `ownerOptions`
      are their names, for the activity forms' people lists (resolved back to IDs when saved). */
@@ -2086,7 +2093,9 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
   };
   const confirmSaveExisting = () => { persist(activeView.id, {columnOrder, sort, viewMode, pipelineId, search, filters, frozenLeft, frozenRight, actionsFrozen, rowsPerPage, cardSettings}); setConfirmOverwrite(false); };
 
-  const visibleViews = views.filter(v=>!v.hidden);
+  // Each view with how many contacts it lists (as saved).
+  const visibleViews = React.useMemo(()=>views.filter(v=>!v.hidden).map(v => ({...v, count:viewRowCount(filterRows, v.filters, v.search, objectSchema)})),
+    [views, filterRows, objectSchema]);
   /* Violations: the same button and list as Deals and Customers. Workflows don't run on Contacts
      yet, so no workflow applies and the button stays hidden. */
   const engineCtx = useWorkflowEngineCtx();
@@ -2301,5 +2310,5 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
   );
 }
 
-Object.assign(window, {viewPillStyle, exportViewCsv, gridRowsOf, withScopeFilters, recordScopeFilterProps, newContactRecord, contactView, ownerUserOptions, assocFilterSchema, withAssocRecords, withAssocFilters, RecordToolbar, TableBoardSwitch, toolbarButton, toolbarIconButton, ContactsModule, RecordSchema, useRecordSchema, ContactsDataGrid, Pagination, SaveViewMenu, FilterModal,
+Object.assign(window, {viewPillStyle, viewRowCount, exportViewCsv, gridRowsOf, withScopeFilters, recordScopeFilterProps, newContactRecord, contactView, ownerUserOptions, assocFilterSchema, withAssocRecords, withAssocFilters, RecordToolbar, TableBoardSwitch, toolbarButton, toolbarIconButton, ContactsModule, RecordSchema, useRecordSchema, ContactsDataGrid, Pagination, SaveViewMenu, FilterModal,
   TableSettingsModal, ViewSettingsDrawer, ConfirmOverwriteModal, SaveAsCopyModal, applyFilters, countAppliedFilters, EMPTY_FILTERS});

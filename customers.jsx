@@ -170,6 +170,7 @@ const CUSTOMER_PANEL_SECTIONS = {
 const CUSTOMER_PANEL_BASE_PROPERTIES = [
   {key:'owner',         label:'Customer Owner'},
   {key:'ownerAssigned', label:'Owner Assignment Date'},
+  {key:'ownerAssignedBy', label:'Owner Assigned By'},
   {key:'ownerChanged',  label:'Owner Change Date'},
   {key:'pipeline',      label:'Pipeline'},
   {key:'stage',         label:'Customer Stage'},
@@ -205,7 +206,7 @@ const defaultCustomerPanelSettings = (props) => ({
 const withCustomerPanelProperties = (settings, props) => {
   const known = settings.customerProperties.map(p => p.key);
   const added = customerPanelProperties(props).filter(p => !known.includes(p.key)).map(p => ({key:p.key, enabled:true}));
-  return added.length ? {...settings, customerProperties:[...settings.customerProperties, ...added]} : settings;
+  return added.length ? {...settings, customerProperties:withAddedPanelProperties(settings.customerProperties, added)} : settings;
 };
 const customerPanelKind = (props, renderPreview) => ({
   object:'customers', sections:CUSTOMER_PANEL_SECTIONS, quickActionLabels:quickActionLabels('customers'),
@@ -261,11 +262,12 @@ function CustomerNameRow({customer, subtitle, headerActions}){
   );
 }
 function CustomerInfo({customer, view, acts, contacts = [], deals, keys, props, onOpenDeal, onOpenContact, onStub}){
-  const owner = ownerDates({owner:view.owner, created:dateOnly(customer.created)}, acts);
+  const owner = ownerDates({owner:view.owner, created:dateOnly(customer.created), ownerSetBy:customer.ownerSetBy}, acts);
   const hub = useRecordHub();
   const rows = {
     owner:         {value:view.owner, owner:true},
     ownerAssigned: {value:owner.assigned},
+    ownerAssignedBy: {value:owner.assignedBy},
     ownerChanged:  {value:owner.changed},
     pipeline:      {value:view.pipeline},
     stage:         {value:view.stage},
@@ -478,7 +480,7 @@ function CustomersModule({data, customers, setCustomers, activities, setActiviti
 
   return (
     <div style={{flex:1, minWidth:0, minHeight:0, display:'flex', flexDirection:'column', position:'relative', overflow:'hidden'}}>
-      <RecordViewsModule inset="page" schema={fullSchema} rows={rows} columns={props.map(p => p.key)}
+      <RecordViewsModule inset="page" viewCounts schema={fullSchema} rows={rows} columns={props.map(p => p.key)}
         defaultViews={[{id:'cv-all', name:'All Customers', sort:{key:'name', dir:'asc'}}]}
         board={pipelines.length ? {pipelines, defaultPipelineId:pipelines[0].id,
           cardSettings:{defaults:DEFAULT_CUSTOMER_CARD_SETTINGS,

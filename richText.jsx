@@ -6,6 +6,8 @@
    is reduced to them. Plain text saved before (no tags) shows as paragraphs.
    `ctas` (the Default HTML Template email, emails.jsx) adds Primary CTA and Secondary CTA: a
    link on its own line, marked data-cta="primary" | "secondary", drawn as a button.
+   A fetched property (emails.jsx Fetch Property) is a chip in the text: SPAN data-token="…",
+   always kept, never typed into — it's put in with `tools` and taken out like a letter.
    The document editor (documents.jsx) turns on more, each kept by the sanitizer only when asked
    (RICH_DOC): `sizes` — text size in points (10 to 36: SPAN data-size; the toolbar shows the size
    at the cursor); `images` —
@@ -28,6 +30,8 @@ const RICH_FONT_SIZE = {'1':'10', '2':'12', '3':'14', '4':'16', '5':'18', '6':'2
 const RICH_OLD_SIZES = {sm:'12', md:'14', lg:'18', xl:'24'};
 const RICH_EMBEDS = ['payment', 'signature', 'record'];
 const RICH_DOC = {sizes:true, images:true, embeds:true};   // what the document editor keeps
+const RICH_TOKEN = /^(contacts|deals|customers|acc|pf):[\w:~.-]+$/;   // a fetched property's key (emails.jsx)
+const richIsToken = (n) => n.tagName === 'SPAN' && RICH_TOKEN.test(n.getAttribute('data-token') || '');
 // Only the editor's tags survive; links keep an http(s) or mailto href and open in a new tab. `opts`: see the header.
 function sanitizeRichText(html, opts = {}){
   const box = document.createElement('div');
@@ -42,6 +46,8 @@ function sanitizeRichText(html, opts = {}){
       if(opts.sizes && n.nodeType === 1 && n.tagName === 'FONT' && RICH_FONT_SIZE[n.getAttribute('size')]){
         const span = document.createElement('span'); span.setAttribute('data-size', RICH_FONT_SIZE[n.getAttribute('size')]); span.append(...n.childNodes); n.replaceWith(span); walk(span); return;
       }
+      // A fetched property: its key and its name, nothing else.
+      if(n.nodeType === 1 && richIsToken(n)){ const label = n.textContent; [...n.attributes].forEach(a => { if(a.name !== 'data-token') n.removeAttribute(a.name); }); n.textContent = label; return; }
       if(n.nodeType === 1 && extra(n)){
         const keep = n.tagName === 'SPAN' ? ['data-size'] : n.tagName === 'IMG' ? ['src'] : ['data-embed', 'data-id'];
         if(n.tagName === 'SPAN' && RICH_OLD_SIZES[n.getAttribute('data-size')]) n.setAttribute('data-size', RICH_OLD_SIZES[n.getAttribute('data-size')]);
@@ -83,6 +89,7 @@ const RICH_CSS = `.hof-rich p{margin:0 0 8px}.hof-rich p:last-child{margin-botto
 .hof-rich a[data-cta]{display:inline-block;margin:4px 0;padding:6px 16px;border-radius:980px;text-decoration:none;font-weight:500;font-size:12.5px;border:1px solid ${T.black}}
 .hof-rich a[data-cta="primary"]{background:${T.black};color:#fff}.hof-rich a[data-cta="secondary"]{background:#fff;color:${T.black}}
 ${RICH_SIZES.map(n => `.hof-rich span[data-size="${n}"]{font-size:${n}px}`).join('')}
+.hof-rich span[data-token]{background:#EEF2FF;color:#3538CD;border-radius:5px;padding:1px 6px;white-space:nowrap}
 .hof-rich img{display:block;max-width:100%;height:auto;margin:8px 0;border-radius:6px}.hof-rich [data-embed]{margin:14px 0;position:relative}
 .hof-rich-edit [data-embed]{cursor:pointer;border-radius:10px}.hof-rich-edit [data-embed]:hover{box-shadow:0 0 0 2px ${T.blueLight}}
 .hof-rich-edit [data-embed-remove]{position:absolute;top:6px;right:6px;width:22px;height:22px;border:none;border-radius:6px;background:#fff;box-shadow:0 0 0 1px ${T.borderStrong};cursor:pointer;display:none;align-items:center;justify-content:center;font-size:14px;line-height:1;color:${T.gray600}}
@@ -129,7 +136,9 @@ function RichTextEditor({value, onChange, placeholder, minHeight = 110, ariaLabe
   const [empty, setEmpty] = React.useState(() => richIsEmpty(richHtmlOf(value)));
   // Embeds show what their data says, and can't be typed into.
   const embedsRef = React.useRef(embeds); embedsRef.current = embeds;   // the latest, for an insert made after their data changed
-  const hydrate = () => { const em = embedsRef.current, el = ref.current; if(!em || !el) return; el.querySelectorAll('[data-embed]').forEach(n => {
+  const hydrate = () => { const em = embedsRef.current, el = ref.current; if(!el) return;
+    el.querySelectorAll('span[data-token]').forEach(n => n.setAttribute('contenteditable', 'false'));   // a fetched property is one piece
+    if(!em) return; el.querySelectorAll('[data-embed]').forEach(n => {
     n.setAttribute('contenteditable', 'false'); n.innerHTML = em.render(n.getAttribute('data-embed'), n.getAttribute('data-id')) || ''; });
     // Room to write after an element that ends the text.
     if(el.lastElementChild && el.lastElementChild.matches('[data-embed]')){ const p = document.createElement('p'); p.innerHTML = '<br>'; el.appendChild(p); } };
@@ -138,6 +147,7 @@ function RichTextEditor({value, onChange, placeholder, minHeight = 110, ariaLabe
     const el = ref.current; if(!el) return;
     const next = sanitizeRichText(richHtmlOf(value), opts);
     if(sanitizeRichText(el.innerHTML, opts) !== next){ el.innerHTML = next; hydrate(); }
+    else if(el.querySelector('span[data-token]:not([contenteditable])')) hydrate();
     setEmpty(richIsEmpty(next));
   }, [value]);
   React.useEffect(() => { hydrate(); }, [embeds && embeds.key]);

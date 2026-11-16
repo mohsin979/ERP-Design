@@ -2,9 +2,10 @@
 
    Default structure (product definition): Dashboard, then five expandable/collapsible groups —
    Marketing, Pre-Sales, Sales, Tools, Administrative (Reports, Workflows, Settings). Settings is
-   always shown: it can't be hidden, nor can the Administrative group. In Marketing only Forms and
-   Brand show by default (Campaigns, SEO, Socials and Ads are hidden until an
-   admin shows them — Edit Nav, or Settings → Navigation). Groups are set apart by
+   always shown: it can't be hidden, nor can the Administrative group. In Marketing only Forms
+   shows by default (Campaigns, SEO, Socials and Ads are hidden until an
+   admin shows them — Edit Nav, or Settings → Navigation). Brand is a CRM Settings page
+   (Settings → Brand, 2026-11-16; it was in Marketing). Groups are set apart by
    generous negative space so the sidebar reads as calm, distinct sections. Edit Nav, pinned at the
    bottom, opens Navigation Management: hide / unhide any entry or item, and reorder the
    top-level entries and the items inside each group (items stay in their group, so the
@@ -21,7 +22,6 @@ const CRM_NAV_DEFAULT = () => ([
     {id:'socials',     label:'Socials',      icon:'socials',   hidden:true},
     {id:'ads',         label:'Ads',          icon:'ads',       hidden:true},
     {id:'forms',       label:'Forms',        icon:'forms',     hidden:false},
-    {id:'brand',       label:'Brand',        icon:'brand',     hidden:false},
   ]},
   {id:'preSales', label:'Pre-Sales', group:true, hidden:false, items:[
     {id:'contacts', label:'Contacts', icon:'contacts', hidden:false},
@@ -66,6 +66,7 @@ const CRM_SETTINGS_NAV = [
     {id:'settings.goals',         label:'Goals',         icon:'target'},
     {id:'settings.notifications', label:'Notifications', icon:'notification'},
     {id:'settings.navigation',    label:'Navigation',    icon:'listBullets'},
+    {id:'settings.brand',         label:'Brand',         icon:'brand'},
   ]},
   {id:'settings.data', label:'Data Management', group:true, items:[
     {id:'settings.objects',         label:'Records',          icon:'cube'},
@@ -97,7 +98,7 @@ const OBJECT_NAV_ICONS = {contacts:'contacts', deals:'deals', customers:'custome
    leave the navigation; the other items are untouched. */
 const isObjectNavItem = (id) => !!OBJECT_NAV_ICONS[id] || String(id).startsWith('obj-');
 // Entries removed from the product (saved navigation may still list them): Lead Scoring.
-const REMOVED_NAV_IDS = ['leadScoring', 'services'];   // Services: now Settings → Templates → Services
+const REMOVED_NAV_IDS = ['leadScoring', 'services', 'brand'];   // Services: now Settings → Templates → Services; Brand: now Settings → Brand
 // Entries added to the product since a navigation was saved join their group, after `after`.
 const ADDED_NAV_ITEMS = [{group:'marketing', after:'ads', item:{id:'forms', label:'Forms', icon:'forms', hidden:false}},
   {group:'tools', after:'quotes', item:{id:'documents', label:'Documents', icon:'files', hidden:false}},

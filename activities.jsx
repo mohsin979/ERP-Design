@@ -30,6 +30,7 @@ const ACTIVITY_TYPES = {
   note:        {label:'Note',         icon:'notepad'},
   ownerChange: {label:'Owner change', icon:'userSwitch'},
   stageChange: {label:'Stage change', icon:'kanbanView'},        // the record moved stage (workflowEngine.jsx, setDealsTracked)
+  propertyChange: {label:'Property change', icon:'edit'},        // a property's value changed: what it was and what it is now (workflowEngine.jsx, setDealsTracked)
   customerCreated: {label:'Customer created', icon:'customers'}, // a customer made from this deal or contact
   taskReassigned: {label:'Task reassigned', icon:'userSwitch'},  // a task given to someone else
   workflow:    {label:'Workflow',     icon:'workflows'},   // a workflow run on the record (workflowEngine.jsx)
@@ -333,6 +334,7 @@ function activityHeadline(a){
     case 'note':    return richTextPlain(a.body);   // a rich-text note, as one line
     case 'ownerChange': return `${userLabel(a.from) || 'No owner'} → ${userLabel(a.to) || 'No owner'}`;   // user IDs (older history: names)
     case 'stageChange': return `${(a.from || {}).label || '—'} → ${(a.to || {}).label || '—'}`;
+    case 'propertyChange': return `${a.label} · ${a.from || '—'} → ${a.to || '—'}`;
     case 'customerCreated': return a.customerName;
     case 'taskReassigned': return `${a.taskTitle} · ${a.from || 'No one'} → ${a.to || 'No one'}`;
     case 'payment':     return a.from || a.to ? `${a.from || '—'} → ${a.to || '—'}` : a.detail || '';
@@ -426,6 +428,7 @@ function activityLines(a, contact, context = 'all'){
     case 'meeting': return {lead: all ? act('Meeting', 'by') : (who ? act('', 'by') : act('Meeting')), detail:a.title, when};
     case 'ownerChange': return {lead:act('Owner changed', 'by'), detail:`${userLabel(a.from) || 'No owner'} → ${userLabel(a.to) || 'No owner'}`, when};
     case 'stageChange': return {lead:act('Stage changed', 'by'), detail:activityHeadline(a), when};
+    case 'propertyChange': return {lead:act('Property changed', 'by'), detail:activityHeadline(a), when};
     case 'customerCreated': return {lead:act('Customer created', 'by'), detail:a.customerName, when};
     case 'taskReassigned': return {lead:act('Task reassigned', 'by'), detail:activityHeadline(a), when};
     case 'payment': return {lead:act(a.action || 'Payment', 'by'), detail:activityHeadline(a), when};
@@ -648,7 +651,7 @@ function HistoryItem({a, last}){
     case 'task':    title = a.title; extra = activityWhen(a).text; break;
     case 'note':    body = richTextPlain(a.body); break;
     case 'ownerChange': title = `${userLabel(a.from) || 'No owner'} → ${userLabel(a.to) || 'No owner'}`; break;
-    case 'stageChange': case 'customerCreated': case 'taskReassigned': title = activityHeadline(a); break;
+    case 'stageChange': case 'propertyChange': case 'customerCreated': case 'taskReassigned': title = activityHeadline(a); break;
     case 'recordsMerged': title = `Merged ${activityHeadline(a)}`; break;
     case 'recordsSplit': title = `Split from ${activityHeadline(a)}`; break;
     case 'payment': title = `${a.action || 'Payment'} · ${activityHeadline(a)}`; break;

@@ -606,10 +606,11 @@ function MeetingDetail({a, contact, team, comments, onUpdate, onAdd, onStub, acr
   );
 }
 
-/* A stage move, a customer created from the record, a task reassigned, a payment change or records
+/* A stage move, a property change, a customer created from the record, a task reassigned, a payment change or records
    merged into it (each value replaced, before → after): what changed, read-only. */
 function HistoryChangeDetail({a, contact}){
   const rows = a.type === 'stageChange' ? [['Previous stage', (a.from || {}).label], ['New stage', (a.to || {}).label]]
+    : a.type === 'propertyChange' ? [['Property', a.label], ['Previous value', a.from], ['New value', a.to]]
     : a.type === 'recordsMerged' ? [['Merged records', activityHeadline(a)], ...(a.changes || []).map(c => [c.label, `${c.from || '—'} → ${c.to || '—'}`])]
     : a.type === 'recordsSplit' ? [['Split from', activityHeadline(a)]]
     : a.type === 'customerCreated' ? [['Customer', a.customerName]]
@@ -648,7 +649,7 @@ function ActivityDetail({a, contact, team, acts, onUpdate, onAdd, onStub, onReas
   if(a.type === 'task') return <TaskDetail a={a} contact={contact} team={team} onUpdate={onUpdate} onStub={onStub} across={across && across.hideType ? across : undefined}/>;
   if(a.type === 'note') return <NoteDetail a={a} contact={contact} calls={acts.filter(x => x.type === 'call' || x.type === 'meeting')} onUpdate={onUpdate} onStub={onStub} across={across}/>;
   if(a.type === 'ownerChange') return <OwnerChangeDetail a={a} contact={contact} team={team} onReassign={onReassign}/>;
-  if(['stageChange', 'customerCreated', 'taskReassigned', 'payment', 'recordsMerged', 'recordsSplit'].includes(a.type)) return <HistoryChangeDetail a={a} contact={contact}/>;
+  if(['stageChange', 'propertyChange', 'customerCreated', 'taskReassigned', 'payment', 'recordsMerged', 'recordsSplit'].includes(a.type)) return <HistoryChangeDetail a={a} contact={contact}/>;
   if(a.type === 'file') return <FileActivityDetail a={a} contact={contact} onStub={onStub}/>;
   if(a.type === 'fileChange') return <FileChangeDetail a={a} contact={contact}/>;
   if(a.type === 'quote') return <QuoteActivityDetail a={a} contact={contact}/>;
