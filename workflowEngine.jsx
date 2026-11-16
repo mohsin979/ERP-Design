@@ -840,8 +840,8 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
   const contactActsSeen = React.useRef(contactActivities);
   /* Effects: what each workflow step changed — property / stage values (from → to), activities and
      records it created, notifications it sent — kept on the step (`effects`). Recorded while a step,
-     or the prompt it raised, runs. They're what reverting a workflow would work from; reverting
-     itself isn't defined yet. */
+     or the prompt it raised, runs. They're what Revert works from (revertRun — a record's
+     automation line). */
   const effectStep = React.useRef(null);   // {runId, stepId}
   const recordEffect = (e) => {
     const t = effectStep.current;
@@ -939,7 +939,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
         else { const st = contactStageFor(contactPipe, dIn); if(st !== dIn.stage) d0 = {...dIn, stage:st, pipeline:contactPipe.id}; }
       }
       if(!p || !d0.stage || (p.stage === d0.stage && p.pipeline === d0.pipeline)) return d0;
-      const by = entryBlockers(p, d0, chain);
+      const by = chain && chain.revert ? [] : entryBlockers(p, d0, chain);   // a revert puts a record back where it was
       if(!by.length) return d0;
       blocks.push({dealId:d0.id, by, attempt:{fromStage:p.stage, fromPipeline:p.pipeline, toStage:d0.stage, toPipeline:d0.pipeline,
         byPerson: !chain || !chain.depth || !!chain.byPerson}});
@@ -1089,6 +1089,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
      Stage schedules its check instead (it fires when the time has passed). */
   const firedBatches = React.useRef(new Set());
   function dispatch(ev){
+    if(ev.chain && ev.chain.revert) return;   // a revert undoes — it starts no workflow
     const deal = getDeal(ev.recordId);
     // Record events reach the record's workflows (Company-wide ones run per user — checkCompanyUsers).
     (dataRef.current.workflows || []).map(normalizeWorkflow).filter(w => w.active !== false && w.triggers.length && !!w.context.object && w.context.object === ev.objectId).forEach(w => {
@@ -1723,7 +1724,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
         const pending = actsOf(deal.id).filter(a => a.type === 'email' && a.status === 'scheduled' && a.sequenceId === seq.id);
         if(!pending.length) return {status:'done', result:`No emails scheduled from \u201c${seq.name}\u201d`};
         editActivities(m => ({...m, [deal.id]:(m[deal.id] || []).filter(a => !pending.some(x => x.id === a.id))}));
-        pending.forEach(a => recordEffect({kind:'activityRemoved', recordId:deal.id, activityId:a.id, type:'email', title:a.title, scheduledFor:a.scheduledFor}));
+        pending.forEach(a => recordEffect({kind:'activityRemoved', recordId:deal.id, activityId:a.id, type:'email', title:a.title, scheduledFor:a.scheduledFor, activity:a}));
         return {status:'done', result:`Exited \u201c${seq.name}\u201d · ${plural(pending.length, 'scheduled email')} cancelled`};
       }
       // Create Meeting: a meeting that happened, logged (Track: the owner is asked to log it).
@@ -1779,7 +1780,8 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
         const live = liveRecords(), recs = mc ? mc.ids.map(id => live[object].find(r => String(r.id) === String(id))).filter(Boolean) : [];
         if(recs.length < 2 || !mergeRecordsRef || !mergeRecordsRef.current) return {status:'skipped', result:'No matching record to merge'};
         const plan = mergeByRules(data, object, recs, live, c.rules || {});
-        mergeRecordsRef.current(object, recs.map(r => r.id), plan.values, plan.changes, plan.links, {by:`${w.name || workflowTitle(data, w)} (workflow)`, workflowId:w.id});
+        const mergeId = mergeRecordsRef.current(object, recs.map(r => r.id), plan.values, plan.changes, plan.links, {by:`${w.name || workflowTitle(data, w)} (workflow)`, workflowId:w.id});
+        if(mergeId) recordEffect({kind:'merge', object, historyId:mergeId});
         const keptId = object === 'contacts' ? String(recs[0].id) : recs[0].id, name = plan.values.name ?? recs[0].name ?? '';
         if(keptId !== deal.id) patchRun(run.id, r => ({...r, dealId:keptId, dealName:name}));
         return {status:'done', result:`Merged ${recs.length} ${typePlural(object, 'Records').toLowerCase()} into ${name || 'the first'}`};
@@ -1820,6 +1822,61 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
       }
     }
     return {status:'skipped', result:'Not defined yet'};
+  }
+
+  /* Revert (a record's automation line; the Workflows · Revert permission): what a run's automatic
+     steps did is undone, last first — as far as it still stands (decided 2026-11-15: a value a
+     person changed since keeps its newer value):
+       a property / stage / owner → back to what it was, if it's still what the workflow set;
+       an activity it added → removed (an email already sent, or a task since completed, stays);
+       an email it cancelled (Exit Email Sequence) → scheduled again;
+       a record it created → deleted (one with payments recorded stays);
+       a notification → withdrawn; a merge → split.
+     A revert starts no workflow and no Block Stage Entry holds it; the record's owner and stage
+     history name the person. What couldn't be undone is kept on the run (`reverted.kept`). */
+  const effectUndoable = (e) => ['property', 'record', 'notification', 'activityRemoved', 'merge'].includes(e.kind) || (e.kind === 'activity' && !(e.type === 'email' && e.status !== 'scheduled'));
+  function revertRun(runId){
+    const run = getRun(runId);
+    if(!run || run.reverted) return null;
+    const chain = {id:wfNewId('ch'), depth:0, visited:[], revert:true, byPerson:true}, kept = [];
+    const same = (a, b) => (isBlank(a) && isBlank(b)) || samePropertyValue(a, b) || String(a ?? '') === String(b ?? '');
+    [...run.steps].reverse().filter(st => !st.promptIds).forEach(st => {
+      const effects = [...(st.effects || [])].reverse();
+      // Properties, one record at a time (a stage goes back with its pipeline).
+      [...new Set(effects.filter(e => e.kind === 'property').map(e => e.recordId))].forEach(rid => {
+        const rec = getDeal(rid), mine = effects.filter(e => e.kind === 'property' && e.recordId === rid);
+        if(!rec) return;
+        const still = mine.filter(e => same(rec[e.key], e.to)), label = (k) => (recordProps(rec).find(p => p.key === k) || {}).label || k;
+        mine.filter(e => !still.includes(e)).forEach(e => kept.push(`${label(e.key)} changed since`));
+        // The first value of each (the same property set twice in a step: back to where it started).
+        const patch = {}; still.forEach(e => { patch[e.key] = e.from; });
+        if(Object.keys(patch).length) setDealsTracked(rs => rs.map(r => r.id === rid ? {...r, ...patch} : r), chain);
+      });
+      effects.filter(e => e.kind !== 'property').forEach(e => {
+        if(e.kind === 'activity'){
+          const act = (actsRef.current[e.recordId] || []).find(a => a.id === e.activityId);
+          if(!act) return;
+          if(act.type === 'email' && act.status !== 'scheduled') return void kept.push('Email already sent');
+          if(act.type === 'task' && act.status === 'completed') return void kept.push('Task already completed');
+          editActivities(m => m[e.recordId] ? {...m, [e.recordId]:m[e.recordId].filter(a => a.id !== e.activityId)} : m);
+        } else if(e.kind === 'activityRemoved'){
+          if(e.activity && getDeal(e.recordId) && !(actsRef.current[e.recordId] || []).some(a => a.id === e.activityId)) editActivities(m => ({...m, [e.recordId]:[e.activity, ...(m[e.recordId] || [])]}));
+        } else if(e.kind === 'record'){
+          const rid = e.object === 'contacts' ? String(e.recordId) : e.recordId, rec = getDeal(rid);
+          if(!rec) return;
+          if(recordHasPayments(e.object, e.recordId)) return void kept.push(`${rec.name || 'Record'} has payments recorded`);
+          removeRecord(rec, {chain});
+        } else if(e.kind === 'notification'){
+          commit(s => ({...s, notifications:s.notifications.filter(n => !(e.ids || []).includes(n.id))}));
+        } else if(e.kind === 'merge'){
+          if(mergeRecordsRef && mergeRecordsRef.split) mergeRecordsRef.split(e.historyId, {});
+        }
+      });
+    });
+    patchRun(runId, r => ({...r, reverted:{at:Date.now(), by:CURRENT_USER.name, kept}}));
+    const w = getWorkflow(run.workflowId), rule = w ? (w.name || workflowTitle(dataRef.current, w)) : 'Workflow';
+    if(getDeal(run.dealId)) addActivity(run.dealId, {id:wfNewId('rv'), ...recordKey(run.dealId), type:'workflow', at:new Date(), title:`${rule} · reverted`, body:kept.join('\n'), by:CURRENT_USER.name, source:'you'});
+    return {kept};
   }
 
   /* A run's status follows its steps; its deal activity lists the results. */
@@ -2505,6 +2562,9 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
 
   const api = {
     addDealActivity, updateDealActivity, deleteRecordActivity,
+    // A record's automation line: undo what a run did (revertRun); hide its line.
+    revertRun,
+    hideAutomation: (runId) => patchRun(runId, r => ({...r, noticeHidden:true})),
     // The records (stored shape) and every record's activity as they are right now — a merge, or a split, reads them (App's closures may be a change behind).
     live: () => ({...liveRecords(), activities:actsRef.current}),
     /* Records merged (App's mergeRecords): their activity moves in one change — the same activity
@@ -2623,7 +2683,7 @@ const STATUS_PILLS = {
 const RUN_STATUS = {
   waiting:{label:'Waiting', tone:'info'}, running:{label:'Scheduled', tone:'info'}, awaiting:{label:'Awaiting user', tone:'warn'},
   completed:{label:'Completed', tone:'success'}, failed:{label:'Failed', tone:'danger'}, notRun:{label:'Not run', tone:'neutral'}, notApplicable:{label:'Not applicable', tone:'neutral'},
-  loopPrevented:{label:'Loop prevented', tone:'warn'}, cancelled:{label:'Cancelled', tone:'neutral'},
+  loopPrevented:{label:'Loop prevented', tone:'warn'}, cancelled:{label:'Cancelled', tone:'neutral'}, reverted:{label:'Reverted', tone:'neutral'},
 };
 const STEP_STATUS = {
   scheduled:{label:'Scheduled', tone:'info'}, done:{label:'Done', tone:'success'}, prompted:{label:'Prompted', tone:'warn'}, dismissed:{label:'Dismissed', tone:'neutral'},
@@ -2766,7 +2826,7 @@ function WorkflowRuns({workflowId}){
               <span style={{flex:1, minWidth:0, fontSize:13.5, fontWeight:500, color:T.attioText, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{r.dealName}</span>
               <span style={{fontSize:12, color:T.gray600, whiteSpace:'nowrap'}}>{r.status === 'waiting' ? `Checks ${fmtWhen(r.checkAt)}` : fmtWhen(r.startedAt || r.createdAt)}</span>
               <span style={{fontSize:12, color:T.gray400, whiteSpace:'nowrap'}}>v{r.version}</span>
-              <StatusPill status={r.status} map={RUN_STATUS}/>
+              <StatusPill status={r.reverted ? 'reverted' : r.status} map={RUN_STATUS}/>
             </div>
             {on && (
               <div style={{padding:'0 4px 14px 28px', display:'flex', flexDirection:'column', gap:8}}>
@@ -3067,8 +3127,9 @@ function violationExplanation(data, p){
 }
 /* ── Violations on the record ── a record's open violations stay in sight on the record itself
    (its side panel and full page), not only in the Violations panel:
-     a red one-line notice at the top of the record (ViolationNotice) — the first violation in a
-       line (violationExplanation), "+N" for the others, View opens it in the Violations panel;
+     its required actions at the top of the record (ViolationNotice) — each open violation as a
+       red pill that does it, the rest under "+N"; under them the record's automations, one line
+       with Revert (AutomationNotice);
      a red mark (ViolationMark) beside each place it asks for: the property to update (its row in
        the record's properties), the tab where it's resolved (Tasks, Calls, Email, Meetings, Notes,
        Customer Profile, an associated record's tab, Accounting) and, for accounting, the
@@ -3150,21 +3211,94 @@ function ViolationMark({prop, tab, inst}){
   return <span title={lines.join('\n')} aria-label={`Needs attention: ${lines.join(' ')}`}
     style={{width:7, height:7, borderRadius:9999, background:VIOLATION_RED, flexShrink:0, display:'inline-block', boxShadow:'0 0 0 2px #FEE4E2'}}/>;
 }
-/* The record's red one-line notice: what needs attention first, +N for the rest (all of them on
-   hover); View opens it in the Violations panel. */
+/* The record's required actions (Track Violations), at the top of its side panel and full page:
+   each open violation as a red pill that does it — the action's own name (Update Deal Type value,
+   Create a task, Move to CCL Sent, Assign to …), why on hover. Two show; the rest under +N. A
+   record kept in a blocked stage: Edit <the property that blocks it>, else its card in the panel. */
+const RECORD_NOTICE_PILL = {display:'inline-flex', alignItems:'center', gap:6, height:26, padding:'0 10px', borderRadius:9999, fontSize:12.5, fontWeight:500, fontFamily:'inherit',
+  cursor:'pointer', maxWidth:'100%', minWidth:0, flexShrink:0};
 function ViolationNotice(){
   const v = useRecordViolations(), ctx = useWorkflowEngineCtx();
+  const [more, setMore] = React.useState(false);
+  const [editing, setEditing] = React.useState(null);   // {deal, prop, violation}: Edit <property>
   if(!v.list.length || !ctx) return null;
-  const lines = v.list.map(p => violationExplanation(ctx.data, p));
+  const items = v.list.map(p => {
+    const deal = ctx.deals.find(d => d.id === p.dealId), editProp = p.kind === 'blockEntry' && deal ? violationEditProperty(ctx.data, p) : null;
+    const run = p.kind === 'blockEntry' ? (editProp ? () => setEditing({deal, prop:editProp, violation:p}) : () => ctx.openViolation(v.object, p.id))
+      : p.kind === 'initiateCall' ? () => startViolationCall(ctx, p) : PROMPT_NEEDS_INPUT.includes(p.kind) ? () => ctx.openPrompt(p.id, {direct:true}) : () => ctx.api.completePrompt(p.id, {});
+    return {p, run, label: p.kind !== 'blockEntry' ? p.title : editProp ? `Edit ${editProp.label}` : 'Change Values', why:`${violationExplanation(ctx.data, p)}\n${violationRule(ctx.data, p)}`};
+  });
+  const shown = items.slice(0, 2), rest = items.slice(2);
+  const red = {border:'1px solid #FECDCA', background:'#FEF3F2', color:'#B42318'};
   return (
-    <div role="alert" title={lines.join('\n')} style={{display:'flex', alignItems:'center', gap:8, padding:'7px 10px', marginBottom:14, borderRadius:8,
-      background:'#FEF3F2', border:'1px solid #FECDCA', color:'#B42318', fontSize:12.5, minWidth:0}}>
-      <Icon name="warningCircle" size={14} color={VIOLATION_RED}/>
-      <span style={{flex:1, minWidth:0, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{lines[0]}</span>
-      {lines.length > 1 && <span style={{flexShrink:0, fontWeight:600}}>+{lines.length - 1}</span>}
-      <button type="button" onClick={()=>ctx.openViolation(v.object, v.list[0].id)}
-        style={{flexShrink:0, border:'none', background:'transparent', padding:0, fontSize:12.5, fontWeight:600, color:'#B42318', cursor:'pointer', fontFamily:'inherit',
-          textDecorationLine:'underline', textUnderlineOffset:2}}>View</button>
+    <div role="alert" style={{display:'flex', alignItems:'center', flexWrap:'wrap', gap:6, marginBottom:14, minWidth:0}}>
+      {shown.map(it => (
+        <button key={it.p.id} type="button" title={it.why} onClick={it.run} style={{...RECORD_NOTICE_PILL, ...red}}>
+          <Icon name={PROMPT_ICON[it.p.kind] || 'warningCircle'} size={13} color={VIOLATION_RED}/>
+          <span style={{overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{it.label}</span>
+        </button>
+      ))}
+      {rest.length > 0 && (
+        <span style={{position:'relative', display:'inline-flex'}} onMouseDown={e=>e.stopPropagation()}>
+          <button type="button" aria-expanded={more} aria-haspopup="menu" onClick={()=>setMore(o => !o)} style={{...RECORD_NOTICE_PILL, ...red, fontWeight:600}}>+{rest.length}</button>
+          <MenuShell open={more} onClose={()=>setMore(false)} width={260}>
+            {rest.map(it => <MenuItem key={it.p.id} icon={<Icon name={PROMPT_ICON[it.p.kind] || 'warningCircle'} size={13} color={VIOLATION_RED}/>} label={it.label} onClick={()=>{ setMore(false); it.run(); }}/>)}
+          </MenuShell>
+        </span>
+      )}
+      {editing && <EditPropertyModal deal={editing.deal} prop={editing.prop} violation={editing.violation} onClose={()=>setEditing(null)}/>}
+    </div>
+  );
+}
+/* The record's automations, under its required actions: one line — the workflow and what it did —
+   with Revert (the Workflows · Revert permission; only where something can still be undone) and a
+   close button; it stays until it's reverted or hidden (decided 2026-11-15). The latest shows; the
+   others under +N, each with its own Revert. Only what a workflow did on its own: a step a person
+   completed (a violation) isn't one. */
+const automationSteps = (r) => (r.steps || []).filter(st => st.status === 'done' && !st.promptIds && (st.effects || []).length);
+const recordAutomations = (ctx, recordId) => !ctx || recordId == null ? [] : ctx.state.runs.filter(r => String(r.dealId) === String(recordId) && !r.reverted && !r.noticeHidden && automationSteps(r).length)
+  .sort((a, b) => (b.startedAt || b.createdAt || 0) - (a.startedAt || a.createdAt || 0));
+const automationRevertible = (r) => automationSteps(r).some(st => st.effects.some(e => ['property', 'record', 'notification', 'activityRemoved', 'merge'].includes(e.kind) || (e.kind === 'activity' && !(e.type === 'email' && e.status !== 'scheduled'))));
+const automationLine = (data, r) => { const raw = (data.workflows || []).find(x => x.id === r.workflowId), w = raw && normalizeWorkflow(raw);
+  return `${(w && (w.name || workflowTitle(data, w))) || 'Workflow'} · ${automationSteps(r).map(st => st.result).filter(Boolean).join(' · ')}`; };
+function AutomationNotice({recordId}){
+  const ctx = useWorkflowEngineCtx(), hub = useRecordHub();
+  const [more, setMore] = React.useState(false);
+  const list = recordAutomations(ctx, recordId);
+  if(!list.length) return null;
+  const may = workflowCan('revert');
+  const revert = (r) => { ctx.api.revertRun(r.id); if(hub) hub.toast('Workflow reverted'); };
+  const revertBtn = (r) => may && automationRevertible(r) && (
+    <button type="button" onClick={(e)=>{ e.stopPropagation(); revert(r); }} style={{flexShrink:0, border:'none', background:'transparent', padding:0, fontSize:12.5, fontWeight:600, color:T.attioText, cursor:'pointer',
+      fontFamily:'inherit', textDecorationLine:'underline', textUnderlineOffset:2}}>Revert</button>
+  );
+  const hideBtn = (r) => (
+    <button type="button" title="Hide" aria-label="Hide" onClick={(e)=>{ e.stopPropagation(); ctx.api.hideAutomation(r.id); }}
+      style={{flexShrink:0, width:20, height:20, borderRadius:6, border:'none', background:'transparent', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', padding:0}}>
+      <Icon name="close" size={11} color={T.gray600}/>
+    </button>
+  );
+  const [first, ...rest] = list, text = (r) => automationLine(ctx.data, r);
+  return (
+    <div data-automation-notice="" style={{display:'flex', alignItems:'center', gap:8, padding:'6px 8px 6px 10px', marginBottom:14, borderRadius:8, background:T.headerBg, border:`1px solid ${T.border}`,
+      color:T.attioText, fontSize:12.5, minWidth:0}}>
+      <Icon name="workflows" size={13} color={T.gray600} style={{flexShrink:0}}/>
+      <span title={text(first)} style={{flex:1, minWidth:0, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{text(first)}</span>
+      {rest.length > 0 && (
+        <span style={{position:'relative', display:'inline-flex', flexShrink:0}} onMouseDown={e=>e.stopPropagation()}>
+          <button type="button" aria-expanded={more} aria-haspopup="menu" onClick={()=>setMore(o => !o)}
+            style={{border:'none', background:'transparent', padding:0, fontSize:12.5, fontWeight:600, color:T.attioMuted, cursor:'pointer', fontFamily:'inherit'}}>+{rest.length}</button>
+          <MenuShell open={more} onClose={()=>setMore(false)} anchorRight width={360}>
+            {rest.map(r => (
+              <div key={r.id} style={{display:'flex', alignItems:'center', gap:8, padding:'7px 10px', fontSize:12.5, color:T.attioText, minWidth:0}}>
+                <span title={text(r)} style={{flex:1, minWidth:0, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{text(r)}</span>
+                {revertBtn(r)}{hideBtn(r)}
+              </div>
+            ))}
+          </MenuShell>
+        </span>
+      )}
+      {revertBtn(first)}{hideBtn(first)}
     </div>
   );
 }
@@ -4224,5 +4358,5 @@ function WorkflowBell(){
   );
 }
 
-Object.assign(window, {STATUS_PILLS, sequenceSchedules, violationTargets, RecordViolationsProvider, useRecordViolations, ViolationMark, ViolationNotice, recordObjectOf, recordKey, recordNoun, ACTIVITY_RECORD_OBJECTS, withSeeded, PROPERTY_CHANGE_OPERATORS, PROPERTY_CHANGE_UNITS, triggerPropertyOperators, isChangeOp, conditionsValid, triggerConditionComplete, TriggerPropertyCondition, CONDITION_OPERATORS, conditionKind, useWorkflowEngine, WorkflowEngineCtx, useWorkflowEngineCtx, WF_SAVED, reviveActivities, withStageEntry, ConditionsEditor, WorkflowRuns,
+Object.assign(window, {STATUS_PILLS, sequenceSchedules, violationTargets, RecordViolationsProvider, useRecordViolations, ViolationMark, ViolationNotice, AutomationNotice, recordAutomations, recordObjectOf, recordKey, recordNoun, ACTIVITY_RECORD_OBJECTS, withSeeded, PROPERTY_CHANGE_OPERATORS, PROPERTY_CHANGE_UNITS, triggerPropertyOperators, isChangeOp, conditionsValid, triggerConditionComplete, TriggerPropertyCondition, CONDITION_OPERATORS, conditionKind, useWorkflowEngine, WorkflowEngineCtx, useWorkflowEngineCtx, WF_SAVED, reviveActivities, withStageEntry, ConditionsEditor, WorkflowRuns,
   DealPromptMarker, WorkflowPromptModal, WorkflowBell, ViolationsButton, ViolationPanel, WorkflowNotices, AutomaticActionModal, workflowExpectations, workflowContextPath, orderedStages, stageMoveDirection, workflowTitle, conditionFields, evalConditions});

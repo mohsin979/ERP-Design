@@ -768,6 +768,7 @@ function ContactDetail({mode, contact, acts, properties, panelProperties, onClos
           </div>
           <div style={{flex:1, minHeight:0, overflowY:'auto', padding:'0 20px 24px'}}>
             <ViolationNotice/>
+            <AutomationNotice recordId={contact && contact.id}/>
             {body || <ContactDetailBody contact={contact} acts={acts} onStub={onStub} onCopied={onCopied}
               onCall={actions && actions.onCall} withName={false} settings={panelSettings} actions={actions} panelProperties={panelProperties}/>}
           </div>

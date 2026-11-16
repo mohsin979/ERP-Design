@@ -993,6 +993,7 @@ function App(){
     // A merged record that had been kept separate from another: now the kept record is.
     if(mergeSeparate.some(x => x.object === object && x.ids.some(isGone)))
       setMergeSeparate(l => l.map(x => x.object === object && x.ids.some(isGone) ? {...x, ids:[...new Set(x.ids.map(i => isGone(i) ? keepId : i))]} : x));
+    return entry.id;   // a workflow's Merge Record keeps it: reverting the run splits this merge
   };
   mergeRecordsRef.current = mergeRecords;
   /* Split (merge.jsx): the records of a merge come back as they were, and what's new since goes
@@ -1051,6 +1052,7 @@ function App(){
     setMergeSeparate(l => [...l, {object, ids, at:at.toISOString(), by:CURRENT_USER.name}]);
     setMergeHistory(l => l.map(h => h.id === entryId ? {...h, split:{at:at.toISOString(), by:CURRENT_USER.name}} : h));
   };
+  mergeRecordsRef.split = splitRecords;   // for a reverted Merge Record
   // Keep Separate (merge.jsx): the case closes; its records aren't matched with each other again.
   const keepSeparate = (object, ids) => setMergeSeparate(l => [...l, {object, ids, at:new Date().toISOString(), by:CURRENT_USER.name}]);
   /* Services (Tools → Services) and quotations (Quotes) — workspace records of their own. */
