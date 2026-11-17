@@ -749,29 +749,84 @@ function useBrandDraft({brand, admin, toast, setActions, key, blank, label, vali
 
 /* Email Signature: always personal (2026-11-16). This is the signature of the person looking at
    it — every field theirs to set: name, designation, email, phone, website, company address,
-   additional info, and the company logo (Logo), shown or not. Saved on their user (`signature`);
+   additional info, and the company logo (Logo), shown or not. Since 2026-11-17 also: their own
+   photo (optional, kept small); a Secondary Language of their choice (none to start with) and,
+   once one is chosen, the name, designation, company address and additional info in it, beside
+   the first; a WhatsApp number (a WhatsApp button); and one CTA button — its
+   text, its link and its colour (black to start with). In the signature the email, phone and
+   website are links; the address isn't. Saved on their user (`signature`);
    until then it starts as their name, Designation and email. Every email they send ends with
    it (emails.jsx emailSignatureOf) unless Include Email Signature is turned off on that email.
    The preview is the signature as their emails carry it. */
+/* `second`: the field in the Secondary Language — shown once one is chosen, named for it ("Name
+   (Arabic)"), typed right to left where the language is; `cta`: the CTA button's own rows. */
 const SIGNATURE_FIELDS = [
-  {key:'name', label:'Name', placeholder:'e.g. Asim Ali', required:true}, {key:'designation', label:'Designation', placeholder:'e.g. Senior Migration Consultant'},
+  {key:'name', label:'Name', placeholder:'e.g. Asim Ali', required:true}, {key:'name2', label:'Name', second:true},
+  {key:'designation', label:'Designation', placeholder:'e.g. Senior Migration Consultant'}, {key:'designation2', label:'Designation', second:true},
   {key:'email', label:'Email', placeholder:'name@hofmigration.com'}, {key:'phone', label:'Phone', placeholder:'+971 4 000 0000'},
-  {key:'website', label:'Website', placeholder:'https://hofmigration.com'}, {key:'address', label:'Company Address', multiline:true},
-  {key:'additional', label:'Additional Info', multiline:true},
+  {key:'website', label:'Website', placeholder:'https://hofmigration.com'},
+  {key:'address', label:'Company Address', multiline:true}, {key:'address2', label:'Company Address', multiline:true, second:true},
+  {key:'whatsapp', label:'WhatsApp', placeholder:'+971 55 000 0000'},
+  {key:'ctaLabel', label:'CTA Text', placeholder:'e.g. Book Free Consultation', cta:true}, {key:'ctaUrl', label:'CTA Link', placeholder:'https://', cta:true},
+  {key:'additional', label:'Additional Info', multiline:true}, {key:'additional2', label:'Additional Info', multiline:true, second:true},
 ];
-const SIGNATURE_BLANK = {includeLogo:true, name:'', designation:'', email:'', phone:'', website:'', address:'', additional:''};
+const SIGNATURE_BLANK = {includeLogo:true, photo:null, language2:'', name:'', name2:'', designation:'', designation2:'', email:'', phone:'', website:'', address:'', address2:'',
+  whatsapp:'', ctaLabel:'', ctaUrl:'', ctaColor:'#000000', additional:'', additional2:''};
+// The Secondary Language's choices: the app's languages (propertyTypes.jsx), without the first one.
+const signatureLanguages = () => LANGUAGE_LIST.filter(l => l !== 'English');
+// Written right to left — typed and shown so, in a plain face for its script (the app's own has no Arabic letters; the browser's stand-in is a calligraphic one).
+const SIGNATURE_RTL = ['Arabic', 'Farsi', 'Pashto', 'Sindhi', 'Urdu'];
+const signatureRtl = (language) => SIGNATURE_RTL.includes(language);
+const SIGNATURE_RTL_FONT = "'Geeza Pro','Segoe UI',Tahoma,Arial,sans-serif";
+// A saved signature, complete — one saved while Arabic was the only second language (its *Ar fields) reads as Arabic.
+const signatureNormal = (sig) => { const {nameAr, designationAr, addressAr, additionalAr, ...rest} = sig || {}, old = {name2:nameAr, designation2:designationAr, address2:addressAr, additional2:additionalAr};
+  const had = Object.values(old).some(v => String(v || '').trim());
+  return {...SIGNATURE_BLANK, ...(had ? {language2:'Arabic', ...Object.fromEntries(Object.entries(old).filter(([, v]) => v))} : {}), ...rest}; };
+/* A person's photo for their signature: any image, kept small (a 160px square from its middle —
+   it goes out with every email they send). */
+const SIGNATURE_PHOTO_MAX = 5 * 1024 * 1024, SIGNATURE_PHOTO_PX = 160;
+const readSignaturePhoto = (file) => readImageFile(file, SIGNATURE_PHOTO_MAX).then(url => new Promise((resolve, reject) => {
+  const img = new Image();
+  img.onload = () => { const side = Math.min(img.naturalWidth, img.naturalHeight), c = document.createElement('canvas'); c.width = c.height = SIGNATURE_PHOTO_PX;
+    c.getContext('2d').drawImage(img, (img.naturalWidth - side) / 2, (img.naturalHeight - side) / 2, side, side, 0, 0, SIGNATURE_PHOTO_PX, SIGNATURE_PHOTO_PX);
+    resolve(c.toDataURL('image/jpeg', .86)); };
+  img.onerror = () => reject(new Error('That file could not be read.'));
+  img.src = url;
+}));
 /* The sample CRM's saved signatures, by user (2026-11-16: Waleed's, as he set it) — given to that
    user while they have none of their own (app.jsx); what they save since is kept. */
 const SAMPLE_SIGNATURES = {
   'waleed-bin-zaman': {includeLogo:true, name:'Waleed bin Zaman', designation:'CEO', email:'waleed.binzaman@hof-global.com', phone:'+971 626266626',
     website:'https://hofmigration.com/', address:'1408, Opal Tower, Burj Khalifa Blvd\nBusiness Bay, Dubai, UAE', additional:''},
 };
+/* A CRM's own sample signature (2026-11-17, for now): Redberry Consultancy's is the HOF Partners
+   signature Mohsin shared — everything in it the signature holds (its tagline and its closing
+   paragraph are the additional info; its QR code and social links have no place in a signature
+   yet). Everyone's in that CRM until they save their own; signatures saved there before it are
+   put aside once (`mockSignature`, app.jsx). */
+const MOCK_SIGNATURE_VERSION = 1;
+const CRM_SIGNATURES = {
+  [CRM_PARTNERS]: {includeLogo:true, photo:null, language2:'Arabic',
+    name:'Arslan Aman', name2:'أرسلان أمان', designation:'Client Solutions Consultant', designation2:'مستشار حلول العملاء',
+    email:'arslanaman@hof-partners.com', phone:'+971 55 854 5261', website:'www.hof-partners.com',
+    address:'1408, Opal Tower, Burj Khalifa Blvd,\nBusiness Bay, Dubai, United Arab Emirates', address2:'1408، برج أوبال، بوليفارد برج خليفة،\nالخليج التجاري، دبي، الإمارات العربية المتحدة',
+    whatsapp:'+971 55 854 5261', ctaLabel:'Book Free Consultation', ctaUrl:'https://www.hof-partners.com', ctaColor:'#D3E86F',
+    additional:'HOF Partners | Accounting | Tax | Advisory\nHOF Partners UAE & GCC\nWe support organizations across the UAE, GCC, US and UK with expert Accounting, Bookkeeping, VAT, Corporate Tax, E-Invoicing and Audit services built on trust, accuracy and compliance.',
+    additional2:'إتش أو إف بارتنرز | محاسبة | ضرائب | استشارات\nندعم الشركات في الإمارات ودول الخليج والولايات المتحدة والمملكة المتحدة بخدمات المحاسبة ومسك الدفاتر والضرائب والفوترة الإلكترونية والتدقيق، بالثقة والدقة والامتثال.'},
+};
 function BrandSignatureSection({brand, toast, setActions, data, setData}){
   const me = ((data && data.users) || []).find(u => u.name === CURRENT_USER.name);
   const saved = emailSignatureOf();
   const [sig, setSig] = React.useState(saved);
   const set = (k, v) => setSig(d => ({...d, [k]:v}));
-  const dirty = JSON.stringify(sig) !== JSON.stringify(saved), valid = !!sig.name.trim() && brandEmailOk(sig.email);
+  const rtl = signatureRtl(sig.language2);
+  const [photoError, setPhotoError] = React.useState('');
+  const photoInput = React.useRef(null);
+  const pickPhoto = (e) => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if(!f) return;
+    readSignaturePhoto(f).then(url => { setPhotoError(''); set('photo', url); }).catch(err => setPhotoError(err.message)); };
+  // A CTA is its text and its link together: one without the other can't be saved.
+  const ctaHalf = !!String(sig.ctaLabel || '').trim() !== !!String(sig.ctaUrl || '').trim();
+  const dirty = JSON.stringify(sig) !== JSON.stringify(saved), valid = !!sig.name.trim() && brandEmailOk(sig.email) && !ctaHalf;
   React.useEffect(() => setActions(<BrandActions admin={!!me && !!setData} dirty={dirty} valid={valid} onCancel={()=>setSig(saved)}
     onSave={()=>{ const mine = Object.fromEntries(Object.entries(sig).map(([k, v]) => [k, typeof v === 'string' ? v.trim() : v]));
       setData(d => ({...d, users:(d.users || []).map(u => u.id === me.id ? {...u, signature:mine} : u)})); setSig(mine); toast('Email signature saved'); }}/>),
@@ -784,8 +839,27 @@ function BrandSignatureSection({brand, toast, setActions, data, setData}){
             <UtToggle on={sig.includeLogo} onChange={(v)=>set('includeLogo', v)}/> Show the company logo
           </label>
         </Field>
-        {SIGNATURE_FIELDS.map(f => (
-          <Field key={f.key} label={f.label} required={f.required}>{brandTextField(sig[f.key], (v)=>set(f.key, v), f.placeholder, {multiline:f.multiline, invalid: f.key === 'email' && !brandEmailOk(sig.email)})}</Field>
+        <Field label="Photo">
+          <div style={{display:'flex', alignItems:'center', gap:10, paddingTop:2}}>
+            {sig.photo && <img src={sig.photo} alt="" style={{width:40, height:40, borderRadius:8, objectFit:'cover', border:`1px solid ${T.attioLine}`, flexShrink:0}}/>}
+            <input ref={photoInput} type="file" accept="image/*" onChange={pickPhoto} style={{display:'none'}}/>
+            <StSecondary label={sig.photo ? 'Replace' : 'Upload'} onClick={()=>photoInput.current && photoInput.current.click()}/>
+            {sig.photo && <StTextAction label="Remove" onClick={()=>set('photo', null)}/>}
+          </div>
+          {photoError && <div style={{fontSize:12, color:T.red, marginTop:6}}>{photoError}</div>}
+        </Field>
+        <Field label="Secondary Language">
+          <Dropdown value={sig.language2 || ''} options={signatureLanguages()} placeholder="None" ariaLabel="Secondary language" onChange={(v)=>set('language2', v || '')} controlStyle={fieldControl}/>
+        </Field>
+        {SIGNATURE_FIELDS.filter(f => !f.second || sig.language2).map(f => (
+          <React.Fragment key={f.key}>
+            <Field label={f.second ? `${f.label} (${sig.language2})` : f.label} required={f.required}><div dir={f.second && rtl ? 'rtl' : undefined} style={f.second && rtl ? {fontFamily:SIGNATURE_RTL_FONT} : undefined}>{brandTextField(sig[f.key] || '', (v)=>set(f.key, v), f.placeholder,
+              {multiline:f.multiline, invalid:(f.key === 'email' && !brandEmailOk(sig.email)) || (f.cta && ctaHalf && !String(sig[f.key] || '').trim())})}</div></Field>
+            {f.key === 'ctaUrl' && <Field label="CTA Color">
+              <input type="color" aria-label="CTA color" value={validHex(sig.ctaColor) ? sig.ctaColor : '#000000'} onChange={e=>set('ctaColor', e.target.value.toUpperCase())}
+                style={{width:36, height:32, padding:2, border:`1px solid ${T.borderStrong}`, borderRadius:8, background:'#fff', cursor:'pointer'}}/>
+            </Field>}
+          </React.Fragment>
         ))}
       </>}
       preview={

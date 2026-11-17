@@ -26,7 +26,10 @@
    as Custom HTML.
 
    The signature (2026-11-16): always personal. Every email ends with its sender's own signature,
-   as they set it in Settings → Brand → Email Signature (kept on their user, `signature`): name,
+   as they set it in Settings → Brand → Email Signature (kept on their user, `signature`; since
+   2026-11-17 also their photo, the name, designation, address and additional info in a secondary
+   language of their choice beside the first, a WhatsApp button and one CTA button; email, phone
+   and website are links): name,
    designation, email, phone, website, company address — each contact line with its icon — then
    additional info, and the company logo, shown or not. Until they set it, it's their name,
    Designation and email. It's added as the email is shown or sent, never kept in the text, so a
@@ -108,7 +111,9 @@ const brandSignatureOf = () => { const s = orgBrand().signature; return s && !s.
 const emailSignatureOf = (who) => {
   const find = (v) => v ? USER_DIRECTORY.find(u => !u.deleted && (u.id === v || u.name === v)) : null;
   const u = find(who) || find(CURRENT_USER.name) || {name:CURRENT_USER.name, email:CURRENT_USER.email, preset:CURRENT_USER.role};
-  if(u.signature) return {...SIGNATURE_BLANK, ...u.signature};
+  if(u.signature) return signatureNormal(u.signature);
+  // A CRM with a sample signature of its own (workspaces.jsx CRM_SIGNATURES): everyone's, until they save theirs.
+  if(CRM_SIGNATURES[ACTIVE_CRM.id]) return signatureNormal(CRM_SIGNATURES[ACTIVE_CRM.id]);
   const was = brandSignatureOf() || {};
   return {...SIGNATURE_BLANK, includeLogo:was.includeLogo !== false, name:u.name, designation:ownerProfileMock(u.name, u).designation || u.preset || '', email:u.email || '',
     phone:was.phone || '', website:was.website || '', address:was.address || '', additional:was.additional || ''};
@@ -128,30 +133,68 @@ const SIGNATURE_ICONS = {
   website:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/>',
   address:'<path d="M12 21.5s7-6.3 7-11.5a7 7 0 1 0-14 0c0 5.2 7 11.5 7 11.5z"/><circle cx="12" cy="10" r="2.6"/>',
 };
-const signatureIcon = (kind) => `<img src="data:image/svg+xml;charset=utf-8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#6E6E73" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${SIGNATURE_ICONS[kind]}</svg>`)}"`
+// The WhatsApp button's mark: a speech bubble with the handset in it.
+SIGNATURE_ICONS.whatsapp = `<path d="M12 2.8a9.2 9.2 0 0 0-7.9 13.9L2.8 21.2l4.6-1.2A9.2 9.2 0 1 0 12 2.8z"/><g transform="translate(7.1 6.9) scale(.42)" stroke-width="3.6">${SIGNATURE_ICONS.phone}</g>`;
+const signatureIcon = (kind, stroke = '#6E6E73') => `<img src="data:image/svg+xml;charset=utf-8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="${stroke}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${SIGNATURE_ICONS[kind]}</svg>`)}"`
   + ` width="13" height="13" alt="" style="display:block;width:13px;height:13px;border:0">`;
-/* The signature as it ends an email (marked, so it's never added twice): the logo, shown or not;
-   the name, the designation; the email, phone, website and address, each with its icon; then the
-   additional info. */
+// Where a contact line goes when clicked: the email, the phone and the website are links (the address isn't).
+const signatureHref = (kind, value) => { const v = String(value || '').trim();
+  return kind === 'email' ? `mailto:${v}` : kind === 'phone' ? `tel:${v.replace(/[^\d+]/g, '')}` : kind === 'website' ? (/^https?:\/\//i.test(v) ? v : `https://${v}`) : ''; };
+const whatsappHref = (number) => `https://wa.me/${String(number || '').replace(/\D/g, '')}`;
+// Text that reads on a button of this colour: white on a dark one, near-black on a light one.
+const signatureInk = (hex) => { const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim()); if(!m) return '#FFFFFF';
+  const n = parseInt(m[1], 16), lum = (.299 * (n >> 16) + .587 * ((n >> 8) & 255) + .114 * (n & 255)) / 255; return lum > .55 ? '#111113' : '#FFFFFF'; };
+const SIGNATURE_WHATSAPP = '#25D366', SIGNATURE_CTA = '#000000';
+/* The signature as it ends an email (marked, so it's never added twice): on the left the
+   person's photo and the logo, each shown or not; the name and the designation — in the secondary
+   language too, at the right of the same line, where given; the email, phone and website (links)
+   and the address (then in the secondary language), each with its icon; the CTA and WhatsApp
+   buttons; then the additional info (then in the secondary language). */
 function signatureEmailHtml(sig, brand){
   if(!sig) return '';
-  const muted = 'color:#6E6E73', cell = `font-family:${EMAIL_FONT};font-size:13px;line-height:1.5;color:#1D1D1F;vertical-align:middle`;
-  const line = (kind, value) => !String(value || '').trim() ? '' : `<tr><td style="padding:2px 8px 2px 0;vertical-align:top"><div style="padding-top:3px">${signatureIcon(kind)}</div></td>`
-    + `<td style="padding:2px 0;font-family:${EMAIL_FONT};font-size:13px;line-height:1.5;color:#1D1D1F;word-break:break-word">${emailLines(String(value).trim())}</td></tr>`;
-  const lines = line('email', sig.email) + line('phone', sig.phone) + line('website', sig.website) + line('address', sig.address);
-  const text = `<div style="font-weight:600">${emailEsc(sig.name)}</div>`
-    + (sig.designation ? `<div style="${muted}">${emailLines(sig.designation)}</div>` : '')
+  const has = (v) => !!String(v || '').trim();
+  const muted = 'color:#6E6E73', font = `font-family:${EMAIL_FONT};font-size:13px;line-height:1.5;color:#1D1D1F`, cell = `${font};vertical-align:middle`;
+  /* The secondary language (the person's choice; none: its fields aren't shown): beside the first
+     on the name's and designation's lines, under it for the address and the additional info. A
+     language written right to left reads so, at the right, in a plain face for its script (the
+     email font has no Arabic letters of its own). */
+  const second = has(sig.language2), rtl = second && signatureRtl(sig.language2);
+  const otherCss = rtl ? `text-align:right;font-family:${SIGNATURE_RTL_FONT}` : '', otherDir = rtl ? ' dir="rtl"' : '';
+  const other = (value, style = '') => `<div${otherDir} style="${otherCss};${style}">${emailLines(String(value).trim())}</div>`;
+  const link = (kind, value) => { const href = signatureHref(kind, value), text = emailLines(String(value).trim());
+    return href ? `<a href="${emailEsc(href)}" target="_blank" rel="noopener" style="color:#1D1D1F;text-decoration:none">${text}</a>` : text; };
+  const line = (kind, value, ar) => !has(value) && !has(ar) ? '' : `<tr><td style="padding:2px 8px 2px 0;vertical-align:top"><div style="padding-top:3px">${signatureIcon(kind)}</div></td>`
+    + `<td style="padding:2px 0;${font};word-break:break-word">${has(value) ? link(kind, value) : ''}${has(ar) ? other(ar) : ''}</td></tr>`;
+  const lines = line('email', sig.email) + line('phone', sig.phone) + line('website', sig.website) + line('address', sig.address, second && sig.address2);
+  // The name and the designation: alone, or — with the secondary language's — the first at the left and the second at the right of one line.
+  const pair = (en, ar, style) => `<tr><td style="${font};${style};vertical-align:top">${has(en) ? emailLines(String(en).trim()) : ''}</td>`
+    + `<td${otherDir} style="${font};${style};vertical-align:top;text-align:right;padding-left:28px;${rtl ? `font-family:${SIGNATURE_RTL_FONT}` : ''}">${has(ar) ? emailLines(String(ar).trim()) : ''}</td></tr>`;
+  const head = second && (has(sig.name2) || has(sig.designation2))
+    ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">${pair(sig.name, sig.name2, 'font-weight:600')}`
+      + (has(sig.designation) || has(sig.designation2) ? pair(sig.designation, sig.designation2, muted) : '') + `</table>`
+    : `<div style="font-weight:600">${emailEsc(sig.name)}</div>` + (sig.designation ? `<div style="${muted}">${emailLines(sig.designation)}</div>` : '');
+  const button = (href, label, bg, icon = '') => `<td style="padding:0 8px 0 0"><a href="${emailEsc(href)}" target="_blank" rel="noopener" style="display:inline-block;background:${bg};color:${signatureInk(bg)};`
+    + `font-family:${EMAIL_FONT};font-size:12.5px;font-weight:600;line-height:1;padding:9px 14px;border-radius:6px;text-decoration:none;white-space:nowrap">`
+    + (icon ? `<span style="display:inline-block;vertical-align:middle;margin-right:6px">${icon}</span>` : '') + `<span style="vertical-align:middle">${emailEsc(label)}</span></a></td>`;
+  const cta = has(sig.ctaLabel) && has(sig.ctaUrl) ? button(signatureHref('website', sig.ctaUrl), String(sig.ctaLabel).trim(), /^#[0-9a-f]{6}$/i.test(sig.ctaColor || '') ? sig.ctaColor : SIGNATURE_CTA) : '';
+  const whatsapp = has(sig.whatsapp) ? button(whatsappHref(sig.whatsapp), 'WhatsApp', SIGNATURE_WHATSAPP, signatureIcon('whatsapp', signatureInk(SIGNATURE_WHATSAPP))) : '';
+  const text = head
     + (lines ? `<table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-top:6px">${lines}</table>` : '')
-    + (sig.additional ? `<div style="${muted};margin-top:6px">${emailLines(sig.additional)}</div>` : '');
+    + (cta || whatsapp ? `<table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-top:10px"><tr>${cta}${whatsapp}</tr></table>` : '')
+    + (has(sig.additional) ? `<div style="${muted};margin-top:6px">${emailLines(String(sig.additional).trim())}</div>` : '')
+    + (second && has(sig.additional2) ? other(sig.additional2, `${muted};margin-top:${has(sig.additional) ? 2 : 6}px`) : '');
+  const photo = sig.photo ? `<img src="${sig.photo}" alt="${emailEsc(sig.name || '')}" width="64" height="64" style="display:block;width:64px;height:64px;border-radius:8px;object-fit:cover;border:0">` : '';
+  const logo = sig.includeLogo ? emailLogoImg(brand, 24) : '';
+  const side = photo && logo ? `${photo}<div style="height:12px;line-height:12px;font-size:0">&nbsp;</div>${logo}` : photo || logo;
   return `<table data-hof-signature="1" role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse"><tr>`
-    + (sig.includeLogo ? `<td style="padding:0 16px 0 0;border-right:2px solid #E8E8ED;vertical-align:middle">${emailLogoImg(brand, 24)}</td><td style="padding:0 0 0 16px;${cell}">` : `<td style="${cell}">`)
+    + (side ? `<td style="padding:0 16px 0 0;border-right:2px solid #E8E8ED;vertical-align:${photo ? 'top' : 'middle'}">${side}</td><td style="padding:0 0 0 16px;${cell}">` : `<td style="${cell}">`)
     + text + `</td></tr><!--/hof-signature--></table>`;
 }
 // A Simple Text Body saved with the Brand's signature in its text (before 2026-11-16), without it.
 const withoutKeptSignature = (body) => { const kept = signatureRichHtml(brandSignatureOf()), html = String(body || '');
   return kept && html.includes(kept) ? html.replace(kept, '').replace(/(<p><br><\/p>)+$/i, '') : html; };
 // An email kept as HTML (a workflow's own copy of its email), with its sender's signature in place of the one it was saved with.
-const withSenderSignature = (html, who, brand = orgBrand()) => String(html || '').replace(/<table data-hof-signature="1"[\s\S]*?(<!--\/hof-signature--><\/table>|<\/table>)/i, () => signatureEmailHtml(emailSignatureOf(who), brand));
+const withSenderSignature = (html, who, brand = orgBrand()) => String(html || '').replace(/<table data-hof-signature="1"(?:[\s\S]*?<!--\/hof-signature--><\/table>|[\s\S]*?<\/table>)/i, () => signatureEmailHtml(emailSignatureOf(who), brand));
 // Whether an HTML email already ends with the signature: ours (marked), or its name and email written in.
 const hasEmailSignature = (html, sig) => /data-hof-signature/i.test(html || '')
   || !!(sig && sig.email && html && html.toLowerCase().includes(sig.email.toLowerCase()) && html.includes(sig.name));

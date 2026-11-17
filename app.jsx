@@ -628,7 +628,9 @@ function App(){
     // (A sample user with a sample email signature and none of their own gets it — workspaces.jsx SAMPLE_SIGNATURES.)
     // The Team Lead and Sales Professional presets as defined on 2026-11-17, once (usersTeams.jsx withPresetDefaults).
     const presets0 = loaded.presetDefaults === PRESET_DEFAULTS_VERSION ? loaded.presets : withPresetDefaults(loaded.presets);
-    const base = {...loaded, users:(loaded.users || []).map(u => ({...u, ...(SEED && !u.signature && SAMPLE_SIGNATURES[u.id] ? {signature:SAMPLE_SIGNATURES[u.id]} : {}), permissions:normalizePermissions(u.permissions, levelOfPreset(u.preset))})),
+    // A CRM with a sample signature of its own (workspaces.jsx CRM_SIGNATURES): signatures saved there before it are put aside, once.
+    const crmSignature = !!CRM_SIGNATURES[ACTIVE_CRM.id], dropSignatures = crmSignature && loaded.mockSignature !== MOCK_SIGNATURE_VERSION;
+    const base = {...loaded, users:(loaded.users || []).map(u => ({...u, ...(SEED && !u.signature && SAMPLE_SIGNATURES[u.id] ? {signature:SAMPLE_SIGNATURES[u.id]} : {}), ...(dropSignatures ? {signature:null} : {}), permissions:normalizePermissions(u.permissions, levelOfPreset(u.preset))})),
       presets:(presets0 || []).map(x => ({...x, permissions:normalizePermissions(x.permissions, levelOfPreset(x.name))})), presetDefaults:PRESET_DEFAULTS_VERSION};
     // The signed-in person is one of this CRM's users (added when they aren't yet).
     // One identity per person across the Organization: the signed-in person joins under their shared name.
@@ -649,6 +651,7 @@ function App(){
       seededDeals:SAMPLE_DEALS().map(x => x.id), seededContacts:SAMPLE_CONTACTS.map(c => c.id), seededCustomers:SAMPLE_CUSTOMERS().map(c => c.id),
       ...(!v2 && saved.emailTemplates ? {emailTemplates:saved.emailTemplates} : {}),
       ...(SEED ? {mockPersonas:MOCK_PERSONAS_VERSION, mockEnrollGroup:1, mockPersonaRecords:1} : {}),
+      ...(crmSignature ? {mockSignature:MOCK_SIGNATURE_VERSION} : {}),
       // The sample email templates and sequences, once (workflows.jsx withMockEmails).
       ...(SEED && loaded.mockEmails !== MOCK_EMAILS_VERSION ? withMockEmails(loaded) : {})});
   });
