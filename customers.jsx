@@ -80,16 +80,16 @@ const migrateCustomer = (c, pipelines, deals = []) => {
 
 const CUSTOMER_TABS = [
   {id:'overview', label:'Overview',         icon:'overview',    list:false},
-  {id:'profile',  label:'Customer Profile', icon:'profile',     list:false},
   {id:'calls',    label:'Calls',            icon:'call',        list:true},
   {id:'notes',    label:'Notes',            icon:'notepad',     list:true},
   {id:'email',    label:'Emails',            icon:'envelope',    list:true},
   {id:'tasks',    label:'Tasks',            icon:'tasks',       list:true},
   {id:'meetings', label:'Meetings',         icon:'videoCamera', list:true},
-  {id:'files',    label:'Files',            icon:'folder',      list:true},
   {id:'quotes',   label:'Quotes',           icon:'quote',       list:true},
-  {id:'documents', label:'Documents',       icon:'files',    list:true},
   {id:'accounting', label:'Accounting',     icon:'coins',       list:false},
+  {id:'files',    label:'Files',            icon:'folder',      list:true},
+  {id:'profile',  label:'Customer Profile', icon:'profile',     list:false},
+  {id:'documents', label:'Documents',       icon:'files',    list:true},
   {id:'contacts', label:'Contacts',         icon:'contacts',    list:true},
   {id:'deals',    label:'Deals',            icon:'deals',       list:true},
 ];
@@ -342,8 +342,7 @@ function CustomerDetail({mode, customer, view, acts, contact, contacts = [], dea
         onQuick={onQuick} onOpenDeal={onOpenDeal} onOpenContact={onOpenContact} onStub={onStub} onCopied={onCopied}/>}
       workspace={<ContactWorkspace contact={view} acts={acts} onStub={onStub} requestedTab={requestedTab}
         team={team} onUpdateActivity={onUpdateActivity} onAddActivity={onAddActivity} onReassignOwner={onReassignOwner}
-        tabs={CUSTOMER_TABS.filter(t => workspaceHasType(t.id === 'contacts' ? 'contacts' : t.id === 'deals' ? 'deals' : 'customers'))
-          .map(t => t.id === 'deals' ? {...t, label:typePlural('deals', 'Deals')} : t)} renderTab={renderTab} activityViews={activityViews}/>}/>
+        tabs={recordWorkspaceTabs('customers')} renderTab={renderTab} activityViews={activityViews}/>}/>
   );
 }
 

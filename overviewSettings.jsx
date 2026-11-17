@@ -1,6 +1,8 @@
-/* HOF Pulse ERP — Overview View Settings (Contacts, Deals, Customers).
+/* HOF Pulse ERP — a record's View Settings (Contacts, Deals, Customers).
 
-   The Overview tab's View Settings button (Highlights section) opens Highlight Settings: exactly
+   View Settings sits in a record's full-page top bar, beside Back to side panel. Tab Settings: the
+   workspace tabs' order and which show (drag, untick); Overview is always first and always shown.
+   Highlight Settings: exactly
    four properties pinned to Highlights, picked from a grouped, searchable pool — Record Properties
    (the record type's own), Customer Profile Properties (every profile template's fields, by
    template) and Accounting Properties (system-generated, read-only). (Snapshots were removed: the
@@ -28,10 +30,36 @@ const HIGHLIGHT_RENAMED = {'acc:nextInstallment':'acc:nextInstallmentDueDate'};
 // (HOF Partners has no Canada CRS form and no Customer Status).
 function overviewSettingsOf(hub, object){
   const saved = ((hub && hub.overviewSettings) || {})[object] || {};
-  if(saved.pinned) return {pinned:saved.pinned.map(id => HIGHLIGHT_RENAMED[id] || id)};
+  const tabs = saved.tabs || null;
+  if(saved.pinned) return {pinned:saved.pinned.map(id => HIGHLIGHT_RENAMED[id] || id), tabs};
   const have = new Set(highlightPool(hub, null, object).flatMap(c => c.groups.flatMap(g => g.items.map(it => it.id))));
-  return {pinned:(OVERVIEW_DEFAULT_PINNED[object] || []).filter(id => have.has(id))};
+  return {pinned:(OVERVIEW_DEFAULT_PINNED[object] || []).filter(id => have.has(id)), tabs};
 }
+
+/* A record type's workspace tabs (contactDetail.jsx CONTACT_TABS, dealDetail.jsx DEAL_TABS,
+   customers.jsx CUSTOMER_TABS — each in its default order), only those of record types this CRM has. */
+function recordWorkspaceTabs(object){
+  if(object === 'deals') return DEAL_TABS.filter(t => workspaceHasType('contacts') || t.id !== 'contacts');
+  if(object === 'customers') return CUSTOMER_TABS.filter(t => workspaceHasType(t.id === 'contacts' ? 'contacts' : t.id === 'deals' ? 'deals' : 'customers'))
+    .map(t => t.id === 'deals' ? {...t, label:typePlural('deals', 'Deals')} : t);
+  return CONTACT_TABS;
+}
+/* Tab Settings: the saved order and which tabs show ([{id, enabled}]), applied to `tabs`.
+   Overview is always first and always shown; a tab the setting doesn't name yet keeps its
+   default place after the named ones. */
+function arrangeRecordTabs(tabs, saved){
+  const overview = tabs.filter(t => t.id === 'overview'), rest = tabs.filter(t => t.id !== 'overview');
+  if(!saved || !saved.length) return [...overview, ...rest];
+  const at = (id) => { const i = saved.findIndex(s => s.id === id); return i < 0 ? saved.length : i; };
+  const off = new Set(saved.filter(s => s.enabled === false).map(s => s.id));
+  return [...overview, ...rest.map((t, i) => ({t, i})).sort((x, y) => at(x.t.id) - at(y.t.id) || x.i - y.i).map(x => x.t).filter(t => !off.has(t.id))];
+}
+// The Tab Settings list: every tab but Overview, in its arranged order, with whether it shows.
+const tabSettingsList = (tabs, saved) => {
+  const shown = new Set(arrangeRecordTabs(tabs, saved).map(t => t.id));
+  const order = arrangeRecordTabs(tabs, (saved || []).map(s => ({...s, enabled:true})));
+  return order.filter(t => t.id !== 'overview').map(t => ({id:t.id, enabled:shown.has(t.id)}));
+};
 
 // The pool, grouped: [{id, label, groups:[{label?, items:[{id, label}]}]}].
 function highlightPool(hub, forms, object){
@@ -104,31 +132,45 @@ function HighlightCard({id, item, object, ctx}){
     : kpiText(text)}/>;
 }
 
-/* Highlights on a record's Overview: the record type's four pinned properties, and View Settings. */
+/* Highlights on a record's Overview: the record type's four pinned properties. */
 function RecordHighlights({object, record, view, acts, contact}){
   const hub = useRecordHub();
   const store = useProfileForms();
-  const [open, setOpen] = React.useState(false);
   const settings = overviewSettingsOf(hub, object);
   const pool = highlightPool(hub, store.forms, object);
   const ctx = {record, view: view || record, acts: acts || [], contact};
   return (
     <section>
-      <SectionHeader title="Highlights" right={<ViewSettingsButton onClick={()=>setOpen(true)}/>}/>
+      <SectionHeader title="Highlights"/>
       <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(min(180px, 100%), 1fr))', gap:12}}>
         {settings.pinned.map(id => <HighlightCard key={id} id={id} item={poolItem(pool, id)} object={object} ctx={ctx}/>)}
       </div>
-      {open && <OverviewSettingsModal object={object} pool={pool} settings={settings} onClose={()=>setOpen(false)}
-        onApply={(next)=>{ hub.setOverviewSettings(s => ({...(s || {}), [object]:next})); setOpen(false); }}/>}
     </section>
   );
 }
 
-const OVERVIEW_SETTINGS_SECTIONS = {highlights:'Highlight Settings'};
+/* A record's full page, top bar (beside Back to side panel): View Settings — Highlight Settings
+   and Tab Settings, per record type. */
+function RecordViewSettings({object}){
+  const hub = useRecordHub();
+  const store = useProfileForms();
+  const [open, setOpen] = React.useState(false);
+  return <>
+    <ViewSettingsButton onClick={()=>setOpen(true)}/>
+    {open && <OverviewSettingsModal object={object} pool={highlightPool(hub, store.forms, object)} settings={overviewSettingsOf(hub, object)}
+      tabs={recordWorkspaceTabs(object)} onClose={()=>setOpen(false)}
+      onApply={(next)=>{ hub.setOverviewSettings(s => ({...(s || {}), [object]:next})); setOpen(false); }}/>}
+  </>;
+}
+
+const OVERVIEW_SETTINGS_SECTIONS = {highlights:'Highlight Settings', tabs:'Tab Settings'};
 const poolGroupLabel = {fontSize:11, fontWeight:600, letterSpacing:.4, color:T.gray400, textTransform:'uppercase', padding:'14px 6px 4px'};
 
-function OverviewSettingsModal({object, pool, settings, onApply, onClose}){
+function OverviewSettingsModal({object, pool, settings, tabs = [], onApply, onClose}){
   const [section, setSection] = React.useState('highlights');
+  // Tab Settings: every tab but Overview (always first, always shown) — drag to reorder, untick to hide.
+  const tabList = (d) => tabSettingsList(tabs, d.tabs);
+  const tabLabel = (id) => (tabs.find(t => t.id === id) || {}).label || id;
   const [query, setQuery] = React.useState('');
   const [draft, setDraft] = React.useState(() => JSON.parse(JSON.stringify(settings)));
   const q = query.trim().toLowerCase();
@@ -146,7 +188,7 @@ function OverviewSettingsModal({object, pool, settings, onApply, onClose}){
       <SettingsCheckRow label={it.label} checked={on} onToggle={()=>!off && toggle(it.key)}/></div>; };
 
   return (
-    <SettingsModalShell title="Highlight Settings" sections={OVERVIEW_SETTINGS_SECTIONS} order={[]} onReorder={()=>{}} fixed={['highlights']}
+    <SettingsModalShell title="View Settings" sections={OVERVIEW_SETTINGS_SECTIONS} order={[]} onReorder={()=>{}} fixed={['highlights', 'tabs']}
       section={section} onSection={(id)=>{ setSection(id); setQuery(''); }} onClose={onClose}
       onApply={()=>ready && onApply(draft)} applyDisabled={!ready}
       footerNote={section === 'highlights' || !ready ? `${pinned.length} of ${HIGHLIGHT_COUNT} pinned${ready ? '' : ` · pin exactly ${HIGHLIGHT_COUNT} to apply`}` : null}
@@ -192,8 +234,14 @@ function OverviewSettingsModal({object, pool, settings, onApply, onClose}){
         {!shown.length && !extMatches && <div style={{fontSize:12.5, color:T.gray400, padding:'8px 6px'}}>No properties match "{query}"</div>}
       </>)}
 
+      {section === 'tabs' && (<>
+        <div style={{opacity:.55, paddingLeft:24}}><SettingsCheckRow label={tabLabel('overview')} checked onToggle={()=>{}}/></div>
+        <DragCheckList items={tabList(draft)} labelOf={it => tabLabel(it.id)}
+          onChange={(fn)=>setDraft(d => ({...d, tabs:fn(tabList(d))}))}/>
+      </>)}
+
     </SettingsModalShell>
   );
 }
 
-Object.assign(window, {RecordHighlights, OverviewSettingsModal, overviewSettingsOf, HIGHLIGHT_COUNT});
+Object.assign(window, {RecordHighlights, RecordViewSettings, OverviewSettingsModal, overviewSettingsOf, recordWorkspaceTabs, arrangeRecordTabs, HIGHLIGHT_COUNT});

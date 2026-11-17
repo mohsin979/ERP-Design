@@ -95,7 +95,8 @@ const RECORD_TAB_PRIMARY = {
    `store`: {state, setState} — the module's chosen feed per tab; `sources.own`: the record's own
    rows; `render(acts, emptyText, recordOf)`: the activity list — `recordOf(act)` ({object,
    record}) on an associated feed, naming the record each activity is on. */
-function ActivityViewsArea({tabId, store, sources, schema, controls, render}){
+/* `heading`: a section title above the views (Overview: Activity, as Highlights above it). */
+function ActivityViewsArea({tabId, store, sources, schema, controls, render, heading}){
   const hub = useRecordHub(), ra = useRecordAccess();
   const ownObject = ra ? ra.object : 'contacts';
   const feeds = activityFeeds(tabId);
@@ -128,6 +129,8 @@ function ActivityViewsArea({tabId, store, sources, schema, controls, render}){
       <div style={{flex:1, minHeight:0, display:'flex', flexDirection:'column'}}>
         {/* Meetings: the first level as tabs, the record feeds as the toolbar's pills. Email: the
             first level as the pills, the record feeds as the second row. */}
+        {/* The toolbar's own top padding stands in for the header's gap, as under Highlights. */}
+        {heading && <div style={{padding:'20px 24px 0', marginBottom:-12}}><SectionHeader title={heading}/></div>}
         {primary && primary.tabs && <PrimaryTabs inset="settings" items={primary.views} active={level} onSelect={setLevel}/>}
         <RecordToolbar inset="settings" views={primary && !primary.tabs ? primary.views : feeds} activeViewId={primary && !primary.tabs ? level : feedId}
           onSelectView={primary && !primary.tabs ? setLevel : setFeed} controls={controls}

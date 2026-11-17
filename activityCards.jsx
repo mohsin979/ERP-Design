@@ -1006,7 +1006,7 @@ function ActivityTab({tabId, contact, acts, allActs, team, adding, setAdding, pr
   const closeEmail = (result, id) => { setAdding(a => a === 'Email' ? null : a); setCompose(null); if(id) setSelectedId(id); };
   return (
     <ComposeHostCtx.Provider value={{compose:setCompose}}>
-    <div style={{display:'flex', flex:1, minHeight:0, height:'100%', position:'relative'}}>
+    <div style={{display:'flex', flex:1, minWidth:0, minHeight:0, height:'100%', position:'relative'}}>
       {/* Tasks: the Tasks module's board — In Progress, Overdue, Completed — for this record's tasks
           (and its associated records' on their feeds); a task opens in a side panel. */}
       {tabId === 'tasks' ? (() => {

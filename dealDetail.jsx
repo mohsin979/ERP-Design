@@ -23,19 +23,19 @@
    owner is the contact's owner or another user. After it's saved, a contact without a Customer
    Profile is offered one (ProfilePromptModal). */
 
-/* Workspace tabs, in order. */
+/* Workspace tabs, in the default order (View Settings → Tab Settings may change it; overviewSettings.jsx). */
 const DEAL_TABS = [
   {id:'overview', label:'Overview',         icon:'overview',    list:false},
-  {id:'profile',  label:'Customer Profile', icon:'profile',     list:false},
   {id:'calls',    label:'Calls',            icon:'call',        list:true},
   {id:'notes',    label:'Notes',            icon:'notepad',     list:true},
   {id:'email',    label:'Emails',            icon:'envelope',    list:true},
   {id:'tasks',    label:'Tasks',            icon:'tasks',       list:true},
   {id:'meetings', label:'Meetings',         icon:'videoCamera', list:true},
-  {id:'files',    label:'Files',            icon:'folder',      list:true},
   {id:'quotes',   label:'Quotes',           icon:'quote',       list:true},
-  {id:'documents', label:'Documents',       icon:'files',    list:true},
   {id:'accounting', label:'Accounting',     icon:'coins',       list:false},
+  {id:'files',    label:'Files',            icon:'folder',      list:true},
+  {id:'profile',  label:'Customer Profile', icon:'profile',     list:false},
+  {id:'documents', label:'Documents',       icon:'files',    list:true},
   {id:'contacts', label:'Contacts',         icon:'contacts',    list:true},
   {id:'customers', label:'Customers',       icon:'customers',   list:true},
 ];
@@ -303,7 +303,7 @@ function DealDetail({mode, deal, view, acts, contact, contacts = contact ? [cont
         onQuick={onQuick} onOpenContact={onOpenContact} onOpenCustomer={onOpenCustomer} onStub={onStub} onCopied={onCopied}/>}
       workspace={<ContactWorkspace contact={view} acts={acts} onStub={onStub} requestedTab={requestedTab}
         team={team} onUpdateActivity={onUpdateActivity} onAddActivity={onAddActivity} onReassignOwner={onReassignOwner}
-        tabs={DEAL_TABS.filter(t => workspaceHasType('contacts') || t.id !== 'contacts')} renderTab={renderTab} activityViews={activityViews}/>}/>
+        tabs={recordWorkspaceTabs('deals')} renderTab={renderTab} activityViews={activityViews}/>}/>
   );
 }
 

@@ -9,6 +9,10 @@
                      and expands from again (Open Full Screen). While it's open, another record
                      clicked in the list takes its place in the side panel.
 
+   The full page's top bar holds View Settings (Highlight Settings, Tab Settings — the tabs' order
+   and which show). The tab bar shows as many tabs as fit and puts the rest under "<n> More", a
+   dropdown; the open tab always stays in the bar.
+
    The body (header, quick actions, Summary/activity section, Contact Properties) is a single
    component rendered in both, so the two can't drift apart. Layout follows the Attio record
    page; styling is the product's own. */
@@ -351,39 +355,92 @@ const barIconBtn = {
 
 /* ── Full screen ────────────────────────────────────────────────────────────────────────── */
 
-/* Workspace tabs, in the specified order. `list` marks tabs that will hold lists of records;
-   only those get Search and Filter. Tab content, search/filter behaviour, reordering and
-   adding/removing tabs are all not defined yet. */
+/* Workspace tabs, in the default order (each record type's View Settings → Tab Settings may
+   reorder and hide them; Overview stays first). `list` marks tabs that hold lists of records;
+   only those get Search and Filter. */
 const CONTACT_TABS = [
   {id:'overview', label:'Overview',         icon:'overview', list:false},
-  {id:'profile',  label:'Customer Profile', icon:'profile',  list:false},
   {id:'calls',    label:'Calls',            icon:'call',     list:true},
   {id:'notes',    label:'Notes',            icon:'notepad',  list:true},
   {id:'email',    label:'Emails',            icon:'envelope', list:true},
   {id:'tasks',    label:'Tasks',            icon:'tasks',    list:true},
   {id:'meetings', label:'Meetings',         icon:'videoCamera', list:true},
-  {id:'files',    label:'Files',            icon:'folder',   list:true},
   {id:'quotes',   label:'Quotes',           icon:'quote',    list:true},
-  {id:'documents', label:'Documents',       icon:'files',    list:true},
   {id:'accounting', label:'Accounting',     icon:'coins',    list:false},
+  {id:'files',    label:'Files',            icon:'folder',   list:true},
+  {id:'profile',  label:'Customer Profile', icon:'profile',  list:false},
+  {id:'documents', label:'Documents',       icon:'files',    list:true},
   {id:'deals',    label:'Deals',            icon:'deals',    list:true},
   {id:'customers', label:'Customers',       icon:'customers', list:true},
 ];
 
-function WorkspaceTab({tab, active, onClick}){
+/* `more`: the bar's "<n> More" — semibold, no icon, a chevron, and no underline (it isn't a tab). */
+function WorkspaceTab({tab, active, onClick, more, open}){
   const [h, setH] = React.useState(false);
   return (
     <button onClick={onClick} onMouseEnter={()=>setH(true)} onMouseLeave={()=>setH(false)}
       style={{
         display:'flex', alignItems:'center', gap:6, padding:'12px 10px', border:'none', background:'transparent',
         cursor:'pointer', whiteSpace:'nowrap', fontSize:13, flexShrink:0, marginBottom:-1,
-        color: active ? T.attioText : h ? T.gray800 : T.attioMuted, fontWeight: active ? 600 : 400,
+        color: active || open || more ? T.attioText : h ? T.gray800 : T.attioMuted, fontWeight: active || more ? 600 : 400,
         borderBottom:`2px solid ${active ? T.attioText : 'transparent'}`,
       }}>
-      <Icon name={tab.icon} size={14} color={active ? T.attioText : T.attioMuted}/>{tab.label}
-      {/* An open workflow violation resolved in this tab (workflowEngine.jsx). */}
-      <ViolationMark tab={tab.id}/>
+      {more ? <>{tab.label}<Icon name="chevDown" size={T.chevronSize} color={T.attioMuted} style={{transform: open ? 'rotate(180deg)' : 'none'}}/></>
+        : <><Icon name={tab.icon} size={14} color={active ? T.attioText : T.attioMuted}/>{tab.label}
+          {/* An open workflow violation resolved in this tab (workflowEngine.jsx). */}
+          <ViolationMark tab={tab.id}/></>}
     </button>
+  );
+}
+
+/* The workspace's tab bar: as many tabs as fit, in order, and the rest under "<n> More" — a
+   dropdown that opens the one picked. The open tab always stays in the bar. */
+const WORKSPACE_TAB_GAP = 2, WORKSPACE_MORE_W = 96;
+function WorkspaceTabBar({tabs, activeId, onPick}){
+  const barRef = React.useRef(null), measureRef = React.useRef(null);
+  const [width, setWidth] = React.useState(0);
+  const [widths, setWidths] = React.useState({});
+  const [open, setOpen] = React.useState(false);
+  React.useLayoutEffect(()=>{
+    const el = barRef.current; if(!el) return;
+    const ro = new ResizeObserver(() => setWidth(el.clientWidth));
+    ro.observe(el); setWidth(el.clientWidth);
+    return () => ro.disconnect();
+  }, []);
+  // Each tab's width, measured off-screen at its widest (as the open tab).
+  const key = tabs.map(t => `${t.id}:${t.label}`).join('|');
+  React.useLayoutEffect(()=>{
+    const m = measureRef.current; if(!m) return;
+    const next = {}; [...m.children].forEach(c => { next[c.dataset.id] = c.offsetWidth; });
+    setWidths(next);
+  }, [key]);
+  const w = (t) => (widths[t.id] || 0) + WORKSPACE_TAB_GAP;
+  const avail = width - 24;
+  let visible = tabs;
+  if(width && Object.keys(widths).length && tabs.reduce((s, t) => s + w(t), 0) > avail){
+    const room = avail - WORKSPACE_MORE_W, active = tabs.find(t => t.id === activeId);
+    const keep = new Set(active ? [active.id] : []);
+    let used = active ? w(active) : 0;
+    for(const t of tabs){ if(keep.has(t.id)) continue; if(used + w(t) > room) break; used += w(t); keep.add(t.id); }
+    visible = tabs.filter(t => keep.has(t.id));
+  }
+  const more = tabs.filter(t => !visible.includes(t));
+  React.useEffect(()=>{ if(!more.length) setOpen(false); }, [more.length]);
+  return (
+    <div ref={barRef} style={{position:'relative', display:'flex', gap:WORKSPACE_TAB_GAP, padding:'0 12px', borderBottom:`1px solid ${T.border}`, flexShrink:0, minWidth:0}}>
+      {visible.map(t => <WorkspaceTab key={t.id} tab={t} active={t.id === activeId} onClick={()=>onPick(t.id)}/>)}
+      {more.length > 0 && (
+        <div onMouseDown={e=>e.stopPropagation()} style={{position:'relative', flexShrink:0, display:'flex'}}>
+          <WorkspaceTab tab={{id:'more', label:`${more.length} More`}} more open={open} onClick={()=>setOpen(o => !o)}/>
+          <MenuShell open={open} onClose={()=>setOpen(false)} anchorRight width={220}>
+            {more.map(t => <MenuItem key={t.id} icon={<Icon name={t.icon} size={14} color={T.attioMuted}/>} label={t.label} onClick={()=>{ onPick(t.id); setOpen(false); }}/>)}
+          </MenuShell>
+        </div>
+      )}
+      <div ref={measureRef} aria-hidden="true" style={{position:'absolute', top:0, left:0, height:0, width:'max-content', overflow:'hidden', visibility:'hidden', pointerEvents:'none', display:'flex'}}>
+        {tabs.map(t => <div key={t.id} data-id={t.id} style={{flexShrink:0, display:'flex'}}><WorkspaceTab tab={t} active onClick={()=>{}}/></div>)}
+      </div>
+    </div>
   );
 }
 
@@ -395,10 +452,15 @@ function WorkspaceTab({tab, active, onClick}){
 /* `activityViews` ({store, names, sources, schemaFor(tabId)}): the activity tabs get saved views,
    search and filters (ActivityViewsArea, activityViews.jsx) over the record's own and associated
    activity; without it they list the record's own activity, as before. */
-function ContactWorkspace({contact, acts, onStub, onCall, onCreateProfile, profiles, requestedTab, team, onUpdateActivity, onAddActivity, onReassignOwner, tabs = CONTACT_TABS, renderTab, activityViews}){
+function ContactWorkspace({contact, acts, onStub, onCall, onCreateProfile, profiles, requestedTab, team, onUpdateActivity, onAddActivity, onReassignOwner, tabs:allTabs = CONTACT_TABS, renderTab, activityViews}){
+  const hub = useRecordHub(), ra = useRecordAccess();
+  // The tabs in the order View Settings → Tab Settings gives the record type, hidden ones left out.
+  const tabs = arrangeRecordTabs(allTabs, (((hub && hub.overviewSettings) || {})[ra ? ra.object : 'contacts'] || {}).tabs);
   const [tabId, setTabId] = React.useState(requestedTab ? requestedTab.id : 'overview');
   const [q, setQ] = React.useState('');
-  const tab = tabs.find(t => t.id === tabId) || tabs[0];
+  // A hidden tab opened from elsewhere (a violation, a saved Customer Profile) still opens, and shows in the bar while open.
+  const tab = allTabs.find(t => t.id === tabId) || tabs[0];
+  const barTabs = tabs.some(t => t.id === tab.id) ? tabs : [...tabs, tab];
   // Activity tabs: the item being added (Note, Log Call, Task), if any, and what its form starts with.
   const [adding, setAdding] = React.useState(null);
   const [prefill, setPrefill] = React.useState(null);
@@ -408,7 +470,6 @@ function ContactWorkspace({contact, acts, onStub, onCall, onCreateProfile, profi
   const actTabId = overview ? 'activity' : tab.id;
   const isActivityTab = actTabId in ACTIVITY_TAB_TYPES;
   const actLabel = overview ? 'Activity' : tab.label;
-  const hub = useRecordHub(), ra = useRecordAccess();
   const pickAdd = (o, start) => {
     if(o === 'Call') return onCall ? onCall(contact) : hub && ra && hub.startCall({object:ra.object, id:ra.record.id});   // the call window
     // Email: the composer as this tab's creation panel (emails.jsx); elsewhere at the CRM's right edge.
@@ -428,9 +489,7 @@ function ContactWorkspace({contact, acts, onStub, onCall, onCreateProfile, profi
   }, [requestedTab && requestedTab.nonce]);
   return (
     <div style={{flex:1, minWidth:0, display:'flex', flexDirection:'column'}}>
-      <div style={{display:'flex', gap:2, padding:'0 12px', borderBottom:`1px solid ${T.border}`, overflowX:'auto', flexShrink:0}}>
-        {tabs.map(t => <WorkspaceTab key={t.id} tab={t} active={t.id === tab.id} onClick={()=>setTabId(t.id)}/>)}
-      </div>
+      <WorkspaceTabBar tabs={barTabs} activeId={tab.id} onPick={setTabId}/>
       {overview && (
         <div style={{padding:'20px 24px 16px', flexShrink:0, borderBottom:`1px solid ${T.border}`}}>
           <RecordHighlights object={ra ? ra.object : 'contacts'} record={ra ? ra.record : contact} view={contact} acts={acts}
@@ -461,7 +520,7 @@ function ContactWorkspace({contact, acts, onStub, onCall, onCreateProfile, profi
             onCreate={(templateId)=>onCreateProfile && onCreateProfile(contact, templateId)} onStub={onStub}/>
         </div>
       ) : isActivityTab && activityViews ? (
-        <ActivityViewsArea tabId={actTabId} store={activityViews.store} sources={activityViews.sources}
+        <ActivityViewsArea tabId={actTabId} store={activityViews.store} sources={activityViews.sources} heading={overview ? 'Activity' : null}
           schema={activityViews.schemaFor(actTabId)} controls={<ActivityAddButton tabId={actTabId} onPick={pickAdd}/>}
           render={(shown, emptyText, recordOf) => (
             <div style={{flex:1, minHeight:0, display:'flex', overflow:'hidden'}}>
@@ -719,6 +778,7 @@ function OwnerProfilePanel({name, onClose, user: userProp, editable, onSaveProfi
 function ContactDetail({mode, contact, acts, properties, panelProperties, onClose, onExpand, onCollapse, onStub, onCopied, actions, profiles, requestedTab, panelSettings, onOpenPanelSettings, team, onUpdateActivity, onAddActivity, onReassignOwner,
                         backLabel = 'Contacts', renderName, menu, body, workspace, activityViews}){
   const full = mode === 'full';
+  const ra = useRecordAccess();
   const [entered, setEntered] = React.useState(false);
   React.useEffect(()=>{
     // Two frames so the off-screen start position is painted before the slide begins.
@@ -753,19 +813,21 @@ function ContactDetail({mode, contact, acts, properties, panelProperties, onClos
       boxShadow: full ? 'none' : '-12px 0 32px rgba(16,24,40,.10)',
       display:'flex', flexDirection:'column',
     }}>
-      {/* Full-screen top bar: breadcrumb, then Collapse and Close at the top right. Present in
+      {/* Full-screen top bar: breadcrumb, then View Settings, Collapse and Close at the top right. Present in
           both modes, opening to its height as the panel expands. */}
       <div aria-hidden={!full} style={{
         height: full ? 49 : 0, opacity: full ? 1 : 0, overflow:'hidden', flexShrink:0,
         transition: `${t('height')}, ${t('opacity')}`, pointerEvents: full ? 'auto' : 'none',
         borderBottom:`1px solid ${full ? T.border : 'transparent'}`,
       }}>
-        <div style={{display:'flex', alignItems:'center', gap:8, padding:'10px 16px'}}>
+        <div style={{display:'flex', alignItems:'center', gap:8, height:48, padding:'0 16px'}}>
           <button onClick={onClose} style={{display:'flex', alignItems:'center', gap:6, border:'none', background:'transparent', cursor:'pointer', fontSize:13, color:T.gray600, padding:'4px 6px', borderRadius:6}}>
             <Icon name="arrowLeft" size={14} color={T.gray600}/> {backLabel}
           </button>
           <span style={{fontSize:13, color:T.attioFaint}}>/</span>
           <span style={{fontSize:13, color:T.attioText, fontWeight:500, flex:1, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{contact.name}</span>
+          {/* View Settings: the record type's Highlights and tabs (overviewSettings.jsx). */}
+          <RecordViewSettings object={ra ? ra.object : 'contacts'}/>
           <button title="Back to side panel" onClick={onCollapse} style={barIconBtn}><Icon name="collapse" size={15} color={T.gray600}/></button>
           <button title="Close" onClick={onClose} style={barIconBtn}><Icon name="close" size={13} color={T.gray600}/></button>
         </div>
