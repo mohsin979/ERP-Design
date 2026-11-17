@@ -394,7 +394,7 @@ function FormConnectionsModal({form, saved, onClose, onToggle, onSetLink, onSimu
                   {on && (
                     <div style={{display:'flex', alignItems:'baseline', gap:8, marginTop:2, minWidth:0}}>
                       {on.link && <span title={on.link} style={{fontSize:12, color:T.attioMuted, minWidth:0, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{on.link}</span>}
-                      {!(linking && linking.id === c.id) && <button onClick={()=>setLinking({id:c.id, value:on.link || ''})} style={{...formTextAction, fontSize:12, flexShrink:0}}>{on.link ? 'Edit Link' : 'Add Link'}</button>}
+                      {!(linking && linking.id === c.id) && <button onClick={()=>setLinking({id:c.id, value:on.link || ''})} className={LINK_CLASS} style={{...formTextAction, fontSize:12, flexShrink:0}}>{on.link ? 'Edit Link' : 'Add Link'}</button>}
                     </div>
                   )}
                 </div>
@@ -458,9 +458,8 @@ function ShareMark({size = 14, color = T.gray600}){
     </svg>
   );
 }
-// A text action, underlined (Edit connection, the submissions count).
-const formTextAction = {border:'none', background:'transparent', padding:0, fontFamily:'inherit', fontSize:13, color:T.attioText, cursor:'pointer',
-  textDecorationLine:'underline', textUnderlineOffset:2};
+// A text action, underlined (Edit connection, the submissions count) — with LINK_CLASS.
+const formTextAction = {border:'none', background:'transparent', padding:0, fontFamily:'inherit', fontSize:13, color:T.attioText, cursor:'pointer'};
 function FormDetailPanel({form, menuItems, onClose, onEdit, onConnections, onPreview, onPublish}){
   const hub = useRecordHub();
   const connected = formConnectedNames(form);
@@ -485,7 +484,7 @@ function FormDetailPanel({form, menuItems, onClose, onEdit, onConnections, onPre
           <Field label="Connections">
             <div style={{display:'flex', flexWrap:'wrap', alignItems:'baseline', gap:'4px 10px', paddingTop:7}}>
               {connected.length > 0 && <span style={{fontSize:13, color:T.attioText}}>{connected.join(', ')}</span>}
-              <button onClick={onConnections} style={formTextAction}>{connected.length ? 'Edit Connection' : 'Add Connection'}</button>
+              <button onClick={onConnections} className={LINK_CLASS} style={formTextAction}>{connected.length ? 'Edit Connection' : 'Add Connection'}</button>
             </div>
           </Field>
           <Field label="Created by"><ReadValue>{form.createdBy}</ReadValue></Field>

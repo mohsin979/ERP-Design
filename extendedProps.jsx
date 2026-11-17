@@ -1,5 +1,6 @@
-/* HOF Pulse ERP — Customer Profile Properties and Accounting Properties wherever a record's
-   properties are picked: filters, table columns, cards and the Overview's Highlights.
+/* HOF Pulse ERP — Customer Profile Properties, Accounting Properties and Form Properties
+   wherever a record's properties are picked: filters, table columns, cards and the Overview's
+   Highlights (and workflow conditions, workflowEngine.jsx).
 
    One definition of each — no copies:
      Customer Profile Properties  the Customer Profile forms' fields (customerProfile.jsx),
@@ -8,14 +9,20 @@
                                   is its contact's).
      Accounting Properties        ACCOUNTING_TRIGGER_FIELDS (workflowEngine.jsx — the workflows'
                                   and filters' list), read from the record's Payment Plans.
-   Keys: 'pf:<form id>:<field id>', 'acc:<accounting key>'. Values are read-only here (profile
+     Form Properties              (2026-11-17) Marketing → Forms: each form's fields, grouped by
+                                  form, and Submission Source; a record's value is the answer in
+                                  the submission that created it (workflowEngine.jsx
+                                  recordFormSubmission) — empty for a record no form created.
+                                  (Form Name and Form Submission Date are record properties.)
+   Keys: 'pf:<form id>:<field id>', 'acc:<accounting key>', 'fm:<form id>:<field id>', 'fm:source'. Values are read-only here (profile
    answers are edited in the Customer Profile tab or Highlights).
 
    Picking: dropdowns (Filter by) open each group as a submenu; settings lists (Table settings,
    Card settings, Highlights) show each group as an accordion, a profile form a sub-group. */
 
-const EXT_PROFILE_LABEL = 'Customer Profile Properties', EXT_ACCOUNTING_LABEL = 'Accounting Properties';
-const isExtendedKey = (k) => typeof k === 'string' && /^(pf|acc):/.test(k);
+const EXT_PROFILE_LABEL = 'Customer Profile Properties', EXT_ACCOUNTING_LABEL = 'Accounting Properties', EXT_FORM_LABEL = 'Form Properties';
+const isExtendedKey = (k) => typeof k === 'string' && /^(pf|acc|fm):/.test(k);
+const liveForms = () => ((typeof WF_LIVE !== 'undefined' && WF_LIVE.forms) || []).filter(f => !f.deleted);
 
 // The groups: [{id, label, groups:[{id, label, items:[{key, label, group}]}]}].
 function extendedPropertyGroups(){
@@ -25,6 +32,8 @@ function extendedPropertyGroups(){
       items:(f.fields || []).filter(x => x.label).map(x => ({key:`pf:${f.id}:${x.id}`, label:x.label, group:f.name}))})).filter(g => g.items.length)},
     {id:'accounting', label:EXT_ACCOUNTING_LABEL, groups:[{id:'accounting', label:null,
       items:ACCOUNTING_TRIGGER_FIELDS.map(a => ({key:`acc:${a.key}`, label:a.label, group:null}))}]},
+    {id:'form', label:EXT_FORM_LABEL, groups:[{id:'form', label:null, items:[{key:'fm:source', label:'Submission Source', group:null}]},
+      ...liveForms().map(f => ({id:f.id, label:f.name, items:(f.fields || []).filter(x => x.label).map(x => ({key:`fm:${f.id}:${x.id}`, label:x.label, group:f.name}))})).filter(g => g.items.length)]},
   ];
 }
 const extendedItems = () => extendedPropertyGroups().flatMap(c => c.groups.flatMap(g => g.items.map(it => ({...it, category:c.id}))));
@@ -55,6 +64,15 @@ function extendedValue(key, record){
     const v = f.level === 'installments' ? f.readAll(terms) : f.readRecord(terms);
     return Array.isArray(v) ? [...new Set(v)].join(', ') : (v ?? '');
   }
+  // A Form property: the submission that created the record.
+  if(key.startsWith('fm:')){
+    const s = recordFormSubmission(record);
+    if(!s) return '';
+    if(key === 'fm:source') return formSubmissionSource(s.submission) || '';
+    const [, formId, fieldId] = key.split(':');
+    const v = s.form.id === formId ? (s.submission.answers || {})[fieldId] : '';
+    return v == null ? '' : Array.isArray(v) ? v.join(', ') : v;
+  }
   const [, formId, fieldId] = key.split(':');
   const cid = profileHolderId(object, record);
   if(cid == null) return '';
@@ -74,6 +92,7 @@ function extendedValueText(key, record){
     if(f.kind === 'date') return /^\d{4}-\d{2}-\d{2}$/.test(String(v)) ? ptFmtDay(v) : String(v);
     return String(v);
   }
+  if(key.startsWith('fm:')) return String(v);
   const field = extendedFormField(key);
   const t = field ? pfFormat(field, v) : String(v);
   return t === '—' ? '' : t;
@@ -117,5 +136,5 @@ function ExtendedPropertyGroups({query, renderItem, keep}){
   });
 }
 
-Object.assign(window, {extendedIsMoney, EXT_PROFILE_LABEL, EXT_ACCOUNTING_LABEL, isExtendedKey, extendedPropertyGroups, extendedItems, extendedPropOf, extendedProps, extendedFullLabel,
+Object.assign(window, {extendedIsMoney, EXT_PROFILE_LABEL, EXT_ACCOUNTING_LABEL, EXT_FORM_LABEL, isExtendedKey, extendedPropertyGroups, extendedItems, extendedPropOf, extendedProps, extendedFullLabel,
   extendedValue, extendedValueText, ExtendedPropertyGroups});

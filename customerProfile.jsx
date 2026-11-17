@@ -464,7 +464,7 @@ function ProfileFormFillPanel({contact, form, current, found = {}, onBack, onCan
                 <div key={i} style={{display:'flex', alignItems:'center', gap:8, fontSize:12, color:T.attioMuted}}>
                   <span style={{flex:1, minWidth:0}}>Found: <b style={{color:T.attioText, fontWeight:600}}>{pfFormat(f, o.value)}</b> · {o.sourceLabel}{o.quote ? ` — “${o.quote}”` : ''}</span>
                   <button type="button" onClick={()=>set(f, o.value, {source:o.source, sourceLabel:o.sourceLabel, at:o.at, quote:o.quote})}
-                    style={{border:'none', background:'transparent', padding:0, cursor:'pointer', fontSize:12, color:T.attioBlue, fontFamily:'inherit'}}>Use this</button>
+                    className={LINK_CLASS} style={{border:'none', background:'transparent', padding:0, cursor:'pointer', fontSize:12, color:T.attioText, fontFamily:'inherit'}}>Use this</button>
                 </div>
               ))}/>
           );
@@ -679,12 +679,12 @@ function ProfileRunWizard({contact, form: startForm, call, onCancel, onSave}){
             {sourceLine && <div title={sourceLine} style={{fontSize:12, color:T.attioMuted, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{sourceLine}</div>}
             {hit && !pfSame(hit.value, draft) && (
               <button onClick={()=>setDraft(hit.value)} style={{alignSelf:'flex-start', fontSize:12, border:'none', background:'transparent', padding:0, cursor:'pointer', color:T.attioMuted, fontFamily:'inherit'}}>
-                {PF_FOUND_LABEL[hit.source] || 'Found'}: <span style={{color:T.attioText, textDecoration:'underline'}}>{pfFormat(field, hit.value)}</span>
+                {PF_FOUND_LABEL[hit.source] || 'Found'}: <span className={LINK_CLASS} style={{color:T.attioText}}>{pfFormat(field, hit.value)}</span>
               </button>
             )}
             {hit && (hit.also || []).filter(o => !pfSame(o.value, draft)).map((o, i) => (
               <button key={i} onClick={()=>setDraft(o.value)} style={{alignSelf:'flex-start', fontSize:12, border:'none', background:'transparent', padding:0, cursor:'pointer', color:'#8A4B08', fontFamily:'inherit'}}>
-                {o.sourceLabel} ({pfDay(o.at)}) says <span style={{textDecoration:'underline'}}>{pfFormat(field, o.value)}</span>
+                {o.sourceLabel} ({pfDay(o.at)}) says <span className={LINK_CLASS}>{pfFormat(field, o.value)}</span>
               </button>
             ))}
           </div>

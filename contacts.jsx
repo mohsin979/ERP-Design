@@ -299,9 +299,17 @@ function exportViewCsv({schema, rows, columnOrder, search, sort, fileName}){
 const propMeta = (key, props = FILTER_PROPS) => props.find(p=>p.key===key);
 // A property's filter carries its type's operators (propertyFilterMeta); other filters use their kind's.
 const filterOperatorsOf = (m) => m ? (m.operators || FILTER_OPERATORS[m.type] || []) : [];
+/* Filters saved before properties took their type's operators (propertyTypes.jsx) keep the old
+   ids: they read as today's (2026-11-17 — they used to be ignored, the row matching everything);
+   Is any of and Is between are matched on their own in filterRowMatches. */
+const LEGACY_FILTER_OPS = {is:'equals', isNot:'notEquals', isBefore:'lt', isAfter:'gt', startsWith:'contains', endsWith:'contains', isAnyOf:'equals', isBetween:'gt'};
 const opMeta = (propKey, opId, props = FILTER_PROPS) => {
   const m = propMeta(propKey, props);
-  return m ? filterOperatorsOf(m).find(o=>o.id===opId) : null;
+  if(!m) return null;
+  const ops = filterOperatorsOf(m), own = ops.find(o=>o.id===opId);
+  if(own || !m.ptype || !LEGACY_FILTER_OPS[opId]) return own || null;
+  const now = ops.find(o=>o.id===LEGACY_FILTER_OPS[opId]);
+  return now && {...now, legacy:opId, ...(opId === 'isAnyOf' ? {values:'multi'} : {})};
 };
 
 /* `joinOp` is the operator joining an item to the one directly above it — every gap carries its
@@ -367,7 +375,12 @@ function filterRowMatches(row, c, props){
   if(meta.ptype){
     const value = op.values === 'multi' ? (row.values || []) : row.value;
     if(op.values === 'multi' ? !value.length : op.values === 1 && (value === '' || value == null)) return true;   // no value yet → not narrowing
-    return propertyValueMatches(meta.prop || meta.ptype, row.op, raw, value);
+    const pt = meta.prop || meta.ptype;
+    // An old filter: Is any of — any of its values; Is between — after the one, before the other.
+    if(op.legacy === 'isAnyOf') return value.some(v => propertyValueMatches(pt, 'equals', raw, v));
+    if(op.legacy === 'isBetween') return !row.value2 || (propertyValueMatches(pt, 'gt', raw, row.value) || propertyValueMatches(pt, 'equals', raw, row.value))
+      && (propertyValueMatches(pt, 'lt', raw, row.value2) || propertyValueMatches(pt, 'equals', raw, row.value2));
+    return propertyValueMatches(pt, op.id, raw, value);
   }
   const filled = raw !== undefined && raw !== null && String(raw).trim() !== '';
   if(row.op === 'isEmpty')    return !filled;
@@ -478,12 +491,15 @@ const withAssocFilters = (schema, assoc) => ({...schema, filterProps:[...schema.
    Filter by; `read(row)`: its value(s) for a record (every installment's for All Installment
    Statuses, which must all match). */
 // Each profile property under its form (`group`: "Canada CRS Score"), as the other pickers group them (extendedProps.jsx).
-const recordScopeFilterProps = (data) => [['profile', EXT_PROFILE_LABEL], ['accounting', EXT_ACCOUNTING_LABEL]].flatMap(([scope, section]) =>
-  (scopeFields(data, scope) || []).map(f => {
+/* Form Properties too (2026-11-17): Submission Source and each form's answers, under their form
+   (Form Name and Form Submission Date are record properties, filtered as such). */
+const recordScopeFilterProps = (data) => [['profile', EXT_PROFILE_LABEL], ['accounting', EXT_ACCOUNTING_LABEL], ['form', EXT_FORM_LABEL]].flatMap(([scope, section]) =>
+  (scopeFields(data, scope) || []).filter(f => scope !== 'form' || !['prop:formName', 'prop:formSubmittedAt'].includes(f.key)).map(f => {
     const base = fieldProperty(f);
     if(!base) return null;
     const key = `${scope}:${f.key.replace(/^prop:/, '')}`;
-    const form = scope === 'profile' ? (PROFILE_FORMS_LIVE || []).find(x => f.key.startsWith(`prop:form.${x.id}.`)) : null;
+    const form = scope === 'profile' ? (PROFILE_FORMS_LIVE || []).find(x => f.key.startsWith(`prop:form.${x.id}.`))
+      : scope === 'form' ? (WF_LIVE.forms || []).find(x => f.key.startsWith(`prop:ans~${x.id}~`)) : null;
     const label = form && f.label.startsWith(`${form.name} · `) ? f.label.slice(form.name.length + 3) : f.label;
     const prop = {...base, key, label, options:(base.options || []).map(o => o && typeof o === 'object' ? o.value : o)};
     return {...propertyFilterMeta(prop), section, ...(form ? {group:form.name} : {}), read:(row) => f.many ? f.many({deal:row, data}) : f.get({deal:row, data}), all:!!f.all};
@@ -879,7 +895,7 @@ function FilterModal({filters, setFilters, onClose}){
                   patchNode(node.id, {...node, rows:[...node.rows, r]});
                   setAutoOpenId(r.id);
                 }}
-                style={{border:'none', background:'transparent', color:T.attioBlue, fontSize:12.5, cursor:'pointer', padding:'4px 0 0'}}>
+                className={LINK_CLASS} style={{border:'none', background:'transparent', color:T.attioText, fontSize:12.5, cursor:'pointer', padding:'4px 0 0', fontFamily:'inherit'}}>
                 + Add Filter to group
               </button>
             </div>
@@ -948,8 +964,10 @@ function DeleteConfirmModal({contactName, note, noun = 'Contact', paid, onCancel
 }
 
 /* `resetKey`: what the rows are chosen by (filters, view) — a change starts again at page 1. */
+/* `columnWidths` / `setColumnWidths` (2026-11-17): widths set by dragging a column header's right
+   border, by column key — kept with the view; a column without one keeps its own width (scaled to fill). */
 function ContactsDataGrid({rows, columnOrder, setColumnOrder, sort, setSort, search, actions, onOpenContact,
-                           frozenLeft=0, frozenRight=0, actionsFrozen=true, rowsPerPage=25, resetKey}){
+                           frozenLeft=0, frozenRight=0, actionsFrozen=true, rowsPerPage=25, resetKey, columnWidths, setColumnWidths}){
   const {propByKey, colWidth:baseColWidth, renderCell, renderActions, noun, nounPlural, searchKeys, selectable, fillWidth, onRowReorder,
          pinGutter = true, paginate = true, ordered = false, bulkActions, actionsWidth} = useRecordSchema();
   // The Actions column: its usual width, or the schema's own (`actionsWidth`: a list with an action beside the ⋯ menu — Users).
@@ -1114,9 +1132,24 @@ function ContactsDataGrid({rows, columnOrder, setColumnOrder, sort, setSort, sea
 
   /* With fillWidth the data columns grow in proportion (never below their own width) until they
      meet Actions; otherwise every column keeps its declared width. */
-  const baseDataWidth = displayOrder.reduce((sum,k)=>sum+baseColWidth(k), 0);
-  const scale = fillWidth && boxW ? Math.max(1, (boxW - GUTTER - ACTIONS_W) / baseDataWidth) : 1;
-  const colWidth = (k) => baseColWidth(k) * scale;
+  // A column dragged to a width keeps it; the others share what's left.
+  const [resizing, setResizing] = React.useState(null);   // {key, width} while a border is dragged
+  const setWidth = (k) => resizing && resizing.key === k ? resizing.width : (columnWidths || {})[k];
+  const sized = displayOrder.filter(k => setWidth(k) != null), free = displayOrder.filter(k => setWidth(k) == null);
+  const baseDataWidth = free.reduce((sum,k)=>sum+baseColWidth(k), 0), sizedWidth = sized.reduce((sum,k)=>sum+setWidth(k), 0);
+  const scale = fillWidth && boxW && baseDataWidth ? Math.max(1, (boxW - GUTTER - ACTIONS_W - sizedWidth) / baseDataWidth) : 1;
+  const colWidth = (k) => setWidth(k) != null ? setWidth(k) : baseColWidth(k) * scale;
+  const COL_MIN_W = 80;
+  const startResize = (e, key) => {
+    e.preventDefault(); e.stopPropagation();
+    const x0 = e.clientX, w0 = colWidth(key);
+    let last = w0;
+    const move = (ev) => { last = Math.max(COL_MIN_W, Math.round(w0 + ev.clientX - x0)); setResizing({key, width:last}); };
+    const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); document.body.style.cursor = '';
+      setResizing(null); if(setColumnWidths && last !== w0) setColumnWidths(w => ({...(w || {}), [key]:last})); };
+    document.body.style.cursor = 'col-resize';
+    document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+  };
 
   /* Frozen columns are the first `frozenLeft` and last `frozenRight` of the order, so each one
      can work out its own sticky offset from the widths of the frozen columns beside it. */
@@ -1178,6 +1211,10 @@ function ContactsDataGrid({rows, columnOrder, setColumnOrder, sort, setSort, sea
                     boxShadow: isDragging ? '0 6px 14px rgba(16,24,40,.22)' : 'none',
                     ...cellFreeze(i, true),
                   }}>
+                  {/* Its right border drags to resize the column (not to move it). */}
+                  {setColumnWidths && <span role="separator" aria-orientation="vertical" aria-label={`Resize ${col.label}`} onMouseDown={(e)=>startResize(e, key)}
+                    style={{position:'absolute', top:0, right:-4, width:8, height:'100%', cursor:'col-resize', zIndex:2,
+                      background: resizing && resizing.key === key ? T.attioBlue : 'transparent', backgroundClip:'content-box', padding:'0 3px', boxSizing:'border-box'}}/>}
                   <div style={{display:'flex', alignItems:'center', gap:12, justifyContent: moneyCol(key) ? 'flex-end' : 'flex-start'}}>
                     <span title={col.extended ? extendedFullLabel(col) : undefined} style={{fontWeight:500, color:T.attioMuted, whiteSpace:'nowrap'}}>{col.label}{sortIndicator(key)}</span>
                     {!ordered && <ThreeDotMenu visible={hoverCol===key} align={i===0 ? 'left' : 'right'}
@@ -1759,10 +1796,9 @@ function RecordToolbar({inset = 'page', views, activeViewId, onSelectView, viewC
         {showFilters && <FilterModal filters={filters} setFilters={setFilters} onClose={()=>setShowFilters(false)}/>}
       </div>
       {appliedFilterCount > 0 && (
-        <button onClick={()=>setFilters(EMPTY_FILTERS())} style={{
+        <button onClick={()=>setFilters(EMPTY_FILTERS())} className={LINK_CLASS} style={{
           border:'none', background:'transparent', color:T.gray600, fontSize:12.5,
-          cursor:'pointer', padding:'7px 2px', textDecoration:'underline',
-          textDecorationColor:'#D7D6DA', textUnderlineOffset:2, fontFamily:'inherit',
+          cursor:'pointer', padding:'7px 2px', fontFamily:'inherit',
         }}>Clear All</button>
       )}
       {filterControls && <div style={{marginLeft:'auto', display:'flex', alignItems:'center', gap:8}}>{filterControls}</div>}
@@ -1851,11 +1887,15 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
   const [profilePrompt, setProfilePrompt] = React.useState(null); // after Create Deal: the contact without a profile
   /* Contact Detail: which contact is open and how. Stored by id so edits made elsewhere show
      immediately, and a deleted contact closes its detail. */
+  /* A record opens straight on its detail page (2026-11-17), not in the side panel first — from
+     the list, the board, or anywhere else it's opened from. The page can still be collapsed into
+     the side panel (Back to side panel) and expanded again; while it's the side panel, another
+     record clicked in the list takes its place there. */
   const [detail, setDetail] = React.useState(null);   // {id, mode:'panel'|'full'}
-  const openContact = (c) => setDetail(d => ({id:c.id, mode: d && d.mode === 'full' ? 'full' : 'panel'}));
-  // Opened from elsewhere (the contact on a deal): in the mode it came from.
+  const openContact = (c) => setDetail(d => ({id:c.id, mode: d && d.mode === 'panel' ? 'panel' : 'full'}));
+  // Opened from elsewhere (the contact on a deal).
   React.useEffect(() => {
-    if(openRequest && contacts.some(c => c.id === openRequest.id)) setDetail({id:openRequest.id, mode:openRequest.mode || 'panel',
+    if(openRequest && contacts.some(c => c.id === openRequest.id)) setDetail({id:openRequest.id, mode:'full',
       tab: openRequest.tab ? {id:openRequest.tab, nonce:openRequest.nonce} : undefined});
   }, [openRequest && openRequest.nonce]);
   const [toast, setToast] = React.useState(null);   // {message, action?}
@@ -1878,9 +1918,11 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
   const [actionsFrozen, setActionsFrozen] = React.useState(activeView.actionsFrozen ?? true);
   const [rowsPerPage, setRowsPerPage] = React.useState(activeView.rowsPerPage ?? 25);
   const [cardSettings, setCardSettings] = React.useState(activeView.cardSettings || DEFAULT_CARD_SETTINGS());
+  const [columnWidths, setColumnWidths] = React.useState(activeView.columnWidths || {});
 
   React.useEffect(()=>{
     setColumnOrder(activeView.columnOrder);
+    setColumnWidths(activeView.columnWidths || {});
     setSort(activeView.sort);
     setViewMode(activeView.viewMode);
     setPipelineId(activeView.pipelineId || 'typesOfContact');
@@ -1903,14 +1945,23 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
     || frozenRight !== (activeView.frozenRight ?? 0)
     || actionsFrozen !== (activeView.actionsFrozen ?? true)
     || rowsPerPage !== (activeView.rowsPerPage ?? 25)
-    || JSON.stringify(cardSettings) !== JSON.stringify(activeView.cardSettings || DEFAULT_CARD_SETTINGS());
+    || JSON.stringify(cardSettings) !== JSON.stringify(activeView.cardSettings || DEFAULT_CARD_SETTINGS())
+    || JSON.stringify(columnWidths) !== JSON.stringify(activeView.columnWidths || {});
 
   // Board cards' activity: what the acting user may see on each contact (tool permissions).
   const shownActivities = Object.fromEntries(contacts.map(c => [c.id, visibleActivities('contacts', c, activities[c.id])]));
-  // Filtered with each contact's deals alongside (their filters); the contacts themselves are what's listed.
+  /* Filtered with each contact's deals alongside (their filters); the contacts themselves are what's
+     listed. Each deal reads as on the Deals page (2026-11-17 — the worked-out ones were empty, so a
+     filter on them matched nothing): Associated Contact / Customer, Last Activity Date, and what
+     `deals` (App's deal rows) carries — Owner Assigned By, Form properties, Merge Status. */
+  const dealFilterRow = (d, acts) => ({...dealRowOf(dealData, d),
+    contact:contactIdsOf(d).map(id => (contacts.find(c => sameId(c.id, id)) || {}).name).filter(Boolean).join(', '),
+    customers:(customers || []).filter(x => (x.dealIds || []).includes(d.id)).map(x => x.name).join(', '),
+    lastActivity:latestActivityDate(acts)});
   const filterRows = React.useMemo(()=> !dealAssoc ? contacts
-    : contacts.map(c => withAssocRecords(c, 'Deals', deals.filter(d => contactIdsOf(d).some(id => sameId(id, c.id))).map(d => dealRowOf(dealData, d)))),
-    [contacts, dealAssoc, deals, dealData]);
+    : contacts.map(c => { const acts = new Map((dealActivitiesFor ? dealActivitiesFor(c.id) : []).map(x => [x.deal.id, x.acts]));
+      return withAssocRecords(c, 'Deals', deals.filter(d => contactIdsOf(d).some(id => sameId(id, c.id))).map(d => dealFilterRow(d, acts.get(d.id) || []))); }),
+    [contacts, dealAssoc, deals, dealData, customers]);
   const filteredContacts = React.useMemo(()=>{
     if(!dealAssoc) return applyFilters(contacts, filters, objectSchema.filterProps);
     const ok = new Set(applyFilters(filterRows, filters, objectSchema.filterProps).map(r => r.id));
@@ -2089,11 +2140,11 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
 
   const saveAsCopy = (name) => {
     const newId = 'v' + Date.now();
-    setViews(vs => [...vs, makeView(newId, name, {columnOrder, sort, viewMode, pipelineId, search, filters, frozenLeft, frozenRight, actionsFrozen, rowsPerPage, cardSettings})]);
+    setViews(vs => [...vs, makeView(newId, name, {columnOrder, sort, viewMode, pipelineId, search, filters, frozenLeft, frozenRight, actionsFrozen, rowsPerPage, cardSettings, columnWidths})]);
     setActiveViewId(newId);
     setShowSaveAsCopy(false);
   };
-  const confirmSaveExisting = () => { persist(activeView.id, {columnOrder, sort, viewMode, pipelineId, search, filters, frozenLeft, frozenRight, actionsFrozen, rowsPerPage, cardSettings}); setConfirmOverwrite(false); };
+  const confirmSaveExisting = () => { persist(activeView.id, {columnOrder, sort, viewMode, pipelineId, search, filters, frozenLeft, frozenRight, actionsFrozen, rowsPerPage, cardSettings, columnWidths}); setConfirmOverwrite(false); };
 
   // Each view with how many contacts it lists (as saved).
   const visibleViews = React.useMemo(()=>views.filter(v=>!v.hidden).map(v => ({...v, count:viewRowCount(filterRows, v.filters, v.search, objectSchema)})),
@@ -2140,7 +2191,7 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
       <div style={{flex:1, minHeight:0, display:'flex', flexDirection:'column', position:'relative', overflow:'hidden'}}>
       {contactViolationMode && <ViolationPanel object="contacts" pipelines={[pipelineId]} onClose={()=>setContactViolationMode(false)}/>}
       {viewMode === 'table' ? (
-        <ContactsDataGrid rows={filteredContacts} resetKey={`${activeViewId}:${JSON.stringify(filters)}`} columnOrder={columnOrder} setColumnOrder={setColumnOrder}
+        <ContactsDataGrid rows={filteredContacts} resetKey={`${activeViewId}:${JSON.stringify(filters)}`} columnOrder={columnOrder} setColumnOrder={setColumnOrder} columnWidths={columnWidths} setColumnWidths={setColumnWidths}
           frozenLeft={frozenLeft} frozenRight={frozenRight} actionsFrozen={actionsFrozen} rowsPerPage={rowsPerPage}
           sort={sort} setSort={setSort} search={search}
           actions={tableRowActions} onOpenContact={openContact}/>

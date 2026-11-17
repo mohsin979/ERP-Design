@@ -101,6 +101,9 @@ function FetchPropertyModal({data, onCancel, onPick}){
 const EMAIL_FORMATS = [{value:'simple', label:'Simple Text Body'}, {value:'html', label:'Default HTML Template'}, {value:'custom', label:'Custom HTML Template'}];
 const emailFormatLabel = (f) => (EMAIL_FORMATS.find(x => x.value === f) || {}).label || '';
 const EMAIL_FONT = "-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',Helvetica,Arial,sans-serif";
+// The email editor's text colours (2026-11-17): black and grey, then the brand's colours (Settings → Brand → Color System).
+const emailTextColors = () => { const b = orgBrand(), list = Array.isArray(b.palette) ? b.palette.map(c => c.value) : [b.colors.primary, b.colors.secondary];
+  return [...new Set(['#1D1D1F', '#6E6E73', ...list.map(richHex).filter(Boolean)])]; };
 const emailEsc = (t) => String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const emailLines = (t) => emailEsc(t).replace(/\n/g, '<br>');
 // The signature Brand kept before signatures were personal (its phone, website, address and additional info start each person's off).
@@ -204,7 +207,7 @@ const emailInkOn = (hex) => { const m = /^#?([0-9a-f]{6})$/i.exec(hex || ''); if
 // Rich text with its styles written in (emails carry no stylesheet); CTAs become buttons in the brand's colour.
 function emailStyledBody(html, brand, size){
   const box = document.createElement('div');
-  box.innerHTML = sanitizeRichText(richHtmlOf(html));
+  box.innerHTML = sanitizeRichText(richHtmlOf(html), RICH_EMAIL);   // its text sizes and colours kept, as styles
   const gap = Math.round(size * .9), accent = brand.colors.primary;
   box.querySelectorAll('p, div').forEach(n => n.setAttribute('style', `margin:0 0 ${gap}px`));
   box.querySelectorAll('ul, ol').forEach(n => n.setAttribute('style', `margin:0 0 ${gap}px;padding-left:22px${n.getAttribute('type') === 'a' ? ';list-style-type:lower-alpha' : ''}`));
@@ -248,7 +251,7 @@ const emailTextOf = (c) => richTextPlain(c.format === 'custom' ? String(c.html |
 const newEmailContent = () => ({format:'simple', body:'<p><br></p>', attachments:[], html:'', fileName:'', includeSignature:true});
 // Another format: the text stays — CTAs as plain links in a Simple Text Body (they're the Default HTML Template's).
 function switchEmailFormat(c, format){
-  let body = sanitizeRichText(richHtmlOf(c.body || ''));
+  let body = sanitizeRichText(richHtmlOf(c.body || ''), RICH_EMAIL);
   if(format === 'simple') body = body.replace(/\sdata-cta="(primary|secondary)"/g, '');
   return {...c, format, body};
 }
@@ -354,7 +357,7 @@ function EmailContentFields({value:c, setValue}){
     {fetching && <FetchPropertyModal data={(hub && hub.data) || {}} onCancel={()=>setFetching(false)} onPick={fetched}/>}
     <Field label="Email Format"><FormSelect value={c.format} options={EMAIL_FORMATS} onChange={(v)=>v && v !== c.format && setValue(x => switchEmailFormat(x, v))}/></Field>
     {c.format === 'custom' ? <Field label="HTML File"><EmailHtmlUpload c={c} setValue={setValue}/></Field> : <>
-      <Field label="Body" wide><RichTextEditor value={c.body} onChange={(v)=>setValue(x => ({...x, body:v}))} minHeight={280} ctas={c.format === 'html'} tools={tools} ariaLabel="Email body"/></Field>
+      <Field label="Body" wide><RichTextEditor value={c.body} onChange={(v)=>setValue(x => ({...x, body:v}))} minHeight={280} ctas={c.format === 'html'} sizes colors={emailTextColors()} tools={tools} ariaLabel="Email body"/></Field>
       {c.format === 'simple' && <Field label="Attachments"><EmailAttachmentsField list={c.attachments || []} update={(fn)=>setValue(x => ({...x, attachments:fn(x.attachments || [])}))}/></Field>}
     </>}
     <Field label="">

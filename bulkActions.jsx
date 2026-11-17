@@ -102,7 +102,7 @@ function BulkEditPanel({data, object, records, onSave, onClose}){
               <div style={{flex:1, minWidth:0, display:'flex', flexDirection:'column', gap:4}}>
               <TypedPropertyInput prop={p} value={value} invalid={tried && !!errors[p.key]} onChange={(v)=>setEdits(e => ({...e, [p.key]:v}))}/>
               <div style={{display:'flex', alignItems:'baseline', gap:8}}>
-                {dirty ? <button onClick={()=>setEdits(e => { const n = {...e}; delete n[p.key]; return n; })} style={{border:'none', background:'transparent', padding:0, cursor:'pointer', fontSize:12, color:T.attioBlue, fontFamily:'inherit'}}>Undo</button>
+                {dirty ? <button onClick={()=>setEdits(e => { const n = {...e}; delete n[p.key]; return n; })} className={LINK_CLASS} style={{border:'none', background:'transparent', padding:0, cursor:'pointer', fontSize:12, color:T.attioText, fontFamily:'inherit'}}>Undo</button>
                   : s.mixed && <span style={{fontSize:12, color:T.attioMuted}}>Mixed values</span>}
               </div>
               {tried && errors[p.key] && <span style={{fontSize:12, color:T.red}}>{errors[p.key]}</span>}

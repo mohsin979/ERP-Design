@@ -711,10 +711,10 @@ function CountMenu({items, count, labelOf, icon, title, onOpen}){
   const open = (e) => { const r = e.currentTarget.getBoundingClientRect(); const up = r.bottom + 16 + items.length * 34 > window.innerHeight;
     setPos(p => p ? null : {left:r.right, top: up ? r.top : r.bottom, up}); };
   return (<>
-    <button type="button" onClick={open} aria-expanded={!!pos} title={title}
-      style={{border:'none', background:'transparent', padding:0, cursor:'pointer', fontFamily:'inherit', fontSize:13, fontWeight:'inherit', color:T.attioBlue,
+    <button type="button" onClick={open} aria-expanded={!!pos} title={title} className={LINK_CLASS}
+      style={{border:'none', background:'transparent', padding:0, cursor:'pointer', fontFamily:'inherit', fontSize:13, fontWeight:'inherit', color:T.attioText,
               display:'inline-flex', alignItems:'center', gap:3, fontVariantNumeric:'tabular-nums'}}>
-      {count}<Icon name="chevDown" size={T.chevronSize} color={T.attioBlue}/>
+      {count}<Icon name="chevDown" size={T.chevronSize} color={T.attioText}/>
     </button>
     {pos && ReactDOM.createPortal(
       <div style={{position:'fixed', left:pos.left, top:pos.top, width:0, height:0, zIndex:110, textAlign:'left'}}>
@@ -734,10 +734,10 @@ function ViolationsValue({list, onOpen}){
   if(!list.length) return <span>0</span>;
   if(list.length === 1) return (
     <button type="button" onClick={()=>onOpen(list[0])} title={violationLabel(list[0])}
-      style={{border:'none', background:'transparent', padding:0, cursor:'pointer', fontFamily:'inherit', fontSize:13, color:T.attioBlue, maxWidth:'100%',
+      style={{border:'none', background:'transparent', padding:0, cursor:'pointer', fontFamily:'inherit', fontSize:13, color:T.attioText, maxWidth:'100%',
               display:'inline-flex', alignItems:'center', gap:6, minWidth:0}}>
       <Icon name="warning" size={13} color={T.red}/>
-      <span style={{overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{violationLabel(list[0])}</span>
+      <span className={LINK_CLASS} style={{overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{violationLabel(list[0])}</span>
     </button>
   );
   return <CountMenu items={list} count={list.length} title={`${list.length} violations`} labelOf={violationLabel}

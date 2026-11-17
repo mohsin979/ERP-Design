@@ -180,6 +180,18 @@ const defaultQuickActions = (object, enabled) => normalizeQuickActions(null, obj
 const shownQuickActions = (list, object, record) => normalizeQuickActions(list, object)
   .filter(q => q.enabled && (!QUICK_TOOL_KEYS.includes(q.key) || canAdd(object, record, q.key)) && quickActionAvailable(object, q.key, record))
   .map(q => ({key:q.key, label:quickActionLabel(object, q.key), icon:QUICK_ACTION_DEFS[q.key].icon}));
+/* A side panel's primary quick action (View Settings → Quick Actions → Primary, 2026-11-17): one
+   of the actions the record shows, drawn on its own beneath the icons as a filled button with its
+   icon and name — and so left out of the icons. None unless one is chosen (`primaryKey`). */
+const splitQuickActions = (list, primaryKey, object, record) => { const on = shownQuickActions(list, object, record), primary = (primaryKey && on.find(q => q.key === primaryKey)) || null;
+  return {primary, icons: primary ? on.filter(q => q !== primary) : on}; };
+/* Each record type's primary quick action to start with (2026-11-17): a contact's Create Deal, a
+   deal's Create Customer, a customer's Call. Panel settings saved before there was one take it
+   (and show it); set to none since (`null`), it stays none. */
+const DEFAULT_PRIMARY_ACTION = {contacts:'createDeal', deals:'createCustomer', customers:'call'};
+const withPrimaryAction = (settings, object) => { const key = DEFAULT_PRIMARY_ACTION[object];
+  if(!settings || settings.primaryAction !== undefined || !key || !objectQuickActions(object).includes(key)) return settings;
+  return {...settings, primaryAction:key, quickActions:normalizeQuickActions(settings.quickActions, object).map(x => x.key === key ? {...x, enabled:true} : x)}; };
 /* `h`: the record's handlers — onTool(key), onOwner, onCreateDeal, onCreateCustomer, onGoToContact, onGoToDeal;
    one that's missing falls back to `onStub(label)`. */
 const runQuickAction = (key, h, label) => {
@@ -477,4 +489,4 @@ function ContactFormModal({mode, initial, properties, owners, stages, onCancel, 
   );
 }
 
-Object.assign(window, {TOAST_MS, TOAST_ACTION_MS, customerHasDeal, customerTakesDeal, quickActionAvailable, RecordFields, AssociatedCreation, RecordLinkField, recordLinkFields, linkFieldValues, linkFieldIds, RecordActionsMenu, StandardRecordMenu, RECORD_TOOLS, ChangeOwnerModal, associatedNote, QUICK_ACTION_DEFS, QUICK_TOOL_KEYS, OBJECT_QUICK_ACTIONS, objectQuickActions, OBJECT_NOUNS, quickActionLabel, quickActionLabels, normalizeQuickActions, defaultQuickActions, shownQuickActions, runQuickAction, copyAction, viewSettingsItem, contactCopyText, ContactActionsMenu, ContactFormModal, CopyToast, copyText, todayLabel});
+Object.assign(window, {TOAST_MS, TOAST_ACTION_MS, customerHasDeal, customerTakesDeal, quickActionAvailable, RecordFields, AssociatedCreation, RecordLinkField, recordLinkFields, linkFieldValues, linkFieldIds, RecordActionsMenu, StandardRecordMenu, RECORD_TOOLS, ChangeOwnerModal, associatedNote, QUICK_ACTION_DEFS, QUICK_TOOL_KEYS, OBJECT_QUICK_ACTIONS, objectQuickActions, OBJECT_NOUNS, quickActionLabel, quickActionLabels, normalizeQuickActions, defaultQuickActions, shownQuickActions, splitQuickActions, runQuickAction, copyAction, viewSettingsItem, contactCopyText, ContactActionsMenu, ContactFormModal, CopyToast, copyText, todayLabel});

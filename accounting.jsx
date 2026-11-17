@@ -724,7 +724,7 @@ function PlanSourcePill({icon, label, target, onOpen, title}){
       style={{display:'inline-flex', alignItems:'center', gap:5, border:'none', fontFamily:'inherit', fontSize:11.5, fontWeight:500, padding:'2px 8px', borderRadius:9999,
         background:T.blueLight, color:T.blue, whiteSpace:'nowrap', cursor: target ? 'pointer' : 'default'}}>
       <Icon name={icon} size={11} color={T.blue}/>
-      <span style={target ? {textDecorationLine:'underline', textUnderlineOffset:2} : undefined}>{label}</span></button>
+      <span className={target ? LINK_CLASS : undefined}>{label}</span></button>
     {!target && <span style={{fontSize:12, color:T.attioMuted, whiteSpace:'nowrap'}}>Deleted</span>}
   </>);
 }

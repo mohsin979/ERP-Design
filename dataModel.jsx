@@ -473,8 +473,8 @@ function PropertyTypeConfig({type, options, setOptions, range, setRange}){
           </div>
         ))}
       </div>
-      <button onClick={()=>setOptions([...options, ''])} style={{marginTop:6, display:'inline-flex', alignItems:'center', gap:6, border:'none', background:'transparent', padding:'4px 0', cursor:'pointer', fontFamily:'inherit', fontSize:13, color:T.attioBlue}}>
-        <Icon name="plus" size={13} color={T.attioBlue}/> Add Option
+      <button onClick={()=>setOptions([...options, ''])} className={LINK_CLASS} style={{marginTop:6, display:'inline-flex', alignItems:'center', gap:6, border:'none', background:'transparent', padding:'4px 0', cursor:'pointer', fontFamily:'inherit', fontSize:13, color:T.attioText}}>
+        <Icon name="plus" size={13} color={T.attioText}/> Add Option
       </button>
     </div>
   );
@@ -921,8 +921,8 @@ function RecordTypePanel({data, objectId, onClose, onSave, records = {}}){
           <div style={{flex:1, minWidth:0, overflowY:'auto', padding:'16px 24px', borderLeft:`1px solid ${T.border}`}}>
             <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:6}}>
               <span style={sectionLabel}>Properties</span>
-              <button onClick={()=>setProps(ps => [...ps, blankDraftProperty()])} style={{display:'inline-flex', alignItems:'center', gap:6, border:'none', background:'transparent', padding:'4px 0', cursor:'pointer', fontFamily:'inherit', fontSize:13, color:T.attioBlue}}>
-                <Icon name="plus" size={13} color={T.attioBlue}/> Add Property
+              <button onClick={()=>setProps(ps => [...ps, blankDraftProperty()])} className={LINK_CLASS} style={{display:'inline-flex', alignItems:'center', gap:6, border:'none', background:'transparent', padding:'4px 0', cursor:'pointer', fontFamily:'inherit', fontSize:13, color:T.attioText}}>
+                <Icon name="plus" size={13} color={T.attioText}/> Add Property
               </button>
             </div>
             {!active.length && <div style={{fontSize:12.5, color:T.gray400, padding:'6px 0'}}>No properties yet</div>}
@@ -939,7 +939,7 @@ function RecordTypePanel({data, objectId, onClose, onSave, records = {}}){
                 {archived.map(p => (
                   <div key={p.id} style={{display:'flex', alignItems:'center', gap:10, minHeight:38, borderTop:`1px solid ${T.border}`}}>
                     <span style={{flex:1, minWidth:0, fontSize:13, color:T.attioText}}>{p.label} <span style={{color:T.attioMuted}}>· {propertyTypeId(p.type)}</span></span>
-                    <button onClick={()=>setProp(p.id, {archived:false})} style={{border:'none', background:'transparent', cursor:'pointer', fontFamily:'inherit', fontSize:13, color:T.attioBlue}}>Restore</button>
+                    <button onClick={()=>setProp(p.id, {archived:false})} className={LINK_CLASS} style={{border:'none', background:'transparent', cursor:'pointer', fontFamily:'inherit', fontSize:13, color:T.attioText}}>Restore</button>
                   </div>
                 ))}
               </div>
@@ -990,7 +990,10 @@ function PropertiesSettings({data, setData, records = {}, updateRecords, onWorkf
   const [stub, setStub] = React.useState(null);
   const [fromObject] = React.useState(data.propertiesObjectId);
   React.useEffect(()=>{ if(data.propertiesObjectId) setData(d => ({...d, propertiesObjectId:null})); }, []);
-  const rows = data.properties.filter(p => propertyShown(data, p)).map(p => ({...p, id:`${p.objectId}:${p.key}`, objectName:objectName(data, p.objectId), type:propertyTypeId(p.type), createdBy:creatorOf(p)}));
+  /* Source: System (built in) or Custom (added in Settings); Created By: who added it — "System"
+     for a built-in one (2026-11-17). Both are filters. */
+  const rows = data.properties.filter(p => propertyShown(data, p)).map(p => ({...p, id:`${p.objectId}:${p.key}`, objectName:objectName(data, p.objectId), type:propertyTypeId(p.type),
+    source: p.system ? 'System' : 'Custom', createdBy: p.system ? 'System' : creatorOf(p)}));
   // Users' properties have no Properties permissions; the record types' follow Settings & Administration → Properties (by who created each).
   const propCan = (objectId, action, prop) => !ADMIN_RECORD_OBJECTS.includes(objectId) || adminPropertyCan(objectId, action, prop);
   const addableHolders = PROPERTY_HOLDERS(data).filter(o => propCan(o.id, 'add'));
@@ -1021,8 +1024,10 @@ function PropertiesSettings({data, setData, records = {}, updateRecords, onWorkf
   ];
   const schema = {
     properties:PROPERTY_COLS, noun:'property', nounPlural:'properties', searchKeys:['label', 'type', 'objectName'], fillWidth:true, bulkActions,
-    filterProps:[{key:'label', label:'Property Label', type:'text'}, {key:'type', label:'Property Type', type:'select'}, {key:'objectName', label:'Record', type:'select'}],
-    selectValues:{type:[...PROPERTY_TYPES, ...SYSTEM_PROPERTY_TYPES], objectName:PROPERTY_HOLDERS(data).map(o => o.name)},
+    filterProps:[{key:'label', label:'Property Label', type:'text'}, {key:'type', label:'Property Type', type:'select'}, {key:'objectName', label:'Record', type:'select'},
+      {key:'source', label:'Source', type:'select'}, {key:'createdBy', label:'Created By', type:'select'}],
+    selectValues:{type:[...PROPERTY_TYPES, ...SYSTEM_PROPERTY_TYPES], objectName:PROPERTY_HOLDERS(data).map(o => o.name), source:['System', 'Custom'],
+      createdBy:['System', ...[...new Set(rows.map(r => r.createdBy).filter(n => n && n !== 'System'))].sort()]},
     // Actions: the workflow quick action (a property workflows can watch — its Record and Property as the context), then ⋯.
     /* Settings & Administration → Properties (per record type): Edit (archiving and restoring
        included) and Delete, property by property. User Properties aren't covered by them. */

@@ -16,7 +16,8 @@
               Email — an email outside the CRM, entered by hand, as a call log): email type (Sent /
               Received), point of contact, subject and content, all editable.
      Task   — name, description, status (radios), task type, assigned to, assigned by; then its
-              Notes (ActivityNotes: Notes linked to the task).
+              Notes (ActivityNotes: Notes linked to the task). Its header moves it on: Start (Not
+              Started → In Progress), Put on Hold, Resume (On Hold → In Progress), Complete.
      Note   — readable text; Edit makes it a field.
      Owner change — previous and new owner; Edit reassigns the owner (through the normal owner
               update, so it records its own Owner change).
@@ -528,9 +529,16 @@ function TaskDetail({a, contact, team, comments = [], onUpdate, onAdd, onStub, a
     setEditing(false); };
   const orig = blank();
   const dirty = Object.keys(d).some(k => (typeof d[k] === 'string' ? d[k].trim() : d[k]) !== orig[k]);
+  // The next steps for an open task, by its status (Overdue is its date, not a status: the steps stay).
+  const ra = useRecordAccess(), canEdit = !ra || activityCan(ra.object, ra.record, a, 'edit');
+  const steps = !canEdit || !isTaskOpen(a) ? [] : [
+    ...(a.status === 'notStarted' ? [['Start', 'inProgress']] : []),
+    ...(a.status === 'onHold' ? [['Resume', 'inProgress']] : [['Put on Hold', 'onHold']]),
+    ['Complete', 'completed']];
   return (
     <DetailFrame head={activityHead(a, contact)} actions={editing ? saveBar(cancel, save, !!d.title.trim() && dirty)
-      : activityEditBar(a, ()=>{ setD(blank()); setEditing(true); }, detailMenu({a, onUpdate, onStub, own:[stubItem('Reassign Task', onStub, 'userSwitch'), stubItem('Copy Task Description', onStub, 'copy')], deleteLabel:'Delete Task'}))}>
+      : <>{steps.map(([label, status]) => <React.Fragment key={label}>{headerBtn(label, ()=>onUpdate(a.id, {status}))}</React.Fragment>)}
+        {activityEditBar(a, ()=>{ setD(blank()); setEditing(true); }, detailMenu({a, onUpdate, onStub, own:[stubItem('Reassign Task', onStub, 'userSwitch'), stubItem('Copy Task Description', onStub, 'copy')], deleteLabel:'Delete Task'}))}</>}>
       {stack(<>
         {!editing && recordFirst(across)}
         <Field label="Task Name">{editing ? <input value={d.title} onChange={e=>set({title:e.target.value})} style={fieldText}/> : <ReadValue>{a.title}</ReadValue>}</Field>
@@ -567,8 +575,7 @@ function parseTranscript(text){
   });
   return out;
 }
-const linkBtn = {border:'none', background:'transparent', padding:'7px 0 0', fontSize:13, fontFamily:'inherit', color:T.attioText, cursor:'pointer',
-  textDecorationLine:'underline', textUnderlineOffset:2, textDecorationColor:'#D7D6DA'};
+const linkBtn = {border:'none', background:'transparent', padding:'7px 0 0', fontSize:13, fontFamily:'inherit', color:T.attioText, cursor:'pointer'};   // with LINK_CLASS
 // Read transcript (with its times) or Add transcript (a text box, saved as the meeting's transcript).
 function MeetingTranscript({a, onUpdate}){
   const [open, setOpen] = React.useState(null);   // 'read' | 'add'
@@ -577,7 +584,7 @@ function MeetingTranscript({a, onUpdate}){
   const close = () => { setOpen(null); setText(''); };
   const lines = open === 'read' ? parseTranscript(a.transcript) : [];
   return (<>
-    <button onClick={()=>setOpen(has ? 'read' : 'add')} style={linkBtn}>{has ? 'Read Transcript' : 'Add Transcript'}</button>
+    <button onClick={()=>setOpen(has ? 'read' : 'add')} className={LINK_CLASS} style={linkBtn}>{has ? 'Read Transcript' : 'Add Transcript'}</button>
     {open === 'read' && ReactDOM.createPortal(
       <StModal title="Transcript" width={600} onCancel={close}>
         <div style={{maxHeight:'60vh', overflowY:'auto', display:'flex', flexDirection:'column', gap:12}}>
@@ -644,7 +651,7 @@ function MeetingDetail({a, contact, team, comments, onUpdate, onAdd, onStub, acr
         {!editing && a.description && <Field label="Description"><ReadValue>{a.description}</ReadValue></Field>}
         {!editing && <Field label="Link">{a.link
           ? <div style={{paddingTop:7, fontSize:13, minWidth:0, overflowWrap:'anywhere'}}><a href={meetingHref(a.link)} target="_blank" rel="noopener noreferrer"
-              style={{color:T.blue, textDecorationLine:'underline', textUnderlineOffset:2}}>{a.link}</a></div>
+              className={LINK_CLASS} style={{color:T.attioText}}>{a.link}</a></div>
           : <ReadValue/>}</Field>}
       </>)}
       {!editing && <ActivityNotes a={a} contact={contact} notes={comments} link="meetingId" onUpdate={onUpdate} onAdd={onAdd}/>}

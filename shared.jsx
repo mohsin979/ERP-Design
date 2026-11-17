@@ -29,6 +29,20 @@ const T = {
      caret is ~9.6x5.3px, readable while still sitting under the 15-16px UI icons around it. */
   chevronSize:14,
 };
+/* Text click actions — one look everywhere (2026-11-17): every link-like action (record and
+   people names, owners, counts, email and phone, Undo, Add …) is dark text with a dark line
+   under it, and all of it — text and line — turns blue while the pointer is on it. Give the
+   element className={LINK_CLASS}, dark text and no text-decoration of its own (an inline one
+   would win over this). An underlined part inside a button turns with the button. */
+const LINK_CLASS = 'hof-link';
+(() => {
+  if(typeof document === 'undefined' || document.getElementById('hof-link-style')) return;
+  const el = document.createElement('style'); el.id = 'hof-link-style';
+  el.textContent = `.hof-link{text-decoration-line:underline;text-decoration-color:${T.attioText};text-underline-offset:2px;transition:text-decoration-color 120ms ease}`
+    + `.hof-link:hover,button:hover>.hof-link{text-decoration-color:${T.attioBlue};color:${T.attioBlue}!important}`;
+  document.head.appendChild(el);
+})();
+
 
 /* One consistent icon library used across the whole UI — Phosphor Icons (regular weight),
    https://phosphoricons.com, MIT. Chosen to match the Figma reference (node 6280:11094): soft

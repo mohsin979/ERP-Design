@@ -171,17 +171,13 @@ function LeadScoreTag({value, title = 'Lead Score'}){
 }
 
 /* Contact name — the primary-record treatment used in both the Table and on cards: underlined
-   in #D7D6DA, darkening on hover. Clicking it opens the Contact Detail panel. */
+   as every click action's (shared.jsx LINK_CLASS): dark, blue on hover. Clicking it opens the record. */
 function ContactName({name, onOpen, style}){
-  const [h, setH] = React.useState(false);
   return (
     <span onClick={onOpen ? (e)=>{ e.stopPropagation(); onOpen(); } : undefined}
-      onMouseEnter={()=>setH(true)} onMouseLeave={()=>setH(false)} style={{
+      className={LINK_CLASS} style={{
       fontSize:13.5, fontWeight:600, color:T.attioText, cursor:'pointer', minWidth:0,
       whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis',
-      textDecoration:'underline', textUnderlineOffset:2,
-      textDecorationColor: h ? T.attioMuted : '#D7D6DA',
-      transition:'text-decoration-color 120ms ease',
       ...style,
     }}>{name}</span>
   );
@@ -287,7 +283,7 @@ function ContactCard({contact, acts, dragging, onStub, onDragStart, actions, sel
                 <span style={{fontSize:12.5, color:T.attioMuted, flexShrink:0}}>{p.label}</span>
                 {link && link.show(contact) ? (
                   <button {...stop} onClick={e=>{ e.stopPropagation(); p.key === 'deals' && actions.onOpenDeals ? actions.onOpenDeals(contact) : onStub(link.open(contact)); }}
-                    style={{border:'none', background:'transparent', padding:0, cursor:'pointer', fontSize:12.5, fontWeight:500, color:T.attioBlue,
+                    className={LINK_CLASS} style={{border:'none', background:'transparent', padding:0, cursor:'pointer', fontSize:12.5, fontWeight:500, color:T.attioText,
                             minWidth:0, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{value}</button>
                 ) : (
                   <span style={{fontSize:12.5, color:T.attioText, minWidth:0, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{value || '—'}</span>

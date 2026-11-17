@@ -507,12 +507,12 @@ function TaskCard({e, onOpen, onDragStart, dragging, showAssignee}){
     </div>
   );
 }
-/* The three-column board — the Tasks module's and a record's Tasks tab's. `entries`: tasks as
+/* The board — Not Started, In Progress, On Hold, Overdue (automatic), Completed —  — the Tasks module's and a record's Tasks tab's. `entries`: tasks as
    {act, object, recordId, record}; `onUpdate(entry, patch)`; `onOpen(entry)`. */
 function TaskStatusBoard({entries, onUpdate, onOpen, showAssignee}){
   const [drag, setDrag] = React.useState(null);     // the dragged task's id
   const [over, setOver] = React.useState(null);     // the column it's over
-  const [rescheduling, setRescheduling] = React.useState(null);   // {e, date, time}: In Progress needs a new due date
+  const [rescheduling, setRescheduling] = React.useState(null);   // {e, date, time, status}: an overdue task moved to an open column needs a new due date
   // Within a column: due soonest first, tasks without a due date after.
   const ordered = (list) => list.slice().sort((x, y) => (x.act.due ? new Date(x.act.due).getTime() : Infinity) - (y.act.due ? new Date(y.act.due).getTime() : Infinity));
   const drop = (state) => {
@@ -520,8 +520,9 @@ function TaskStatusBoard({entries, onUpdate, onOpen, showAssignee}){
     setDrag(null); setOver(null);
     if(!e || state === 'overdue' || taskState(e.act) === state) return;
     if(state === 'completed') return onUpdate(e, {status:'completed'});
-    if(isPastDue(e.act)) return setRescheduling({e, date:'', time:''});
-    onUpdate(e, {status:'inProgress'});
+    // Not Started, In Progress, On Hold: an overdue task needs a new due date first.
+    if(isPastDue(e.act)) return setRescheduling({e, date:'', time:'', status:state});
+    onUpdate(e, {status:state});
   };
   const rs = rescheduling, rsDue = rs && rs.date ? taskDueValue(rs.date, rs.time) : null, rsOk = !!rsDue && !isPastDue(rsDue);
   return (
@@ -545,8 +546,8 @@ function TaskStatusBoard({entries, onUpdate, onOpen, showAssignee}){
           </div>
         );
       })}
-      {rs && <StModal title="New due date" primary="Move to In Progress" canSubmit={rsOk} onCancel={()=>setRescheduling(null)}
-        onSubmit={()=>{ if(!rsOk) return; onUpdate(rs.e, {status:'inProgress', ...rsDue}); setRescheduling(null); }}>
+      {rs && <StModal title="New due date" primary={`Move to ${(TASK_STATUSES.find(s => s.key === rs.status) || {}).label}`} canSubmit={rsOk} onCancel={()=>setRescheduling(null)}
+        onSubmit={()=>{ if(!rsOk) return; onUpdate(rs.e, {status:rs.status, ...rsDue}); setRescheduling(null); }}>
         <div style={{display:'flex', gap:12}}>
           <div style={{flex:1}}><label style={fieldLabel}>Due Date</label><DateField required value={rs.date} onChange={v=>setRescheduling(x => ({...x, date:v}))} ariaLabel="Due date"/></div>
           <div style={{flex:1}}><label style={fieldLabel}>Due Time</label><TimeField value={rs.time} onChange={v=>setRescheduling(x => ({...x, time:v}))} ariaLabel="Due time"/></div>

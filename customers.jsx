@@ -202,8 +202,9 @@ const defaultCustomerPanelSettings = (props) => ({
   dropdowns: [{id:'d-all', type:'all', enabled:true, count:10}],
   customerProperties: customerPanelProperties(props).map(p => ({key:p.key, enabled:true})),
 });
-// A custom property added since the settings were saved joins the end, shown.
-const withCustomerPanelProperties = (settings, props) => {
+// A custom property added since the settings were saved joins the end, shown. (And the panel's primary quick action, where none was ever set: Call.)
+const withCustomerPanelProperties = (saved, props) => {
+  const settings = withPrimaryAction(saved, 'customers');
   const known = settings.customerProperties.map(p => p.key);
   const added = customerPanelProperties(props).filter(p => !known.includes(p.key)).map(p => ({key:p.key, enabled:true}));
   return added.length ? {...settings, customerProperties:withAddedPanelProperties(settings.customerProperties, added)} : settings;
@@ -297,7 +298,7 @@ function CustomerInfo({customer, view, acts, contacts = [], deals, keys, props, 
               : r.owner ? <OwnerValue object="customers" record={customer} name={r.value}/>
               : !r.value ? <span style={{fontSize:13, color:T.attioFaint}}>—</span>
               : r.list ? <AssociatedRecordsValue records={r.value} noun={r.noun} onOpen={r.open}/>
-              : r.open ? <button onClick={r.open} style={linkButton}>{r.value}</button>
+              : r.open ? <button onClick={r.open} className={LINK_CLASS} style={linkButton}>{r.value}</button>
               : <span style={{fontSize:13, color:T.attioText, minWidth:0, overflowWrap:'anywhere'}}>{dateShown(String(r.value))}</span>}
           </div>
         );
@@ -362,6 +363,7 @@ function CustomersModule({data, customers, setCustomers, activities, setActiviti
   const cardProps = React.useMemo(()=>[...customerCardProperties(props), ...extendedProps()], [props]);
   const owners = data.users.filter(u => u.status === 'Activated');
   const pipelineOf = (id) => pipelines.find(p => p.id === id);
+  // A customer opens straight on its detail page (2026-11-17), not in the side panel first; the page can still be collapsed into the side panel and expanded again.
   const [detail, setDetail] = React.useState(null);   // {id, mode:'panel'|'full', tab?, returnTo?}
   const [form, setForm] = React.useState(null);       // {mode:'add'|'edit', id?, initial}
   const [changingOwner, setChangingOwner] = React.useState(null);
@@ -406,9 +408,10 @@ function CustomersModule({data, customers, setCustomers, activities, setActiviti
   }), [customers, pipelines, data.users, contacts, deals, activities]);
   const schema = React.useMemo(()=>withScopeFilters(withAssocFilters(withAssocFilters(customerSchema(props, pipelines, owners), contactAssoc), dealAssoc), data, 'customers'), [props, pipelines, data, contactAssoc, dealAssoc]);
 
-  const openCustomer = (c) => setDetail(x => ({id:c.id, mode: x && x.mode === 'full' ? 'full' : 'panel', returnTo: x && x.returnTo}));
+  // While the side panel is open, another customer clicked in the list takes its place there.
+  const openCustomer = (c) => setDetail(x => ({id:c.id, mode: x && x.mode === 'panel' ? 'panel' : 'full', returnTo: x && x.returnTo}));
   React.useEffect(() => {
-    if(openRequest && byId.has(openRequest.id)) setDetail({id:openRequest.id, mode:openRequest.mode || 'panel',
+    if(openRequest && byId.has(openRequest.id)) setDetail({id:openRequest.id, mode:'full',
       tab: openRequest.tab ? {...(typeof openRequest.tab === 'string' ? {id:openRequest.tab} : openRequest.tab), nonce:openRequest.nonce} : undefined,
       returnTo: openRequest.onReturn || null});
   }, [openRequest && openRequest.nonce]);
@@ -426,8 +429,8 @@ function CustomersModule({data, customers, setCustomers, activities, setActiviti
     if(!tab) return setStub(`${({call:'Call', email:'Email', meeting:'Meeting', quote:'Quote'})[key]} · ${c.name}`);
     setDetail(x => ({id:c.id, mode:'full', tab:{...tab, nonce:Date.now()}, returnTo: x && x.returnTo}));
   };
-  // Go to Deal: the customer's parent deal, opened in the mode the customer is open in.
-  const goToDeal = (c) => { const id = (c.dealIds || [])[0]; if(id && onOpenDeal) onOpenDeal(id, detail && detail.id === c.id ? detail.mode : 'panel'); };
+  // Go to Deal: the customer's parent deal.
+  const goToDeal = (c) => { const id = (c.dealIds || [])[0]; if(id && onOpenDeal) onOpenDeal(id, 'full'); };
   const menu = (c, onViewSettings) => {
     const rec = byId.get(c.id) || c;
     return <CustomerActionsMenu customer={rec} onTool={(k)=>toolAction(k, rec)}

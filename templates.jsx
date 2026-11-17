@@ -656,9 +656,9 @@ function TemplatesSettings({data, setData}){
   const isT = tab === 'templates';
   const list = (isT ? templates : sequences).filter(x => can('view', x));
   const open = list.find(x => x.id === openId) || null;
-  const cols = isT ? [{key:'name', label:'Template Name', width:240}, {key:'usedBy', label:'Used By', width:120}, {key:'createdBy', label:'Created By', width:170}]
+  // Subject is a column again (2026-11-17).
+  const cols = isT ? [{key:'name', label:'Template Name', width:240}, {key:'subject', label:'Subject', width:280}, {key:'usedBy', label:'Used By', width:120}, {key:'createdBy', label:'Created By', width:170}]
     : [{key:'name', label:'Sequence Name', width:240}, {key:'enrolled', label:'Enrolled', width:130}, {key:'usedBy', label:'Used By', width:120}, {key:'createdBy', label:'Created By', width:170}];
-  // (A template's subject isn't a column; the search still reads it.)
   const rows = list.map(x => isT ? {id:x.id, name:x.name, subject:x.subject, usedBy:usage('templates', x.id).length, createdBy:creatorOf(x)}
     : {id:x.id, name:x.name, enrolled:enrolledIn(x.id), usedBy:usage('sequences', x.id).length, createdBy:creatorOf(x)});
   const noun = isT ? 'template' : 'sequence', Noun = isT ? 'Template' : 'Sequence';
@@ -720,7 +720,7 @@ function TemplatesSettings({data, setData}){
         tab === 'playbooks' ? <PlaybooksTab data={data} setData={setData} say={say}/> :
         tab === 'services' ? <ServicesPage/> :
         <div style={{display:'flex', flexDirection:'column', flex:1, minHeight:0}}>
-          <RecordViewsModule key={tab} schema={schema} rows={rows} columns={cols.map(c => c.key)} storeKey={isT ? 'views:templates-templates' : 'views:templates-sequences-v2' /* v2: Enrolled in place of Emails and Templates */}
+          <RecordViewsModule key={tab} schema={schema} rows={rows} columns={cols.map(c => c.key)} storeKey={isT ? 'views:templates-templates-v2' : 'views:templates-sequences-v2' /* v2: Subject back (templates), Enrolled in place of Emails and Templates */}
             defaultViews={[{id:`tv-${tab}`, name: isT ? 'All Templates' : 'All Sequences', sort:{key:'name', dir:'asc'}}]}
             actions={() => can('create') && <button onClick={()=>{ setOpenId(null); setForm({kind:tab}); }} title={isT ? 'Add Email Template' : 'Add Email Sequence'} aria-label={isT ? 'Add Email Template' : 'Add Email Sequence'} style={toolbarIconButton}><Icon name="plus" size={14} color={T.gray800}/></button>}
             overlay={form ? (form.kind === 'templates'

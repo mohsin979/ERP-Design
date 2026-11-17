@@ -707,7 +707,8 @@ const USER_SELECT_VALUES = {status:USER_STATUSES, seat:USER_SEATS, preset:PERMIS
 const USER_COLUMNS = ['name', 'email', 'seat', 'team', 'preset', 'lastActive', 'created'];
 
 const isFilter = (prop, value) => ({nodes:[{id:`f-${prop}-${value}`, kind:'row', joinOp:'AND', prop, op:'is', value, value2:'', values:[]}]});
-const VIEW_STATE = ['columnOrder', 'sort', 'search', 'filters', 'frozenLeft', 'frozenRight', 'actionsFrozen', 'rowsPerPage', 'viewMode', 'pipelineId', 'cardSettings'];
+// `columnWidths`: columns dragged to a width (2026-11-17), kept with the view.
+const VIEW_STATE = ['columnOrder', 'sort', 'search', 'filters', 'frozenLeft', 'frozenRight', 'actionsFrozen', 'rowsPerPage', 'viewMode', 'pipelineId', 'cardSettings', 'columnWidths'];
 const makeRecordView = (id, name, columns, opts = {}) => ({
   id, name, hidden:false, columnOrder:columns, frozenLeft:1, frozenRight:0, actionsFrozen:true, rowsPerPage:25,
   sort:null, viewMode:'table', search:'', filters:{nodes:[]}, ...opts,
@@ -838,7 +839,7 @@ function RecordViewsModule({schema, rows, defaultViews, columns, savedViews = tr
         {/* `overlay`: floats over the records, under the toolbar (e.g. Deals → Violations). */}
         <div style={{overflow:'hidden', flex:1, minHeight:0, display:'flex', flexDirection:'column', position:'relative'}}>
           {typeof overlay === 'function' ? overlay(viewInfo) : overlay}
-          {board && st.viewMode === 'board' ? board.render(filtered, {search:st.search, pipelineId:st.pipelineId, cardSettings:st.cardSettings}) : <ContactsDataGrid rows={filtered} resetKey={`${activeViewId}:${JSON.stringify(st.filters)}`} columnOrder={st.columnOrder} setColumnOrder={set('columnOrder')} sort={st.sort} setSort={set('sort')} search={st.search}
+          {board && st.viewMode === 'board' ? board.render(filtered, {search:st.search, pipelineId:st.pipelineId, cardSettings:st.cardSettings}) : <ContactsDataGrid rows={filtered} resetKey={`${activeViewId}:${JSON.stringify(st.filters)}`} columnOrder={st.columnOrder} setColumnOrder={set('columnOrder')} columnWidths={st.columnWidths} setColumnWidths={set('columnWidths')} sort={st.sort} setSort={set('sort')} search={st.search}
             frozenLeft={st.frozenLeft} frozenRight={st.frozenRight} actionsFrozen={st.actionsFrozen} rowsPerPage={st.rowsPerPage} onOpenContact={()=>{}}/>}
         </div>
       </div>
@@ -1157,7 +1158,7 @@ function AddUserModal({data, onClose, onAdd, onStub}){
           {/* The login / create-account prompt pattern. */}
           <div style={{fontSize:13, color:T.gray600, paddingTop:2}}>
             Don't have an employee right now?{' '}
-            <button onClick={()=>onStub('Add employee first')} style={{border:'none', background:'transparent', padding:0, cursor:'pointer', fontFamily:'inherit', fontSize:13, fontWeight:500, color:T.attioBlue}}>Add employee first</button>
+            <button onClick={()=>onStub('Add employee first')} className={LINK_CLASS} style={{border:'none', background:'transparent', padding:0, cursor:'pointer', fontFamily:'inherit', fontSize:13, fontWeight:500, color:T.attioText}}>Add employee first</button>
           </div>
         </div>
 
@@ -1276,8 +1277,7 @@ const TEAM_FILTER_PROPS = [
 ];
 /* A clickable count: just the number, underlined (the column header names what it counts). */
 const countLink = (n, onClick) => (
-  <button onClick={onClick} style={{border:'none', background:'transparent', padding:0, cursor:'pointer', fontFamily:'inherit', fontSize:'inherit', color:T.attioText,
-    textDecoration:'underline', textUnderlineOffset:2, textDecorationColor:'#D7D6DA'}}>{n}</button>
+  <button onClick={onClick} className={LINK_CLASS} style={{border:'none', background:'transparent', padding:0, cursor:'pointer', fontFamily:'inherit', fontSize:'inherit', color:T.attioText}}>{n}</button>
 );
 function TeamsModule({data, setData, onStub, openUsers}){
   const [adding, setAdding] = React.useState(false);

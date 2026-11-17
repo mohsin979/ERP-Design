@@ -536,7 +536,7 @@ function TaskPipelineModal({initial, onCancel, onSave}){
     </CreatePanelFrame>
   );
 }
-// The three statuses as the section shows them.
+// The statuses as the section shows them (Overdue automatic).
 function TaskStatesLine(){
   return (
     <div style={{display:'flex', flexWrap:'wrap', alignItems:'center', gap:6}}>

@@ -86,19 +86,23 @@ const SYSTEM_CALL_OUTCOMES = ['No answer', 'Left voicemail', 'Connected', 'Wrong
 const LEGACY_OUTCOME = {Missed:'No answer', 'Left live message':'Connected', 'Meeting booked':'Connected'};
 const outcomeOf = (raw) => LEGACY_OUTCOME[raw] || raw;
 
-/* Tasks — type and status. A task is In Progress or Completed (`status`); Overdue is worked out —
-   an In Progress task past its due date — and never set by hand (taskState). The same three states
-   everywhere: the Tasks board, a record's Tasks tab, Settings → Tasks. */
+/* Tasks — type and status (2026-11-17). A task is Not Started (a new one), In Progress (Start),
+   On Hold (Put on Hold; Resume brings it back) or Completed (`status`). Overdue is worked out —
+   any open task (Not Started, In Progress, On Hold) past its due date — and never set by hand
+   (taskState). The same states everywhere: the Tasks board, a record's Tasks tab, Settings → Tasks. */
 const TASK_TYPES = ['Email', 'Call', 'To-do'];
 const TASK_STATUSES = [
+  {key:'notStarted', label:'Not Started'},
   {key:'inProgress', label:'In Progress'},
+  {key:'onHold',     label:'On Hold'},
   {key:'completed',  label:'Completed'},
 ];
-const TASK_STATES = [...TASK_STATUSES.slice(0, 1), {key:'overdue', label:'Overdue'}, ...TASK_STATUSES.slice(1)];
+const TASK_OPEN_STATUSES = ['notStarted', 'inProgress', 'onHold'];
+const TASK_STATES = [...TASK_STATUSES.slice(0, 3), {key:'overdue', label:'Overdue'}, ...TASK_STATUSES.slice(3)];
 const TASK_PIPELINE_STAGES = () => TASK_STATUSES.map(s => ({id:s.key, label:s.label}));
 /* Task pipelines (Settings → Tasks): a task sits in one pipeline (`pipelineId`, the default when
    none) at its status. Every pipeline has the same stages — In Progress, Completed (Overdue is
-   worked out). App keeps TASK_PIPELINES current (setTaskPipelines) for the helpers below. */
+   worked out) — Not Started, In Progress, On Hold, Completed. App keeps TASK_PIPELINES current (setTaskPipelines) for the helpers below. */
 const DEFAULT_TASK_PIPELINE_ID = 'tp-general';
 const DEFAULT_TASK_PIPELINES = () => [{id:DEFAULT_TASK_PIPELINE_ID, name:'General', isDefault:true, stages:TASK_PIPELINE_STAGES()}];
 // Pipelines saved with their own stages take the fixed ones (their tasks: withTaskStatuses).
@@ -110,7 +114,7 @@ const taskPipelinesOf = (data) => (data && data.taskPipelines && data.taskPipeli
    stage then), else In Progress (Not started, Waiting, …). `oldPipelines`: the pipelines as saved
    before. Running it again changes nothing. */
 const taskStatusFrom = (t, oldPipelines) => {
-  if(t.status === 'completed' || t.status === 'inProgress') return t.status;
+  if(t.status === 'completed' || TASK_OPEN_STATUSES.includes(t.status)) return t.status;
   const pl = (oldPipelines || []).find(p => p.id === (t.pipelineId || DEFAULT_TASK_PIPELINE_ID)), last = pl && pl.stages && pl.stages[pl.stages.length - 1];
   return last && last.id === t.status ? 'completed' : 'inProgress';
 };
@@ -276,8 +280,8 @@ const startOfToday = () => { const d = new Date(); d.setHours(0,0,0,0); return d
    date alone is overdue from the next day. */
 const isPastDue = (t) => !!t.due && (t.dueTime ? new Date(t.due) < new Date() : new Date(t.due) < startOfToday());
 const isOverdue = (t) => t.type === 'task' && isTaskOpen(t) && isPastDue(t);
-// A task's state: Completed, Overdue (worked out) or In Progress — and its label.
-const taskState = (t) => !isTaskOpen(t) ? 'completed' : isPastDue(t) ? 'overdue' : 'inProgress';
+// A task's state: Completed, Overdue (worked out — any open task past its due date), else its status — and its label.
+const taskState = (t) => !isTaskOpen(t) ? 'completed' : isPastDue(t) ? 'overdue' : TASK_OPEN_STATUSES.includes(t.status) ? t.status : 'inProgress';
 const taskStateLabel = (t) => (TASK_STATES.find(s => s.key === taskState(t)) || {}).label || '';
 const ymdOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 // The task form's values (date 'YYYY-MM-DD', time 'HH:MM') ⇄ the task's `due` / `dueTime`.
@@ -469,12 +473,11 @@ function PersonName({kind, name}){
   const profile = React.useContext(OwnerProfileCtx);
   const open = internal && profile ? (e) => { e.stopPropagation(); profile.open(name); } : undefined;
   return (
+    // The underline every click action has (shared.jsx LINK_CLASS), as record names (ContactName).
     <span onClick={open} role={open ? 'button' : undefined} onMouseEnter={internal ? ()=>setH(true) : undefined} onMouseLeave={internal ? ()=>setH(false) : undefined}
+      className={internal ? LINK_CLASS : undefined}
       style={{minWidth:0, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', flexShrink:1000,
-              color: internal && h ? T.attioText : T.attioMuted, cursor: internal ? 'pointer' : 'default',
-              // Same underline as record names (ContactName): light grey, darker on hover.
-              textDecorationLine: internal ? 'underline' : 'none', textUnderlineOffset:2,
-              textDecorationColor: internal && h ? T.attioMuted : '#D7D6DA', transition:'color 120ms ease, text-decoration-color 120ms ease'}}>{name}</span>
+              color: internal && h ? T.attioText : T.attioMuted, cursor: internal ? 'pointer' : 'default', transition:'color 120ms ease'}}>{name}</span>
   );
 }
 
@@ -623,8 +626,8 @@ function ActivityDropdown({icon, label, items, count, emptyText, linkLabel, onLi
           {shown.length
             ? shown.map((a, i) => <ActivityRow key={a.id} a={a} contact={contact} context={context} first={i === 0}/>)
             : <div style={{fontSize:12.5, color:T.attioFaint, paddingTop:8}}>{emptyText}</div>}
-          <button onClick={onLink} style={{marginTop:8, border:'none', background:'transparent', padding:0, cursor:'pointer',
-            fontSize:12.5, color:T.attioBlue, fontFamily:'inherit'}}>{linkLabel}</button>
+          <button onClick={onLink} className={LINK_CLASS} style={{marginTop:8, border:'none', background:'transparent', padding:0, cursor:'pointer',
+            fontSize:12.5, color:T.attioText, fontFamily:'inherit'}}>{linkLabel}</button>
         </div>
       )}
     </div>
@@ -709,7 +712,7 @@ Object.assign(window, {isRealTouch, latestTouch, isOverdue, taskDueParts, taskDu
   ACTIVITY_TYPES, generateActivities, withSampleTaskDescriptions, buildActivitySummary,
   ActivitySection, ActivityHistory, SummaryBlock, ActivityDropdown, HistoryItem, activityBox,
   ActivityRow, ActivityLead, activityLines, activityActor, listedActivities, leadText,
-  LOG_CALL_OUTCOMES, SYSTEM_CALL_OUTCOMES, MEETING_PLATFORMS, TASK_TYPES, TASK_STATUSES, TASK_STATES, taskState, taskStateLabel, isPastDue, withTaskStatuses, isTaskOpen, DEFAULT_TASK_PIPELINE_ID, DEFAULT_TASK_PIPELINES, setTaskPipelines, taskPipelinesOf, taskPipelineIdOf, taskPipelineOf, taskStageLabel, outcomeOf, fmtActStamp,
+  LOG_CALL_OUTCOMES, SYSTEM_CALL_OUTCOMES, MEETING_PLATFORMS, TASK_TYPES, TASK_STATUSES, TASK_OPEN_STATUSES, TASK_STATES, taskState, taskStateLabel, isPastDue, withTaskStatuses, isTaskOpen, DEFAULT_TASK_PIPELINE_ID, DEFAULT_TASK_PIPELINES, setTaskPipelines, taskPipelinesOf, taskPipelineIdOf, taskPipelineOf, taskStageLabel, outcomeOf, fmtActStamp,
   PersonAvatar, PersonName, CallDirection,
   fmtActDate, isOverdue, activityHeadline, activityWhen,
 });

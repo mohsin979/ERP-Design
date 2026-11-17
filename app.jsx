@@ -1264,7 +1264,7 @@ function App(){
         <CrmHeader session={session} setSession={setSession}/>
         {keepAlivePane('contacts', <ContactsModule contactProperties={objectFormProperties(settingsData, 'contacts')} contacts={contactsWithDeals} setContacts={engine.setContacts}
           activities={contactActivities} setActivities={setContactActivities} profileStore={profileStore}
-          dealData={settingsData} deals={deals} dealsFor={dealsFor} onCreateDeal={createDeal} onLinkDeal={linkDeal} onOpenDeal={(id, mode)=>openRecord('deals', id, mode)}
+          dealData={settingsData} deals={dealsView} dealsFor={dealsFor} onCreateDeal={createDeal} onLinkDeal={linkDeal} onOpenDeal={(id, mode)=>openRecord('deals', id, mode)}
           dealActivitiesFor={dealActivitiesFor} updateDealActivity={(id, patch) => engine.value.api.updateDealActivity(id, patch)}
           customers={customers} customersFor={customersFor} onCreateCustomer={startCustomer} onLinkCustomer={linkCustomer} onOpenCustomer={(id, mode)=>openRecord('customers', id, mode)} onRecordDeleted={unlinkDeleted}
           openRequest={recordLink && recordLink.object === 'contacts' ? recordLink : null}/>)}

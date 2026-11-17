@@ -1300,9 +1300,8 @@ const sequenceSpan = (seq) => {
 function UnderlineAction({label, onClick}){
   const [h, setH] = React.useState(false);
   return (
-    <button onClick={onClick} onMouseEnter={()=>setH(true)} onMouseLeave={()=>setH(false)} style={{border:'none', background:'transparent', padding:0, cursor:'pointer',
-      fontFamily:'inherit', fontSize:13, fontWeight:500, color: h ? T.black : T.attioText, textDecoration:'underline', textUnderlineOffset:2,
-      textDecorationColor: h ? T.attioMuted : '#D7D6DA', transition:'color 120ms ease, text-decoration-color 120ms ease', alignSelf:'flex-start'}}>{label}</button>
+    <button onClick={onClick} onMouseEnter={()=>setH(true)} onMouseLeave={()=>setH(false)} className={LINK_CLASS} style={{border:'none', background:'transparent', padding:0, cursor:'pointer',
+      fontFamily:'inherit', fontSize:13, fontWeight:500, color: h ? T.black : T.attioText, transition:'color 120ms ease', alignSelf:'flex-start'}}>{label}</button>
   );
 }
 

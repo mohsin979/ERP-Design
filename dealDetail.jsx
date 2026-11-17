@@ -91,8 +91,9 @@ const defaultDealPanelSettings = (props) => ({
   dropdowns: [{id:'d-all', type:'all', enabled:true, count:10}],
   dealProperties: dealPanelProperties(props).map(p => ({key:p.key, enabled:true})),
 });
-// A custom property added since the settings were saved joins the end, shown.
-const withDealPanelProperties = (settings, props) => {
+// A custom property added since the settings were saved joins the end, shown. (And the panel's primary quick action, where none was ever set: Create Customer.)
+const withDealPanelProperties = (saved, props) => {
+  const settings = withPrimaryAction(saved, 'deals');
   const known = settings.dealProperties.map(p => p.key);
   const added = dealPanelProperties(props).filter(p => !known.includes(p.key)).map(p => ({key:p.key, enabled:true}));
   return added.length ? {...settings, dealProperties:withAddedPanelProperties(settings.dealProperties, added)} : settings;
@@ -122,7 +123,8 @@ function DealNameRow({deal, subtitle, headerActions}){
   );
 }
 
-const linkButton = {border:'none', background:'transparent', padding:0, cursor:'pointer', fontSize:13, color:T.attioBlue, textAlign:'left', fontFamily:'inherit',
+// A record or person value that opens it — with LINK_CLASS (dark, underlined, all blue on hover).
+const linkButton = {border:'none', background:'transparent', padding:0, cursor:'pointer', fontSize:13, color:T.attioText, textAlign:'left', fontFamily:'inherit',
   whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', minWidth:0};
 const dateOnly = (v) => v ? String(v).split(', ').slice(0, 2).join(', ') : '';
 // Last Activity Date: the latest activity that has happened (a meeting still ahead is the next one, not the last).
@@ -173,7 +175,7 @@ function DealInfo({deal, view, acts, contacts = [], customers = [], keys, props,
               : r.owner ? <OwnerValue object="deals" record={deal} name={r.value}/>
               : !r.value ? <span style={{fontSize:13, color:T.attioFaint}}>—</span>
               : r.list ? <AssociatedRecordsValue records={r.value} noun={r.noun} onOpen={r.open}/>
-              : r.open ? <button onClick={r.open} style={linkButton}>{r.value}</button>
+              : r.open ? <button onClick={r.open} className={LINK_CLASS} style={linkButton}>{r.value}</button>
               : <span style={{fontSize:13, color:T.attioText, minWidth:0, overflowWrap:'anywhere'}}>{dateShown(r.value)}</span>}
           </div>
         );
@@ -189,14 +191,7 @@ function DealInfo({deal, view, acts, contacts = [], customers = [], keys, props,
 function RecordDetailBody({object, record, view, acts, email, phone, settings, dropdowns, propertiesKey, info, onQuick, onStub, onCopied}){
   const ps = settings;
   const sections = {
-    quickActions: () => {
-      const on = shownQuickActions(ps.quickActions, object, record);
-      return on.length ? (
-        <div style={{display:'flex', gap:8, flexWrap:'wrap'}}>
-          {on.map(q => <QuickAction key={q.key} icon={q.icon} label={q.label} onClick={()=>onQuick(q.key)}/>)}
-        </div>
-      ) : null;
-    },
+    quickActions: () => <QuickActionsBlock items={ps.quickActions} primaryKey={ps.primaryAction} object={object} record={record} onRun={(q)=>onQuick(q.key)}/>,
     // The card's Smart Summary: it opens with the record's stage and pipeline.
     smartSummary: () => !ps.smartSummary.enabled ? null : (
       <div style={activityBox}><SummaryBlock contact={view} acts={acts} source="From activity" lead={`${view.stage || 'No stage'} · ${view.pipeline || 'No pipeline'}.`}/></div>

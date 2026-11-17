@@ -340,6 +340,7 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
   const [changingOwner, setChangingOwner] = React.useState(null);
   const [stub, setStub] = React.useState(null);
   /* Deal Detail: which deal is open and how (side panel / full screen), by id like Contacts. */
+  // A deal opens straight on its detail page (2026-11-17), not in the side panel first; the page can still be collapsed into the side panel and expanded again.
   const [detail, setDetail] = React.useState(null);   // {id, mode:'panel'|'full', tab?}
   // Deal side panel layout (View Settings from the deal's ⋯ menu) — one setting for every deal.
   const [panelSettings, setPanelSettings] = usePersistedState('panel:deals', () => defaultDealPanelSettings(props));
@@ -373,18 +374,19 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
   const schema = React.useMemo(()=>withScopeFilters(withAssocFilters(dealSchema(props, pipelines, owners), contactAssoc), data, 'deals'), [props, pipelines, data, contactAssoc]);
 
   // `returnTo`: opened from a workflow event, which comes back when the deal closes.
-  const openDeal = (d) => setDetail(x => ({id:d.id, mode: x && x.mode === 'full' ? 'full' : 'panel', returnTo: x && x.returnTo}));
-  /* Opened from elsewhere (a contact's Associated Deals or Deals tab, a workflow event): in the mode
-     it came from, on a tab if asked — a tab id, or {id, adding, prefill} with a form open. */
+  // While the side panel is open, another deal clicked in the list takes its place there.
+  const openDeal = (d) => setDetail(x => ({id:d.id, mode: x && x.mode === 'panel' ? 'panel' : 'full', returnTo: x && x.returnTo}));
+  /* Opened from elsewhere (a contact's Associated Deals or Deals tab, a workflow event): on a tab
+     if asked — a tab id, or {id, adding, prefill} with a form open. */
   React.useEffect(() => {
-    if(openRequest && byId.has(openRequest.id)) setDetail({id:openRequest.id, mode:openRequest.mode || 'panel',
+    if(openRequest && byId.has(openRequest.id)) setDetail({id:openRequest.id, mode:'full',
       tab: openRequest.tab ? {...(typeof openRequest.tab === 'string' ? {id:openRequest.tab} : openRequest.tab), nonce:openRequest.nonce} : undefined,
       returnTo: openRequest.onReturn || null});
   }, [openRequest && openRequest.nonce]);
   const closeDetail = () => { const back = detail && detail.returnTo; setDetail(null); if(back) back(); };
   const contactOf = (d) => contactsOfDeal(byId.get(d.id) || d)[0] || null;
-  // Go to contact: the Contacts page with the deal's contact open (in the mode the deal is open in).
-  const goToContact = (d) => { const c = contactOf(d); if(c && onOpenContact) onOpenContact(c.id, detail && detail.id === d.id ? detail.mode : 'panel'); };
+  // Go to contact: the Contacts page with the deal's contact open.
+  const goToContact = (d) => { const c = contactOf(d); if(c && onOpenContact) onOpenContact(c.id, 'full'); };
   /* The deal ⋯ menu — the one record menu (DealActionsMenu); View settings only on the
      deal itself. Same menu on the table row, the board card and the deal. */
   const dealMenu = (d, onViewSettings) => <DealActionsMenu deal={byId.get(d.id) || d} contact={contactOf(d)} onTool={(key)=>dealToolAction(key, d)}

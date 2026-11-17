@@ -5,6 +5,11 @@
    with a live preview of the panel body on the right. The profile (name, email, phone) always
    stays at the top and is not a section.
 
+   Quick Actions: which actions show, in what order — and (2026-11-17) one of them may be the
+   Primary: it shows beneath the icons as a filled button with its icon and name, not among them.
+   Choosing one shows it; choosing it again, or unticking it, leaves none (`primaryAction`). To
+   start with: a contact's Create Deal, a deal's Create Customer, a customer's Call.
+
    One setting for every contact, in both the side panel and the full page's left column —
    they are the same component, so they never differ. Opened from View Settings in the
    contact's ⋯ menu; applies on Apply. */
@@ -58,7 +63,9 @@ const withAddedPanelProperties = (list, added) => {
   const by = added.find(p => p.key === 'ownerAssignedBy'), at = list.findIndex(p => p.key === 'ownerAssigned'), rest = added.filter(p => p !== by);
   return by && at >= 0 ? [...list.slice(0, at + 1), by, ...list.slice(at + 1), ...rest] : [...list, ...added];
 };
-const withContactPanelProperties = (settings, props) => {
+// (And the panel's primary quick action, where none was ever set — contactActions.jsx withPrimaryAction: Create Deal.)
+const withContactPanelProperties = (saved, props) => {
+  const settings = withPrimaryAction(saved, 'contacts');
   const known = settings.contactProperties.map(p => p.key);
   const added = contactPanelProperties(props).filter(p => !known.includes(p.key)).map(p => ({key:p.key, enabled:!p.system}));
   return added.length ? {...settings, contactProperties:withAddedPanelProperties(settings.contactProperties, added)} : settings;
@@ -67,14 +74,14 @@ const withContactPanelProperties = (settings, props) => {
 /* Defaults reproduce today's panel: the four quick actions, the summary, View Activity (now a
    dropdown showing the latest 10), and every Contact Property in its existing order. */
 /* `subtitle`: the property shown under the contact's name ('' = none); Job Title by default. */
-const DEFAULT_PANEL_SETTINGS = () => ({
+const DEFAULT_PANEL_SETTINGS = () => withPrimaryAction({
   subtitle: 'jobTitle',
   order: ['quickActions', 'smartSummary', 'dropdowns', 'contactProperties'],
   quickActions: defaultQuickActions('contacts'),
   smartSummary: {enabled:true},
   dropdowns: [{id:'d-all', type:'all', enabled:true, count:10}],
   contactProperties: PANEL_PROPERTIES.map(p => ({key:p.key, enabled:true})),
-});
+}, 'contacts');
 
 /* A draggable checkbox list — Quick Actions, Dropdowns and Contact Properties all use it. */
 /* onChange receives an updater (list => next list), so quick successive changes never overwrite
@@ -115,6 +122,12 @@ function PanelSettingsModal({draft, setDraft, sample, onApply, onClose, kind = C
   const propLabel = (k) => (kind.properties.find(p => p.key === k) || {}).label || k;
   const missing = kind.dropdowns.filter(dd => !draft.dropdowns.some(x => x.type === dd.key));
   const preview = kind.renderPreview(draft, sample);
+  // Quick Actions: the list, and the one that's Primary (it's always a shown one).
+  const quickOf = (d) => normalizeQuickActions(d.quickActions, kind.object || 'contacts');
+  const setQuick = (v) => setDraft(d => { const next = typeof v === 'function' ? v(quickOf(d)) : v, kept = d.primaryAction && next.some(x => x.key === d.primaryAction && x.enabled);
+    return {...d, quickActions:next, primaryAction: kept ? d.primaryAction : null}; });
+  const togglePrimary = (key) => setDraft(d => d.primaryAction === key ? {...d, primaryAction:null}
+    : {...d, primaryAction:key, quickActions:quickOf(d).map(x => x.key === key ? {...x, enabled:true} : x)});
 
   return (
     <SettingsModalShell title="Side Panel Settings" sections={kind.sections} order={draft.order}
@@ -132,8 +145,13 @@ function PanelSettingsModal({draft, setDraft, sample, onApply, onClose, kind = C
       )}
 
       {section === 'quickActions' && (
-        <DragCheckList items={normalizeQuickActions(draft.quickActions, kind.object || 'contacts')} labelOf={it => kind.quickActionLabels[it.key]}
-          onChange={v=>set('quickActions', list => typeof v === 'function' ? v(normalizeQuickActions(list, kind.object || 'contacts')) : v)}/>
+        <DragCheckList items={quickOf(draft)} labelOf={it => kind.quickActionLabels[it.key]} onChange={setQuick}
+          right={it => { const on = draft.primaryAction === it.key;
+            // As the dashboard's Pin as first; picking the Primary again clears it.
+            return <label style={{display:'flex', alignItems:'center', gap:6, fontSize:12.5, color: on ? T.attioText : T.attioMuted, cursor:'pointer', flexShrink:0}}>
+              <input type="radio" checked={on} onClick={()=>togglePrimary(it.key)} onChange={()=>{}} aria-label={`Make ${kind.quickActionLabels[it.key]} the primary action`}
+                style={{margin:0, width:14, height:14, accentColor:T.black, cursor:'pointer'}}/>Primary
+            </label>; }}/>
       )}
 
       {section === 'smartSummary' && (
@@ -154,11 +172,11 @@ function PanelSettingsModal({draft, setDraft, sample, onApply, onClose, kind = C
         {draft.dropdowns.length === 0 && <div style={{fontSize:12.5, color:T.gray400, padding:'8px 6px'}}>No dropdowns yet</div>}
         {/* Add one of the dropdown types not already in the list. */}
         <div style={{position:'relative', alignSelf:'flex-start', padding:'4px 6px'}}>
-          <button disabled={!missing.length} onClick={()=>setAddOpen(o=>!o)}
+          <button disabled={!missing.length} onClick={()=>setAddOpen(o=>!o)} className={missing.length ? LINK_CLASS : undefined}
             style={{display:'flex', alignItems:'center', gap:6, border:'none', background:'transparent', padding:'4px 0',
                     cursor: missing.length ? 'pointer' : 'default', fontSize:13, fontFamily:'inherit',
-                    color: missing.length ? T.attioBlue : T.gray400}}>
-            <Icon name="plus" size={13} color={missing.length ? T.attioBlue : T.gray400}/> Add Dropdown
+                    color: missing.length ? T.attioText : T.gray400}}>
+            <Icon name="plus" size={13} color={missing.length ? T.attioText : T.gray400}/> Add Dropdown
           </button>
           <MenuShell open={addOpen} onClose={()=>setAddOpen(false)} width={200}>
             {missing.map(dd => (

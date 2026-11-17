@@ -391,7 +391,10 @@ function conditionFields(data, w){
     ...(t && t.group === 'stage' && t.key !== 'stayAtStage' ? [{key:'previousStage', group:'Pipeline', label:'Previous Stage', kind:'choice', options:stages, get:(env) => env.previousStage || ''}] : []),
     {key:'daysInStage', group:'Pipeline', label:'Days in Current Stage', kind:'number', get:(env) => env.deal.stageEnteredAt ? Math.floor((Date.now() - env.deal.stageEnteredAt) / WF_DAY) : ''},
   ] : [];
-  return [...record, ...pipelineFields, ...(ACTIVITY_RECORD_OBJECTS.includes(objectId) ? activityConditionFields(data) : [])];
+  /* Form properties under every trigger (2026-11-17): Submission Source and each form's answers —
+     Form Name and Form Submission Date are already among the record's own where it has them. */
+  const formFields = (scopeFields(data, 'form') || []).filter(f => !record.some(r => r.key === f.key));
+  return [...record, ...pipelineFields, ...formFields, ...(ACTIVITY_RECORD_OBJECTS.includes(objectId) ? activityConditionFields(data) : [])];
 }
 // Blank in any shape (a list with nothing in it, a group with no part filled in).
 const isBlank = (v) => v === undefined || v === null || (Array.isArray(v) ? !v.length : typeof v === 'object' ? Object.values(v).every(x => isBlank(x)) : String(v).trim() === '');
@@ -1394,7 +1397,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
     const owner = userName(dataRef.current, deal.owner);
     tasks.forEach(t => {
       const act = {id:wfNewId('wt'), ...recordKey(deal.id), type:'task', at:new Date(), title:t.name.trim(), description:t.description || '', taskType:t.taskType || 'To-do',
-        status:'inProgress', assignee:t.assigneeName || owner, due:new Date(t.dueAt), dueTime:!!(t.due && t.due.time), source:'team', by:owner, viaWorkflow:workflowId};
+        status:'notStarted', assignee:t.assigneeName || owner, due:new Date(t.dueAt), dueTime:!!(t.due && t.due.time), source:'team', by:owner, viaWorkflow:workflowId};
       addActivity(deal.id, act);
       emit({type:'taskCreated', recordId:deal.id, pipelineId:deal.pipeline, attrs:{activityId:act.id, taskType:act.taskType, assignee:act.assignee}}, childChain(run));
     });
@@ -3327,8 +3330,8 @@ function AutomationNotice({recordId}){
   const may = workflowCan('revert');
   const revert = (r) => { ctx.api.revertRun(r.id); if(hub) hub.toast('Workflow reverted'); };
   const revertBtn = (r) => may && automationRevertible(r) && (
-    <button type="button" onClick={(e)=>{ e.stopPropagation(); revert(r); }} style={{flexShrink:0, border:'none', background:'transparent', padding:0, fontSize:12.5, fontWeight:600, color:T.attioText, cursor:'pointer',
-      fontFamily:'inherit', textDecorationLine:'underline', textUnderlineOffset:2}}>Revert</button>
+    <button type="button" onClick={(e)=>{ e.stopPropagation(); revert(r); }} className={LINK_CLASS} style={{flexShrink:0, border:'none', background:'transparent', padding:0, fontSize:12.5, fontWeight:600, color:T.attioText, cursor:'pointer',
+      fontFamily:'inherit'}}>Revert</button>
   );
   const hideBtn = (r) => (
     <button type="button" title="Hide" aria-label="Hide" onClick={(e)=>{ e.stopPropagation(); ctx.api.hideAutomation(r.id); }}
@@ -3490,9 +3493,9 @@ function EventRecordLink({dealId, name, keepEvent, style}){
   const [h, setH] = React.useState(false);
   const open = ctx && ctx.openRecord;
   return (
-    <button onClick={open ? ()=>open(dealId, null, keepEvent) : undefined} onMouseEnter={()=>setH(true)} onMouseLeave={()=>setH(false)} title="Open record"
+    <button onClick={open ? ()=>open(dealId, null, keepEvent) : undefined} onMouseEnter={()=>setH(true)} onMouseLeave={()=>setH(false)} title="Open record" className={LINK_CLASS}
       style={{alignSelf:'flex-start', border:'none', background:'transparent', padding:0, fontFamily:'inherit', fontSize:15, fontWeight:600, textAlign:'left',
-        color: h ? T.black : T.attioText, textDecoration:'underline', textUnderlineOffset:3, textDecorationColor: h ? T.attioMuted : '#D7D6DA', cursor: open ? 'pointer' : 'default', ...style}}>{name}</button>
+        color: h ? T.black : T.attioText, cursor: open ? 'pointer' : 'default', ...style}}>{name}</button>
   );
 }
 const journeyButton = (onClick) => (
@@ -3818,9 +3821,8 @@ function useRemedies(ctx, deal, name){
 function EventLink({label, onClick}){
   const [h, setH] = React.useState(false);
   return (
-    <button onClick={onClick} onMouseEnter={()=>setH(true)} onMouseLeave={()=>setH(false)} style={{alignSelf:'flex-start', border:'none', background:'transparent', padding:0, cursor:'pointer',
-      fontFamily:'inherit', fontSize:14, textAlign:'left', color: h ? T.black : T.attioText, textDecoration:'underline', textUnderlineOffset:3,
-      textDecorationColor: h ? T.attioMuted : T.attioText, transition:'color 120ms ease, text-decoration-color 120ms ease'}}>{label}</button>
+    <button onClick={onClick} onMouseEnter={()=>setH(true)} onMouseLeave={()=>setH(false)} className={LINK_CLASS} style={{alignSelf:'flex-start', border:'none', background:'transparent', padding:0, cursor:'pointer',
+      fontFamily:'inherit', fontSize:14, textAlign:'left', color: h ? T.black : T.attioText, transition:'color 120ms ease'}}>{label}</button>
   );
 }
 /* Enforce Rules — the triggers as actions: each condition that's blocking (as the trigger says it),

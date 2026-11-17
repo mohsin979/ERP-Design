@@ -15,7 +15,10 @@
    text (DIV data-embed="payment" | "signature" | "record" with data-id), saved empty: what they show is drawn
    from their data where they're shown, and clicking one in the editor opens it. `tools` adds the
    caller's own toolbar buttons (they insert at the cursor); `toolbarTarget` puts the toolbar
-   elsewhere (above the page); `page` drops the editor's box, for a page that is the editor. */
+   elsewhere (above the page); `page` drops the editor's box, for a page that is the editor.
+   `colors` (the email editor, 2026-11-17: the brand's colours, black and grey) — text colour
+   (SPAN data-color, a #RRGGBB value). A kept size or colour span also carries it as its style, so
+   the text keeps it wherever the HTML goes (an email has no stylesheet). */
 
 const RICH_TAGS = ['B', 'STRONG', 'I', 'EM', 'U', 'OL', 'UL', 'LI', 'A', 'P', 'BR', 'DIV'];
 // Plain text (saved before rich text) → paragraphs; HTML is kept as it is.
@@ -30,6 +33,11 @@ const RICH_FONT_SIZE = {'1':'10', '2':'12', '3':'14', '4':'16', '5':'18', '6':'2
 const RICH_OLD_SIZES = {sm:'12', md:'14', lg:'18', xl:'24'};
 const RICH_EMBEDS = ['payment', 'signature', 'record'];
 const RICH_DOC = {sizes:true, images:true, embeds:true};   // what the document editor keeps
+const RICH_EMAIL = {sizes:true, colors:true};                 // what the email editor keeps (emails.jsx)
+const RICH_HEX = /^#[0-9a-f]{6}$/i;
+// A colour as #RRGGBB (the browser may hand back rgb(…)); anything else: null.
+const richHex = (c) => { const v = String(c || '').trim(); if(RICH_HEX.test(v)) return v.toUpperCase();
+  const m = /^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/i.exec(v); return m ? '#' + m.slice(1).map(x => Number(x).toString(16).padStart(2, '0')).join('').toUpperCase() : null; };
 const RICH_TOKEN = /^(contacts|deals|customers|acc|pf):[\w:~.-]+$/;   // a fetched property's key (emails.jsx)
 const richIsToken = (n) => n.tagName === 'SPAN' && RICH_TOKEN.test(n.getAttribute('data-token') || '');
 // Only the editor's tags survive; links keep an http(s) or mailto href and open in a new tab. `opts`: see the header.
@@ -37,6 +45,7 @@ function sanitizeRichText(html, opts = {}){
   const box = document.createElement('div');
   box.innerHTML = html || '';
   const extra = (n) => (opts.sizes && n.tagName === 'SPAN' && (RICH_SIZES.includes(n.getAttribute('data-size')) || !!RICH_OLD_SIZES[n.getAttribute('data-size')]))
+    || (opts.colors && n.tagName === 'SPAN' && RICH_HEX.test(n.getAttribute('data-color') || ''))
     || (opts.images && n.tagName === 'IMG' && /^data:image\//.test(n.getAttribute('src') || ''))
     || (opts.embeds && n.tagName === 'DIV' && RICH_EMBEDS.includes(n.getAttribute('data-embed')) && /^[\w-]+$/.test(n.getAttribute('data-id') || ''));
   const walk = (node) => {
@@ -46,12 +55,22 @@ function sanitizeRichText(html, opts = {}){
       if(opts.sizes && n.nodeType === 1 && n.tagName === 'FONT' && RICH_FONT_SIZE[n.getAttribute('size')]){
         const span = document.createElement('span'); span.setAttribute('data-size', RICH_FONT_SIZE[n.getAttribute('size')]); span.append(...n.childNodes); n.replaceWith(span); walk(span); return;
       }
+      // The browser's text colour becomes a text colour.
+      if(opts.colors && n.nodeType === 1 && n.tagName === 'FONT' && richHex(n.getAttribute('color'))){
+        const span = document.createElement('span'); span.setAttribute('data-color', richHex(n.getAttribute('color'))); span.append(...n.childNodes); n.replaceWith(span); walk(span); return;
+      }
       // A fetched property: its key and its name, nothing else.
       if(n.nodeType === 1 && richIsToken(n)){ const label = n.textContent; [...n.attributes].forEach(a => { if(a.name !== 'data-token') n.removeAttribute(a.name); }); n.textContent = label; return; }
       if(n.nodeType === 1 && extra(n)){
-        const keep = n.tagName === 'SPAN' ? ['data-size'] : n.tagName === 'IMG' ? ['src'] : ['data-embed', 'data-id'];
+        const keep = n.tagName === 'SPAN' ? ['data-size', 'data-color'] : n.tagName === 'IMG' ? ['src'] : ['data-embed', 'data-id'];
         if(n.tagName === 'SPAN' && RICH_OLD_SIZES[n.getAttribute('data-size')]) n.setAttribute('data-size', RICH_OLD_SIZES[n.getAttribute('data-size')]);
         [...n.attributes].forEach(a => { if(!keep.includes(a.name)) n.removeAttribute(a.name); });
+        if(n.tagName === 'SPAN'){   // only what's allowed stays; its style follows it
+          if(!(opts.sizes && RICH_SIZES.includes(n.getAttribute('data-size')))) n.removeAttribute('data-size');
+          if(!(opts.colors && RICH_HEX.test(n.getAttribute('data-color') || ''))) n.removeAttribute('data-color');
+          const st = [n.getAttribute('data-size') ? `font-size:${n.getAttribute('data-size')}px` : '', n.getAttribute('data-color') ? `color:${n.getAttribute('data-color')}` : ''].filter(Boolean).join(';');
+          if(st) n.setAttribute('style', st);
+        }
         if(n.tagName === 'DIV'){ n.innerHTML = ''; return; }   // an embed is saved empty
         walk(n); return;
       }
@@ -122,8 +141,9 @@ const RICH_IMAGE_MAX = 1024 * 1024;
 /* `embeds` {render(kind, id) → its HTML, onOpen(kind, id), key (changes when their data does)};
    `tools({insert, keep})` → the caller's toolbar buttons: `keep()` on press remembers the cursor,
    `insert(html)` puts the HTML there later (at the end without one). */
-function RichTextEditor({value, onChange, placeholder, minHeight = 110, ariaLabel, ctas, sizes, images, embeds, tools, toolbarTarget, page}){
-  const opts = {sizes:!!sizes, images:!!images, embeds:!!embeds};
+function RichTextEditor({value, onChange, placeholder, minHeight = 110, ariaLabel, ctas, sizes, images, embeds, colors, tools, toolbarTarget, page}){
+  const opts = {sizes:!!sizes, images:!!images, embeds:!!embeds, colors:!!(colors && colors.length)};
+  const [coloring, setColoring] = React.useState(false);
   const ref = React.useRef(null);
   const fileRef = React.useRef(null);
   const [sizing, setSizing] = React.useState(false);
@@ -166,6 +186,14 @@ function RichTextEditor({value, onChange, placeholder, minHeight = 110, ariaLabe
     ref.current.querySelectorAll('font[size]').forEach(f => { f.querySelectorAll('span[data-size]').forEach(x => x.replaceWith(...x.childNodes));
       const span = document.createElement('span'); span.setAttribute('data-size', f.getAttribute('size') === '7' ? n : RICH_FONT_SIZE[f.getAttribute('size')] || '14'); span.append(...f.childNodes); f.replaceWith(span); });
     setSizing(false); setCurSize(Number(n)); emit();
+  };
+  // Text colour: the selection marked with the browser's colour, then kept as a text colour (sanitizeRichText).
+  const setColor = (hex) => {
+    restore(); document.execCommand('styleWithCSS', false, false); document.execCommand('foreColor', false, hex);
+    ref.current.querySelectorAll('font[color]').forEach(f => { const c = richHex(f.getAttribute('color')); if(!c){ f.replaceWith(...f.childNodes); return; }
+      f.querySelectorAll('span[data-color]').forEach(x => { x.removeAttribute('data-color'); x.style.color = ''; });
+      const span = document.createElement('span'); span.setAttribute('data-color', c); span.style.color = c; span.append(...f.childNodes); f.replaceWith(span); });
+    setColoring(false); emit();
   };
   // The size at the cursor, for the Text Size button.
   const readSize = () => { const sel = window.getSelection(), n = sel && sel.anchorNode; if(!n || !ref.current || !ref.current.contains(n)) return;
@@ -233,6 +261,17 @@ function RichTextEditor({value, onChange, placeholder, minHeight = 110, ariaLabe
             </MenuShell>
           </div>
         </>}
+        {opts.colors && <div style={{position:'relative'}}>
+          <button type="button" title="Text Color" aria-label="Text Color" onMouseDown={e=>{ e.preventDefault(); keepSelection(); }} onClick={()=>setColoring(v => !v)}
+            style={{...btn, width:'auto', padding:'0 6px', gap:4, fontSize:12.5}}>
+            <span style={{fontWeight:600, borderBottom:`3px solid ${colors[0]}`, lineHeight:'13px'}}>A</span><Icon name="chevDown" size={10} color={T.gray600}/></button>
+          <MenuShell open={coloring} onClose={()=>setColoring(false)} width={156}>
+            <div style={{display:'flex', flexWrap:'wrap', gap:6, padding:8}}>
+              {colors.map(c => <button key={c} type="button" title={c} aria-label={`Text color ${c}`} onMouseDown={e=>e.preventDefault()} onClick={()=>setColor(c)}
+                style={{width:22, height:22, borderRadius:6, border:`1px solid ${T.borderStrong}`, background:c, cursor:'pointer', padding:0}}/>)}
+            </div>
+          </MenuShell>
+        </div>}
         {images && <>
           <input ref={fileRef} type="file" accept="image/*" style={{display:'none'}} onChange={e=>{ pickImage(e.target.files[0]); e.target.value = ''; }}/>
           <button type="button" title="Insert Image" aria-label="Insert Image" onMouseDown={e=>{ e.preventDefault(); keepSelection(); }} onClick={()=>fileRef.current.click()}
@@ -283,7 +322,7 @@ function RichTextEditor({value, onChange, placeholder, minHeight = 110, ariaLabe
           onClick={e=>{ if(!embeds) return; const n = e.target.closest && e.target.closest('[data-embed]'); if(!n || !ref.current.contains(n)) return;
             e.preventDefault(); if(e.target.closest('[data-embed-remove]')){ n.remove(); emit(); } else embeds.onOpen(n.getAttribute('data-embed'), n.getAttribute('data-id')); }}
           onPaste={e=>{ e.preventDefault(); const html = e.clipboardData.getData('text/html'); const text = e.clipboardData.getData('text/plain');
-            document.execCommand('insertHTML', false, html ? sanitizeRichText(html, {sizes:opts.sizes}) : richHtmlOf(text) || text); emit(); }}
+            document.execCommand('insertHTML', false, html ? sanitizeRichText(html, {sizes:opts.sizes, colors:opts.colors}) : richHtmlOf(text) || text); emit(); }}
           style={page ? {minHeight, padding:0, fontSize:14, color:T.attioText, lineHeight:1.6, outline:'none'}
             : {minHeight, height:minHeight, padding:'8px 12px', fontSize:13, color:T.attioText, lineHeight:1.55, outline:'none',
             /* Drag the corner to make it taller (or back down to its starting height). */
@@ -293,4 +332,4 @@ function RichTextEditor({value, onChange, placeholder, minHeight = 110, ariaLabe
   );
 }
 
-Object.assign(window, {richTextPlain, RichTextEditor, RichTextView, RichTextStyles, sanitizeRichText, richHtmlOf, richIsEmpty, RICH_DOC});
+Object.assign(window, {RICH_EMAIL, richHex, richTextPlain, RichTextEditor, RichTextView, RichTextStyles, sanitizeRichText, richHtmlOf, richIsEmpty, RICH_DOC});

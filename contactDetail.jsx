@@ -1,10 +1,13 @@
 /* HOF Pulse ERP — Contact Detail.
 
    One Contact record, two presentations of the same content:
-     • Side panel  — opens over the Table/Board from any contact entry point (name in the
-                     Table, name on a card, the card's open icon).
-     • Full screen — fills the Contacts content area (CRM sidebar and header stay). The panel's
-                     content moves to a left column; the Contact workspace tabs sit on the right.
+     • Full screen — where a record opens (2026-11-17: straight here from any entry point — its
+                     name in the Table, on a card, the card's open icon — not in the side panel
+                     first). It fills the content area (CRM sidebar and header stay): the panel's
+                     content in a left column, the workspace tabs on the right.
+     • Side panel  — over the Table/Board: what the page collapses into (Back to side panel),
+                     and expands from again (Open Full Screen). While it's open, another record
+                     clicked in the list takes its place in the side panel.
 
    The body (header, quick actions, Summary/activity section, Contact Properties) is a single
    component rendered in both, so the two can't drift apart. Layout follows the Attio record
@@ -38,9 +41,9 @@ function ContactLine({icon, value, label, onOpen, onCopied}){
   return (
     <div style={{display:'flex', alignItems:'center', gap:8, height:26, minWidth:0}}>
       <Icon name={icon} size={14} color={T.attioMuted}/>
-      <button onClick={onOpen} title={label === 'email' ? 'Email' : 'Call'}
+      <button onClick={onOpen} title={label === 'email' ? 'Email' : 'Call'} className={LINK_CLASS}
         style={{border:'none', background:'transparent', padding:0, cursor:'pointer', fontSize:13,
-                color:T.attioBlue, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', minWidth:0}}>
+                color:T.attioText, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', minWidth:0}}>
         {value}
       </button>
       <CopyButton text={value} label={label} onCopied={onCopied}/>
@@ -82,12 +85,16 @@ function NameRow({contact, subtitle, headerActions}){
   );
 }
 
+/* The email opens a new email to the record in the composer (body or a template), as the Email
+   quick action does; the phone starts a call. */
 function DetailHeader({contact, onStub, onCopied, onCall, withName=true, subtitle}){
+  const hub = useRecordHub();
+  const compose = () => hub && contact.id != null ? hub.composeEmail({object:'contacts', id:contact.id}) : onStub('Email');
   return (
     <div style={{display:'flex', flexDirection:'column', gap:12}}>
       {withName && <NameRow contact={contact} subtitle={subtitle}/>}
       <div>
-        <ContactLine icon="envelope" label="email" value={contact.email} onOpen={()=>onStub('Email')} onCopied={onCopied}/>
+        <ContactLine icon="envelope" label="email" value={contact.email} onOpen={compose} onCopied={onCopied}/>
         <ContactLine icon="call" label="phone number" value={contact.phone} onOpen={()=>onCall ? onCall(contact) : onStub('Call')} onCopied={onCopied}/>
       </div>
     </div>
@@ -101,15 +108,28 @@ const contactQuickHandlers = (contact, actions, onStub, onCall) => ({onStub,
   onOwner: actions && actions.onOwner && (() => actions.onOwner(contact)),
   onCreateDeal: actions && actions.onCreateRecord && (() => actions.onCreateRecord('Create Deal', contact)),
   onCreateCustomer: actions && actions.onCreateRecord && (() => actions.onCreateRecord('Create Customer', contact))});
-function PanelQuickActions({contact, items, actions, onStub, onCall}){
-  const on = shownQuickActions(items, 'contacts', contact);
-  if(!on.length) return null;
-  const h = contactQuickHandlers(contact, actions, onStub, onCall);
+/* A record's quick actions in its side panel (Contacts, Deals and Customers alike): the icons,
+   then — where View Settings names one Primary — that action beneath them as a filled button with
+   its icon and name (contactActions.jsx splitQuickActions). `onRun(action)`. */
+function QuickActionsBlock({items, primaryKey, object, record, onRun}){
+  const {primary, icons} = splitQuickActions(items, primaryKey, object, record);
+  if(!primary && !icons.length) return null;
   return (
-    <div style={{display:'flex', gap:8, flexWrap:'wrap'}}>
-      {on.map(q => <QuickAction key={q.key} icon={q.icon} label={q.label} onClick={()=>runQuickAction(q.key, h, q.label)}/>)}
+    <div style={{display:'flex', flexDirection:'column', gap:10}}>
+      {icons.length > 0 && <div style={{display:'flex', gap:8, flexWrap:'wrap'}}>
+        {icons.map(q => <QuickAction key={q.key} icon={q.icon} label={q.label} onClick={()=>onRun(q)}/>)}
+      </div>}
+      {primary && <button onClick={()=>onRun(primary)}
+        style={{display:'flex', alignItems:'center', justifyContent:'center', gap:8, width:'100%', height:34, border:'none', borderRadius:8, background:T.black, color:'#fff',
+                fontSize:13, fontWeight:500, fontFamily:'inherit', cursor:'pointer'}}>
+        <Icon name={primary.icon} size={14} color="#fff"/>{primary.label}
+      </button>}
     </div>
   );
+}
+function PanelQuickActions({contact, items, primaryKey, actions, onStub, onCall}){
+  const h = contactQuickHandlers(contact, actions, onStub, onCall);
+  return <QuickActionsBlock items={items} primaryKey={primaryKey} object="contacts" record={contact} onRun={(q)=>runQuickAction(q.key, h, q.label)}/>;
 }
 
 /* ── Contact Properties ────────────────────────────────────────────────────────────────── */
@@ -164,14 +184,13 @@ function OwnerValue({object, record, name}){
    a record detail (Contact, Deal, Customer) it opens the owner's profile panel over the record. */
 const OwnerProfileCtx = React.createContext(null);
 function OwnerLink({name, onOpen}){
-  const [h, setH] = React.useState(false);
   const profile = React.useContext(OwnerProfileCtx);
   const open = profile ? () => profile.open(name) : onOpen;
   if(!open) return <span style={{fontSize:13, color:T.attioText}}>{name}</span>;
   return (
-    <button onClick={open} onMouseEnter={()=>setH(true)} onMouseLeave={()=>setH(false)}
-      style={{border:'none', background:'transparent', padding:0, cursor:'pointer', fontSize:13, color:T.attioBlue, textAlign:'left',
-              textDecoration: h ? 'underline' : 'none', textUnderlineOffset:2}}>
+    // The one click-action look (shared.jsx LINK_CLASS): dark, underlined, all blue on hover.
+    <button onClick={open} className={LINK_CLASS}
+      style={{border:'none', background:'transparent', padding:0, cursor:'pointer', fontSize:13, color:T.attioText, textAlign:'left', fontFamily:'inherit'}}>
       {name}
     </button>
   );
@@ -236,7 +255,7 @@ function ContactInfo({contact, acts, onStub, keys, onOpenDeals, onOpenCustomers,
           ) : r.ownerLink ? (
             <OwnerLink name={r.value} onOpen={()=>r.open(r.value)}/>
           ) : r.open ? (
-            <button onClick={()=>r.open(r.value)} style={{border:'none', background:'transparent', padding:0, cursor:'pointer', fontSize:13, color:T.attioBlue, textAlign:'left'}}>{r.value}</button>
+            <button onClick={()=>r.open(r.value)} className={LINK_CLASS} style={{border:'none', background:'transparent', padding:0, cursor:'pointer', fontSize:13, color:T.attioText, textAlign:'left', fontFamily:'inherit'}}>{r.value}</button>
           ) : (
             <span style={{fontSize:13, color:T.attioText, minWidth:0, overflowWrap:'anywhere'}}>{dateShown(r.value)}</span>
           )}
@@ -273,8 +292,8 @@ function AssociatedRecordsValue({records, noun, onOpen, width=220, inTable=false
     return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey);
                    window.removeEventListener('scroll', close, true); window.removeEventListener('resize', close); };
   }, [pos]);
-  const link = {border:'none', background:'transparent', padding:0, cursor:'pointer', fontSize:13, color:T.attioBlue, textAlign:'left', fontFamily:'inherit'};
-  if(records.length === 1) return <button onClick={()=>onOpen(records[0])} title={truncate ? records[0].name : undefined}
+  const link = {border:'none', background:'transparent', padding:0, cursor:'pointer', fontSize:13, color:T.attioText, textAlign:'left', fontFamily:'inherit'};   // with LINK_CLASS
+  if(records.length === 1) return <button onClick={()=>onOpen(records[0])} className={LINK_CLASS} title={truncate ? records[0].name : undefined}
     style={{...link, minWidth:0, ...(count != null ? {fontVariantNumeric:'tabular-nums'} : truncate ? {maxWidth:'100%', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'} : {overflowWrap:'anywhere'})}}>{count != null ? count : records[0].name}</button>;
   const items = (close) => records.map(x => <MenuItem key={x.id} label={x.name} onClick={()=>{ close(); onOpen(x); }}/>);
   return (
@@ -296,7 +315,7 @@ function AssociatedRecordsValue({records, noun, onOpen, width=220, inTable=false
 function ContactDetailBody({contact, acts, onStub, onCopied, onCall, withName=true, settings, actions, panelProperties}){
   const ps = settings || DEFAULT_PANEL_SETTINGS();
   const sections = {
-    quickActions: () => <PanelQuickActions contact={contact} items={ps.quickActions} actions={actions} onStub={onStub} onCall={onCall}/>,
+    quickActions: () => <PanelQuickActions contact={contact} items={ps.quickActions} primaryKey={ps.primaryAction} actions={actions} onStub={onStub} onCall={onCall}/>,
     smartSummary: () => !ps.smartSummary.enabled ? null : (
       <div style={activityBox}><SummaryBlock contact={contact} acts={acts} source="From activity"/></div>
     ),

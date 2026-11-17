@@ -112,8 +112,8 @@ function RelatedPropertiesEditor({rows, setRows, options}){
     <div style={{display:'flex', flexDirection:'column', gap:8, padding:'0 6px'}}>
       <button onClick={()=>setRows(rs => [...rs, {id:'r' + Date.now(), left:null, right:null}])}
         style={{alignSelf:'flex-start', display:'flex', alignItems:'center', gap:6, border:'none', background:'transparent',
-                padding:'4px 0', cursor:'pointer', fontSize:13, color:T.attioBlue, fontFamily:'inherit'}}>
-        <Icon name="plus" size={13} color={T.attioBlue}/> Add Related Property
+                padding:'4px 0', cursor:'pointer', fontSize:13, color:T.attioText, fontFamily:'inherit'}} className={LINK_CLASS}>
+        <Icon name="plus" size={13} color={T.attioText}/> Add Related Property
       </button>
       {rows.map((r, i) => (
         /* One related property = one card row: its left and right values, stacked here so full
