@@ -72,8 +72,16 @@ function RecordPicker({value, onChange, objects: given}){
 }
 
 /* A record's name as a link that opens it on its own page. */
+/* The record whose page (or side panel) is open — {object, id}, given by the record shell
+   (contactDetail.jsx). Inside its own page a record is never a link: its name is plain text. */
+const OpenRecordCtx = React.createContext(null);
+function useIsOpenRecord(object, id){
+  const open = React.useContext(OpenRecordCtx);
+  return !!(open && object && open.object === object && id != null && String(open.id) === String(id));
+}
 function HubRecordLink({object, id, name}){
   const hub = useRecordHub();
+  if(useIsOpenRecord(object, id)) return <span style={{color:T.attioText, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{name}</span>;
   return <ContactName name={name} onOpen={()=>hub && hub.openRecord(object, id, 'panel')} style={{fontSize:'inherit', fontWeight:400}}/>;
 }
 
@@ -122,4 +130,4 @@ function RecordHubProvider({value, children}){
   );
 }
 
-Object.assign(window, {hubFindActivity, ActivityDeleteCtx, useActivityDelete, RecordHubCtx, useRecordHub, HUB_OBJECTS, hubObjects, HUB_NOUN, hubRecord, hubRecordPerson, hubActivities, hubRecordOptions, RecordPicker, HubRecordLink, RecordHubProvider});
+Object.assign(window, {hubFindActivity, ActivityDeleteCtx, useActivityDelete, RecordHubCtx, useRecordHub, HUB_OBJECTS, hubObjects, HUB_NOUN, hubRecord, hubRecordPerson, hubActivities, hubRecordOptions, RecordPicker, HubRecordLink, OpenRecordCtx, useIsOpenRecord, RecordHubProvider});

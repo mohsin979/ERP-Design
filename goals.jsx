@@ -171,6 +171,9 @@ function GoalsWidget({data, settings, rangeId, onOpenUser, title = 'Goals', leve
     ? t.teams.map(tm => ({id:tm.id, name:tm.name, ...line(t.teamTarget(tm.id).value, t.members(tm.id).map(u => u.id))}))
     : userRows(t.users);
   const ranked = rows.sort((a, b) => (b.pct ?? -1) - (a.pct ?? -1) || a.name.localeCompare(b.name));
+  // Ten at a glance; more get a search and the pager (dashboard.jsx useDashList).
+  const page = useDashList(ranked, r => r.name, `${at}:${tab}:${rangeId}`);
+  const noun = at === 'company' && tab === 'teams' ? 'teams' : 'users';
   return (
     <DashWidgetCard title={title} right={<span style={{fontSize:12.5, color:T.attioMuted}}>{goalPeriod(t.period).now}</span>}>
       <div style={{display:'flex', flexDirection:'column', gap:6, paddingBottom:8}}>
@@ -181,8 +184,9 @@ function GoalsWidget({data, settings, rangeId, onOpenUser, title = 'Goals', leve
       {at === 'company' && <div style={{display:'flex', gap:8, borderBottom:`1px solid ${T.borderStrong}`}}>
         {[['teams', 'Teams'], ['users', 'Users']].map(([id, label]) => <UtTab key={id} label={label} active={tab === id} onClick={()=>setTab(id)}/>)}
       </div>}
+      {at !== 'personal' && page.long && <DashSearch value={page.query} onChange={page.setQuery} placeholder={`Search ${noun}`}/>}
       {at !== 'personal' && <div style={{display:'flex', flexDirection:'column', ...(at === 'team' ? {borderTop:`1px solid ${T.attioLine}`} : {})}}>
-        {ranked.map(r => (
+        {page.rows.map(r => (
           <div key={r.id} style={{display:'flex', alignItems:'center', gap:10, minHeight:44, borderBottom:`1px solid ${T.attioLine}`}}>
             <span style={{width:120, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flexShrink:0}}>
               {r.user ? <ContactName name={r.name} onOpen={()=>onOpenUser && onOpenUser(r.id)} style={{fontSize:13, fontWeight:500}}/> : <span style={{fontSize:13, fontWeight:500, color:T.attioText}}>{r.name}</span>}
@@ -192,7 +196,9 @@ function GoalsWidget({data, settings, rangeId, onOpenUser, title = 'Goals', leve
           </div>
         ))}
         {!ranked.length && <div style={{fontSize:13, color:T.attioMuted, padding:'14px 0'}}>No {at === 'team' ? 'users' : tab} yet.</div>}
+        {page.q && !page.found.length && dashNoMatch(page.query)}
       </div>}
+      {at !== 'personal' && page.pager}
     </DashWidgetCard>
   );
 }

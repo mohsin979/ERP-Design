@@ -779,6 +779,8 @@ function ContactDetail({mode, contact, acts, properties, panelProperties, onClos
                         backLabel = 'Contacts', renderName, menu, body, workspace, activityViews}){
   const full = mode === 'full';
   const ra = useRecordAccess();
+  const openObject = ra ? ra.object : 'contacts', openId = ra && ra.record ? ra.record.id : contact && contact.id;
+  const openRecord = React.useMemo(() => ({object:openObject, id:openId}), [openObject, openId]);
   const [entered, setEntered] = React.useState(false);
   React.useEffect(()=>{
     // Two frames so the off-screen start position is painted before the slide begins.
@@ -803,6 +805,8 @@ function ContactDetail({mode, contact, acts, properties, panelProperties, onClos
   return (
     <OwnerProfileCtx.Provider value={ownerProfile}>
     {/* The record's open workflow violations: the notice, and the marks on its properties, tabs and installments. */}
+    {/* This record's own name is never a link on its page (recordHub.jsx HubRecordLink). */}
+    <OpenRecordCtx.Provider value={openRecord}>
     <RecordViolationsProvider record={contact}>
     <div style={{
       position:'absolute', top:0, right:0, bottom:0, zIndex:70, overflow:'hidden',
@@ -877,6 +881,7 @@ function ContactDetail({mode, contact, acts, properties, panelProperties, onClos
       {ownerOpen && <OwnerProfilePanel key={ownerOpen} name={ownerOpen} onClose={()=>setOwnerOpen(null)}/>}
     </div>
     </RecordViolationsProvider>
+    </OpenRecordCtx.Provider>
     </OwnerProfileCtx.Provider>
   );
 }

@@ -825,11 +825,7 @@ function KeyIndicators({data, range, rangeKey, violations, onOpenUser, onOpenDea
       <div style={{padding:'20px 24px 0', display:'flex', flexDirection:'column', gap:12}}>
         <div style={{display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', minHeight:32}}>
           <span style={{...dashTitle, fontSize:15, flex:1}}>{title}</span>
-          <div style={{position:'relative', width:'min(240px, 100%)'}}>
-            <div style={{position:'absolute', left:9, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', display:'flex'}}><Icon name="search" size={13} color={T.gray400}/></div>
-            <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search users" aria-label="Search users"
-              style={{width:'100%', height:32, padding:'0 10px 0 28px', fontSize:12.5, fontFamily:'inherit', color:T.attioText, border:`1px solid ${T.borderStrong}`, borderRadius:8, background:'#fff', outline:'none'}}/>
-          </div>
+          <DashSearch value={query} onChange={setQuery} placeholder="Search users" width="min(240px, 100%)"/>
         </div>
         <div style={{display:'flex', alignItems:'flex-end', gap:4, flexWrap:'wrap', borderBottom:`1px solid ${T.attioLine}`}}>
           {KI_TABS.filter(t => t.id !== 'revenue' || accountingViewAny()).map(t => <UtTab key={t.id} label={t.label} active={t.id === tabId} onClick={()=>setTabId(t.id)}/>)}
@@ -842,6 +838,34 @@ function KeyIndicators({data, range, rangeKey, violations, onOpenUser, onOpenDea
     </section>
   );
 }
+
+/* A widget's list (Goals, Deal Won, Deal Lost, My Tasks): ten at a glance. A longer list gets a
+   search above it and the tables' pager beneath (Prev, the page dropdown, Next) — as Key
+   Indicator User. `textOf(item)`: what the search matches; `resetKey`: back to page 1 when the list
+   changes (a tab, a quick filter, the range). */
+const DASH_LIST_PAGE = FAME_PAGE;
+function useDashList(items, textOf, resetKey){
+  const [query, setQuery] = React.useState('');
+  const [page, setPage] = React.useState(1);
+  const long = items.length > DASH_LIST_PAGE;
+  const q = long ? query.trim().toLowerCase() : '';
+  const found = q ? items.filter(it => String(textOf(it) || '').toLowerCase().includes(q)) : items;
+  const pages = Math.max(1, Math.ceil(found.length / DASH_LIST_PAGE)), at = Math.min(page, pages);
+  React.useEffect(() => { setPage(1); }, [resetKey, q]);
+  return {long, query, setQuery, q, found, rows:found.slice((at - 1) * DASH_LIST_PAGE, at * DASH_LIST_PAGE),
+    pager: long && found.length ? <div style={{margin:'-14px -22px -22px'}}><Pagination page={at} totalPages={pages} onChange={setPage} totalRows={found.length}/></div> : null};
+}
+function DashSearch({value, onChange, placeholder, width = '100%'}){
+  return (
+    <div style={{position:'relative', width}}>
+      <div style={{position:'absolute', left:9, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', display:'flex'}}><Icon name="search" size={13} color={T.gray400}/></div>
+      <input value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} aria-label={placeholder}
+        style={{width:'100%', height:32, padding:'0 10px 0 28px', fontSize:12.5, fontFamily:'inherit', color:T.attioText, border:`1px solid ${T.borderStrong}`, borderRadius:8, background:'#fff', outline:'none'}}/>
+    </div>
+  );
+}
+// No match for the search.
+const dashNoMatch = (query) => <div style={{fontSize:13, color:T.attioMuted, padding:'14px 0'}}>Nothing matches "{query.trim()}"</div>;
 
 // A one-title widget card: the title (and count / controls on its right), then its content.
 function DashWidgetCard({title, right, children}){
@@ -887,10 +911,12 @@ function VelocityList({velocity}){
 function DealOutcomeList({deals, type, tone, range, now, onOpen}){
   const list = deals.filter(d => recordStageType('deals', d) === type).map(d => ({...d, at:dashTime(d.actualCloseDate) || d.stageEnteredAt})).filter(d => d.at != null && dashIn(d.at, range))
     .sort((a, b) => b.at - a.at);
-  return (
+  const page = useDashList(list, d => d.name, `${range[0]}:${range[1]}`);
+  return (<>
     <div style={{display:'flex', flexDirection:'column', paddingBottom:4}}>
       <span style={{fontFamily:DASH_FIGURE_FONT, fontWeight:700, fontSize:44, lineHeight:1, color: list.length ? tone : T.attioFaint, padding:'4px 0 14px', fontVariantNumeric:'tabular-nums'}}>{list.length}</span>
-      {list.map(d => (
+      {page.long && <div style={{paddingBottom:12}}><DashSearch value={page.query} onChange={page.setQuery} placeholder={`Search ${dashDeals().toLowerCase()}`}/></div>}
+      {page.rows.map(d => (
         <div key={d.id} style={{display:'flex', alignItems:'center', gap:10, minHeight:44, borderTop:`1px solid ${T.attioLine}`}}>
           <Icon name="deals" size={14} color={T.attioMuted}/>
           <span style={{minWidth:0, flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>
@@ -900,8 +926,10 @@ function DealOutcomeList({deals, type, tone, range, now, onOpen}){
         </div>
       ))}
       {!list.length && <div style={{fontSize:13, color:T.attioMuted, borderTop:`1px solid ${T.attioLine}`, padding:'14px 0'}}>No {dashDeals().toLowerCase()} in this range.</div>}
+      {page.q && !page.found.length && dashNoMatch(page.query)}
     </div>
-  );
+    {page.pager}
+  </>);
 }
 
 /* My Tasks: the signed-in person's tasks with a due date, narrowed by a quick filter — Due today
@@ -919,6 +947,7 @@ function DueTasksWidget({hub, title = 'My Tasks'}){
   const entry = open ? hubActivities(hub, 'task').find(e => e.act.id === open.actId) || null : null;
   const team = (hub.data.users || []).filter(u => u.status === 'Activated').map(u => u.name);
   const empty = {today:'No tasks due today', overdue:'No overdue tasks', week:'No tasks due this week'}[quick];
+  const page = useDashList(tasks, e => `${e.act.title || ''} ${(e.record && e.record.name) || ''}`, quick);
   return (
     <DashWidgetCard title={<span>{title} <span style={{fontSize:12.5, fontWeight:400, color:T.attioMuted, fontVariantNumeric:'tabular-nums', marginLeft:4}}>{tasks.length}</span></span>}>
       <div role="radiogroup" aria-label="Quick filter" style={{display:'flex', gap:6, flexWrap:'wrap'}}>
@@ -928,11 +957,14 @@ function DueTasksWidget({hub, title = 'My Tasks'}){
             style={{height:28, padding:'0 10px', borderRadius:9999, border:`1px solid ${on ? T.black : T.borderStrong}`, background: on ? T.black : '#fff', color: on ? '#fff' : T.gray800, fontSize:12, fontFamily:'inherit', cursor:'pointer'}}>{f.label}</button>;
         })}
       </div>
+      {page.long && <DashSearch value={page.query} onChange={page.setQuery} placeholder="Search tasks"/>}
       {tasks.length ? (
         <div style={{display:'flex', flexDirection:'column', gap:10}}>
-          {tasks.map(e => <TaskCard key={e.act.id} e={e} onDragStart={(ev)=>ev.preventDefault()} onOpen={()=>setOpen({object:e.object, recordId:e.recordId, actId:e.act.id})}/>)}
+          {page.rows.map(e => <TaskCard key={e.act.id} e={e} onDragStart={(ev)=>ev.preventDefault()} onOpen={()=>setOpen({object:e.object, recordId:e.recordId, actId:e.act.id})}/>)}
         </div>
       ) : <div style={{fontSize:13, color:T.attioMuted}}>{empty}</div>}
+      {page.q && !page.found.length && dashNoMatch(page.query)}
+      {page.pager}
       {open && (
         <PageSidePanel title={(entry && entry.act.title) || 'Task'}
           onClose={()=>setOpen(null)} menuItems={entry ? [{label:`Open ${HUB_NOUN[entry.object]}`, onClick:()=>hub.openRecord(entry.object, entry.recordId, 'panel')}] : undefined}>
@@ -1449,4 +1481,4 @@ function DashboardPage(){
   );
 }
 
-Object.assign(window, {dashPermissionRows, DashboardPage, dashBusinessData, dashPeriodRange, USER_STATS, userStat, userStatsAllTime, userStatPerson, useDashBusinessData, UserStatistics, UserStatTrend, DASH_FILTERS});
+Object.assign(window, {useDashList, DashSearch, dashNoMatch, dashPermissionRows, DashboardPage, dashBusinessData, dashPeriodRange, USER_STATS, userStat, userStatsAllTime, userStatPerson, useDashBusinessData, UserStatistics, UserStatTrend, DASH_FILTERS});

@@ -472,15 +472,19 @@ function ListToolPage({pageId}){
 const CallsToolPage = () => <ListToolPage pageId="calls"/>;
 
 /* ── Tools → Tasks ── every task (Contacts, Deals, Customers) as a board by status: In Progress,
-   Overdue, Completed. A card shows the task's name and description, its record and record type,
-   due date, task type, who assigned it and when it was created. Dragging a card to Completed
+   Overdue, Completed. A card shows the task's name, description (two lines), due date and who
+   it's assigned to, and its record, record type, task type, who assigned it and when it was created under Details. Dragging a card to Completed
    completes it; to In Progress reopens it — asking for a new due date when it's past due; nothing
    is dragged into Overdue (it's worked out). Opening a card shows the task's usual detail (Edit,
    assignment, due date, ⋯ Delete) and its record; Add task asks for the record, then the form. */
 const TASK_FEEDS = () => RECORD_FEEDS('task');
+/* A task as a card (the boards, a record's Tasks tab, the dashboard's My Tasks): its name, its
+   description (two lines, then cut off), its due date and who it's assigned to; the rest — record,
+   record type, task type, who assigned it, created date — under Details, an accordion (closed to start). */
 function TaskCard({e, onOpen, onDragStart, dragging, showAssignee}){
   const a = e.act;
-  // The board card's property rows: label on the left, value on the right.
+  const [open, setOpen] = React.useState(false);
+  // The card's property rows: label on the left, value on the right.
   const row = (label, value, tone) => (
     <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', gap:12}}>
       <span style={{fontSize:12.5, color:T.attioMuted, flexShrink:0}}>{label}</span>
@@ -491,18 +495,27 @@ function TaskCard({e, onOpen, onDragStart, dragging, showAssignee}){
     <div draggable onDragStart={onDragStart} onClick={onOpen}
       style={{background:'#fff', border:`1px solid ${T.borderStrong}`, borderRadius:10, cursor:'pointer', opacity: dragging ? .5 : 1,
         boxShadow:'0 1px 2px rgba(16,24,40,.05)', minWidth:0, flexShrink:0}}>
-      <div style={{padding:'14px 16px 12px', display:'flex', flexDirection:'column', gap:6}}>
+      <div style={{padding:'14px 16px 10px', display:'flex', flexDirection:'column', gap:6}}>
         <div style={{fontSize:13.5, fontWeight:500, color:T.attioText, lineHeight:1.35, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{a.title || 'Task'}</div>
-        {a.description && <div style={{fontSize:13, color:T.attioMuted, lineHeight:1.4, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{a.description}</div>}
+        {a.description && <div title={a.description} style={{fontSize:13, color:T.attioMuted, lineHeight:1.4, display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', overflow:'hidden', overflowWrap:'anywhere'}}>{a.description}</div>}
       </div>
-      <div style={{padding:'14px 16px 16px', display:'flex', flexDirection:'column', gap:10, borderTop:`1px solid ${T.attioLine}`}}>
-        {row('Record', e.record.name)}
-        {row('Record Type', HUB_NOUN[e.object])}
+      <div style={{padding:'10px 16px 12px', display:'flex', flexDirection:'column', gap:8, borderTop:`1px solid ${T.attioLine}`}}>
         {row('Due Date', a.due ? fmtTaskDue(a) : '', isOverdue(a) ? T.red : null)}
-        {row('Task Type', a.taskType)}
-        {showAssignee && row('Assigned To', a.assignee)}
-        {row('Assigned By', byName(a))}
-        {row('Created Date', fmtActDate(new Date(a.at)))}
+        {row('Assigned To', a.assignee)}
+      </div>
+      <div style={{borderTop:`1px solid ${T.attioLine}`}}>
+        <button type="button" aria-expanded={open} onClick={ev=>{ ev.stopPropagation(); setOpen(o => !o); }}
+          style={{display:'flex', alignItems:'center', gap:8, width:'100%', border:'none', background:'transparent', cursor:'pointer', fontFamily:'inherit', textAlign:'left',
+            padding:'9px 16px', fontSize:12.5, fontWeight:500, color:T.attioText}}>
+          <Icon name="chevDown" size={12} color={T.gray600} style={{transform: open ? 'none' : 'rotate(-90deg)', transition:'transform 120ms ease', flexShrink:0}}/>Details
+        </button>
+        {open && <div style={{padding:'2px 16px 16px', display:'flex', flexDirection:'column', gap:10}}>
+          {row('Record', e.record.name)}
+          {row('Record Type', HUB_NOUN[e.object])}
+          {row('Task Type', a.taskType)}
+          {row('Assigned By', byName(a))}
+          {row('Created Date', fmtActDate(new Date(a.at)))}
+        </div>}
       </div>
     </div>
   );

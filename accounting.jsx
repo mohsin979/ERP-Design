@@ -718,13 +718,15 @@ const InvoiceLink = ({invoice, onOpen}) => invoice
       style={{...formTextAction, fontWeight:400, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', padding:0}}>{invoice.number}</button>
   : <span style={{color:T.attioMuted}}>—</span>;
 // A source pill: the quote or document a plan was made from (gone if it was deleted).
-function PlanSourcePill({icon, label, target, onOpen, title}){
+/* `self`: the record whose page this is — named, not a link. */
+function PlanSourcePill({icon, label, target, onOpen, title, self}){
+  const link = target && !self;
   return (<>
-    <button type="button" disabled={!target} onClick={()=>target && onOpen(target)} title={target ? title || target.number : undefined}
+    <button type="button" disabled={!link} onClick={()=>link && onOpen(target)} title={target ? title || target.number : undefined}
       style={{display:'inline-flex', alignItems:'center', gap:5, border:'none', fontFamily:'inherit', fontSize:11.5, fontWeight:500, padding:'2px 8px', borderRadius:9999,
-        background:T.blueLight, color:T.blue, whiteSpace:'nowrap', cursor: target ? 'pointer' : 'default'}}>
+        background:T.blueLight, color:T.blue, whiteSpace:'nowrap', cursor: link ? 'pointer' : 'default'}}>
       <Icon name={icon} size={11} color={T.blue}/>
-      <span className={target ? LINK_CLASS : undefined}>{label}</span></button>
+      <span className={link ? LINK_CLASS : undefined}>{label}</span></button>
     {!target && <span style={{fontSize:12, color:T.attioMuted, whiteSpace:'nowrap'}}>Deleted</span>}
   </>);
 }
@@ -732,6 +734,7 @@ function PlanSourcePill({icon, label, target, onOpen, title}){
 function PaymentScheduleCard({schedule, canEdit, invoices, owner, onOpenRecord, quote, doc, onPay, onView, onEdit, onOpenQuote, onOpenDocument, onCancelSubscription, onOpenInvoice}){
   const t = scheduleTotals(schedule), type = paymentTypeOf(schedule), oneTime = type === 'one-time', frozen = !!schedule.frozen;
   const [showArchived, setShowArchived] = React.useState(false);
+  const ownerIsOpen = useIsOpenRecord(owner && owner.object, owner && owner.record && owner.record.id);
   const mine = planInvoices(invoices, schedule.id), archived = mine.filter(v => v.status === 'archived');
   const invoiceOf = (inst) => mine.find(v => v.instId === inst.id && v.status !== 'archived') || null;
   // Every row (header included) one line, at the record tables' row height.
@@ -775,7 +778,7 @@ function PaymentScheduleCard({schedule, canEdit, invoices, owner, onOpenRecord, 
           {schedule.source === 'quote' && <PlanSourcePill icon="quote" label={`From ${schedule.quoteNumber || 'Quote'}`} target={quote} onOpen={onOpenQuote}/>}
           {schedule.source === 'document' && <PlanSourcePill icon="files" label={`From ${schedule.documentNumber || 'Document'}`} target={doc} onOpen={onOpenDocument}/>}
           {/* Shared with this record: the record it was added to. */}
-          {owner && owner.record && <PlanSourcePill icon={owner.object} label={owner.record.name} title={typeSingular(owner.object, 'Record')} target={owner.record} onOpen={(r)=>onOpenRecord(owner.object, r)}/>}
+          {owner && owner.record && <PlanSourcePill icon={owner.object} label={owner.record.name} title={typeSingular(owner.object, 'Record')} target={owner.record} self={ownerIsOpen} onOpen={(r)=>onOpenRecord(owner.object, r)}/>}
         </div>
       </div>
       {oneTime ? <OneTimePaymentRow schedule={schedule} canAct={canPay} invoice={invoiceOf(schedule.installments[0] || {})} head={head} cell={cell} num={num} clip={clip} actionsCol={actionsCol} onPay={onPay} onView={onView} onOpenInvoice={onOpenInvoice}/> : (
