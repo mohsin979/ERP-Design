@@ -20,7 +20,13 @@
        Email (an icon button) — the sequence's own copy of that email,
        the template untouched — and When: After Days (days, weeks or months after the email
        before it) or Specific Date (a record enrolled after that date isn't sent that email).
-       Clone Sequence (its menus) copies one. Enrolled (2026-11-16): the
+       Clone Sequence (its menus) copies one. Settings (2026-11-17): Skip Weekends — an email due on
+       a Saturday or Sunday goes on the Monday, the ones after counting from there (not available
+       while an email goes on a Specific Date); Include Unsubscribe Button — an Unsubscribe link at
+       the bottom of each email, which takes the record out of every sequence (emails.jsx unsubscribeRecord); Exit Criteria — unticked, the sequence never stops; ticked, Call
+       Happened, Email Received and/or Meeting Booked end a record's enrollment (workflowEngine.jsx
+       exitSequencesOn). Each email's Time: Any Time, or a one- or two-hour window from a start
+       time, the email going at a time within it. Enrolled (2026-11-16): the
        records with emails of the sequence still scheduled — each with a bar of how many have
        been sent, View and Exit. View opens that record's enrollment (EnrollmentPanel): the
        emails sent, a line, the ones still scheduled — edited or removed for this record only —
@@ -47,6 +53,12 @@ const TEMPLATE_TABS = [{id:'templates', label:'Email Templates', icon:'envelope'
   {id:'services', label:'Services', icon:'services', kind:'services'}];
 const SEQUENCE_UNITS = ['Days', 'Weeks', 'Months'];
 const SEQUENCE_WHEN = [{value:'after', label:'After Days'}, {value:'date', label:'Specific Date'}];
+// A sequence's settings (2026-11-17): each email's time window, and Exit Criteria — what ends a record's enrollment.
+const SEQUENCE_WINDOWS = [{value:'any', label:'Any Time'}, {value:'1', label:'1 Hour'}, {value:'2', label:'2 Hours'}];
+const SEQUENCE_EXITS = [{value:'call', label:'Call Happened'}, {value:'emailReceived', label:'Email Received'}, {value:'meeting', label:'Meeting Booked'}];
+// The end of a time window, as shown beside its start ("09:00", 2 → "11:00 AM").
+const windowEnd = (from, hours) => { const [h, m] = (from || '00:00').split(':').map(Number), d = new Date(2000, 0, 1, h + (Number(hours) || 1), m);
+  return d.toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit'}); };
 // Where a template or sequence is used: workflows (any of their settings) and, for templates, sequences.
 // A workflow's current version only — one it was used in before (its version history) doesn't count.
 const usedInWorkflows = (data, id) => (data.workflows || []).filter(w => { const {history, ...now} = w; return JSON.stringify(now).includes(`"${id}"`); });
@@ -503,18 +515,26 @@ const sequenceWhenLabel = (e, i) => e.when === 'date' ? `On ${fmtQuoteDate(e.dat
    Email, Edit Email (its own copy, above), and When — After Days (a number of days, weeks or months after the email before
    it) or Specific Date. */
 function SequenceFormPanel({initial, templates, onCancel, onSave}){
-  const [s, setS] = React.useState(() => ({name:(initial && initial.name) || '',
+  const [s, setS] = React.useState(() => ({name:(initial && initial.name) || '', skipWeekends:!!(initial && initial.skipWeekends), unsubscribe:!!(initial && initial.unsubscribe),
+    exit:{on:false, events:[], ...((initial && initial.exit) || {})},
     emails:((initial && initial.emails) || [{templateId:'', delay:{amount:'1', unit:'Days'}}]).map((e, i) => ({key:`se-${i}-${Math.random().toString(36).slice(2, 6)}`, ...e, delay:{amount:'1', unit:'Days', ...e.delay}}))}));
   const [shown, setShown] = React.useState(null);                    // the email previewed (View Email)
   const [editing, setEditing] = React.useState(null);                // the email being edited (its key)
   const setEmail = (i, p) => setS(x => ({...x, emails:x.emails.map((e, j) => j === i ? {...e, ...p} : e)}));
   const move = (i, d) => setS(x => { const n = x.emails.slice(); const [m] = n.splice(i, 1); n.splice(i + d, 0, m); return {...x, emails:n}; });
-  const whenOk = (e) => e.when === 'date' ? /^\d{4}-\d{2}-\d{2}$/.test(e.date || '') : Number(e.delay.amount) >= 0 && e.delay.amount !== '';
-  const ok = !!s.name.trim() && s.emails.length > 0 && s.emails.every(e => e.templateId && whenOk(e));
+  const whenOk = (e) => (e.when === 'date' ? /^\d{4}-\d{2}-\d{2}$/.test(e.date || '') : Number(e.delay.amount) >= 0 && e.delay.amount !== '') && (!e.window || !!e.window.from);
+  // Skip Weekends doesn't apply while an email goes on a Specific Date.
+  const hasDate = s.emails.some(e => e.when === 'date');
+  const ok = !!s.name.trim() && s.emails.length > 0 && s.emails.every(e => e.templateId && whenOk(e)) && (!s.exit.on || s.exit.events.length > 0);
+  const toggleRow = (on, onChange, label, disabled, title) => (
+    <span title={title} style={{display:'inline-flex', alignItems:'center', gap:8, fontSize:12.5, color:T.gray600, opacity: disabled ? .5 : 1, pointerEvents: disabled ? 'none' : 'auto'}}>
+      <UtToggle on={on} onChange={onChange}/> {label}</span>);
   const iconBtn = (icon, title, onClick, disabled) => <button type="button" title={title} disabled={disabled} onClick={onClick}
     style={{border:'none', background:'transparent', cursor: disabled ? 'default' : 'pointer', display:'flex', padding:4, opacity: disabled ? .35 : 1}}><Icon name={icon} size={13} color={T.gray600}/></button>;
   // Saved: an After Days email keeps no date, a Specific Date one its date (its delay stays, unused).
-  const save = () => onSave({name:s.name.trim(), emails:s.emails.map(({key, date, when, ...e}) => when === 'date' ? {...e, when, date} : e)});
+  const save = () => onSave({name:s.name.trim(), skipWeekends:s.skipWeekends && !hasDate, unsubscribe:s.unsubscribe,
+    exit:s.exit.on ? {on:true, events:s.exit.events} : {on:false, events:[]},
+    emails:s.emails.map(({key, date, when, window, ...e}) => ({...(when === 'date' ? {...e, when, date} : e), ...(window && window.from ? {window} : {})}))});
   const current = s.emails.find(e => e.key === shown) || null, email = current && sequenceEmailOf(current, templates);
   const edited = s.emails.find(e => e.key === editing), editedEmail = edited && sequenceEmailOf(edited, templates);
   return (<>
@@ -522,6 +542,16 @@ function SequenceFormPanel({initial, templates, onCancel, onSave}){
       actions={panelActions(onCancel, initial ? 'Save Changes' : 'Add Email Sequence', ok, save)}>
       <SequenceColumns fields onClosePreview={()=>setShown(null)} emails={stack(<>
       <Field label="Name"><input autoFocus value={s.name} onChange={e=>setS(x => ({...x, name:e.target.value}))} placeholder="e.g. New client onboarding" style={fieldText}/></Field>
+      <Field label="Settings"><div style={{display:'flex', flexDirection:'column', gap:12, paddingTop:8}}>
+        {toggleRow(s.skipWeekends && !hasDate, (v)=>setS(x => ({...x, skipWeekends:v})), 'Skip Weekends', hasDate, hasDate ? 'Not available while an email goes on a Specific Date' : undefined)}
+        {toggleRow(s.unsubscribe, (v)=>setS(x => ({...x, unsubscribe:v})), 'Include Unsubscribe Button')}
+        {/* Exit Criteria: unticked, the sequence never stops; ticked, any one of the chosen ends a record's enrollment. */}
+        <div onClick={()=>setS(x => ({...x, exit:{...x.exit, on:!x.exit.on}}))} style={{display:'inline-flex', alignItems:'center', gap:8, fontSize:12.5, color:T.gray600, cursor:'pointer', alignSelf:'flex-start'}}>
+          <RowCheckbox checked={s.exit.on} onChange={()=>setS(x => ({...x, exit:{...x.exit, on:!x.exit.on}}))}/> Exit Criteria
+        </div>
+        {s.exit.on && <MultiSelectMenu value={s.exit.events} options={SEQUENCE_EXITS} placeholder="Select exit criteria"
+          onChange={(v)=>setS(x => ({...x, exit:{...x.exit, events:v}}))}/>}
+      </div></Field>
       <Field label="Emails"><div style={{display:'flex', flexDirection:'column', gap:8, paddingTop:2}}>
         {s.emails.map((e, i) => (
           <div key={e.key} style={{border:`1px solid ${current && e.key === current.key ? T.gray400 : T.attioLine}`, borderRadius:10, padding:10, display:'flex', flexDirection:'column', gap:8}}>
@@ -550,6 +580,16 @@ function SequenceFormPanel({initial, templates, onCancel, onSave}){
                   onChange={(v)=>setEmail(i, {delay:{...e.delay, unit:v || 'Days'}})}/></div>
               </>}
             </div>
+            {/* Time: Any Time, or a window of one or two hours from a start time — it goes at a time within it. */}
+            <div style={{display:'flex', alignItems:'center', gap:8}}>
+              <span style={{fontSize:12.5, color:T.gray600, whiteSpace:'nowrap'}}>Time</span>
+              <div style={{width:150}}><FormSelect value={e.window ? String(e.window.hours) : 'any'} options={SEQUENCE_WINDOWS} ariaLabel={`Email ${i + 1} time`}
+                onChange={(v)=>setEmail(i, {window: v && v !== 'any' ? {from:(e.window && e.window.from) || '09:00', hours:Number(v)} : undefined})}/></div>
+              {e.window && <>
+                <div style={{width:130}}><TimeField required value={e.window.from} onChange={(v)=>setEmail(i, {window:{...e.window, from:v}})} ariaLabel={`Email ${i + 1} window start`}/></div>
+                <span style={{fontSize:12.5, color:T.gray600, whiteSpace:'nowrap'}}>to {windowEnd(e.window.from, e.window.hours)}</span>
+              </>}
+            </div>
           </div>
         ))}
         <button type="button" onClick={()=>setS(x => ({...x, emails:[...x.emails, {key:`se-${Date.now().toString(36)}`, templateId:'', delay:{amount:'1', unit:'Days'}}]}))}
@@ -557,7 +597,7 @@ function SequenceFormPanel({initial, templates, onCancel, onSave}){
           <Icon name="plus" size={13} color={T.gray600}/> Add Email
         </button>
       </div></Field>
-      </>)} preview={email ? <EmailPreview content={templateContentOf(email)} subject={email.subject || email.name || ''}/> : null}/>
+      </>)} preview={email ? <EmailPreview content={templateContentOf(email)} subject={email.subject || email.name || ''} unsubscribe={s.unsubscribe}/> : null}/>
     </CreatePanelFrame>
     {edited && editedEmail && <SequenceEmailPanel key={edited.key} initial={{...editedEmail, subject:editedEmail.subject || editedEmail.name || ''}} onCancel={()=>setEditing(null)}
       onSave={(email)=>{ setS(x => ({...x, emails:x.emails.map(e => e.key === edited.key ? {...e, email} : e)})); setEditing(null); }}/>}

@@ -368,8 +368,21 @@ function EmailContentFields({value:c, setValue}){
   </>;
 }
 // The preview: the subject, the email as it will read (its format and signature), its attachments.
-function EmailPreview({content, subject}){
-  const html = emailHtmlOf(content);
+/* A sequence's Include Unsubscribe Button (templates.jsx): an Unsubscribe link at the very bottom
+   of each of its emails, after the signature. `target` {object, id}: the record it was sent to —
+   clicking the link takes that record out of every sequence (unsubscribeRecord, decided
+   2026-11-17). Without it (a preview) the link does nothing. */
+const withUnsubscribeLink = (html, target) => html ? `${html}<div style="text-align:center;padding:24px 0 8px;font-family:Arial,sans-serif;font-size:12px;color:#6B7280"><a href="#unsubscribe"${target ? ` data-unsubscribe="${target.object}:${String(target.id).replace(/"/g, '')}"` : ''} style="color:#6B7280;text-decoration:underline">Unsubscribe</a></div>` : html;
+// Unsubscribe: the record's emails still scheduled from any sequence aren't sent (as Exit Sequence, for each). → how many.
+function unsubscribeRecord(hub, object, id){
+  const rec = ((hub && hub.records[object]) || []).find(r => String(r.id) === String(id));
+  if(!rec) return 0;
+  const pending = (((hub.activities || {})[object] || {})[rec.id] || []).filter(a => a.type === 'email' && a.status === 'scheduled' && a.sequenceId);
+  pending.forEach(a => hub.remove(object, rec.id, a.id));
+  return pending.length;
+}
+function EmailPreview({content, subject, unsubscribe}){
+  const html = unsubscribe ? withUnsubscribeLink(emailHtmlOf(content)) : emailHtmlOf(content);
   return <>
     {subject !== undefined && <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}><span style={{color:T.attioMuted}}>Subject&nbsp;&nbsp;</span>{subject || '—'}</div>}
     {html ? <EmailHtmlFrame html={html}/> : <div style={{fontSize:13, color:T.attioMuted, padding:'8px 0'}}>No HTML file yet</div>}
@@ -577,10 +590,17 @@ function threadedEmailRows(items, actOf, recordKeyOf, actsOf){
    no scripts run, links open in a new tab; plain text as plain text. */
 function EmailHtmlFrame({html}){
   const ref = React.useRef(null);
+  const hub = useRecordHub();
   const [h, setH] = React.useState(160);
+  // A sequence email's Unsubscribe link: the record leaves every sequence; a preview's does nothing.
+  const wire = () => { try { ref.current.contentDocument.querySelectorAll('a[href="#unsubscribe"]').forEach(link => link.addEventListener('click', (e) => {
+    e.preventDefault(); const t = link.getAttribute('data-unsubscribe'); if(!t || !hub) return;
+    const [object, ...rest] = t.split(':'), n = unsubscribeRecord(hub, object, rest.join(':'));
+    hub.toast && hub.toast(n ? `Unsubscribed · ${n} scheduled ${n === 1 ? 'email' : 'emails'} cancelled` : 'Unsubscribed · no sequence emails scheduled');
+  })); } catch(e){} };
   const doc = `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>body{margin:0;padding:12px;font-family:system-ui,-apple-system,sans-serif;font-size:14px;color:#15141B}img{max-width:100%}</style></head><body>${String(html || '').replace(/<script[\s\S]*?<\/script>/gi, '')}</body></html>`;
   const fit = () => { try { const d = ref.current.contentDocument; setH(Math.max(60, Math.min(2400, d.documentElement.scrollHeight))); } catch(e){} };
-  return <iframe ref={ref} title="Email content" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" srcDoc={doc} onLoad={fit}
+  return <iframe ref={ref} title="Email content" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" srcDoc={doc} onLoad={()=>{ fit(); wire(); }}
     style={{width:'100%', height:h, border:`1px solid ${T.border}`, borderRadius:8, background:'#fff', display:'block'}}/>;
 }
 function EmailBody({a}){
@@ -616,5 +636,5 @@ function EmailThreadView({thread, open: openId, contact}){
   );
 }
 
-Object.assign(window, {useFileView, fillEmailTokens, emailTokenHtml, withSenderSignature, FetchPropertyModal, EmailComposer, emailListValid, emailCopiesOf, EmailListInput, fillFirstName, EMAIL_FORMATS, emailFormatLabel, emailSignatureOf, signatureEmailHtml, emailHtmlOf, emailTextOf, newEmailContent,
+Object.assign(window, {withUnsubscribeLink, unsubscribeRecord, useFileView, fillEmailTokens, emailTokenHtml, withSenderSignature, FetchPropertyModal, EmailComposer, emailListValid, emailCopiesOf, EmailListInput, fillFirstName, EMAIL_FORMATS, emailFormatLabel, emailSignatureOf, signatureEmailHtml, emailHtmlOf, emailTextOf, newEmailContent,
   switchEmailFormat, emailContentReady, emailContentToSave, templateContentOf, EmailAttachmentList, EmailContentFields, EmailPreview, EmailSplit, EMAIL_PANEL_W, emailFirstName, emailSubjectKey, emailThreadsOf, emailThreadOf, threadedEmailRows, EmailHtmlFrame, EmailBody, EmailThreadView});

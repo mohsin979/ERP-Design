@@ -56,8 +56,36 @@ const sequenceSchedules = (seq) => {
   return steps.map(e => { const d = e.delay || {};
     if(e.when === 'date' && e.date){ date = e.date; total = 0; }
     else total += (Number(d.amount) || 0) * (per[d.unit] || 24);
-    return {amount: inHours ? total : total / 24, unit: inHours ? 'Hours' : 'Days', time:d.time || '', ...(date ? {date} : {})}; });
+    return {amount: inHours ? total : total / 24, unit: inHours ? 'Hours' : 'Days', time:d.time || '', ...(date ? {date} : {}), ...(e.window && e.window.from ? {window:e.window} : {})}; });
 };
+/* A sequence's sending rules (templates.jsx, 2026-11-17), applied as its emails are scheduled, one
+   after another (sequenceSendTimes): an email's time window — it goes at a time within it, that
+   day (the next day once the window has passed); Skip Weekends — an email due on a Saturday or
+   Sunday goes on the Monday instead, and the emails after it count from there. Skip Weekends
+   doesn't apply to a sequence with a Specific Date email. */
+const SEQ_WEEKEND = [0, 6];
+const sequenceSkipsWeekends = (seq) => !!(seq && seq.skipWeekends && !(seq.emails || []).some(e => e.when === 'date'));
+function sequenceSendTimes(emails, skipWeekends, now = Date.now()){
+  let shift = 0;
+  return emails.map(e => {
+    let immediate = !!e.immediate;
+    const s = e.schedule || {}, w = s.window;
+    if(immediate && !w && !(skipWeekends && SEQ_WEEKEND.includes(new Date(now).getDay()))) return {immediate:true, at:new Date(now)};
+    const at = immediate ? new Date(now) : scheduledSendAt(s, false);
+    at.setTime(at.getTime() + shift);
+    if(w && w.from){
+      const [h, m] = w.from.split(':').map(Number), span = (Number(w.hours) || 1) * 60;
+      const place = () => at.setHours(h, m + Math.floor(Math.random() * span), 0, 0);
+      place();
+      if(at.getTime() <= now){ at.setDate(at.getDate() + 1); place(); }
+    }
+    if(skipWeekends && SEQ_WEEKEND.includes(at.getDay())){
+      const days = at.getDay() === 6 ? 2 : 1;
+      at.setDate(at.getDate() + days); shift += days * WF_DAY;
+    }
+    return {immediate:false, at};
+  });
+}
 // When a scheduled email goes: its delay from now — or from its schedule's date (that day at 9:00 AM, else its own time of day).
 const scheduledSendAt = (schedule, immediate) => {
   const s = schedule || {}, at = new Date(s.date && !immediate ? new Date(`${s.date}T09:00:00`).getTime() + wfDurationMs(s) : Date.now() + (immediate ? 0 : wfDurationMs(s)));
@@ -1077,6 +1105,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
     if(WF_PROPERTY_EVENTS.includes(ev.type) && ev.attrs.property === 'owner') endViolations(p => p.kind === 'assignOwner' && p.dealId === ev.recordId, () => ['done', 'Owner assigned']);
     if(ev.type === 'associatedRecordCreated' || ev.type === 'associatedRecordChanged') endAssociatedViolations(ev);
     if(ev.type === 'callMade') endViolations(p => p.kind === 'initiateCall' && p.dealId === ev.recordId, () => ['done', `Call made${ev.attrs && ev.attrs.outcome ? ` · ${ev.attrs.outcome}` : ''}`]);
+    exitSequencesOn(ev);
     dispatch(ev);
     return ev;
   };
@@ -1431,9 +1460,15 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
     const person = {name:deal.name || ''}, enrollId = wfNewId('en');
     const byObject = (o) => dealsRef.current.filter(r => recordObjectOf(r.id) === o);
     const tokens = {object:recordObjectOf(deal.id), record:deal, records:{contacts:byObject('contacts'), deals:byObject('deals'), customers:byObject('customers')}, data};
-    emails.forEach(e => {
+    // A sequence's emails: its time windows and Skip Weekends (sequenceSendTimes), and its Unsubscribe link.
+    const seqOf = (id) => id ? emailSequencesOf(data).find(q => q.id === id) || null : null;
+    const firstSeq = seqOf((emails.find(e => e.sequenceId) || {}).sequenceId);
+    const times = sequenceSendTimes(emails, sequenceSkipsWeekends(firstSeq));
+    emails.forEach((e, i) => {
       const tpl = emailTemplatesOf(data).find(t => t.id === e.templateId) || {};
-      const sendAt = scheduledSendAt(e.schedule, e.immediate);
+      const sendAt = times[i].at;
+      e = {...e, immediate:times[i].immediate};
+      const seq = seqOf(e.sequenceId);
       // An email set for a Specific Date (or counted from one) that has already passed isn't sent (decided 2026-11-16); the rest carry on.
       if(!e.immediate && e.schedule && e.schedule.date && sendAt.getTime() <= Date.now()){ passed++; return; }
       const now = !!e.immediate || sendAt.getTime() <= Date.now();
@@ -1447,7 +1482,8 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
          workflow's own copy is its HTML as edited. */
       const own = e.email && e.email.format ? templateContentOf(e.email) : null;
       const content = own || (tpl.id ? templateContentOf(tpl) : null);
-      const html = fillEmailTokens(fillFirstName(!own && e.email && e.email.html ? withSenderSignature(e.email.html, owner) : content ? emailHtmlOf(content, undefined, owner) : '', person), tokens);
+      const filled = fillEmailTokens(fillFirstName(!own && e.email && e.email.html ? withSenderSignature(e.email.html, owner) : content ? emailHtmlOf(content, undefined, owner) : '', person), tokens);
+      const html = seq && seq.unsubscribe ? withUnsubscribeLink(filled, {object:recordObjectOf(deal.id), id:deal.id}) : filled;
       const attachments = content && content.format === 'simple' ? content.attachments : [];
       const act = {id:wfNewId('we'), ...recordKey(deal.id), type:'email', at: now ? new Date() : sendAt, direction:'sent', title:subject, body:htmlText(html),
         html:html || null, ...(attachments.length ? {attachments} : {}),
@@ -1463,6 +1499,22 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
   }
   // Nothing went out (no one to send to): the step is skipped, not done.
   const emailsResult = (text) => /^\d+ emails? skipped/.test(text) ? {status:'skipped', result:text} : {status:'done', result:text};
+
+  /* A sequence's Exit Criteria (templates.jsx, 2026-11-17): a record enrolled in it leaves it — its
+     emails still scheduled aren't sent, as Exit Sequence — once one of the chosen things happens on
+     it: a call (made or logged), an email received, a meeting booked. Without Exit Criteria a
+     sequence never stops. */
+  const SEQ_EXIT_EVENTS = {call:(ev) => ev.type === 'callMade' || (ev.type === 'callLogged' && ev.attrs && ev.attrs.added && ev.attrs.logged),
+    emailReceived:(ev) => ev.type === 'emailReceived', meeting:(ev) => ev.type === 'meetingScheduled'};
+  function exitSequencesOn(ev){
+    if(!ev.recordId || !Object.values(SEQ_EXIT_EVENTS).some(f => f(ev))) return;
+    const pending = actsOf(ev.recordId).filter(a => a.type === 'email' && a.status === 'scheduled' && a.sequenceId);
+    if(!pending.length) return;
+    const seqs = emailSequencesOf(dataRef.current);
+    const leaving = pending.filter(a => { const q = seqs.find(x => x.id === a.sequenceId), x = q && q.exit;
+      return !!(x && x.on && (x.events || []).some(k => SEQ_EXIT_EVENTS[k] && SEQ_EXIT_EVENTS[k](ev))); });
+    if(leaving.length) editActivities(m => ({...m, [ev.recordId]:(m[ev.recordId] || []).filter(a => !leaving.some(x => x.id === a.id))}));
+  }
 
   /* Log Meeting / Log Call by a workflow (Create Meeting, Add Call Log): what happened, recorded as a
      person logging it would — a comment is a note linked to it. */
@@ -2658,7 +2710,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
       if(!deal || !seq || !String(deal.email || '').trim()) return false;
       if(enrolledIn(deal.id, seq.id)) return 'already';
       const when = sequenceSchedules(seq);
-      const emails = seq.emails.map((e, i) => ({id:`se-${i}`, immediate:!(when[i].amount > 0) && !when[i].time && !when[i].date, recipients:['recordEmail'], templateId:e.templateId, email:e.email || null,
+      const emails = seq.emails.map((e, i) => ({id:`se-${i}`, immediate:!(when[i].amount > 0) && !when[i].time && !when[i].date && !when[i].window, recipients:['recordEmail'], templateId:e.templateId, email:e.email || null,
         cc:(copies || {}).cc, bcc:(copies || {}).bcc, sequenceId:seq.id, schedule:when[i]}));
       sendEmails(deal, emails, {chain:{id:wfNewId('ch'), depth:0, visited:[]}}, null);
       return 'enrolled';
@@ -4418,5 +4470,5 @@ function WorkflowBell(){
   );
 }
 
-Object.assign(window, {withoutPropertyHistory, STATUS_PILLS, sequenceSchedules, violationTargets, RecordViolationsProvider, useRecordViolations, ViolationMark, ViolationNotice, AutomationNotice, recordAutomations, recordObjectOf, recordKey, recordNoun, ACTIVITY_RECORD_OBJECTS, withSeeded, PROPERTY_CHANGE_OPERATORS, PROPERTY_CHANGE_UNITS, triggerPropertyOperators, isChangeOp, conditionsValid, triggerConditionComplete, TriggerPropertyCondition, CONDITION_OPERATORS, conditionKind, useWorkflowEngine, WorkflowEngineCtx, useWorkflowEngineCtx, WF_SAVED, reviveActivities, withStageEntry, ConditionsEditor, WorkflowRuns,
+Object.assign(window, {sequenceSendTimes, sequenceSkipsWeekends, withoutPropertyHistory, STATUS_PILLS, sequenceSchedules, violationTargets, RecordViolationsProvider, useRecordViolations, ViolationMark, ViolationNotice, AutomationNotice, recordAutomations, recordObjectOf, recordKey, recordNoun, ACTIVITY_RECORD_OBJECTS, withSeeded, PROPERTY_CHANGE_OPERATORS, PROPERTY_CHANGE_UNITS, triggerPropertyOperators, isChangeOp, conditionsValid, triggerConditionComplete, TriggerPropertyCondition, CONDITION_OPERATORS, conditionKind, useWorkflowEngine, WorkflowEngineCtx, useWorkflowEngineCtx, WF_SAVED, reviveActivities, withStageEntry, ConditionsEditor, WorkflowRuns,
   DealPromptMarker, WorkflowPromptModal, WorkflowBell, ViolationsButton, ViolationPanel, WorkflowNotices, AutomaticActionModal, workflowExpectations, workflowContextPath, orderedStages, stageMoveDirection, workflowTitle, conditionFields, evalConditions});
