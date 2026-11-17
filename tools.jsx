@@ -5,8 +5,8 @@
    belongs to (a link that opens it). Opening one shows it in a side panel with its usual detail
    (Edit, ⋯ Delete, comments, Reply …) — the same component the record's own tab uses, so a change
    here is the record's change, and the other way round (recordHub.jsx). New items are created
-   against a record chosen first: Log Call or a live Call, Task, Schedule / Log Meeting, Note; New
-   email opens the composer. Quotes have their own page (quotes.jsx). */
+   against a record chosen first: Log Call or a live Call, Task, Schedule / Log Meeting, Note, Log
+   Email (an email outside the CRM, entered by hand); New email opens the composer. Quotes have their own page (quotes.jsx). */
 
 const dateKey = (d) => { if(!d) return ''; const z = zonedParts(d), p = (n) => String(n).padStart(2, '0'); return `${z.y}-${p(z.m + 1)}-${p(z.d)}T${p(z.h)}:${p(z.mi)}`; };
 // Who did it: the person who added it (their stamped name), the client (named as the record's person), or the team member.
@@ -35,10 +35,10 @@ const TOOL_PAGES = {
     create:['Task']},
   emails: {type:'email', noun:'email', label:'Email', first:{key:'subject', label:'Subject', width:260},
     row:(a) => ({subject:a.title || '(No subject)', folder: a.status === 'scheduled' ? 'Scheduled' : a.direction === 'received' ? 'Inbox' : 'Sent',
-      to:(a.to || []).join(', '), template:a.templateId ? 'Template' : ''}),
-    columns:[{key:'folder', label:'Folder', width:110, filter:'select'}, {key:'to', label:'To', width:200}],
+      to:(a.to || []).join(', '), template:a.templateId ? 'Template' : '', emailType:a.logged ? 'Email log' : 'Email'}),
+    columns:[{key:'folder', label:'Folder', width:110, filter:'select'}, {key:'emailType', label:'Email Type', width:120, filter:'select'}, {key:'to', label:'To', width:200}],
     views:[viewFilter('temail-inbox', 'Inbox', 'folder', 'Inbox'), viewFilter('temail-sent', 'Sent', 'folder', 'Sent'), viewFilter('temail-scheduled', 'Scheduled', 'folder', 'Scheduled')],
-    create:['Email']},
+    create:['Email', 'Log Email']},
   meetings: {type:'meeting', noun:'meeting', label:'Meeting', first:{key:'subject', label:'Meeting', width:240},
     row:(a) => ({subject:a.title || 'Meeting', meetingType:a.logged ? 'Meeting log' : 'Meeting', platform:a.platform || '', when: isUpcoming(a) ? 'Upcoming' : 'Past',
       organiser:a.organizer || a.by || ''}),
@@ -47,7 +47,7 @@ const TOOL_PAGES = {
     views:[viewFilter('tmeet-up', 'Upcoming', 'when', 'Upcoming'), viewFilter('tmeet-past', 'Past', 'when', 'Past'), {id:'tmeet-all', name:'All Meetings', sort:{key:'date', dir:'desc'}}],
     create:['Schedule Meeting', 'Log Meeting']},
   notes: {type:'note', noun:'note', label:'Note', first:{key:'subject', label:'Note', width:320},
-    row:(a) => ({subject:richTextPlain(a.body).slice(0, 90) || 'Note', linked:a.callId ? 'Call' : a.meetingId ? 'Meeting' : ''}),
+    row:(a) => ({subject:richTextPlain(a.body).slice(0, 90) || 'Note', linked:a.callId ? 'Call' : a.meetingId ? 'Meeting' : a.taskId ? 'Task' : ''}),
     columns:[{key:'linked', label:'Linked To', width:120, filter:'select'}],
     views:[{id:'tnote-all', name:'All Notes', sort:{key:'date', dir:'desc'}}],
     create:['Note']},
@@ -83,6 +83,7 @@ function ToolPanel({page, entry, creating, onClose, onCreated}){
             : creating === 'Log Call' ? <NewLogCall contact={view} team={team} onAdd={onAdd} onDone={(id)=>onCreated(id, object, recordId)}/>
             : creating === 'Task' ? <NewTask team={team} contact={view} onAdd={onAdd} onDone={(id)=>onCreated(id, object, recordId)}/>
             : creating === 'Log Meeting' ? <NewLogMeeting contact={view} team={team} onAdd={onAdd} onDone={(id)=>onCreated(id, object, recordId)}/>
+            : creating === 'Log Email' ? <NewLogEmail contact={view} team={team} onAdd={onAdd} onDone={(id)=>onCreated(id, object, recordId)}/>
             : creating === 'Schedule Meeting' ? <NewScheduleMeeting contact={view} team={team} onAdd={onAdd} onDone={(id)=>onCreated(id, object, recordId)}/>
             : creating === 'Call' ? (
               <div style={{padding:20, display:'flex', flexDirection:'column', gap:12}}>
@@ -123,7 +124,7 @@ function ToolActivityPage({pageId}){
       {label:`Open ${r.object}`, onClick:()=>hub.openRecord(r._e.object, r._e.recordId, 'panel')}]}/>,
   };
   const create = (what) => { setMenu(false); if(what === 'Email') return hub.composeEmail({}); setPanel({creating:what}); };
-  const addLabel = {Call:'Call', 'Log Call':'Log Call', Task:'Add Task', 'Schedule Meeting':'Schedule Meeting', 'Log Meeting':'Log Meeting', Note:'Add Note', Email:'Add Email'};
+  const addLabel = {Call:'Call', 'Log Call':'Log Call', Task:'Add Task', 'Schedule Meeting':'Schedule Meeting', 'Log Meeting':'Log Meeting', Note:'Add Note', Email:'Add Email', 'Log Email':'Log Email'};
   return (
     <div style={{flex:1, minWidth:0, minHeight:0, display:'flex', flexDirection:'column', position:'relative', overflow:'hidden'}}>
       <RecordViewsModule inset="page" schema={schema} rows={rows} columns={columns.map(c => c.key)} defaultViews={page.views} storeKey={`views:tools-${pageId}`}
@@ -172,7 +173,9 @@ const LIST_PAGES = {
   emails: {type:'email', noun:'email', addTab:'email', feeds:EMAIL_FOLDER_TABS, get secondary(){ return SECOND_LEVEL('Emails'); }, tabs:true,
     inFeed:(e, feed) => emailFolder(e.act) === feed, line:(a) => a.title || '(No subject)',
     when:(a) => a.status === 'scheduled' ? new Date(a.scheduledFor || a.at) : new Date(a.at),
-    fields:() => ({}), filters:[], byRecordType:true, search:(a) => [a.title, byName(a), a.body, ...(a.to || [])], byLabel:'From / By', dateLabel:'Email Date'},
+    added:'Email logged', fields:(a) => ({logged:a.logged ? 'Email log' : 'Email'}),
+    filters:[{key:'logged', label:'Email or Email Log', type:'select', ops:['is', 'isNot'], values:['Email', 'Email log']}],
+    byRecordType:true, search:(a) => [a.title, byName(a), a.body, ...(a.to || [])], byLabel:'From / By', dateLabel:'Email Date'},
   // `tabs`: Upcoming / Past as the tab strip (Settings → Templates'), the record types as the pills.
   meetings: {type:'meeting', noun:'meeting', addTab:'meetings', feeds:MEETING_TIME_TABS, get secondary(){ return SECOND_LEVEL('Meetings'); }, tabs:true,
     inFeed:(e, feed) => meetingWhen(e.act) === feed, line:(a) => a.title || 'Meeting',
@@ -181,8 +184,8 @@ const LIST_PAGES = {
     filters:[{key:'meetingType', label:'Meeting Type', type:'select', ops:['is', 'isNot'], values:['Meeting', 'Meeting log']}, {key:'platform', label:'Platform', type:'select', ops:['is', 'isNot', 'isAnyOf']}],
     byLabel:'Organizer', dateLabel:'Meeting Date'},
   notes: {type:'note', noun:'note', addTab:'notes', get feeds(){ return RECORD_FEEDS('note'); }, inFeed:byRecordFeed, line:(a) => richTextPlain(a.body) || 'Note',
-    added:'Note added', search:(a) => [byName(a), richTextPlain(a.body)], fields:(a) => ({linked:a.callId ? 'Call' : a.meetingId ? 'Meeting' : 'None'}),
-    filters:[{key:'linked', label:'Linked To', type:'select', ops:['is', 'isNot'], values:['Call', 'Meeting', 'None']}], byLabel:'Note By', dateLabel:'Note Date'},
+    added:'Note added', search:(a) => [byName(a), richTextPlain(a.body)], fields:(a) => ({linked:a.callId ? 'Call' : a.meetingId ? 'Meeting' : a.taskId ? 'Task' : 'None'}),
+    filters:[{key:'linked', label:'Linked To', type:'select', ops:['is', 'isNot'], values:['Call', 'Meeting', 'Task', 'None']}], byLabel:'Note By', dateLabel:'Note Date'},
 };
 function listFilterSchema(page, rows){
   const uniq = (k) => [...new Set(rows.map(r => r[k]).filter(Boolean))].sort();
@@ -358,14 +361,15 @@ function ListToolItem({page, e, selected, onSelect, personLed}){
 }
 /* A new activity from a Tools page: the creation side panel with the record first (Record Type,
    then the record), then the activity's form. `what`: 'Call' (start a call), 'Log Call', 'Note',
-   'Task', 'Schedule Meeting', 'Log Meeting'. `onDone(id, target)`. */
+   'Task', 'Schedule Meeting', 'Log Meeting', 'Log Email'. `onDone(id, target, added)`. */
 function NewActivityPanel({what, initialObject, team, prefill, onDone}){
   const hub = useRecordHub();
   const [target, setTarget] = React.useState({object:initialObject || hubObjects()[0], id:null});
   const record = target.id != null ? hubRecord(hub, target.object, target.id) : null;
   const view = record && {...record, owner:userLabel(record.owner) || record.owner};
-  const onAdd = (a) => record && hub.add(target.object, target.id, a);
-  const finish = (id) => onDone(id, target);
+  const added = React.useRef(null);
+  const onAdd = (a) => { added.current = a; return record && hub.add(target.object, target.id, a); };
+  const finish = (id) => onDone(id, target, added.current);
   const phone = record ? (hubRecordPerson(hub, target.object, target.id) || {}).phone : null;
   const recordField = <CreateRecordField value={target} onChange={setTarget}/>;
   const form = what === 'Call'
@@ -380,6 +384,7 @@ function NewActivityPanel({what, initialObject, team, prefill, onDone}){
     : what === 'Task' ? <NewTask team={team} contact={view} initial={prefill} onAdd={onAdd} onDone={finish}/>
     : what === 'Schedule Meeting' ? <NewScheduleMeeting contact={view} team={team} onAdd={onAdd} onDone={finish}/>
     : what === 'Log Meeting' ? <NewLogMeeting contact={view} team={team} onAdd={onAdd} onDone={finish}/>
+    : what === 'Log Email' ? <NewLogEmail contact={view} team={team} onAdd={onAdd} onDone={finish}/>
     : null;
   return (
     <CreatePanelCtx.Provider value={{record:recordField, ready:!!record}}>
@@ -422,7 +427,8 @@ function ListToolPage({pageId}){
     setAdding(what);
   };
   const view = (r) => r && {...r, owner:userLabel(r.owner) || r.owner};
-  const done = (id, target) => { setAdding(null); if(id){ setSelected({object:target.object, recordId:target.id, actId:id}); setFeed(page.feeds.find(f => f.id === 'all') ? 'all' : feed); setScope('all'); hub.toast(page.added); } };
+  // An email log shows in its folder (Sent or Inbox), as a sent email does.
+  const done = (id, target, act) => { setAdding(null); if(id){ setSelected({object:target.object, recordId:target.id, actId:id}); setFeed(page.feeds.find(f => f.id === 'all') ? 'all' : page.type === 'email' && act ? emailFolder(act) : feed); setScope('all'); hub.toast(page.added); } };
   // A sent or scheduled email: shown in the folder it's in.
   const emailDone = (result, id, target) => { setCompose(null); if(id){ setFeed(result === 'scheduled' ? 'scheduled' : 'sent'); setSelected({object:target.object, recordId:target.id, actId:id}); } };
   const empty = entries.length ? `No ${page.noun}s match these filters` : `No ${page.noun}s yet`;

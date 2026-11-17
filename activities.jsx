@@ -411,7 +411,8 @@ function activityLines(a, contact, context = 'all'){
     case 'email': {
       const received = a.direction === 'received';
       // A workflow's email that hasn't gone yet reads "Scheduled".
-      const what = a.status === 'scheduled' ? (all ? 'Email scheduled' : 'Scheduled') : all ? `Email ${received ? 'received' : 'sent'}` : (received ? 'Received' : 'Sent');
+      // An email log (Log Email, entered by hand) reads "Email log sent by …", as "Call log by …".
+      const what = a.status === 'scheduled' ? (all ? 'Email scheduled' : 'Scheduled') : all ? `Email ${a.logged ? 'log ' : ''}${received ? 'received' : 'sent'}` : (received ? 'Received' : 'Sent');
       return {lead:act(what, received ? 'from' : 'by'), detail:a.title, when};
     }
     case 'note': return {lead: all ? act('Note', 'by') : (who ? act('', 'by') : act('Note')), detail:richTextPlain(a.body), when};

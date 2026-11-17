@@ -12,8 +12,11 @@
               [Person]" (entered by hand: call type, point of contact and outcome editable).
               Details: call type (Inbound / Outbound), point of contact (the internal
               representative), outcome; then its Notes (ActivityNotes: Notes linked to the call).
-     Email  — subject and content; the header has Reply, ⋯ has Forward (UI only; not defined yet).
-     Task   — name, description, status (radios), task type, assigned to, assigned by.
+     Email  — subject and content; the header has Reply, ⋯ has Forward. Or "Email log …" (Log
+              Email — an email outside the CRM, entered by hand, as a call log): email type (Sent /
+              Received), point of contact, subject and content, all editable.
+     Task   — name, description, status (radios), task type, assigned to, assigned by; then its
+              Notes (ActivityNotes: Notes linked to the task).
      Note   — readable text; Edit makes it a field.
      Owner change — previous and new owner; Edit reassigns the owner (through the normal owner
               update, so it records its own Owner change).
@@ -81,6 +84,11 @@ const callPocValue = (a, contact) => { const p = callPointOfContact(a, contact);
 // Inbound: the customer made the call; outbound: the point of contact did.
 const callPatch = (type, poc) => type === 'Inbound' ? {direction:'inbound', source:'client', by:null, pointOfContact:poc} : {direction:'outbound', source:'team', by:poc, pointOfContact:poc};
 const pocOptions = (team, contact) => team.map(n => ({value:n, label: n === ownerName(contact) ? `${n} (Owner)` : n}));
+/* An email log — an email sent or received outside the CRM, entered by hand (Log Email), as a
+   call log is. Sent: the point of contact sent it; Received: the customer did, to them. */
+const EMAIL_TYPES = ['Sent', 'Received'];
+const emailTypeOf = (a) => a.direction === 'received' ? 'Received' : 'Sent';
+const emailPatch = (type, poc) => type === 'Received' ? {direction:'received', source:'client', by:null, pointOfContact:poc} : {direction:'sent', source:'team', by:poc, pointOfContact:poc};
 /* The record owner as the default person on a new call, task or meeting (Point of contact,
    Assigned to, Organiser) — until another is picked; it follows the record while none is picked
    (a Tools page chooses the record in the form). `initial`: a value given to the form instead. */
@@ -171,7 +179,7 @@ const activityHead = (a, contact) => <ActivityLead a={a} lead={activityLines(a, 
    side: the record leads, not the employee. `acrossLead`: the words before the record's name. */
 // Calls: an inbound call came from the record ("Call by [Record]"); an outbound one went to it.
 const acrossLead = (a) => a.type === 'call' ? (isInboundCall(a) ? (a.logged ? 'Call log by' : 'Call by') : (a.logged ? 'Call log to' : 'Call to'))
-  : a.type === 'email' ? (a.status === 'scheduled' ? 'Scheduled to' : a.direction === 'received' ? 'Received from' : 'Sent to')
+  : a.type === 'email' ? (a.status === 'scheduled' ? 'Scheduled to' : a.logged ? (a.direction === 'received' ? 'Email log from' : 'Email log to') : a.direction === 'received' ? 'Received from' : 'Sent to')
   : a.type === 'meeting' ? 'Meeting with' : a.type === 'note' ? 'Note added to' : '';
 const acrossHead = (a, across) => (
   <div style={{display:'flex', alignItems:'center', gap:6, minWidth:0, fontSize:13, color:T.attioMuted, height:18}}>
@@ -285,6 +293,7 @@ function NoteDetail({a, contact, calls, onUpdate, onStub, across}){
   const [text, setText] = React.useState(richHtmlOf(a.body || ''));
   const call = a.callId && calls.find(c => c.id === a.callId);
   const meeting = a.meetingId && calls.find(c => c.id === a.meetingId);
+  const task = a.taskId && calls.find(c => c.id === a.taskId);
   const cancel = () => { setText(richHtmlOf(a.body || '')); setEditing(false); };
   const save = () => { onUpdate(a.id, {body:sanitizeRichText(text)}); setEditing(false); };
   return (
@@ -295,6 +304,7 @@ function NoteDetail({a, contact, calls, onUpdate, onStub, across}){
         {/* A note saved from a call keeps that context. */}
         {!editing && a.callId && <div style={{fontSize:12, color:T.attioMuted}}>Linked to call{call ? ` · ${fmtActStamp(call.at)}` : ''}</div>}
         {!editing && a.meetingId && <div style={{fontSize:12, color:T.attioMuted}}>Linked to meeting{meeting ? ` · ${fmtActStamp(meeting.at)}` : ''}</div>}
+        {!editing && a.taskId && <div style={{fontSize:12, color:T.attioMuted}}>Linked to task{task && task.title ? ` · ${task.title}` : ''}</div>}
         {editing
           ? <RichTextEditor value={text} onChange={setText} minHeight={180} ariaLabel="Note"/>
           : <RichTextView html={a.body} style={{fontSize:13.5, lineHeight:1.65}}/>}
@@ -305,10 +315,10 @@ function NoteDetail({a, contact, calls, onUpdate, onStub, across}){
   );
 }
 
-/* A call's or meeting's Notes (Notes (n) under its details): every note linked to it
-   (callId / meetingId), oldest first, each with its author, time and its own ⋯ (Edit Note,
+/* A call's, meeting's or task's Notes (Notes (n) under its details): every note linked to it
+   (callId / meetingId / taskId), oldest first, each with its author, time and its own ⋯ (Edit Note,
    Delete Note). + opens a box to add one. They're ordinary Notes, so the Notes tab shows them
-   too; logging a call or meeting doesn't ask for one. Adding, editing and deleting follow the
+   too; logging a call or meeting, or adding a task, doesn't ask for one. Adding, editing and deleting follow the
    record's Notes permissions. `own`: an older call's own notes (its `body`), shown first and
    following the call's permissions. */
 const fmtNoteStamp = (at) => fmtActStamp(new Date(at));
@@ -469,7 +479,42 @@ function EmailDetail({a, contact, acts, onStub, onUpdate, across}){
   );
 }
 
-function TaskDetail({a, contact, team, onUpdate, onStub, across}){
+/* An email log (Log Email): an email outside the CRM, entered by hand — so, as a call log, its
+   email type, point of contact, subject and content are editable (an email through the CRM stays
+   read-only, with Reply and Forward). */
+function EmailLogDetail({a, contact, team, onUpdate, onStub, across}){
+  const blank = () => ({type:emailTypeOf(a), poc:callPocValue(a, contact), title:a.title || '', body:a.body || ''});
+  const [editing, setEditing] = React.useState(false);
+  const [d, setD] = React.useState(blank);
+  const set = (p) => setD(x => ({...x, ...p}));
+  const cancel = () => { setD(blank()); setEditing(false); };
+  const orig = blank(), placed = d.type !== orig.type || d.poc !== orig.poc;
+  const save = () => { onUpdate(a.id, {...(d.poc && placed ? emailPatch(d.type, d.poc) : {}), title:d.title.trim(), body:d.body.trim()}); setEditing(false); };
+  // Save only once something has actually changed — the same rule for every detail.
+  const dirty = !!d.title.trim() && !!d.body.trim() && ((d.poc && placed) || d.title.trim() !== orig.title || d.body.trim() !== orig.body);
+  return (
+    <DetailFrame head={detailHead(a, contact, across)} actions={editing ? saveBar(cancel, save, dirty)
+      : activityEditBar(a, ()=>{ setD(blank()); setEditing(true); }, detailMenu({a, onUpdate, onStub, runProfile:true, deleteLabel:'Delete Email Log'}))}>
+      {stack(<>
+        {!editing && recordFirst(across)}
+        <Field label="Email Type">{editing ? <Select value={d.type} options={EMAIL_TYPES} onChange={v=>v && set({type:v})}/> : <ReadValue>{emailTypeOf(a)}</ReadValue>}</Field>
+        {/* A Tools page from the current user's side: no point of contact there (as a call log). */}
+        {(!across || personLed(across)) && <Field label="Point of Contact">{editing
+          ? <Select value={d.poc} options={pocOptions(team, contact)} placeholder="Select person" onChange={v=>v && set({poc:v})}/>
+          : <PersonValue person={callPointOfContact(a, contact)}/>}</Field>}
+        <Field label="Subject">{editing ? <input value={d.title} onChange={e=>set({title:e.target.value})} style={fieldText}/> : <ReadValue>{a.title}</ReadValue>}</Field>
+        <Field label="Content">{editing
+          ? <textarea value={d.body} onChange={e=>set({body:e.target.value})} rows={8} style={{...fieldText, resize:'vertical', lineHeight:1.5}}/>
+          : <ReadValue>{a.body}</ReadValue>}</Field>
+        {!editing && personLed(across) && recordFields(across)}
+        {!editing && across && timeStampField(a.at)}
+      </>)}
+    </DetailFrame>
+  );
+}
+
+// Its Notes (linked by taskId) follow the details (ActivityNotes), as a call's and a meeting's.
+function TaskDetail({a, contact, team, comments = [], onUpdate, onAdd, onStub, across}){
   const hub = useRecordHub();
   const blank = () => ({title:a.title || '', description:a.description || '', pipelineId:taskPipelineIdOf(a), status:a.status, taskType:a.taskType, assignee:a.assignee, dueDate:taskDueParts(a).date, dueTimeOfDay:taskDueParts(a).time});
   const [editing, setEditing] = React.useState(false);
@@ -502,6 +547,7 @@ function TaskDetail({a, contact, team, onUpdate, onStub, across}){
           : <Field label="Due">{a.due ? <ReadValue>{fmtTaskDue(a)}{isOverdue(a) ? ' · Overdue' : ''}</ReadValue> : <ReadValue>No due date</ReadValue>}</Field>}
         {!editing && <Field label="Assigned by"><PersonValue person={activityActor(a, contact)}/></Field>}
       </>)}
+      {!editing && onAdd && <ActivityNotes a={a} contact={contact} notes={comments} link="taskId" onUpdate={onUpdate} onAdd={onAdd}/>}
     </DetailFrame>
   );
 }
@@ -645,9 +691,10 @@ function OwnerChangeDetail({a, contact, team, onReassign}){
 function ActivityDetail({a, contact, team, acts, onUpdate, onAdd, onStub, onReassign, across}){
   if(a.type === 'call') return <CallDetail a={a} contact={contact} team={team} comments={acts.filter(n => n.type === 'note' && n.callId === a.id)} onUpdate={onUpdate} onAdd={onAdd} onStub={onStub} across={across}/>;
   if(a.type === 'meeting') return <MeetingDetail a={a} contact={contact} team={team} comments={acts.filter(n => n.type === 'note' && n.meetingId === a.id)} onUpdate={onUpdate} onAdd={onAdd} onStub={onStub} across={across}/>;
-  if(a.type === 'email') return <EmailDetail a={a} contact={contact} acts={acts} onStub={onStub} onUpdate={onUpdate} across={across}/>;
-  if(a.type === 'task') return <TaskDetail a={a} contact={contact} team={team} onUpdate={onUpdate} onStub={onStub} across={across && across.hideType ? across : undefined}/>;
-  if(a.type === 'note') return <NoteDetail a={a} contact={contact} calls={acts.filter(x => x.type === 'call' || x.type === 'meeting')} onUpdate={onUpdate} onStub={onStub} across={across}/>;
+  if(a.type === 'email') return a.logged ? <EmailLogDetail a={a} contact={contact} team={team} onUpdate={onUpdate} onStub={onStub} across={across}/>
+    : <EmailDetail a={a} contact={contact} acts={acts} onStub={onStub} onUpdate={onUpdate} across={across}/>;
+  if(a.type === 'task') return <TaskDetail a={a} contact={contact} team={team} comments={acts.filter(n => n.type === 'note' && n.taskId === a.id)} onUpdate={onUpdate} onAdd={onAdd} onStub={onStub} across={across && across.hideType ? across : undefined}/>;
+  if(a.type === 'note') return <NoteDetail a={a} contact={contact} calls={acts.filter(x => x.type === 'call' || x.type === 'meeting' || x.type === 'task')} onUpdate={onUpdate} onStub={onStub} across={across}/>;
   if(a.type === 'ownerChange') return <OwnerChangeDetail a={a} contact={contact} team={team} onReassign={onReassign}/>;
   if(['stageChange', 'propertyChange', 'customerCreated', 'taskReassigned', 'payment', 'recordsMerged', 'recordsSplit'].includes(a.type)) return <HistoryChangeDetail a={a} contact={contact}/>;
   if(a.type === 'file') return <FileActivityDetail a={a} contact={contact} onStub={onStub}/>;
@@ -768,6 +815,30 @@ function NewLogCall({contact, team, onAdd, onDone, fixedPoc}){
   );
 }
 
+/* Log Email — an email sent or received outside the CRM, recorded by hand (as Log Call): its
+   type, point of contact, subject and content. Its time is when it's logged. */
+function NewLogEmail({contact, team, onAdd, onDone}){
+  const [type, setType] = React.useState(null);
+  // The point of contact (the email's internal representative): the record owner unless another is picked.
+  const [poc, setPoc] = useOwnerDefault(contact, team);
+  const [m, setM] = React.useState({title:'', body:''});
+  const set = (p) => setM(x => ({...x, ...p}));
+  const ok = !!type && !!poc && !!m.title.trim() && !!m.body.trim();
+  const save = () => {
+    const id = newId('email');
+    onAdd({id, type:'email', logged:true, title:m.title.trim(), body:m.body.trim(), ...emailPatch(type, poc)});
+    onDone(id);
+  };
+  return (
+    <NewItemPanel title="Log Email" canSave={ok} onSave={save} onCancel={()=>onDone(null)}>
+      <Field label="Email Type"><Select value={type} options={EMAIL_TYPES} placeholder="Select email type" onChange={setType}/></Field>
+      <Field label="Point of Contact"><PersonPicker value={poc} team={team} contact={contact} onChange={setPoc}/></Field>
+      <Field label="Subject"><input value={m.title} onChange={e=>set({title:e.target.value})} placeholder="Email subject" style={fieldText}/></Field>
+      <Field label="Content"><textarea value={m.body} onChange={e=>set({body:e.target.value})} rows={8} placeholder="What the email said" aria-label="Content" style={{...fieldText, resize:'vertical', lineHeight:1.5}}/></Field>
+    </NewItemPanel>
+  );
+}
+
 function NewLogMeeting({contact, team, onAdd, onDone}){
   const [m, setM] = React.useState({platform:null, title:'', link:'', attendees:[]});
   const [organiser, setOrganiser] = useOwnerDefault(contact, team);
@@ -854,10 +925,10 @@ const ACTIVITY_TAB_TYPES = {activity:null, calls:'call', email:'email', tasks:'t
 /* The tab's add action, at the right of the toolbar: a primary button. Where a tab offers more
    than one type, it still opens the list of types. */
 const ACTIVITY_ADD = {
-  activity: {label:'Add',       menu:['Note', 'Call', 'Log Call', 'Start Meeting', 'Schedule Meeting', 'Log Meeting', 'Task', 'Email']},
+  activity: {label:'Add',       menu:['Note', 'Call', 'Log Call', 'Start Meeting', 'Schedule Meeting', 'Log Meeting', 'Task', 'Email', 'Log Email']},
   calls:    {label:'Add Call',  menu:['Call', 'Log Call']},
   notes:    {label:'Add Note',  pick:'Note'},
-  email:    {label:'Add Email', pick:'Email'},
+  email:    {label:'Add Email', menu:['Email', 'Log Email']},
   tasks:    {label:'Add Task',  pick:'Task'},
   meetings: {label:'Add Meeting', menu:['Start Meeting', 'Schedule Meeting', 'Log Meeting']},
 };
@@ -988,6 +1059,7 @@ function ActivityTab({tabId, contact, acts, allActs, team, adding, setAdding, pr
       {adding === 'Note' && <NewNote onAdd={onAdd} onDone={done}/>}
       {adding === 'Log Call' && <NewLogCall contact={contact} team={team} onAdd={onAdd} onDone={done}/>}
       {adding === 'Log Meeting' && <NewLogMeeting contact={contact} team={team} onAdd={onAdd} onDone={done}/>}
+      {adding === 'Log Email' && <NewLogEmail contact={contact} team={team} onAdd={onAdd} onDone={done}/>}
       {adding === 'Schedule Meeting' && <NewScheduleMeeting contact={contact} team={team} onAdd={onAdd} onDone={done}/>}
       {adding === 'Task' && <NewTask team={team} contact={contact} initial={prefill} onAdd={onAdd} onDone={done}/>}
       {emailOpts && <EmailComposer key={adding === 'Email' ? 'new' : 'reply'} {...emailOpts} onClose={closeEmail}/>}
@@ -996,4 +1068,4 @@ function ActivityTab({tabId, contact, acts, allActs, team, adding, setAdding, pr
   );
 }
 
-Object.assign(window, {CreatePanelFrame, ContentSidePanel, APP_HEADER_H, PageVisibleCtx, CreatePanelCtx, CreateRecordField, ComposeHostCtx, ActivityDetail, NewNote, NewLogCall, NewLogMeeting, NewScheduleMeeting, NewTask, SCHEDULE_DURATIONS, ActivityTab, ActivityAddButton, ACTIVITY_TAB_TYPES});
+Object.assign(window, {CreatePanelFrame, ContentSidePanel, APP_HEADER_H, PageVisibleCtx, CreatePanelCtx, CreateRecordField, ComposeHostCtx, ActivityDetail, NewNote, NewLogCall, NewLogEmail, NewLogMeeting, NewScheduleMeeting, NewTask, SCHEDULE_DURATIONS, ActivityTab, ActivityAddButton, ACTIVITY_TAB_TYPES});

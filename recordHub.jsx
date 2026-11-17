@@ -95,10 +95,10 @@ function RecordHubProvider({value, children}){
     newQuote:(target) => setQuote({mode:'new', ...(target || {})}),
     editQuote:(id) => setQuote({mode:'edit', id}),
     toast:showToast,
-    /* A deleted call or meeting keeps its notes: they stay on the record, no longer linked to it. */
+    /* A deleted call, meeting or task keeps its notes: they stay on the record, no longer linked to it. */
     removeActivity:(actId) => { const f = hubFindActivity(value, actId); if(!f) return;
-      ((value.activities[f.object] || {})[f.recordId] || []).filter(n => n.type === 'note' && (n.callId === actId || n.meetingId === actId))
-        .forEach(n => value.update(f.object, f.recordId, n.id, n.callId === actId ? {callId:null} : {meetingId:null}));
+      ((value.activities[f.object] || {})[f.recordId] || []).filter(n => n.type === 'note' && (n.callId === actId || n.meetingId === actId || n.taskId === actId))
+        .forEach(n => value.update(f.object, f.recordId, n.id, n.callId === actId ? {callId:null} : n.meetingId === actId ? {meetingId:null} : {taskId:null}));
       value.remove(f.object, f.recordId, actId); },
   };
   const callPerson = call && hubRecordPerson(hub, call.object, call.id);
