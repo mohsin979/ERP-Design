@@ -167,7 +167,8 @@ function tcRows(trail, now){
   return rows;
 }
 
-function TimeClockWidget({session, setSession}){
+// `bare`: without its own border and corners — inside a dashboard widget card (dashboard.jsx DashTimeClock).
+function TimeClockWidget({session, setSession, bare}){
   const [now, setNow] = React.useState(()=>new Date());
   React.useEffect(()=>{ const t = setInterval(()=>setNow(new Date()), 1000); return ()=>clearInterval(t); }, []);
   const [mode, setMode] = React.useState(null);        // null | 'arrival' | 'note'
@@ -247,7 +248,7 @@ function TimeClockWidget({session, setSession}){
   }
 
   return (
-    <div style={{background:TC.bg, border:`1px solid ${TC.border}`, borderRadius:10, color:TC.text, overflow:'hidden'}}>
+    <div style={{background:TC.bg, border: bare ? 'none' : `1px solid ${TC.border}`, borderRadius: bare ? 0 : 10, color:TC.text, overflow:'hidden'}}>
       <div style={{height:181, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:8,
                    background:TC_STATE_BG[status], color:TC.text, transition:'background 160ms ease',
                    borderBottom: TC_STATE_BG[status] === '#fff' ? `1px solid ${TC.line}` : 'none'}}>
@@ -386,6 +387,37 @@ function ProfileMenu({onStub, inCrm}){
   );
 }
 
+/* Persona Switcher — for testing only (2026-11-17): signs in as one of the sample CRM's personas
+   (usersTeams.jsx PERSONAS — Manager, Team Lead, Employee), so the CRM reads as that person does:
+   their records, their seat and Permission Preset. A chip beside Spring, the same height; the
+   switch reloads into the CRM, as a sign-in does. */
+function PersonaSwitcher(){
+  const [open, setOpen] = React.useState(false);
+  const users = USER_DIRECTORY.filter(u => !u.deleted);
+  const options = PERSONAS.map(p => ({...p, user:users.find(u => u.id === p.id)})).filter(p => p.user);
+  const mine = options.find(p => sameEmail(p.user.email, CURRENT_USER.email));
+  if(!options.length) return null;
+  return (
+    <div style={{position:'relative'}}>
+      <button type="button" title="Persona Switcher" aria-label="Persona Switcher" aria-expanded={open} onClick={()=>setOpen(v => !v)}
+        style={{display:'flex', alignItems:'center', gap:6, height:24, padding:'0 8px', boxSizing:'border-box', border:`1px solid ${T.borderStrong}`, borderRadius:8, background:'#fff', cursor:'pointer', fontFamily:'inherit'}}>
+        <Icon name="userSwitch" size={13} color={T.gray600}/>
+        <span style={{fontSize:12, color:T.gray600, whiteSpace:'nowrap'}}>{mine ? mine.role : 'Persona'}</span>
+        <Icon name="chevDown" size={T.chevronSize} color={T.gray600} style={{transform: open ? 'rotate(180deg)' : 'none'}}/>
+      </button>
+      <MenuShell open={open} onClose={()=>setOpen(false)} anchorRight width={220}>
+        {options.map(p => { const on = mine && mine.id === p.id; return (
+          <div key={p.id} onClick={()=>{ setOpen(false); if(!on) reloadInto({session:{email:p.user.email, signedInAt:Date.now()}, openCrm:true}); }}
+            style={{display:'flex', alignItems:'center', gap:10, padding:'7px 10px', borderRadius:6, cursor:'pointer', background: on ? T.headerBg : 'transparent'}}
+            onMouseEnter={e=>{ e.currentTarget.style.background = T.headerBg; }} onMouseLeave={e=>{ e.currentTarget.style.background = on ? T.headerBg : 'transparent'; }}>
+            <span style={{flex:1, minWidth:0, fontSize:13, color:T.attioText, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{p.role} · {p.name}</span>
+            {on && <Icon name="check" size={12} color={T.blue}/>}
+          </div>); })}
+      </MenuShell>
+    </div>
+  );
+}
+
 /* Right-hand cluster, shared by both headers. Spring shows only in CRM. */
 function HeaderRightIcons({context, session, setSession}){
   const [stub, setStub] = React.useState(null);
@@ -402,6 +434,8 @@ function HeaderRightIcons({context, session, setSession}){
             <span style={{fontSize:12, color:T.gray600}}>Spring</span>
           </div>
         )}
+        {/* For testing: the app as the Manager, a Team Lead or an Employee (the sample CRM's personas). */}
+        {context === 'crm' && ACTIVE_CRM.sample && <PersonaSwitcher/>}
         <TimeClockControl session={session} setSession={setSession}/>
         {/* The signed-in user's workflow violations and notifications (workflowEngine.jsx). */}
         <WorkflowBell/>
@@ -592,14 +626,18 @@ function App(){
     /* Permissions saved in an earlier shape (Contacts only; Records only) are completed: per-Object
        permissions, then the other categories by the holder's preset (levelOfPreset). */
     // (A sample user with a sample email signature and none of their own gets it — workspaces.jsx SAMPLE_SIGNATURES.)
+    // The Team Lead and Sales Professional presets as defined on 2026-11-17, once (usersTeams.jsx withPresetDefaults).
+    const presets0 = loaded.presetDefaults === PRESET_DEFAULTS_VERSION ? loaded.presets : withPresetDefaults(loaded.presets);
     const base = {...loaded, users:(loaded.users || []).map(u => ({...u, ...(SEED && !u.signature && SAMPLE_SIGNATURES[u.id] ? {signature:SAMPLE_SIGNATURES[u.id]} : {}), permissions:normalizePermissions(u.permissions, levelOfPreset(u.preset))})),
-      presets:(loaded.presets || []).map(x => ({...x, permissions:normalizePermissions(x.permissions, levelOfPreset(x.name))}))};
+      presets:(presets0 || []).map(x => ({...x, permissions:normalizePermissions(x.permissions, levelOfPreset(x.name))})), presetDefaults:PRESET_DEFAULTS_VERSION};
     // The signed-in person is one of this CRM's users (added when they aren't yet).
     // One identity per person across the Organization: the signed-in person joins under their shared name.
     const shared = signedInOrgUser();
     // The employees (People): every People instance's, each with its instance; none saved yet — this CRM's (the sample ones), into the first instance.
     const people = hasEmployeeStores() ? allEmployees() : base.people;
-    const withMember0 = withSessionMember({users:base.users, seats:base.seats, presets:base.presets, people}, SESSION && {...SESSION, ...(shared ? {name:shared.name} : {})});
+    // The sample CRM's test personas (usersTeams.jsx withMockPersonas), once.
+    const staff = {users:base.users, seats:base.seats, presets:base.presets, people};
+    const withMember0 = withSessionMember(SEED && loaded.mockPersonas !== MOCK_PERSONAS_VERSION ? withMockPersonas({...staff, teams:base.teams}) : staff, SESSION && {...SESSION, ...(shared ? {name:shared.name} : {})});
     // The Organization's users given this CRM instance (ERP Settings → Users) who aren't in its Users yet join them; everyone keeps their shared name.
     const withMember = {...withMember0, users:[...withMember0.users, ...crmUsersToAdd(withMember0.users)].map(u => {
       const d = orgUserByEmail(u.email);
@@ -610,6 +648,7 @@ function App(){
       pipelines:withSeeded(saved.pipelines && saved.pipelines.filter(p => !SPLIT_AC_PIPELINES.includes(p.id)), d.pipelines, saved.seededPipelines), seededPipelines:d.pipelines.map(p => p.id),
       seededDeals:SAMPLE_DEALS().map(x => x.id), seededContacts:SAMPLE_CONTACTS.map(c => c.id), seededCustomers:SAMPLE_CUSTOMERS().map(c => c.id),
       ...(!v2 && saved.emailTemplates ? {emailTemplates:saved.emailTemplates} : {}),
+      ...(SEED ? {mockPersonas:MOCK_PERSONAS_VERSION, mockEnrollGroup:1, mockPersonaRecords:1} : {}),
       // The sample email templates and sequences, once (workflows.jsx withMockEmails).
       ...(SEED && loaded.mockEmails !== MOCK_EMAILS_VERSION ? withMockEmails(loaded) : {})});
   });
@@ -693,6 +732,22 @@ function App(){
     const into = (list) => (m) => Object.keys(list).length ? {...m, ...Object.fromEntries(Object.entries(list).map(([id, acts]) =>
       [id, [...acts.filter(a => !(m[id] || []).some(x => x.id === a.id)), ...(m[id] || [])].sort((a, b) => new Date(b.at) - new Date(a.at))]))} : m;
     setContactActivities(into(add.contacts)); setDealActivities(into(add.deals)); setCustomerActivities(into(add.customers));
+  }, []);
+  // A sample running instance for Settings → Sequence Control: twelve contacts enrolled together, once (templates.jsx).
+  React.useEffect(() => {
+    if(!SEED || prevSettings.mockEnrollGroup === 1) return;
+    const add = sampleGroupEnrollment({contacts, deals, customers}, settingsData);
+    setContactActivities(m => ({...m, ...Object.fromEntries(Object.entries(add).filter(([id]) => !(m[id] || []).some(a => a.type === 'email' && a.status === 'scheduled' && a.sequenceId === 'es-onboarding'))
+      .map(([id, acts]) => [id, [...acts.filter(a => !(m[id] || []).some(x => x.id === a.id)), ...(m[id] || [])].sort((a, b) => new Date(b.at) - new Date(a.at))]))}));
+  }, []);
+  // Mustafa, the sample Employee, has records of his own, once (usersTeams.jsx personaRecords): theirs to start with — no owner change in their history.
+  React.useEffect(() => {
+    if(!SEED || prevSettings.mockPersonaRecords === 1) return;
+    const give = personaRecords({contacts, deals, customers}), from = give.from.map(id => userLabel(id));
+    const own = (ids) => (list) => list.map(r => ids.has(String(r.id)) ? {...r, owner:give.to} : r);
+    const tasks = (ids) => (m) => Object.fromEntries(Object.entries(m).map(([id, acts]) => [id, ids.has(String(id)) ? acts.map(a => a.type === 'task' && from.includes(a.assignee) ? {...a, assignee:userLabel(give.to)} : a) : acts]));
+    setContacts(own(give.contacts)); setDealsRaw(own(give.deals)); setCustomersRaw(own(give.customers));
+    setContactActivities(tasks(give.contacts)); setDealActivities(tasks(give.deals)); setCustomerActivities(tasks(give.customers));
   }, []);
   // Sample tasks saved before they had descriptions get theirs (activities.jsx).
   React.useEffect(() => { setContactActivities(withSampleTaskDescriptions); setDealActivities(withSampleTaskDescriptions); setCustomerActivities(withSampleTaskDescriptions); }, []);
@@ -1178,7 +1233,7 @@ function App(){
     : object === 'customers' ? setCustomers(cs => cs.map(c => c.id === id ? {...c, ...patch} : c)) : null;
   const hubValue = {data:settingsData, records:{contacts:contactsWithDeals, deals:dealsView, customers:customersView}, updateRecord,
     activities:{contacts:contactActivities, deals:dealActivities, customers:customerActivities},
-    add:hubAdd, update:hubUpdate, remove:hubRemove, openRecord, quotes, setQuotes, documents, setDocuments, services, setServices, forms, setForms, createRecord, setData:setSettingsData, accounting, setAccounting, invoices, setInvoices, overviewSettings, setOverviewSettings,
+    add:hubAdd, update:hubUpdate, remove:hubRemove, openRecord, workSession:{session, setSession}, quotes, setQuotes, documents, setDocuments, services, setServices, forms, setForms, createRecord, setData:setSettingsData, accounting, setAccounting, invoices, setInvoices, overviewSettings, setOverviewSettings,
     merge:{...mergeIdx, mergeRecords, keepSeparate, history:mergeHistory, splitRecords},
     // A workflow violation's details: its Object's page with Workflow Violations open and it selected.
     openViolation:(object, id) => { setCrmActive(object); engine.value.openViolation(object, id); }};

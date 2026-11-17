@@ -17,8 +17,9 @@
        total) with its own invoice issue date and due date; the rest in equal installments, due
        every 30 days after the deposit, each invoiced on its due date, 1 to 3 days or a week before,
        or a custom number of days before (1 day by default). Edit on the schedule sets each amount
-       and date and adds or deletes installments: the schedule then bills what's set, whether or
-       not it adds up to the total.
+       and date, names an installment (the Deposit stays the Deposit; unnamed: "Installment N")
+       and adds or deletes installments: the schedule then bills what's set, whether or not it
+       adds up to the total.
      Recurring Payment   — a subscription: the same amount every month (30 days) or year, its first
        invoice issued when the quote is signed or on a fixed date, each due by its terms; for a
        number of years, or until cancelled (Cancel Subscription).
@@ -199,7 +200,7 @@ const unpackPaymentTerms = (list) => (list || []).map(s => s && s.defaultTerms
                  on `issue` and due by `due`. The rest is `count` equal installments (the last takes
                  the cents) due every 30 days after the deposit is due, each invoiced `lead` days
                  before. Edited (`schedule:'custom'`, what Edit on the schedule turns it into): each
-                 installment's amount and dates as set (`rows`, one per installment — added or
+                 installment's name (`name`), amount and dates as set (`rows`, one per installment — added or
                  deleted there; a date not set: the 30-day one), billed as set: nothing makes it add
                  up to the total.
    Recurring   — the same `amount` every billing cycle, Monthly (every 30 days) or Yearly (every 12
@@ -269,7 +270,7 @@ function planSchedule(plan, {id = 'pt', signedOn = '', total, asOf = ymdOf(new D
       const o = over[k - 1] || {}, set = (v) => v !== '' && v != null;
       const du = set(o.dueDate) ? at(o.dueDate, true) : at(depositDue.date ? addDays(depositDue.date, INSTALLMENT_INTERVAL * k) : '', depositDue.fixed);
       const inv = set(o.invoiceDate) ? at(o.invoiceDate, true) : after(du, -lead);
-      rows.push(row(`${id}-i${k}`, `Installment ${k}`, set(o.amount) ? r2(o.amount) : custom ? 0 : k === n ? r2(rest - each * (n - 1)) : each, inv, du));
+      rows.push(row(`${id}-i${k}`, String(o.name || '').trim() || `Installment ${k}`, set(o.amount) ? r2(o.amount) : custom ? 0 : k === n ? r2(rest - each * (n - 1)) : each, inv, du));
     }
   }
   if(locked) rows = rows.map(x => locked[x.id] ? {...x, amount:locked[x.id].amount, invoiceDate:locked[x.id].invoiceDate || '', dueDate:locked[x.id].dueDate || '', invoiceTentative:'', tentative:'', locked:true} : x);
@@ -294,7 +295,7 @@ function planOk(plan, total){
 // A plan as saved: numbers as numbers; an edited schedule's rows, as many as the installments.
 const normalizePlan = (p) => ({...p, amount:r2(p.amount), depositPercent:p.depositPercent === '' ? '' : Number(p.depositPercent), count:p.count === '' ? '' : Number(p.count), lead:Number(p.lead) || 0,
   issue:p.issue.type === 'date' ? {type:'date', date:p.issue.date || ''} : {type:'signed'}, due:p.due.type === 'date' ? {type:'date', date:p.due.date || ''} : {type:p.due.type, days:Number(p.due.days) || 0},
-  rows:p.schedule === 'custom' ? (p.rows || []).slice(0, planCount(p)).map(x => ({amount:x.amount === '' || x.amount == null ? '' : r2(x.amount), invoiceDate:x.invoiceDate || '', dueDate:x.dueDate || ''})) : []});
+  rows:p.schedule === 'custom' ? (p.rows || []).slice(0, planCount(p)).map(x => ({amount:x.amount === '' || x.amount == null ? '' : r2(x.amount), invoiceDate:x.invoiceDate || '', dueDate:x.dueDate || '', ...(String(x.name || '').trim() ? {name:String(x.name).trim()} : {})})) : []});
 /* Terms saved before plans, as a plan to edit (saved again, they're the plan's): a Subscription is
    Recurring from its first due date; installments a deposit (the first) and the rest in equal parts;
    a One-Time payment its amount. `x`: a payment structure, a document's payment term or a plan. */
@@ -510,7 +511,10 @@ function PaymentTermsFields({plan, onChange, total, currency, signedLabel = 'Quo
             </div>
           ) : (
             <div key={x.id} style={{display:'grid', gridTemplateColumns:cols, gap:10, alignItems:'center'}}>
-              <span style={{fontSize:13, color:T.attioText}}>{x.description}</span>
+              {/* The deposit is the Deposit; an installment's name can be changed (empty: "Installment N"). */}
+              {i === 0 ? <span style={{fontSize:13, color:T.attioText}}>{x.description}</span>
+                : <input value={((plan.rows || [])[i - 1] || {}).name ?? ''} onChange={e=>setRow(i - 1, {name:e.target.value})} placeholder={`Installment ${i}`} aria-label={`Installment ${i} name`}
+                    style={{...fieldInput, height:PT_H, boxSizing:'border-box', minWidth:0}}/>}
               {i === 0
                 ? paid ? <span style={{fontSize:13, color:T.attioText, fontVariantNumeric:'tabular-nums'}}>{fmtMoney(x.amount, cur)}</span>
                   : num(typed != null && byAmount ? typed : String(x.amount), (v)=>{ setTyped(v); set({depositBy:'amount', depositPercent: v === '' || !(amount > 0) ? '' : Number(v) / amount * 100}); }, 'Deposit amount', cur, null, true)

@@ -22,6 +22,12 @@
    Edit Permissions follows the seat model (SEAT_TYPES): seat first (with remaining seats), then
    the seat's access options, then — for manual access — the preset and the permission editor
    (PERMISSION_CATEGORIES).
+   Decided 2026-11-17: the Sales Professional preset sees every record and works their own (no
+   Delete; Payment Plans and Invoices their own records' only); the Team Lead sees every record,
+   works Their Team's and gives their team its permissions; Dashboard permissions (which KPIs and
+   widgets, at the Personal / Team / Company level). No one edits their own permissions (a Super
+   Admin may), and no one gives more than they hold (permissionsWithin) — the all-access option and
+   presets beyond the giver's own are off, and Save while the matrix goes beyond.
    Assigning to people (AssignPeopleFields / AssignPeopleModal, at the end of the file): the one
    pattern for giving something to people — teams, whose members can be unticked, and single
    users. Email templates use it (templates.jsx). */
@@ -90,10 +96,28 @@ const PERMISSION_PRESETS = [SUPER_ADMIN, 'Admin', 'Team Lead', 'Sales Profession
      Templates                   — Email Templates, Email Sequences, Quote Templates, Playbooks,
                                    Services, Customer Profile templates (by who created each).
      Workflows                   — View, Create, Edit, Delete, Revert — on / off, every workflow.
+     Dashboard                   — Personal / Team / Company: the KPIs and widgets the person may
+                                   have on their dashboard at each level (dashboard.jsx).
      Settings & Administration   — Settings → Records, Properties and Pipelines (by creator),
                                    Tools Settings, Company Defaults, Users & Teams and Permission
                                    Management (Their Team / All users). */
-const PERMISSION_CATEGORIES = ['Records', 'Customer Profile Properties', 'Templates', 'Workflows', 'Settings & Administration'];
+const PERMISSION_CATEGORIES = ['Records', 'Customer Profile Properties', 'Templates', 'Workflows', 'Dashboard', 'Settings & Administration'];
+/* ── Dashboard ── which KPIs and widgets a person may have on their dashboard, at each level
+   (2026-11-17): Personal (the records they own), Team (their team's) and Company (every record).
+   Per level {default, items:{<KPI or widget id>: on}} — an id not listed follows `default`, so a
+   KPI or widget added to the catalogue later needs nothing saved. None saved yet: the levels
+   their record View reaches — All: every level; Their Team: Team and Personal; else Personal. */
+const DASHBOARD_LEVELS = [{key:'personal', tab:'Personal'}, {key:'team', tab:'Team'}, {key:'company', tab:'Company'}];
+const dashboardLevels = (personal, team, company, items = {}) => Object.fromEntries(DASHBOARD_LEVELS.map(l =>
+  [l.key, {default:!!({personal, team, company})[l.key], items:{...(items[l.key] || {})}}]));
+function normalizeDashboardPermissions(d, records, level){
+  const reach = level === 'all' ? 'all' : ADMIN_RECORD_OBJECTS.map(o => records[o] && records[o].enabled && records[o].view.on ? records[o].view.scope : null)
+    .reduce((a, sc) => PERMISSION_SCOPES.indexOf(sc) > PERMISSION_SCOPES.indexOf(a) ? sc : a, 'own');
+  const base = dashboardLevels(true, reach !== 'own', reach === 'all');
+  return Object.fromEntries(DASHBOARD_LEVELS.map(l => { const cur = (d || {})[l.key];
+    return [l.key, cur ? {default:!!cur.default, items:Object.fromEntries(Object.entries(cur.items || {}).map(([k, v]) => [k, !!v]))} : base[l.key]]; }));
+}
+const dashboardOn = (dash, level, id) => { const l = (dash || {})[level]; return !!l && (id in (l.items || {}) ? !!l.items[id] : !!l.default); };
 const PERMISSION_TEMPLATES = [
   {key:'emailTemplates', tab:'Email Templates', noun:'Email Template', plural:'Email Templates'},
   {key:'emailSequences', tab:'Email Sequences', noun:'Email Sequence', plural:'Email Sequences'},
@@ -108,6 +132,7 @@ const PERMISSION_TABS = {
   // The workspace's record types, by their names (HOF Partners: Leads, Customers).
   get Records(){ return PERMISSION_OBJECTS.filter(o => workspaceHasType(o.key)).map(o => o.tab); },
   Templates: PERMISSION_TEMPLATES.map(t => t.tab),
+  Dashboard: DASHBOARD_LEVELS.map(l => l.tab),
   'Settings & Administration': ADMIN_TABS,
 };
 // Tools Settings (Settings → Tools): connecting each tool.
@@ -267,11 +292,12 @@ function migrateAdmin(a){
 }
 function normalizePermissions(p, level = 'view'){
   const base = extendedPermissions(level);
-  if(!p) return {...DEFAULT_CONTACT_PERMISSIONS(), ...base};
+  if(!p){ const records = DEFAULT_CONTACT_PERMISSIONS(); return {...records, ...base, dashboard:normalizeDashboardPermissions(null, records, level)}; }
   const contacts = withEditOptions(normalizeObjectPermissions(p.contacts || p));
   // Deals and Customers mirror Contacts until they're set.
   const copy = () => JSON.parse(JSON.stringify(contacts));
-  return {contacts, deals: p.deals ? withEditOptions(normalizeObjectPermissions(p.deals)) : copy(), customers: p.customers ? withEditOptions(normalizeObjectPermissions(p.customers)) : copy(),
+  const deals = p.deals ? withEditOptions(normalizeObjectPermissions(p.deals)) : copy(), customers = p.customers ? withEditOptions(normalizeObjectPermissions(p.customers)) : copy();
+  return {contacts, deals, customers, dashboard:normalizeDashboardPermissions(p.dashboard, {contacts, deals, customers}, level),
     profileProps: Array.isArray(p.profileProps) ? p.profileProps : 'all',
     // Customer Profile forms moved from Settings & Administration to Templates.
     templates:fillFrom(base.templates, {...(p.admin && p.admin.profileForms && !(p.templates || {}).profileForms ? {profileForms:p.admin.profileForms} : {}), ...(p.templates || {})}),
@@ -300,7 +326,8 @@ function capBySeat(perms, seat){
     k === 'on' && typeof x === 'boolean' ? [k, x && seat === 'View Seat' && path[path.length - 1] === 'view' && path[0] !== 'admin']
     : k === 'enabled' && typeof x === 'boolean' ? [k, x && seat === 'View Seat']
     : [k, cap(x, [...path, k])]));
-  return cap(perms, []);
+  // The dashboard is viewing: a View Seat keeps it; no seat — nothing.
+  return {...cap(perms, []), ...(seat === 'View Seat' ? {} : {dashboard:dashboardLevels(false, false, false)})};
 }
 const seatTypeOf = (data, user) => !user || user.status === 'Deactivated' ? null : ((seatOfUser((data && data.seats) || [], user.id) || {}).type || null);
 const setAccessContext = ({user, users, history, data}) => { ACCESS = {user, data, users:users || [], history:history || (() => []),
@@ -390,6 +417,25 @@ const pipelineAdminCan = (object, action, pipeline) => !ACCESS_ON() || ownedCan(
 const profileFormCan = (action, form) => action === 'view' || templateCan('profileForms', action, form);
 const toolSettingCan = (tool) => !ACCESS_ON() || !!((adminOf().tools || {})[tool] || {}).on;
 const defaultsCan = () => !ACCESS_ON() || !!((adminOf().defaults || {}).edit || {}).on;
+// Dashboard: a KPI or widget at a level — 'personal', 'team', 'company' (dashboard.jsx).
+const dashboardCan = (level, id) => !ACCESS_ON() || dashboardOn(ACCESS.perms.dashboard, level, id);
+/* Giving permissions (2026-11-17): no one edits their own (a Super Admin may — they hold
+   everything already), and no one gives more than they hold: every permission on in `target` is
+   on for the giver (`own`), with a Type no wider than theirs. */
+const permissionsEditableBy = (target) => !ACCESS_ON() || ACCESS.user.preset === SUPER_ADMIN || !target || target.id !== ACCESS.user.id;
+function permissionsWithin(t, own){
+  if(t == null || typeof t !== 'object') return true;
+  if(Array.isArray(t)) return Array.isArray(own) ? t.every(x => own.includes(x)) : own === 'all';
+  if(typeof t.on === 'boolean') return !t.on || (!!own && !!own.on && (!t.scope || !own.scope || PERMISSION_SCOPES.indexOf(t.scope) <= PERMISSION_SCOPES.indexOf(own.scope)));
+  if('default' in t && 'items' in t){
+    const ids = [...new Set([...Object.keys(t.items || {}), ...Object.keys((own && own.items) || {})])], on = (n, id) => !!n && (id in (n.items || {}) ? !!n.items[id] : !!n.default);
+    return (!t.default || !!(own && own.default)) && ids.every(id => !on(t, id) || on(own, id));
+  }
+  if(t.enabled === false) return true;   // switched off: it gives nothing
+  return Object.entries(t).every(([k, v]) => v === 'all' ? (own || {})[k] === 'all' : typeof v === 'boolean' ? !v || (own || {})[k] !== false : permissionsWithin(v, (own || {})[k]));
+}
+const grantCapped = () => ACCESS_ON() && ACCESS.user.preset !== SUPER_ADMIN;
+const canGrant = (perms) => !grantCapped() || permissionsWithin(perms, ACCESS.perms);
 // Settings → Goals (goals.jsx): View (the page shows) and Edit (targets can be set).
 const goalsCan = (action) => !ACCESS_ON() || !!((adminOf().goals || {})[action] || {}).on;
 // Users & Teams, Permission Management: Their Team Users (the user is in the actor's team) or All Users.
@@ -457,16 +503,42 @@ const ALL_CONTACTS = 'all', TEAM_CONTACTS = 'team';
 // A preset's matrix: Contacts as given; Deals mirror them. `future` → Until the <record> Is Removed.
 const presetMatrix = ({create, view, edit = null, del = null, merge = null, future = false, assign = false, createAssociated = false, level = 'view'}) =>
   permissionMatrix(objectPermissions({create, view, edit, del, merge, assign: assign ? 'all' : null, createAssociated: createAssociated ? 'all' : null, life: future ? 'removed' : 'reassigned'}), level);
+/* The Sales Professional (2026-11-17): sees every record, works their own — Edit, Merge and Create
+   Associated Record on Their records; no Delete, no Assign Owner. A record's tools follow (what's
+   on their own records can be deleted), and its money — Payment Plans and Invoices — is their own
+   records' only. Dashboard: the Personal level. */
+const ownScope = () => scopedPermission(true, 'own'), teamScope = () => scopedPermission(true, 'team');
+const salesProfessionalMatrix = () => normalizePermissions({
+  contacts:{...objectPermissions({create:true, view:'all', edit:'own', merge:'own', createAssociated:'own'}),
+    tools:{...Object.fromEntries(PERMISSION_TOOLS.filter(t => !t.createOnly).map(t => [t.key, {delete:ownScope()}])), invoices:{view:ownScope(), edit:ownScope(), delete:ownScope()}},
+    accounting:{create:{on:true}, view:ownScope(), edit:ownScope(), delete:ownScope()}},
+  dashboard:dashboardLevels(true, false, false)});
+/* The Team Lead (2026-11-17): sees every record (never less than their team does), works Their
+   Team's — Edit, Delete, Merge, Assign Owner, Create Associated Record; Payment Plans and Invoices
+   are Their Team's; gives their team its permissions (Permission Management → Their Team Users).
+   Dashboard: Personal and Team, and the Company Target. */
+const teamLeadMatrix = () => normalizePermissions({
+  contacts:{...objectPermissions({create:true, view:'all', edit:'team', del:'team', merge:'team', assign:'team', createAssociated:'team'}),
+    tools:{invoices:{view:teamScope(), edit:teamScope(), delete:teamScope()}},
+    accounting:{create:{on:true}, view:teamScope(), edit:teamScope(), delete:teamScope()}},
+  admin:{permissions:{edit:teamScope(), assign:teamScope()}},
+  dashboard:dashboardLevels(true, true, false, {company:{goalCompany:true}})});
 const DEFAULT_PRESETS = () => [
   {id:'pp-super-admin',  name:SUPER_ADMIN,          seat:'Full Seat', permissions:presetMatrix({create:true, view:ALL_CONTACTS, edit:ALL_CONTACTS, del:ALL_CONTACTS, merge:ALL_CONTACTS, future:true, assign:true, createAssociated:true, level:'all'})},
   {id:'pp-admin',        name:'Admin',              seat:'Full Seat', permissions:presetMatrix({create:true, view:ALL_CONTACTS, edit:ALL_CONTACTS, del:ALL_CONTACTS, merge:ALL_CONTACTS, future:true, createAssociated:true, level:'all'})},
-  {id:'pp-team-lead',    name:'Team Lead',          seat:'Full Seat', permissions:presetMatrix({create:true, view:TEAM_CONTACTS, edit:TEAM_CONTACTS, merge:TEAM_CONTACTS})},
-  {id:'pp-sales-pro',    name:'Sales Professional', seat:'Full Seat', permissions:presetMatrix({create:true, view:TEAM_CONTACTS, edit:TEAM_CONTACTS, del:TEAM_CONTACTS})},
+  {id:'pp-team-lead',    name:'Team Lead',          seat:'Full Seat', permissions:teamLeadMatrix()},
+  {id:'pp-sales-pro',    name:'Sales Professional', seat:'Full Seat', permissions:salesProfessionalMatrix()},
   {id:'pp-case-manager', name:'Case Manager',       seat:'Full Seat', permissions:presetMatrix({create:true, view:TEAM_CONTACTS, edit:TEAM_CONTACTS, del:TEAM_CONTACTS})},
   {id:'pp-petition',     name:'Petition Writer',    seat:'Full Seat', permissions:presetMatrix({create:false, view:TEAM_CONTACTS})},
   {id:'pp-compliance',   name:'Compliance',         seat:'Full Seat', permissions:presetMatrix({create:false, view:ALL_CONTACTS})},
   {id:'pp-viewer',       name:'Viewer',             seat:'View Seat', permissions:presetMatrix({create:false, view:ALL_CONTACTS})},
 ];
+
+/* The Team Lead and Sales Professional presets as defined on 2026-11-17, in a CRM saved before
+   (once — `presetDefaults`, app.jsx): the preset's own matrix; its users keep theirs. */
+const PRESET_DEFAULTS_VERSION = 1;
+const withPresetDefaults = (presets) => { const now = DEFAULT_PRESETS();
+  return (presets || []).map(p => ['pp-team-lead', 'pp-sales-pro'].includes(p.id) ? {...p, permissions:(now.find(x => x.id === p.id) || p).permissions} : p); };
 
 /* Employees — stand-in for HRMS (the prototype has no HRMS module yet): everyone already a user,
    plus employees who aren't users yet. Users are added only from here (Add User). */
@@ -542,6 +614,39 @@ function withSessionMember(people, session, preset = SUPER_ADMIN){
   const employees = people.people || [], employee = employees.some(p => String(p.email || '').toLowerCase() === email) ? employees
     : [...employees, {id:`p-${u.id}`, name:u.name, email:u.email, ...(org && org.peopleId ? {peopleId:org.peopleId} : {})}];
   return {...people, users:[...people.users, u], seats, people:employee};
+}
+/* ── Personas ── for testing only (2026-11-17): the header's Persona Switcher (app.jsx) signs in
+   as one of three sample users, so a feature can be tried as each of them — Waleed, the Manager
+   (Super Admin); Ali (Ali Noor), a Team Lead; Mustafa, an Employee (Sales Professional) on Ali's
+   team. What each sees and may do is their own seat and Permission Preset. Mustafa is mocked
+   into the sample CRM once (`mockPersonas`), with a Full Seat; Ali is given the Team Lead preset
+   then, if he isn't on it. Version 2 (the two presets redefined, 2026-11-17): the sample users on
+   the Team Lead or Sales Professional preset take its matrix as it is now. */
+const PERSONAS = [{id:'waleed-bin-zaman', role:'Manager', name:'Waleed'}, {id:'ali-noor', role:'Team Lead', name:'Ali'}, {id:'mustafa', role:'Employee', name:'Mustafa'}];
+const MOCK_PERSONAS_VERSION = 2;
+function withMockPersonas(people){
+  const matrixOf = (name) => { const p = (people.presets || []).find(x => x.name === name); return p ? JSON.parse(JSON.stringify(p.permissions)) : DEFAULT_CONTACT_PERMISSIONS(); };
+  const lead = people.users.find(u => u.id === 'ali-noor'), team = (people.teams || []).find(t => t.leadId === 'ali-noor');
+  let users = people.users.map(u => { const preset = u === lead ? 'Team Lead' : u.preset;
+    return ['Team Lead', 'Sales Professional'].includes(preset) ? {...u, preset, access:'manual', permissions:matrixOf(preset)} : u; }), seats = people.seats || [], employees = people.people || [];
+  if(!users.some(u => u.id === 'mustafa')){
+    users = [...users, {id:'mustafa', name:'Mustafa', email:'mustafa@hof-global.com', preset:'Sales Professional', access:'manual', status:'Activated', lastActive:null, created:'Nov 17, 2026',
+      teamId:(team && team.id) || (lead && lead.teamId) || null, permissions:matrixOf('Sales Professional')}];
+    const free = seats.findIndex(st => st.type === 'Full Seat' && !st.assigneeId);
+    seats = free >= 0 ? seats.map((st, i) => i === free ? {...st, assigneeId:'mustafa'} : st)
+      : [...seats, {id:`${SEAT_PREFIX['Full Seat']}${seats.filter(st => st.type === 'Full Seat').length + 1}`, type:'Full Seat', assigneeId:'mustafa'}];
+    if(!employees.some(p => p.id === 'p-mustafa')) employees = [...employees, {id:'p-mustafa', name:'Mustafa', email:'mustafa@hof-global.com'}];
+  }
+  return {...people, users, seats, people:employees};
+}
+/* Mustafa's own records in the sample CRM (app.jsx, once — `mockPersonaRecords`): every fourth
+   contact of Ali Noor's and of Anaya Malik's — his team — with its deals and customers; the tasks
+   on them that were theirs become his. Sets of record IDs (as strings). */
+function personaRecords({contacts, deals, customers}){
+  const from = ['ali-noor', 'anaya-malik'], seen = {};
+  const mine = new Set(contacts.filter(c => from.includes(c.owner) && (seen[c.owner] = (seen[c.owner] || 0) + 1) % 4 === 0).map(c => String(c.id)));
+  const linked = (r) => (r.contactIds || []).some(id => mine.has(String(id)));
+  return {from, to:'mustafa', contacts:mine, deals:new Set(deals.filter(linked).map(d => String(d.id))), customers:new Set(customers.filter(linked).map(c => String(c.id)))};
 }
 /* An empty workspace's people: no users, teams or employees yet — only its seats and the
    predefined presets (the signed-in person joins through withSessionMember). */
@@ -915,25 +1020,29 @@ function UsersModule({data, setData, onStub, focus}){
   const schema = {
     bulkActions,
     properties:USER_PROPERTIES, filterProps:USER_FILTER_PROPS, selectValues:{...USER_SELECT_VALUES, preset:[...new Set(data.presets.map(p => p.name))]},
-    noun:'user', searchKeys:['name', 'email'], canCreateProperty:false,
+    noun:'user', searchKeys:['name', 'email'], canCreateProperty:false, actionsWidth:184,   // room for Edit Permissions beside the ⋯ menu
     renderCell: (key, u) => key === 'name'
       // An active user opens their details (the Record Owner profile, editable here).
       ? <ContactName name={u.name} onOpen={()=>u.status === 'Activated' ? setViewingId(u.id) : onStub(u.name)} style={{fontSize:'inherit', fontWeight:500}}/>
       : key === 'status' && u.status ? <StatusPill status={u.status} map={STATUS_PILLS}/>
       : undefined,
-    /* Settings & Administration: Edit Permissions with Permission Management (Assign or Edit);
+    /* Settings & Administration: Edit Permissions with Permission Management (Assign or Edit) — never one's own, unless a Super Admin;
        Edit User, Change Seat and Change Team with Users & Teams → Edit; Deactivate and Delete with
        their own — each for Their Team users or All users. */
     renderActions: (u) => { const can = (action) => userAdminCan('users', action, u);
-      return <RowActionsMenu title="User Actions" items={[
+      const canPerms = u.status === 'Activated' && permissionsEditableBy(u) && (userAdminCan('permissions', 'assign', u) || userAdminCan('permissions', 'edit', u));
+      /* Edit Permissions is also a text action of its own beside the menu (2026-11-17; the Actions column wider for it — `actionsWidth`), for whoever the menu offers it to. */
+      return <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', gap:8}}>
+        <span onMouseDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()} style={{display:'flex', whiteSpace:'nowrap'}}>{canPerms && <StTextAction label="Edit Permissions" onClick={()=>setEditing(u)}/>}</span>
+        <RowActionsMenu title="User Actions" items={[
         // Seats and permissions are for activated users (a deactivated user holds none); Reactivate brings one back, with no seat until given one.
-        ...(u.status === 'Activated' && (userAdminCan('permissions', 'assign', u) || userAdminCan('permissions', 'edit', u)) ? [{label:'Edit Permissions', onClick:()=>setEditing(u)}] : []),
+        ...(canPerms ? [{label:'Edit Permissions', onClick:()=>setEditing(u)}] : []),
         ...(can('edit') ? [{label:'Edit User', onClick:()=>setEditingUser(u.id)}, ...(u.status === 'Activated' ? [{label:'Change Seat', onClick:()=>setChangingSeat(u)}] : []), {label:'Change Team', onClick:()=>setChangingTeam(u)}] : []),
         ...(can('deactivate') && u.status !== 'Activated' ? [{label:'Reactivate User', onClick:()=>setData(d => ({...d, users:d.users.map(x => x.id === u.id ? {...x, status:'Activated'} : x)}))}] : []),
         // Not yourself, and not the last Super Admin: someone must be able to run the CRM.
         ...(can('deactivate') && u.status === 'Activated' ? [{label:'Deactivate User', disabled:protectedUser(u), onClick:()=>!protectedUser(u) && setDeactivating(u)}] : []),
         ...(can('delete') ? [{label:'Delete User', danger:!protectedUser(u), disabled:protectedUser(u), onClick:()=>!protectedUser(u) && setDeleting(u)}] : []),
-      ]}/>; },
+      ]}/></div>; },
   };
   const ownedBy = (uid) => ['contacts', 'deals', 'customers'].flatMap(o => (((hub && hub.records) || {})[o] || []).filter(r => r.owner === uid).map(r => ({object:o, id:r.id})));
   const activeSuperAdmins = data.users.filter(x => x.status === 'Activated' && x.preset === SUPER_ADMIN);
@@ -1287,7 +1396,7 @@ function PresetsModule({data, setData, onStub, openUsers}){
 /* The permission editors' frame: a side panel like every other (beneath the app header, the title
    at the left and × at the right, Cancel and Save at the bottom; Escape closes it) — wider than
    the others for the permission tables (Permission | Type | Permission Life). */
-function PermissionsDrawerFrame({title, onClose, onSave, children}){
+function PermissionsDrawerFrame({title, onClose, onSave, children, note, canSave = true}){
   useEscapeClose(onClose);
   return (
     <ContentSidePanel width={1180} zIndex={100} style={{background:'#fff', borderLeft:`1px solid ${T.border}`, boxShadow:'-8px 0 24px rgba(16,24,40,.08)', display:'flex', flexDirection:'column'}}>
@@ -1299,8 +1408,9 @@ function PermissionsDrawerFrame({title, onClose, onSave, children}){
       </div>
       <div style={{flex:1, minHeight:0, overflowY:'auto', padding:16, display:'flex', flexDirection:'column', gap:24}}>{children}</div>
       <div style={{display:'flex', alignItems:'center', justifyContent:'flex-end', gap:8, padding:'12px 20px', borderTop:`1px solid ${T.border}`, flexShrink:0}}>
+        {note && <span style={{...stTextB, flex:1, minWidth:0, color:T.red}}>{note}</span>}
         <StSecondary label="Cancel" onClick={onClose}/>
-        <StCta label="Save" onClick={onSave}/>
+        <StCta label="Save" disabled={!canSave} onClick={()=>canSave && onSave()}/>
       </div>
     </ContentSidePanel>
   );
@@ -1500,7 +1610,7 @@ const USERS_SCOPES = ['team', 'all'];
 function PermissionMatrixEditor({seat, perms, setPerms, readOnly}){
   const hub = useRecordHub();
   const [category, setCategory] = React.useState('Records');
-  const [tabs, setTabs] = React.useState({Records:PERMISSION_TABS.Records[0], Templates:PERMISSION_TEMPLATES[0].tab, 'Settings & Administration':ADMIN_TABS[0]});
+  const [tabs, setTabs] = React.useState({Records:PERMISSION_TABS.Records[0], Templates:PERMISSION_TEMPLATES[0].tab, Dashboard:DASHBOARD_LEVELS[0].tab, 'Settings & Administration':ADMIN_TABS[0]});
   const [find, setFind] = React.useState('');
   const def = seatDef(seat);
   const viewOnly = def.extended === 'view';
@@ -1546,6 +1656,15 @@ function PermissionMatrixEditor({seat, perms, setPerms, readOnly}){
     // Workflows: on / off for every workflow.
     if(category === 'Workflows') return flatTable(['workflows'], {key:'workflows', plural:'Workflows'},
       [row('view', 'View'), row('create', 'Create'), row('edit', 'Edit'), row('delete', 'Delete'), row('revert', 'Revert')].map(r => ({...r, viewRow:r.key === 'view'})), 'Workflows');
+    // Dashboard: the KPIs and widgets the person may have at this level (the catalogue: dashboard.jsx dashPermissionRows) — viewing, so a View Seat has them too.
+    if(category === 'Dashboard'){ const level = DASHBOARD_LEVELS.find(l => l.tab === tab); if(!level) return null;
+      const cur = (perms.dashboard || {})[level.key] || {default:false, items:{}};
+      return dashPermissionRows(level.key).map(sec => (
+        <PermissionTable key={`${level.key}-${sec.title}`} flat title={sec.title} obj={{key:`dashboard-${level.key}`, plural:sec.title}} idKey={`dashboard-${level.key}-${sec.title}`}
+          rows={sec.rows.map(r => ({key:r.id, label:() => r.label, unscoped:true, allowed:true}))}
+          value={Object.fromEntries(sec.rows.map(r => [r.id, {on:dashboardOn(perms.dashboard, level.key, r.id)}]))}
+          set={(id, patch)=>setPerms(p => ({...p, dashboard:{...p.dashboard, [level.key]:{...cur, items:{...cur.items, [id]:!!patch.on}}}}))}/>));
+    }
     if(category !== 'Settings & Administration') return null;
     const admin = ['admin'];
     // Records, Properties, Pipelines: by who created each (the shipped ones are the workspace creator's).
@@ -1646,6 +1765,8 @@ function EditPermissionsDrawer({user, seats, presets, onClose, onSave, onStub, o
   const deviates = !presetDef || JSON.stringify(perms) !== JSON.stringify(normalizePermissions(presetDef.permissions));
   const [namingPreset, setNamingPreset] = React.useState(false);
   const def = seatDef(seat);
+  // No one gives more than they hold (permissionsWithin): the all-access option and presets beyond the giver's own are off; so is Save while the matrix goes beyond.
+  const capped = grantCapped(), over = access === 'all' ? capped : !canGrant(perms);
 
   /* "Make super Admin" (Full Seat) / "Grant all view permissions" (View Seat) applies that seat's
      all-access preset — Super Admin / Viewer — with its matrix. */
@@ -1654,7 +1775,7 @@ function EditPermissionsDrawer({user, seats, presets, onClose, onSave, onStub, o
     : onSave({seat, access, preset, permissions:perms});
 
   return (<>
-    <PermissionsDrawerFrame title="Edit Permissions" onClose={onClose} onSave={save}>
+    <PermissionsDrawerFrame title="Edit Permissions" onClose={onClose} onSave={save} canSave={!over} note={over ? "You can't give more than your own permissions." : null}>
       <Locked on={assignOk} note="You can't assign this user's seat, access or preset.">
       <div style={{display:'flex', flexDirection:'column', gap:24}}>
       {/* 1 — the seat type, with what's left of it; everything below follows from it. */}
@@ -1675,7 +1796,9 @@ function EditPermissionsDrawer({user, seats, presets, onClose, onSave, onStub, o
         <span style={{fontSize:14, fontWeight:500, color:T.black}}>Choose how to access</span>
         <div style={{display:'flex', gap:12}}>
           <StRadioCard selected={access === 'manual'} title={def.manualTitle} description={def.manualDescription} onSelect={()=>setAccess('manual')}/>
-          <StRadioCard selected={access === 'all'} title={def.allTitle} description={def.allDescription} onSelect={()=>setAccess('all')}/>
+          <div aria-disabled={capped} style={{flex:1, minWidth:0, display:'flex', ...(capped ? {opacity:.5, pointerEvents:'none'} : {})}}>
+            <StRadioCard selected={access === 'all'} title={def.allTitle} description={def.allDescription} onSelect={()=>setAccess('all')}/>
+          </div>
         </div>
       </div>
       </div>
@@ -1687,11 +1810,11 @@ function EditPermissionsDrawer({user, seats, presets, onClose, onSave, onStub, o
         {/* The preset sits in its own bordered section, set apart from the permission matrix. */}
         <div style={{display:'flex', alignItems:'flex-end', gap:16, border:`1px solid ${T.borderStrong}`, borderRadius:12, padding:16}}>
           <div style={{display:'flex', flexDirection:'column', gap:8, minWidth:0}}>
-            <StField label="Choose a Permission Preset"><Locked on={assignOk} note=""><StSelect value={preset} options={presetsFor(seat)} onChange={choosePreset}/></Locked></StField>
+            <StField label="Choose a Permission Preset"><Locked on={assignOk} note=""><StSelect value={preset} options={presetsFor(seat).map(name => ({value:name, label:name, disabled:capped && !canGrant(matrixOfPreset(name, seat))}))} onChange={choosePreset}/></Locked></StField>
             <div style={stTextB}>Apply a ready-made permission matrix to this user with a preset.</div>
           </div>
           <div style={{marginLeft:'auto', paddingBottom:24}}>
-            <StSecondary label="Save Permission Preset" disabled={!deviates || !editOk} onClick={()=>setNamingPreset(true)}/>
+            <StSecondary label="Save Permission Preset" disabled={!deviates || !editOk || over} onClick={()=>setNamingPreset(true)}/>
           </div>
         </div>
         <PermissionMatrixEditor seat={seat} perms={perms} setPerms={setPerms} readOnly={!editOk}/>
@@ -1800,4 +1923,4 @@ function AssignPeopleModal({title, value, data, onCancel, onSave}){
   );
 }
 
-Object.assign(window, {assignmentEmpty, assignedUserIds, assignmentLabel, AssignPeopleFields, AssignPeopleModal, countLink, iconBtn, UserEditPanel, saveUserProfileIn, nameFromEmail, memberFromSession, withSessionMember, EMPTY_PEOPLE_DATA, RecordAccessCtx, useRecordAccess, normalizePermissions, setAccessContext, accessUser, toolCan, visibleActivities, activityCan, canAdd, PERMISSION_TOOLS, EditPresetDrawer, PermissionMatrixEditor, UsersTeamsSettings, UsersModule, SeatsModule, TeamsModule, PresetsModule, RecordViewsModule, SAMPLE_USERS, SAMPLE_PEOPLE_DATA, EditPermissionsDrawer});
+Object.assign(window, {PERSONAS, MOCK_PERSONAS_VERSION, withMockPersonas, personaRecords, DASHBOARD_LEVELS, dashboardOn, dashboardCan, PRESET_DEFAULTS_VERSION, withPresetDefaults, permissionsWithin, assignmentEmpty, assignedUserIds, assignmentLabel, AssignPeopleFields, AssignPeopleModal, countLink, iconBtn, UserEditPanel, saveUserProfileIn, nameFromEmail, memberFromSession, withSessionMember, EMPTY_PEOPLE_DATA, RecordAccessCtx, useRecordAccess, normalizePermissions, setAccessContext, accessUser, toolCan, visibleActivities, activityCan, canAdd, PERMISSION_TOOLS, EditPresetDrawer, PermissionMatrixEditor, UsersTeamsSettings, UsersModule, SeatsModule, TeamsModule, PresetsModule, RecordViewsModule, SAMPLE_USERS, SAMPLE_PEOPLE_DATA, EditPermissionsDrawer});

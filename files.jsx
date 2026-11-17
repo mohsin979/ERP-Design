@@ -110,6 +110,119 @@ function FileDetail({a, contact, canEdit, canDelete, onUpdate, onDelete, onStub}
   );
 }
 
+/* ── The built-in file viewer (2026-11-17) ── a file shown inside the CRM: a PDF page by page
+   (pdf.js), an image (JPG, PNG…), a Word document as its text and formatting (.docx — mammoth).
+   Anything else, the old .doc format included, can't be shown: its tile, with Download on the
+   viewer's header. The libraries load the first time they're needed (cdnjs). Sample files carry
+   no content, so a sample page stands in for them (fileSourceOf). Used where an email is
+   edited — the email template editor and a sequence's Edit Email: in the Preview pane, in the
+   email's place (emails.jsx EmailSplit). */
+const PDF_JS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js', PDF_WORKER_JS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+const MAMMOTH_JS = 'https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js';
+const FILE_SCRIPTS = {};
+const loadFileScript = (src) => FILE_SCRIPTS[src] || (FILE_SCRIPTS[src] = new Promise((resolve, reject) => {
+  const el = document.createElement('script'); el.src = src; el.crossOrigin = 'anonymous'; el.onload = resolve;
+  el.onerror = () => { delete FILE_SCRIPTS[src]; reject(new Error(`Could not load ${src}`)); }; document.head.appendChild(el); }));
+const dataUrlBytes = (url) => { const b = atob(String(url).slice(String(url).indexOf(',') + 1)), out = new Uint8Array(b.length); for(let i = 0; i < b.length; i++) out[i] = b.charCodeAt(i); return out; };
+const fileTitle = (name) => String(name || 'File').replace(/\.[a-z0-9]+$/i, '').replace(/[_-]+/g, ' ').trim();
+const SAMPLE_FILE_LINES = ['Sample file.', 'It stands in for the document a client or the team attaches here:', 'the prototype keeps no content for its sample files.'];
+// A one-page PDF with a title and a few lines (Helvetica) — the sample PDFs' content.
+function samplePdfUrl(title, lines){
+  const esc = (t) => String(t).replace(/[^\x20-\x7E]/g, ' ').replace(/([\\()])/g, '\\$1');
+  const text = `BT /F2 20 Tf 56 760 Td (${esc(title)}) Tj ET\n` + lines.map((l, i) => `BT /F1 11 Tf 56 ${724 - i * 18} Td (${esc(l)}) Tj ET`).join('\n')
+    + `\n0.85 0.85 0.87 RG 56 742 m 539 742 l S`;
+  const objects = ['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> >>',
+    `<< /Length ${text.length} >>\nstream\n${text}\nendstream`, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>', '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>'];
+  let pdf = '%PDF-1.4\n'; const at = [];
+  objects.forEach((o, i) => { at.push(pdf.length); pdf += `${i + 1} 0 obj\n${o}\nendobj\n`; });
+  const xref = pdf.length;
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n` + at.map(n => `${String(n).padStart(10, '0')} 00000 n \n`).join('')
+    + `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
+  return `data:application/pdf;base64,${btoa(pdf)}`;
+}
+// A sample picture: a plain card with the file's name.
+function sampleImageUrl(title){
+  const c = document.createElement('canvas'); c.width = 960; c.height = 600;
+  const g = c.getContext('2d'); g.fillStyle = '#F4F5F7'; g.fillRect(0, 0, 960, 600); g.fillStyle = '#fff'; g.fillRect(60, 60, 840, 480);
+  g.strokeStyle = '#DDDFE4'; g.lineWidth = 2; g.strokeRect(60, 60, 840, 480);
+  g.fillStyle = '#15141B'; g.font = '600 34px system-ui, sans-serif'; g.fillText(title, 100, 140);
+  g.fillStyle = '#6E6E73'; g.font = '22px system-ui, sans-serif'; SAMPLE_FILE_LINES.forEach((l, i) => g.fillText(l, 100, 200 + i * 36));
+  return c.toDataURL('image/jpeg', .9);
+}
+/* What the viewer shows for a file: {kind:'pdf' | 'image', url} | {kind:'docx', url} |
+   {kind:'html', html} (a sample Word document) | {kind:'none'}. */
+function fileSourceOf(a){
+  const kind = fileKindOf(a), title = fileTitle(a.name);
+  if(a.dataUrl) return kind === 'PDF' ? {kind:'pdf', url:a.dataUrl} : kind === 'Image' ? {kind:'image', url:a.dataUrl} : /\.docx$/i.test(a.name || '') ? {kind:'docx', url:a.dataUrl} : {kind:'none'};
+  if(kind === 'PDF') return {kind:'pdf', url:samplePdfUrl(title, SAMPLE_FILE_LINES)};
+  if(kind === 'Image') return {kind:'image', url:sampleImageUrl(title)};
+  if(/\.docx?$/i.test(a.name || '')) return {kind:'html', html:`<h1>${escHtml(title)}</h1>${SAMPLE_FILE_LINES.map(l => `<p>${l}</p>`).join('')}`};
+  return {kind:'none'};
+}
+const FILE_PAGE = {background:'#fff', border:`1px solid ${T.attioLine}`, borderRadius:6, boxShadow:'0 1px 3px rgba(16,24,40,.08)'};
+// A PDF, each page drawn at the viewer's width.
+function PdfPages({url}){
+  const ref = React.useRef(null);
+  const [state, setState] = React.useState('loading');
+  React.useEffect(() => {
+    let off = false; setState('loading');
+    (async () => {
+      try {
+        // The worker script is loaded here too, so the pages are read on the page itself (no separate worker to start).
+        await loadFileScript(PDF_JS); await loadFileScript(PDF_WORKER_JS);
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDF_WORKER_JS;
+        const doc = await window.pdfjsLib.getDocument({data:dataUrlBytes(url)}).promise;
+        if(off || !ref.current) return;
+        const box = ref.current, width = box.clientWidth || 480, ratio = Math.min(2, window.devicePixelRatio || 1);
+        box.innerHTML = '';
+        for(let n = 1; n <= doc.numPages; n++){
+          const page = await doc.getPage(n), vp = page.getViewport({scale:width / page.getViewport({scale:1}).width * ratio});
+          const c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height;
+          c.style.cssText = `display:block;width:100%;background:#fff;border:1px solid ${T.attioLine};border-radius:6px;box-shadow:0 1px 3px rgba(16,24,40,.08)`;
+          if(off) return; box.appendChild(c);
+          await page.render({canvasContext:c.getContext('2d'), viewport:vp}).promise;
+        }
+        if(!off) setState('ready');
+      } catch(e){ if(!off) setState('error'); }
+    })();
+    return () => { off = true; };
+  }, [url]);
+  return <>
+    {state !== 'ready' && <div style={{fontSize:12.5, color:T.attioMuted, padding:'8px 2px'}}>{state === 'error' ? 'This PDF can’t be shown' : 'Opening…'}</div>}
+    <div ref={ref} style={{display:'flex', flexDirection:'column', gap:12}}/>
+  </>;
+}
+// A Word document (.docx), as its text and formatting.
+function DocxPage({url}){
+  const [doc, setDoc] = React.useState(null);   // {html} | {error}
+  React.useEffect(() => {
+    let off = false; setDoc(null);
+    loadFileScript(MAMMOTH_JS).then(() => window.mammoth.convertToHtml({arrayBuffer:dataUrlBytes(url).buffer}))
+      .then(r => { if(!off) setDoc({html:r.value}); }).catch(() => { if(!off) setDoc({error:true}); });
+    return () => { off = true; };
+  }, [url]);
+  if(!doc) return <div style={{fontSize:12.5, color:T.attioMuted, padding:'8px 2px'}}>Opening…</div>;
+  return doc.error ? <div style={{fontSize:12.5, color:T.attioMuted, padding:'8px 2px'}}>This document can’t be shown</div> : <DocHtmlPage html={doc.html}/>;
+}
+// A document's HTML on a page (no scripts run; links open in a new tab).
+function DocHtmlPage({html}){
+  const page = `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>body{margin:0;padding:36px 40px;font-family:Georgia,'Times New Roman',serif;font-size:14px;line-height:1.6;color:#15141B}`
+    + `h1{font-size:22px;margin:0 0 14px}h2{font-size:18px}img{max-width:100%}table{border-collapse:collapse}td,th{border:1px solid #DDDFE4;padding:4px 8px}</style></head><body>${String(html || '').replace(/<script[\s\S]*?<\/script>/gi, '')}</body></html>`;
+  return <iframe title="Document" sandbox="allow-popups allow-popups-to-escape-sandbox" srcDoc={page} style={{...FILE_PAGE, width:'100%', height:640, display:'block'}}/>;
+}
+function FileViewer({a}){
+  const src = React.useMemo(() => fileSourceOf(a), [a.id, a.dataUrl, a.name]);
+  if(src.kind === 'pdf') return <PdfPages url={src.url}/>;
+  if(src.kind === 'image') return <img src={src.url} alt={a.name} style={{...FILE_PAGE, display:'block', maxWidth:'100%', alignSelf:'flex-start'}}/>;
+  if(src.kind === 'docx') return <DocxPage url={src.url}/>;
+  if(src.kind === 'html') return <DocHtmlPage html={src.html}/>;
+  return (
+    <div style={{display:'flex', flexDirection:'column', alignItems:'center', gap:8, padding:'48px 24px'}}><FileTile a={a} size={48}/>
+      <span style={{fontSize:12.5, color:T.attioMuted}}>{fileKindOf(a)}{a.size ? ` · ${fmtBytes(a.size)}` : ''}</span></div>
+  );
+}
+
 /* The Files tab. `acts`: the record's own activity (as shown on it); `contact`: the record as
    the activity rows read it (owner); `team`: names for Added By. Writes go through the hub. */
 function FilesTab({acts, contact, team, onStub}){

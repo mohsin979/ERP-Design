@@ -951,7 +951,9 @@ function DeleteConfirmModal({contactName, note, noun = 'Contact', paid, onCancel
 function ContactsDataGrid({rows, columnOrder, setColumnOrder, sort, setSort, search, actions, onOpenContact,
                            frozenLeft=0, frozenRight=0, actionsFrozen=true, rowsPerPage=25, resetKey}){
   const {propByKey, colWidth:baseColWidth, renderCell, renderActions, noun, nounPlural, searchKeys, selectable, fillWidth, onRowReorder,
-         pinGutter = true, paginate = true, ordered = false, bulkActions} = useRecordSchema();
+         pinGutter = true, paginate = true, ordered = false, bulkActions, actionsWidth} = useRecordSchema();
+  // The Actions column: its usual width, or the schema's own (`actionsWidth`: a list with an action beside the ⋯ menu — Users).
+  const ACTIONS_W = actionsWidth || ACTIONS_WIDTH;
   const plural = nounPlural || `${noun}s`;
   /* `onRowReorder(fromId, toId)` (opt-in, e.g. pipeline stages): rows drag by the handle in the
      gutter, which takes the selection checkbox's place. `pinGutter:false` leaves the gutter
@@ -1113,18 +1115,18 @@ function ContactsDataGrid({rows, columnOrder, setColumnOrder, sort, setSort, sea
   /* With fillWidth the data columns grow in proportion (never below their own width) until they
      meet Actions; otherwise every column keeps its declared width. */
   const baseDataWidth = displayOrder.reduce((sum,k)=>sum+baseColWidth(k), 0);
-  const scale = fillWidth && boxW ? Math.max(1, (boxW - GUTTER - ACTIONS_WIDTH) / baseDataWidth) : 1;
+  const scale = fillWidth && boxW ? Math.max(1, (boxW - GUTTER - ACTIONS_W) / baseDataWidth) : 1;
   const colWidth = (k) => baseColWidth(k) * scale;
 
   /* Frozen columns are the first `frozenLeft` and last `frozenRight` of the order, so each one
      can work out its own sticky offset from the widths of the frozen columns beside it. */
-  const tableWidth = GUTTER + ACTIONS_WIDTH
+  const tableWidth = GUTTER + ACTIONS_W
     + displayOrder.reduce((sum,k)=>sum+colWidth(k), 0);
   const lastIdx = displayOrder.length - 1;
   const isFrozenLeft  = (i) => i < frozenLeft;
   const isFrozenRight = (i) => i > lastIdx - frozenRight;
   const leftOffsetOf  = (i) => GUTTER + displayOrder.slice(0, i).reduce((s,k)=>s+colWidth(k), 0);
-  const rightOffsetOf = (i) => (actionsFrozen ? ACTIONS_WIDTH : 0)
+  const rightOffsetOf = (i) => (actionsFrozen ? ACTIONS_W : 0)
     + displayOrder.slice(i+1).reduce((s,k)=>s+colWidth(k), 0);
 
   const cellFreeze = (i, isHeader) => {
@@ -1189,7 +1191,7 @@ function ContactsDataGrid({rows, columnOrder, setColumnOrder, sort, setSort, sea
             <th style={{
               position: actionsFrozen ? 'sticky' : 'static', right:0, top:0,
               zIndex: actionsFrozen ? 5 : 4, background: actionsFrozen ? T.headerBg : '#fff',
-              width:ACTIONS_WIDTH, minWidth:ACTIONS_WIDTH, height:T.attioRowH,
+              width:ACTIONS_W, minWidth:ACTIONS_W, height:T.attioRowH,
               borderBottom:`1px solid ${T.attioLine}`,
               borderLeft: actionsFrozen && frozenRight===0
                 ? `2px solid ${stickyBorderColor}` : `1px solid ${T.attioLine}`,
@@ -1237,7 +1239,7 @@ function ContactsDataGrid({rows, columnOrder, setColumnOrder, sort, setSort, sea
               <td style={{
                 position: actionsFrozen ? 'sticky' : 'static', right:0,
                 zIndex: actionsFrozen ? 2 : 1, background: actionsFrozen ? T.headerBg : '#fff',
-                width:ACTIONS_WIDTH, minWidth:ACTIONS_WIDTH, height:T.attioRowH,
+                width:ACTIONS_W, minWidth:ACTIONS_W, height:T.attioRowH,
                 borderBottom:`1px solid ${T.attioLine}`,
                 borderLeft: actionsFrozen && frozenRight===0
                   ? `2px solid ${stickyBorderColor}` : `1px solid ${T.attioLine}`,

@@ -13,8 +13,9 @@
    figure is that level's own and stays whatever the level above becomes; cleared, the suggestion
    returns. A team's users needn't add up to the team's target (over or under is allowed) — the
    page shows what is allocated. Higher levels never overwrite lower ones.
-   Reporting: the dashboard's Company Target KPI and Goals widget (dashboard.jsx, with Cash
-   Received: View Payment Terms), and each user's own target in their profile panel (UserGoalRow).
+   Reporting: the dashboard's Target KPI and Goals widget (dashboard.jsx, with Cash Received: View
+   Payment Terms) — by the dashboard's level: the company's, a team's or the person's own target —
+   and each user's own target in their profile panel (UserGoalRow).
    Access: Settings & Administration → Goals — View shows the page, Edit lets targets be set
    (usersTeams.jsx goalsCan). */
 
@@ -55,12 +56,16 @@ const goalReceived = (dash, range, userIds) => ((dash && dash.people) || []).fil
   .reduce((s, p) => s + p.ev.payments.filter(x => dashIn(x.at, range)).reduce((a, x) => a + (Number(x.amount) || 0), 0), 0);
 const goalPct = (received, target) => target ? Math.round(received / target * 100) : null;
 const fmtGoalPct = (pct) => pct == null ? '—' : `${pct}%`;
-/* The company's target and progress for the dashboard's Company Target KPI (ctx: the dashboard's
-   data and the settings data). */
+/* Whose target a dashboard level reads (dashboard.jsx levels): Personal — the person's own; Team —
+   their team's (none without a team); else the company's. */
+const goalLevel = ({level, userId, teamId}) => !userId || !level || level === 'company' ? 'company' : level;
+const goalLevelTarget = (t, at) => { const l = goalLevel(at); return l === 'personal' ? t.userTarget(at.userId).value : l === 'team' ? (at.teamId ? t.teamTarget(at.teamId).value : null) : t.company; };
+/* The target and progress for the dashboard's Target KPI (ctx: the dashboard's data — its level's
+   records — and the settings data): the company's, the team's or the person's own, by level. */
 function goalKpi(ctx){
   const t = goalTargets(ctx.settings), range = goalPeriodRange(t.period, new Date(ctx.data.now));
-  const received = goalReceived(ctx.data, range), pct = goalPct(received, t.company);
-  return {target:t.company, received, pct, sub: t.company == null ? 'No target set' : `${fmtGoalPct(pct)} reached · ${goalPeriod(t.period).now}`};
+  const target = goalLevelTarget(t, ctx), received = goalReceived(ctx.data, range), pct = goalPct(received, target);
+  return {target, received, pct, sub: target == null ? 'No target set' : `${fmtGoalPct(pct)} reached · ${goalPeriod(t.period).now}`};
 }
 
 /* ── Settings → Goals ── the period, then the company's target, each team's with its users'. */
@@ -154,26 +159,29 @@ function GoalBar({pct}){
 /* The dashboard's Goals widget: the targets for the dashboard's range — Today daily, This Week
    weekly, This Month monthly (a custom range keeps the period set in Settings → Goals). */
 const GOAL_PERIOD_OF_RANGE = {today:'daily', week:'weekly', month:'monthly'};
-function GoalsWidget({data, settings, rangeId, onOpenUser}){
+function GoalsWidget({data, settings, rangeId, onOpenUser, title = 'Goals', level, userId, teamId}){
   const [tab, setTab] = React.useState('teams');
   const t = goalTargets(settings, GOAL_PERIOD_OF_RANGE[rangeId]), range = goalPeriodRange(t.period, new Date(data.now));
   const line = (target, ids) => { const r = goalReceived(data, range, ids); return {received:r, target, pct:goalPct(r, target)}; };
-  const company = line(t.company);
-  const rows = tab === 'teams'
+  /* By level (`data` is the level's records): the company's progress, then each team's or each
+     user's; the team's, then each of its members'; the person's own, alone. */
+  const at = goalLevel({level, userId, teamId}), company = line(goalLevelTarget(t, {level, userId, teamId}));
+  const userRows = (list) => list.map(u => ({id:u.id, name:u.name, user:true, ...line(t.userTarget(u.id).value, [u.id])}));
+  const rows = at === 'personal' ? [] : at === 'team' ? userRows(teamId ? t.members(teamId) : []) : tab === 'teams'
     ? t.teams.map(tm => ({id:tm.id, name:tm.name, ...line(t.teamTarget(tm.id).value, t.members(tm.id).map(u => u.id))}))
-    : t.users.map(u => ({id:u.id, name:u.name, user:true, ...line(t.userTarget(u.id).value, [u.id])}));
+    : userRows(t.users);
   const ranked = rows.sort((a, b) => (b.pct ?? -1) - (a.pct ?? -1) || a.name.localeCompare(b.name));
   return (
-    <DashWidgetCard title="Goals" right={<span style={{fontSize:12.5, color:T.attioMuted}}>{goalPeriod(t.period).now}</span>}>
+    <DashWidgetCard title={title} right={<span style={{fontSize:12.5, color:T.attioMuted}}>{goalPeriod(t.period).now}</span>}>
       <div style={{display:'flex', flexDirection:'column', gap:6, paddingBottom:8}}>
         <span style={{fontFamily:DASH_FIGURE_FONT, fontWeight:700, fontSize:44, lineHeight:1, color: company.target == null ? T.attioFaint : T.attioText, fontVariantNumeric:'tabular-nums'}}>{fmtGoalPct(company.pct)}</span>
-        <span style={{fontSize:12.5, color:T.attioMuted, fontVariantNumeric:'tabular-nums'}}>{company.target == null ? 'No company target set' : `${fmtMoney(company.received)} of ${fmtMoney(company.target)}`}</span>
+        <span style={{fontSize:12.5, color:T.attioMuted, fontVariantNumeric:'tabular-nums'}}>{company.target == null ? (at === 'company' ? 'No company target set' : 'No target set') : `${fmtMoney(company.received)} of ${fmtMoney(company.target)}`}</span>
         <GoalBar pct={company.pct}/>
       </div>
-      <div style={{display:'flex', gap:8, borderBottom:`1px solid ${T.borderStrong}`}}>
+      {at === 'company' && <div style={{display:'flex', gap:8, borderBottom:`1px solid ${T.borderStrong}`}}>
         {[['teams', 'Teams'], ['users', 'Users']].map(([id, label]) => <UtTab key={id} label={label} active={tab === id} onClick={()=>setTab(id)}/>)}
-      </div>
-      <div style={{display:'flex', flexDirection:'column'}}>
+      </div>}
+      {at !== 'personal' && <div style={{display:'flex', flexDirection:'column', ...(at === 'team' ? {borderTop:`1px solid ${T.attioLine}`} : {})}}>
         {ranked.map(r => (
           <div key={r.id} style={{display:'flex', alignItems:'center', gap:10, minHeight:44, borderBottom:`1px solid ${T.attioLine}`}}>
             <span style={{width:120, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flexShrink:0}}>
@@ -183,8 +191,8 @@ function GoalsWidget({data, settings, rangeId, onOpenUser}){
             <span title={r.target == null ? 'No target' : `${fmtMoney(r.received)} of ${fmtMoney(r.target)}`} style={{width:44, textAlign:'right', fontSize:12.5, color: r.target == null ? T.attioFaint : T.attioText, fontVariantNumeric:'tabular-nums', flexShrink:0}}>{fmtGoalPct(r.pct)}</span>
           </div>
         ))}
-        {!ranked.length && <div style={{fontSize:13, color:T.attioMuted, padding:'14px 0'}}>No {tab} yet.</div>}
-      </div>
+        {!ranked.length && <div style={{fontSize:13, color:T.attioMuted, padding:'14px 0'}}>No {at === 'team' ? 'users' : tab} yet.</div>}
+      </div>}
     </DashWidgetCard>
   );
 }

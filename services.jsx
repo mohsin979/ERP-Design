@@ -220,7 +220,9 @@ function ServicesPage(){
     properties:SERVICE_COLUMNS, noun:'service', searchKeys:['name', 'description'], canCreateProperty:false, bulkActions:serviceBulk.bulkActions,
     filterProps:[{key:'name', label:'Service Name', type:'text'}, {key:'price', label:'Price', type:'number'}, {key:'milestoneCount', label:'Milestones', type:'number'}],
     selectValues:{},
-    renderCell:(key, r) => key === 'name' ? <ContactName name={r.name} onOpen={()=>setOpenId(r.id)} style={{fontSize:'inherit', fontWeight:500}}/> : undefined,
+    // Its name opens the editor straight away (a person who can't edit it sees its details).
+    renderCell:(key, r) => key === 'name' ? <ContactName name={r.name} style={{fontSize:'inherit', fontWeight:500}}
+      onOpen={()=>{ const s = shown.find(x => x.id === r.id); if(can('edit', s)){ setOpenId(null); setForm({initial:s}); } else setOpenId(r.id); }}/> : undefined,
     renderActions:(r) => { const s = services.find(x => x.id === r.id);
       return <RowActionsMenu title="Service Actions" width={MENU_W} items={[
         {label:'View Service', onClick:()=>setOpenId(r.id)}, ...(can('edit', s) ? [{label:'Edit Service', onClick:()=>setForm({initial:s})}] : []),

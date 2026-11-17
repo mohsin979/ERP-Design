@@ -67,6 +67,7 @@ const CRM_SETTINGS_NAV = [
     {id:'settings.notifications', label:'Notifications', icon:'notification'},
     {id:'settings.navigation',    label:'Navigation',    icon:'listBullets'},
     {id:'settings.brand',         label:'Brand',         icon:'brand'},
+    {id:'settings.sequenceEnrollments', label:'Sequence Control', icon:'forward'},
   ]},
   {id:'settings.data', label:'Data Management', group:true, items:[
     {id:'settings.objects',         label:'Records',          icon:'cube'},

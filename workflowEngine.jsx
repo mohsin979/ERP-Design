@@ -1419,7 +1419,9 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
      chosen; with no one to send to it isn't sent or logged ("skipped"). {{first_name}} is the
      record's person's first name and a fetched property the record's value, as in the composer
      (emails.jsx); the signature is the sender's — the record's owner. A sequence's emails share
-     their enrollment (`enrollId`): how far it has got is read from them (templates.jsx). */
+     their enrollment (`enrollId`): how far it has got is read from them (templates.jsx) — and the
+     day they were enrolled (`instance`): the records enrolled in a sequence on one day are one
+     running instance of it (Settings → Sequence Control). */
   function sendEmails(deal, emails, run, workflowId){
     const data = dataRef.current, owner = userName(data, deal.owner);
     let sent = 0, scheduled = 0, skipped = 0, passed = 0;
@@ -1447,7 +1449,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
       const act = {id:wfNewId('we'), ...recordKey(deal.id), type:'email', at: now ? new Date() : sendAt, direction:'sent', title:subject, body:htmlText(html),
         html:html || null, ...(attachments.length ? {attachments} : {}),
         // Cc / Bcc: typed on the workflow's email (its action) or when enrolling by hand — kept as lists, only when filled.
-        templateId:e.templateId, sequenceId:e.sequenceId || null, ...(e.sequenceId ? {enrollId} : {}), to, ...emailCopiesOf(e.cc, e.bcc),
+        templateId:e.templateId, sequenceId:e.sequenceId || null, ...(e.sequenceId ? {enrollId, instance:ymdOf(new Date())} : {}), to, ...emailCopiesOf(e.cc, e.bcc),
         status: now ? 'sent' : 'scheduled', scheduledFor:sendAt, source:'team', by:owner, viaWorkflow:workflowId, ...(workflowId && run && run.id ? {runId:run.id} : {})};
       addActivity(deal.id, act);
       if(now){ sent++; emit({type:'emailSent', recordId:deal.id, pipelineId:deal.pipeline, attrs:{activityId:act.id, templateId:e.templateId}}, childChain(run)); }

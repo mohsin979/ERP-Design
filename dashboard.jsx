@@ -1,18 +1,30 @@
 /* HOF Pulse ERP — CRM Dashboard.
 
-   Layout — configurable, not a fixed set (the Super Admin's Dashboard View Settings; one workspace
-   dashboard for now, kept by id so role or personal dashboards can follow):
+   Levels (2026-11-17) — every KPI and widget is a figure at a level: Personal (the signed-in
+   person's own records), Team (their team's) or Company (every record). Which of them a person
+   may have, level by level, is a permission (Edit Permissions → Dashboard), carried by their
+   Permission Preset. Each is named for its level in full words, with no tag: every record's by its
+   plain name (Total Cash Invoiced, Goals), a team's ending in Team (Total Cash Invoiced Team; Team
+   Goals, Team Key Indicators), the person's own starting with My (My Cash Invoiced, My Goals, My
+   Tasks, My Velocity).
+   Layout — configurable, not a fixed set: each person's own, set in their View Settings (which
+   KPIs, which widgets, Rearrange) from what their permissions give them:
      Greeting            — the time of day and the signed-in person; under it, Ask Spring (the AI
                            prompt box).
-     Controls            — the date filter; All KPIs (every KPI and its value, in a side panel), View
-                           Settings (Super Admin) and the KPIs / Graph switcher.
+     Controls            — the date filter; the team the Team level reads (only for someone who
+                           may have the same figures for the whole company); All KPIs (every KPI
+                           and its value, in a side panel, level by level), View Settings and the
+                           KPIs / Graph switcher.
      KPIs                — one KPI pinned first (blue, twice as wide) and up to four more, from the KPI
                            catalogue (DASH_KPI_DEFS) — or (Graph) a line graph of the three cash KPIs.
      Widgets             — a three-column grid (DashWidgetGrid) of the shown widgets from the widget
                            catalogue (DASH_WIDGET_DEFS), each spanning its width (1, 2 or 3 columns):
                            Key Indicator User (Revenue, Volume, Compliance, Speed — sales
-                           professionals ranked), Total Tasks, Business Velocity, Deal Won, Deal Lost,
-                           Goals (goals.jsx: the company's, each team's and each user's progress).
+                           professionals ranked — a team's or the company's, never Personal), My
+                           Tasks (the person's own only), Business Velocity, Deal Won, Deal
+                           Lost, Goals (goals.jsx: the company's with each team's and user's, a
+                           team's with its members', or the person's own), Time Clock (the header's
+                           own Time Clock as a Personal widget, on the same work session).
      Rearrange           — from View Settings: the four KPIs after the pinned one and the widgets
                            drag to reorder (live), and any of the four can be pinned as first; Done
                            saves and the dashboard returns to viewing.
@@ -22,7 +34,9 @@
    trends, and workflows' User Properties (all-time).
 
    Data: the CRM's own records (dashBusinessData) — deals, their contacts and customers, their
-   activity, Accounting and the workflow violations; each attributed to the deal's owner.
+   activity, Accounting and the workflow violations; each attributed to the deal's owner. A level
+   reads its users' share of it (dashLevelScope); on the dashboard every payment plan counts — a
+   figure is given by its level's permission, not by what the person may open record by record.
      Cash Received    payments recorded in Accounting, by payment date.
      Cash Invoiced    invoices issued (invoices.jsx, by issue date) — issuing isn't payment; a
                       superseded one doesn't count, a part-paid one counts what was received (its
@@ -272,7 +286,7 @@ function DateFilter({value, onChange}){
 }
 
 /* ── KPIs ── a catalogue of KPI definitions (DASH_KPI_DEFS); the dashboard shows the ones its
-   configuration selects (dashConfigOf): one KPI pinned first — the blue card, about twice as wide —
+   configuration selects (normalizeDashConfig): one KPI pinned first — the blue card, about twice as wide —
    then up to four more, light grey, all the same height. Each: an icon chip and the label at the
    top, the figure (the Time Clock's Fira Sans Extra Condensed) low in the card with its unit or
    note under it. A new KPI is one more definition: {id, group, label, icon, kind ('money' |
@@ -292,8 +306,8 @@ const DASH_RECORD_ONE = {contacts:'Contact', deals:'Deal', customers:'Customer'}
 const DASH_KPI_DEFS = [
   ...DASH_KPIS.map(k => ({id:k.key, group:'Financial', label:k.label, icon:k.icon, kind:'money', accounting:true, hint:k.hint,
     read:(ctx) => companyKpis(ctx.data, ctx.range)[k.key]})),
-  // The company's Cash Received target for the goal period (Settings → Goals), with how much of it is reached.
-  {id:'goalCompany', group:'Financial', label:'Company Target', icon:'target', kind:'money', accounting:true, hint:'The Cash Received target set in Settings → Goals, for its period',
+  // The Cash Received target for the goal period (Settings → Goals) — the company's, the team's or the person's own, by level — with how much of it is reached.
+  {id:'goalCompany', group:'Financial', label:'Company Target', labels:{personal:'My Target', team:'Team Target'}, icon:'target', kind:'money', accounting:true, hint:'The Cash Received target set in Settings → Goals, for its period',
     read:(ctx) => goalKpi(ctx).target, sub:(ctx) => goalKpi(ctx).sub},
   // Per record type, named as the workspace names it (Leads in the Accounting workspace); only types it has (`object`).
   ...['contacts', 'deals', 'customers'].map(o => ({id:`winRate:${o}`, object:o, group:'Conversion', get label(){ return `Total ${typeSingular(o, DASH_RECORD_ONE[o])} Win Rate`; }, icon:'gauge', kind:'percent',
@@ -316,6 +330,43 @@ const dashKpiDef = (id) => DASH_KPI_DEFS.find(k => k.id === id) || null;
 // What the viewer may see: accounting KPIs need View Payment Terms.
 const dashKpiVisible = (k) => !!k && (!k.accounting || accountingViewAny()) && (!k.object || !Object.keys(OBJECT_NAMES).length || k.object in OBJECT_NAMES);
 const DASH_KPI_MAX_OTHERS = 4;
+// The workspace has the KPI's record type (HOF Partners has no Contacts).
+const dashKpiHere = (k) => !k.object || !Object.keys(OBJECT_NAMES).length || k.object in OBJECT_NAMES;
+/* A KPI's or widget's name at a level, in full words (2026-11-17 — no tag beside it): every
+   record's is its plain name; a team's ends in "Team"; the person's own starts with "My" (without
+   "Total"). A definition's `labels` name a level otherwise (Team Goals, My Velocity). */
+const dashLabel = (def, level) => (def.labels && def.labels[level]) || (level === 'team' ? `${def.label} Team` : level === 'personal' ? `My ${String(def.label).replace(/^Total /, '')}` : def.label);
+
+/* ── Levels ── (2026-11-17) every KPI and widget is a figure at a level — whose records it reads:
+     Personal   the signed-in person's own records;
+     Team       their team's (someone who may have the same figures for the whole company picks the team);
+     Company    every record.
+   Who may have which, at which level, is a permission (Edit Permissions → Dashboard; usersTeams.jsx
+   dashboardCan), carried by the Permission Presets. A dashboard's entry — a slot — is
+   "<level>/<id>"; entries saved before levels are the Company's (Total Tasks was always the
+   person's own: Personal). A definition's `levels` are the ones it's offered at (all three unless
+   given). With no signed-in user (nothing registered) every level reads everything. */
+const DASH_LEVELS = [{id:'personal', label:'Personal'}, {id:'team', label:'Team'}, {id:'company', label:'Company'}];
+const DASH_LEVEL_IDS = DASH_LEVELS.map(l => l.id);
+const DASH_LEVELS_WIDE = ['company', 'team', 'personal'];   // widest first
+const dashLevelLabel = (id) => (DASH_LEVELS.find(l => l.id === id) || {}).label || '';
+const dashSlot = (level, id) => `${level}/${id}`;
+const dashSlotOf = (key) => { const k = String(key || ''), i = k.indexOf('/');
+  return i > 0 && DASH_LEVEL_IDS.includes(k.slice(0, i)) ? {level:k.slice(0, i), id:k.slice(i + 1)} : {level: k === 'tasks' ? 'personal' : 'company', id:k}; };
+const dashSlotKey = (key) => { const sl = dashSlotOf(key); return dashSlot(sl.level, sl.id); };
+const dashLevelsOf = (def) => (def && def.levels) || DASH_LEVEL_IDS;
+// A level's part of the page's context: its users' people, records and deals. `teamId`: the team picked, else the person's own.
+function dashLevelScope({data, records, deals, users}, level, teamId){
+  const me = accessUser(), tid = level === 'team' && me ? (teamId || me.teamId || null) : null;
+  const ids = level === 'company' || !me ? null : level === 'personal' || !tid ? [me.id] : (users || []).filter(u => u.teamId === tid).map(u => u.id);
+  const scope = {level, userId: me ? me.id : null, teamId:tid, ids};
+  if(!ids) return {...scope, data, records, deals};
+  const set = new Set(ids.map(String)), own = (owner) => set.has(String(userIdOf(owner, users) || owner));
+  return {...scope, data:{...data, people:data.people.filter(p => own(p.id))}, deals:(deals || []).filter(d => own(d.owner)),
+    records:Object.fromEntries(Object.entries(records || {}).map(([o, rs]) => [o, (rs || []).filter(r => own(r.owner))]))};
+}
+// A KPI or widget may be had at a level: it's offered there and the permission is on (`can` — the person's own, or a preset's).
+const dashAllowed = (def, level, can = dashboardCan) => !!def && dashLevelsOf(def).includes(level) && can(level, def.id);
 const DASH_FIGURE_FONT = "'Fira Sans Extra Condensed', 'DM Sans', sans-serif";
 const DASH_BLUE = '#3A5BF9';
 /* A KPI figure counting up from zero to its value — on load and whenever the range changes
@@ -413,19 +464,20 @@ function useLiveReorder(ids, onCommit){
   };
 }
 
-/* The KPI row: the KPI pinned first (blue, twice as wide), then the others in their order — all the
+/* The KPI row (`items`: the slots shown, each with its level's context): the KPI pinned first (blue, twice as wide), then the others in their order — all the
    same height; labels, figures and notes on the same lines across them. While rearranging
    (`arrange`), the pinned card stays as it is — it can't move and nothing changes on it — and the
    other four drag among themselves (live, useLiveReorder); each has Pin as first. */
-function DashKpiRow({ids, ctx, replay, arrange}){
-  const shown = ids.map(dashKpiDef).filter(dashKpiVisible);
-  const pinned = shown[0], others = shown.slice(1);
-  const live = useLiveReorder(others.map(t => t.id), (next) => arrange && arrange.onReorder(next));
-  const byId = Object.fromEntries(others.map(t => [t.id, t]));
-  const card = (t, hero, props = {}) => {
-    const ink = hero ? '#fff' : '#111113', v = t.read(ctx), movable = arrange && !hero, dragged = live.dragging === t.id;
+function DashKpiRow({items, replay, arrange}){
+  const pinned = items[0], others = items.slice(1);
+  const live = useLiveReorder(others.map(x => x.key), (next) => arrange && arrange.onReorder(next));
+  const byId = Object.fromEntries(others.map(x => [x.key, x]));
+  // `x`: a slot — {key, def, ctx (its level's)}.
+  const card = (x, hero, props = {}) => {
+    const t = x.def, ctx = x.ctx;
+    const ink = hero ? '#fff' : '#111113', v = t.read(ctx), movable = arrange && !hero, dragged = live.dragging === x.key;
     return (
-      <div key={t.id} title={t.hint} {...props} style={{flex: hero ? '2 1 0' : '1 1 0', minWidth: hero ? 220 : 150, minHeight:240, borderRadius:22,
+      <div key={x.key} title={t.hint} {...props} style={{flex: hero ? '2 1 0' : '1 1 0', minWidth: hero ? 220 : 150, minHeight:240, borderRadius:22,
         background: hero ? DASH_HERO_BG : '#F2F2F3', border:`1px solid ${hero ? DASH_BLUE : '#E4E4E7'}`, padding: hero ? '20px 24px 22px' : '20px 18px 22px',
         display:'flex', flexDirection:'column', position:'relative', overflow:'hidden', isolation:'isolate',
         cursor: movable ? 'grab' : 'default', opacity: dragged ? .4 : 1,
@@ -439,11 +491,11 @@ function DashKpiRow({ids, ctx, replay, arrange}){
             <Icon name={t.icon} size={11} color={hero ? DASH_BLUE : '#fff'}/>
           </span>
           {/* A label that doesn't fit wraps between words (the cards keep a minimum width; the row wraps instead). */}
-          <span style={{minWidth:0, overflowWrap:'normal', hyphens:'manual', flex:1}}>{t.label}</span>
+          <span style={{minWidth:0, overflowWrap:'normal', hyphens:'manual', flex:1}}>{dashLabel(t, ctx.level)}</span>
           {movable && <Icon name="dragHandle" size={14} color={T.gray400}/>}
         </span>
         {movable && (
-          <button type="button" onClick={()=>arrange.onPin(t.id)}
+          <button type="button" onClick={()=>arrange.onPin(x.key)}
             style={{alignSelf:'flex-start', marginTop:10, border:`1px solid ${T.borderStrong}`, background:'#fff', borderRadius:8, padding:'5px 10px', fontSize:12, fontFamily:'inherit', color:T.attioText, cursor:'pointer'}}>
             Pin as first
           </button>
@@ -464,7 +516,7 @@ function DashKpiRow({ids, ctx, replay, arrange}){
     // In a narrow window the cards wrap to another row rather than squeezing their labels.
     <div ref={live.box} {...(arrange ? live.containerProps : {})} style={{position:'relative', display:'flex', flexWrap:'wrap', alignItems:'stretch', gap:14}}>
       {pinned && card(pinned, true)}
-      {live.order.map(id => byId[id]).filter(Boolean).map(t => card(t, false, {ref:live.register(t.id), ...(arrange ? live.itemProps(t.id) : {})}))}
+      {live.order.map(id => byId[id]).filter(Boolean).map(x => card(x, false, {ref:live.register(x.key), ...(arrange ? live.itemProps(x.key) : {})}))}
     </div>
   );
 }
@@ -746,9 +798,11 @@ function FameTable({tab, rows, order, sort, onSort, onMove, onOpenUser, onOpenDe
    and column order, opening on its ranking), then Business Velocity, Deal Won and Deal Lost — all for
    the selected range. */
 /* Key Indicator User — the sales professionals' own indicators only (the ranking tabs): Revenue,
-   Volume, Compliance, Speed. Business-level figures are widgets of their own. */
+   Volume, Compliance, Speed. Business-level figures are widgets of their own. By level (`data`):
+   the company's sales professionals ranked, or the team's ranked among themselves — a ranking, so
+   not offered at the Personal level (one's own row alone says nothing; 2026-11-17). */
 const KI_TABS = FAME_TABS.map(t => ({id:t.id, label:t.label}));
-function KeyIndicators({data, range, rangeKey, violations, onOpenUser, onOpenDeal, onOpenViolation}){
+function KeyIndicators({data, range, rangeKey, violations, onOpenUser, onOpenDeal, onOpenViolation, title = 'Key Indicator User'}){
   // Revenue (cash) needs View Payment Terms; without it Volume leads.
   const [tabId, setTabId] = React.useState(() => accountingViewAny() ? 'revenue' : 'volume');
   const [query, setQuery] = React.useState('');
@@ -770,7 +824,7 @@ function KeyIndicators({data, range, rangeKey, violations, onOpenUser, onOpenDea
     <section style={{...dashCard, borderRadius:22, display:'flex', flexDirection:'column', minWidth:0}}>
       <div style={{padding:'20px 24px 0', display:'flex', flexDirection:'column', gap:12}}>
         <div style={{display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', minHeight:32}}>
-          <span style={{...dashTitle, fontSize:15, flex:1}}>Key Indicator User</span>
+          <span style={{...dashTitle, fontSize:15, flex:1}}>{title}</span>
           <div style={{position:'relative', width:'min(240px, 100%)'}}>
             <div style={{position:'absolute', left:9, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', display:'flex'}}><Icon name="search" size={13} color={T.gray400}/></div>
             <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search users" aria-label="Search users"
@@ -850,11 +904,11 @@ function DealOutcomeList({deals, type, tone, range, now, onOpen}){
   );
 }
 
-/* Total Tasks: the signed-in person's tasks with a due date, narrowed by a quick filter — Due today
+/* My Tasks: the signed-in person's tasks with a due date, narrowed by a quick filter — Due today
    (the default; any status), Overdue (open and past due) or This week (due Monday to Sunday). Each
    opens the task (the Tasks page's task panel). */
 const DASH_TASK_FILTERS = [{id:'today', label:'Due today'}, {id:'overdue', label:'Overdue'}, {id:'week', label:'This week'}];
-function DueTasksWidget({hub}){
+function DueTasksWidget({hub, title = 'My Tasks'}){
   const [open, setOpen] = React.useState(null);   // {object, recordId, actId}
   const [quick, setQuick] = React.useState('today');
   const me = CURRENT_USER.name;
@@ -866,7 +920,7 @@ function DueTasksWidget({hub}){
   const team = (hub.data.users || []).filter(u => u.status === 'Activated').map(u => u.name);
   const empty = {today:'No tasks due today', overdue:'No overdue tasks', week:'No tasks due this week'}[quick];
   return (
-    <DashWidgetCard title={<span>Total Tasks <span style={{fontSize:12.5, fontWeight:400, color:T.attioMuted, fontVariantNumeric:'tabular-nums', marginLeft:4}}>{tasks.length}</span></span>}>
+    <DashWidgetCard title={<span>{title} <span style={{fontSize:12.5, fontWeight:400, color:T.attioMuted, fontVariantNumeric:'tabular-nums', marginLeft:4}}>{tasks.length}</span></span>}>
       <div role="radiogroup" aria-label="Quick filter" style={{display:'flex', gap:6, flexWrap:'wrap'}}>
         {DASH_TASK_FILTERS.map(f => {
           const on = f.id === quick;
@@ -896,44 +950,90 @@ function DueTasksWidget({hub}){
   );
 }
 
-/* ── Widgets ── a catalogue of widget definitions (DASH_WIDGET_DEFS): {id, label, width (columns
-   it spans: 1, 2 or 3), render(ctx), can?() (who may see it)}. The dashboard shows the
-   configuration's widgets in its order. `ctx`: the page's data, range and handlers. */
+// Time Clock as a Personal widget — the header's own Time Clock (app.jsx), on the same work session.
+function DashTimeClock({hub}){
+  const ws = hub && hub.workSession;
+  return ws ? <section style={{...dashCard, borderRadius:22, overflow:'hidden'}}><TimeClockWidget bare session={ws.session} setSession={ws.setSession}/></section> : null;
+}
+
+/* ── Widgets ── a catalogue of widget definitions (DASH_WIDGET_DEFS): {id, label, labels? (its
+   name at a level — dashLabel), width (columns it spans: 1, 2 or 3), levels? (the levels it's
+   offered at — all three unless given), render(ctx), can?() (who may see it)}. The dashboard
+   shows the configuration's widgets in its order. `ctx`: the page's data, range and handlers,
+   narrowed to the slot's level (`level`, `userId`, `teamId`, `ids` — its users), and `title` — the
+   widget's name there. Key Indicator User is a ranking: a team's (Team Key Indicators) or
+   everyone's; My Tasks and the Time Clock are the person's own. */
 const DASH_WIDGET_DEFS = [
-  {id:'keyIndicatorUser', label:'Key Indicator User', width:2,
-    render:(c) => <KeyIndicators data={c.data} range={c.range} rangeKey={c.rangeKey} violations={c.violations} onOpenUser={c.onOpenUser} onOpenDeal={c.onOpenDeal} onOpenViolation={c.onOpenViolation}/>},
-  {id:'tasks', label:'Total Tasks', width:1, render:(c) => <DueTasksWidget hub={c.hub}/>},
-  {id:'businessVelocity', label:'Business Velocity', width:1,
-    render:(c) => <DashWidgetCard title="Business Velocity"><VelocityList velocity={companyVelocity(c.data, c.range)}/></DashWidgetCard>},
+  {id:'keyIndicatorUser', label:'Key Indicator User', labels:{team:'Team Key Indicators'}, width:2, levels:['team', 'company'],
+    render:(c) => <KeyIndicators title={c.title} data={c.data}
+      range={c.range} rangeKey={c.rangeKey} violations={c.violations} onOpenUser={c.onOpenUser} onOpenDeal={c.onOpenDeal} onOpenViolation={c.onOpenViolation}/>},
+  {id:'tasks', label:'Total Tasks', labels:{personal:'My Tasks'}, width:1, levels:['personal'], render:(c) => <DueTasksWidget hub={c.hub} title={c.title}/>},
+  {id:'businessVelocity', label:'Business Velocity', labels:{personal:'My Velocity'}, width:1,
+    render:(c) => <DashWidgetCard title={c.title}><VelocityList velocity={companyVelocity(c.data, c.range)}/></DashWidgetCard>},
   {id:'dealWon', get label(){ return `${typeSingular('deals', 'Deal')} Won`; }, width:1,
-    render:(c) => <DashWidgetCard title={`${typeSingular('deals', 'Deal')} Won`}><DealOutcomeList deals={c.deals} type="won" tone={T.good} range={c.range} now={new Date(c.data.now)} onOpen={c.onOpenDeal}/></DashWidgetCard>},
+    render:(c) => <DashWidgetCard title={c.title}><DealOutcomeList deals={c.deals} type="won" tone={T.good} range={c.range} now={new Date(c.data.now)} onOpen={c.onOpenDeal}/></DashWidgetCard>},
   {id:'dealLost', get label(){ return `${typeSingular('deals', 'Deal')} Lost`; }, width:1,
-    render:(c) => <DashWidgetCard title={`${typeSingular('deals', 'Deal')} Lost`}><DealOutcomeList deals={c.deals} type="lost" tone={T.red} range={c.range} now={new Date(c.data.now)} onOpen={c.onOpenDeal}/></DashWidgetCard>},
+    render:(c) => <DashWidgetCard title={c.title}><DealOutcomeList deals={c.deals} type="lost" tone={T.red} range={c.range} now={new Date(c.data.now)} onOpen={c.onOpenDeal}/></DashWidgetCard>},
   // Goals (goals.jsx): Cash Received against the targets — needs View Payment Terms, as the cash KPIs.
-  {id:'goals', label:'Goals', width:1, can:() => accountingViewAny(), render:(c) => <GoalsWidget data={c.data} settings={c.settings} rangeId={c.rangeId} onOpenUser={c.onOpenUser}/>},
+  {id:'goals', label:'Goals', labels:{team:'Team Goals', personal:'My Goals'}, width:1, can:() => accountingViewAny(),
+    render:(c) => <GoalsWidget title={c.title} data={c.data} settings={c.settings} rangeId={c.rangeId} onOpenUser={c.onOpenUser} level={c.level} userId={c.userId} teamId={c.teamId}/>},
+  {id:'timeClock', label:'Time Clock', labels:{personal:'Time Clock'}, width:1, levels:['personal'], render:(c) => <DashTimeClock hub={c.hub}/>},
 ];
 const dashWidgetDef = (id) => DASH_WIDGET_DEFS.find(w => w.id === id) || null;
 const dashWidgetVisible = (w) => !!w && (!w.can || w.can());
 const dashColumns = (n) => `${n} column${n === 1 ? '' : 's'}`;
+// Edit Permissions → Dashboard (usersTeams.jsx): the KPIs and widgets offered at a level.
+const dashPermissionRows = (level) => [
+  {title:'KPIs', rows:DASH_KPI_DEFS.filter(k => dashLevelsOf(k).includes(level) && dashKpiHere(k)).map(k => ({id:k.id, label:dashLabel(k, level)}))},
+  {title:'Widgets', rows:DASH_WIDGET_DEFS.filter(w => dashLevelsOf(w).includes(level)).map(w => ({id:w.id, label:dashLabel(w, level)}))}];
 
-/* ── Configuration ── what the dashboard shows and in what order: {prominent, kpis (the others, in
-   order), widgets:[{id, hidden}] (in order)}. One workspace dashboard for now, set by the Super
-   Admin (hub.overviewSettings.dashboard) and seen by everyone; kept by id, so a role's or a
-   person's dashboard can be one more configuration later. Unknown ids are dropped; widgets added
-   to the catalogue later join at the end, shown. */
-const DASH_DEFAULT_CONFIG = {prominent:'invoiced', kpis:['received', 'forecast', 'closed:deals', 'winRate:deals'],
-  widgets:['keyIndicatorUser', 'tasks', 'businessVelocity', 'dealWon', 'dealLost'].map(id => ({id, hidden:false}))};
-function normalizeDashConfig(raw){
-  const c = raw || DASH_DEFAULT_CONFIG;
-  const prominent = dashKpiDef(c.prominent) ? c.prominent : DASH_DEFAULT_CONFIG.prominent;
-  const kpis = [...new Set((c.kpis || []).filter(id => dashKpiDef(id) && id !== prominent))].slice(0, DASH_KPI_MAX_OTHERS);
-  const saved = (c.widgets || []).filter(w => dashWidgetDef(w.id));
-  const widgets = [...saved.map(w => ({id:w.id, hidden:!!w.hidden})), ...DASH_WIDGET_DEFS.filter(d => !saved.some(w => w.id === d.id)).map(d => ({id:d.id, hidden:false}))];
-  return {prominent, kpis, widgets};
+/* ── Configuration ── what a dashboard shows and in what order: {prominent, kpis (the others, in
+   order), widgets:[{id, hidden}] (in order)} — each entry a slot ("<level>/<id>"). Each person
+   has their own (2026-11-17: hub.overviewSettings.userDashboards[<user ID>]), set in their View
+   Settings from what their permissions give them (`offer`). None of their own yet: the one saved
+   for their Permission Preset or (a Super Admin) the workspace's, from before everyone had their
+   own; else the default for what they may have (dashDefaultConfig) — the widest level they have
+   widgets at leads, with its KPIs and widgets; their own My Tasks and Time Clock with it; a Team
+   dashboard keeps the person's own My Goals too; everything else is there to switch on. Unknown
+   slots are dropped; ones offered later join at the end, hidden. */
+const DASH_KPI_DEFAULTS = ['invoiced', 'received', 'forecast', 'closed:deals', 'winRate:deals'];
+const DASH_WIDGET_ORDER = {
+  company:['keyIndicatorUser', 'tasks', 'businessVelocity', 'dealWon', 'dealLost', 'goals', 'timeClock'],
+  team:['goals', 'keyIndicatorUser', 'businessVelocity', 'dealWon', 'dealLost', 'tasks', 'timeClock'],
+  personal:['timeClock', 'goals', 'tasks', 'keyIndicatorUser', 'businessVelocity', 'dealWon', 'dealLost'],
+};
+const DASH_OWN_WIDGETS = ['tasks', 'timeClock'];   // the person's own, whichever level leads
+// Every slot on offer — {kpis, widgets}, widest level first: what `can` gives (the person's own permissions, or a preset's) of what shows here.
+function dashOffer(can = dashboardCan){
+  return {kpis:DASH_LEVELS_WIDE.flatMap(l => DASH_KPI_DEFS.filter(k => dashKpiVisible(k) && dashAllowed(k, l, can)).map(k => dashSlot(l, k.id))),
+    widgets:DASH_LEVELS_WIDE.flatMap(l => DASH_WIDGET_DEFS.filter(w => dashWidgetVisible(w) && dashAllowed(w, l, can)).map(w => dashSlot(l, w.id)))};
 }
-const dashConfigOf = (hub) => normalizeDashConfig((((hub && hub.overviewSettings) || {}).dashboard) || null);
-// Dashboard View Settings and Rearrange: the Super Admin's (with no signed-in user, the prototype's).
-const dashCanConfigure = () => { const u = accessUser(); return !u || u.preset === SUPER_ADMIN; };
+const dashOfferLevels = (list) => DASH_LEVELS_WIDE.filter(l => list.some(sl => dashSlotOf(sl).level === l));
+function dashDefaultConfig(offer){
+  const lead = dashOfferLevels(offer.widgets)[0] || dashOfferLevels(offer.kpis)[0] || 'personal';
+  const first = DASH_KPI_DEFAULTS.map(id => dashSlot(lead, id)).filter(sl => offer.kpis.includes(sl)), kpis = first.length ? first : offer.kpis.slice(0, DASH_KPI_MAX_OTHERS + 1);
+  const shown = [];
+  DASH_WIDGET_ORDER[lead].forEach(id => { const at = dashSlot(lead, id), own = dashSlot('personal', id);
+    if(offer.widgets.includes(at)) shown.push(at); else if(DASH_OWN_WIDGETS.includes(id) && offer.widgets.includes(own)) shown.push(own); });
+  if(lead === 'team') ['tasks', 'goals'].map(id => dashSlot('personal', id)).forEach(sl => { if(offer.widgets.includes(sl) && !shown.includes(sl)) shown.push(sl); });
+  return {prominent:kpis[0] || null, kpis:kpis.slice(1, 1 + DASH_KPI_MAX_OTHERS),
+    widgets:[...shown.map(id => ({id, hidden:false})), ...offer.widgets.filter(sl => !shown.includes(sl)).map(id => ({id, hidden:true}))]};
+}
+function normalizeDashConfig(raw, offer = dashOffer()){
+  if(!raw) return dashDefaultConfig(offer);
+  // Saved before levels: what joined shown then (Goals) still does, and it gains the Time Clock.
+  const legacy = ![raw.prominent, ...(raw.kpis || []), ...(raw.widgets || []).map(w => w.id)].some(x => String(x || '').includes('/'));
+  const pinned = raw.prominent ? dashSlotKey(raw.prominent) : null, prominent = offer.kpis.includes(pinned) ? pinned : dashDefaultConfig(offer).prominent;
+  const kpis = [...new Set((raw.kpis || []).map(dashSlotKey))].filter(sl => offer.kpis.includes(sl) && sl !== prominent).slice(0, DASH_KPI_MAX_OTHERS);
+  const saved = (raw.widgets || []).map(w => ({id:dashSlotKey(w.id), hidden:!!w.hidden})).filter((w, i, all) => offer.widgets.includes(w.id) && all.findIndex(x => x.id === w.id) === i);
+  const joins = legacy ? [dashSlot('company', 'goals'), dashSlot('personal', 'timeClock')] : [];
+  return {prominent, kpis, widgets:[...saved, ...offer.widgets.filter(sl => !saved.some(w => w.id === sl)).map(id => ({id, hidden:!joins.includes(id)}))]};
+}
+// The person's saved layout — else the one saved for their preset or (a Super Admin) the workspace's, from before everyone had their own — or none.
+const dashUserKey = (user) => (user && user.id) || 'default';
+const dashSavedFor = (hub, user) => { const o = (hub && hub.overviewSettings) || {}, preset = (user && user.preset) || SUPER_ADMIN;
+  return (o.userDashboards || {})[dashUserKey(user)] || (o.dashboards || {})[preset] || (preset === SUPER_ADMIN ? o.dashboard : null) || null; };
+
 
 /* The widget grid: three columns at every width (navigation open or collapsed, ~1,000–1,500px),
    each widget spanning its definition's width. Placement is CSS grid's dense flow on fine rows
@@ -994,10 +1094,10 @@ function DashWidgetGrid({items, ctx, arrange}){
   );
 }
 
-/* All KPIs — a side panel listing every KPI in the catalogue the viewer may see (cash KPIs need View
-   Payment Terms), grouped as in the catalogue: the KPI on the left, its value on the right. Its own
-   date filter (starting from the dashboard's) sets the period. Read-only; for everyone. Opened by
-   its own button, beside View Settings. */
+/* All KPIs — a side panel listing every KPI the viewer may have (`offer`; cash KPIs need View
+   Payment Terms), grouped as in the catalogue: the KPI on the left, its value on the right — one
+   level at a time where they have more than one (tabs). Its own date filter (starting from the
+   dashboard's) sets the period. Read-only; for everyone. Opened by its own button, beside View Settings. */
 const fmtKpiValue = (k, v) => v == null ? '—' : k.kind === 'money' ? `${defaultCurrency()} ${formatAmount(Math.round(v))}`
   : k.kind === 'percent' ? `${v}%` : k.kind === 'hours' ? fmtHours(v) : formatAmount(v);
 function AllKpisButton({onClick}){
@@ -1007,13 +1107,19 @@ function AllKpisButton({onClick}){
     </button>
   );
 }
-function AllKpisPanel({ctx, filter: initial, onClose}){
+function AllKpisPanel({ctxOf, offer, level: start, filter: initial, onClose}){
   const [filter, setFilter] = React.useState(initial);
+  const levels = dashOfferLevels(offer.kpis);
+  const [picked, setPicked] = React.useState(start);
+  const level = levels.includes(picked) ? picked : levels[0], ctx = ctxOf(level);
   const at = {...ctx, range:dashRangeOf(filter, new Date(ctx.data.now))};
   const cell = {padding:'10px 20px', fontSize:13, borderTop:`1px solid ${T.attioLine}`};
   return (
     <PageSidePanel width={DETAIL_SIDE_W} title="All KPIs" onClose={onClose}>
       <div style={{flexShrink:0, padding:'12px 20px'}}><DateFilter value={filter} onChange={setFilter}/></div>
+      {levels.length > 1 && <div style={{flexShrink:0, display:'flex', gap:8, padding:'0 20px', borderBottom:`1px solid ${T.borderStrong}`}}>
+        {levels.map(l => <UtTab key={l} label={dashLevelLabel(l)} active={l === level} onClick={()=>setPicked(l)}/>)}
+      </div>}
       <div style={{flex:1, minHeight:0, overflowY:'auto', paddingBottom:16}}>
         <table style={{width:'100%', borderCollapse:'collapse'}}>
           <thead>
@@ -1023,14 +1129,14 @@ function AllKpisPanel({ctx, filter: initial, onClose}){
             </tr>
           </thead>
           {DASH_KPI_GROUPS.map(g => {
-            const list = DASH_KPI_DEFS.filter(k => k.group === g && dashKpiVisible(k));
+            const list = DASH_KPI_DEFS.filter(k => k.group === g && offer.kpis.includes(dashSlot(level, k.id)));
             if(!list.length) return null;
             return (
               <tbody key={g}>
                 <tr><td colSpan={2} style={{...settingsSectionLabel, padding:'16px 20px 6px'}}>{g}</td></tr>
                 {list.map(k => (
                   <tr key={k.id} title={k.hint}>
-                    <td style={{...cell, color:T.attioText}}>{k.label}</td>
+                    <td style={{...cell, color:T.attioText}}>{dashLabel(k, level)}</td>
                     <td style={{...cell, color:T.attioText, fontWeight:500, textAlign:'right', whiteSpace:'nowrap', fontVariantNumeric:'tabular-nums'}}>{fmtKpiValue(k, k.read(at))}</td>
                   </tr>
                 ))}
@@ -1043,17 +1149,21 @@ function AllKpisPanel({ctx, filter: initial, onClose}){
   );
 }
 
-/* Dashboard View Settings (SettingsModalShell): KPIs — pick the KPI pinned first and up to four more,
-   from the catalogue by group; Widgets — show or hide each (its width shown). Rearrange (both
+/* Dashboard View Settings (SettingsModalShell) — the person's own dashboard: KPIs — pick the KPI
+   pinned first and up to four more, from the catalogue by group, one level at a time (the levels
+   they have: tabs); Widgets — show or hide each (its width shown), each by its name at its level.
+   Only what their permissions give is offered (`offer`). Rearrange (both
    sections' toolbar) applies the choices and turns the dashboard into its rearranging state. */
-function DashViewSettingsModal({config, onApply, onRearrange, onClose}){
+function DashViewSettingsModal({config, offer, onApply, onRearrange, onClose}){
   const [section, setSection] = React.useState('kpis');
   const [draft, setDraft] = React.useState(config);
+  const kpiLevels = dashOfferLevels(offer.kpis);
+  const [level, setLevel] = React.useState(() => (draft.prominent && dashSlotOf(draft.prominent).level) || kpiLevels[0]);
   const others = draft.kpis;
   const toggleKpi = (id) => setDraft(d => id === d.prominent ? d
     : d.kpis.includes(id) ? {...d, kpis:d.kpis.filter(x => x !== id)} : d.kpis.length >= DASH_KPI_MAX_OTHERS ? d : {...d, kpis:[...d.kpis, id]});
   // The KPI pinned first is one of the selection; the one it replaces joins the others, if there's room.
-  const makeProminent = (id) => setDraft(d => id === d.prominent ? d : ({...d, prominent:id, kpis:[d.prominent, ...d.kpis.filter(x => x !== id)].slice(0, DASH_KPI_MAX_OTHERS)}));
+  const makeProminent = (id) => setDraft(d => id === d.prominent ? d : ({...d, prominent:id, kpis:[d.prominent, ...d.kpis.filter(x => x !== id)].filter(Boolean).slice(0, DASH_KPI_MAX_OTHERS)}));
   const toggleWidget = (id) => setDraft(d => ({...d, widgets:d.widgets.map(w => w.id === id ? {...w, hidden:!w.hidden} : w)}));
   const radio = (on, onPick, label) => (
     <label style={{display:'flex', alignItems:'center', gap:6, fontSize:12.5, color: on ? T.attioText : T.attioMuted, cursor:'pointer', flexShrink:0}}>
@@ -1062,26 +1172,31 @@ function DashViewSettingsModal({config, onApply, onRearrange, onClose}){
   );
   const toolbar = (
     <div style={{padding:'0 20px 10px', display:'flex', alignItems:'center', gap:10}}>
-      <span style={{flex:1, fontSize:12.5, color:T.attioMuted}}>{section === 'kpis' ? `${others.length} of ${DASH_KPI_MAX_OTHERS} selected` : ''}</span>
+      {section === 'kpis' && kpiLevels.length > 1 && <div style={{display:'flex', gap:8}}>{kpiLevels.map(l => <UtTab key={l} label={dashLevelLabel(l)} active={l === level} onClick={()=>setLevel(l)}/>)}</div>}
+      <span style={{flex:1, fontSize:12.5, color:T.attioMuted, textAlign: section === 'kpis' && kpiLevels.length > 1 ? 'right' : 'left'}}>{section === 'kpis' ? `${others.length} of ${DASH_KPI_MAX_OTHERS} selected` : ''}</span>
       <StSecondary label={<span style={{display:'inline-flex', alignItems:'center', gap:6}}><Icon name="dragHandle" size={12} color={T.gray800}/>Rearrange</span>} onClick={()=>onRearrange(draft)}/>
     </div>
   );
+  const pinned = draft.prominent && dashSlotOf(draft.prominent), pinnedDef = pinned && dashKpiDef(pinned.id);
   return (
     <SettingsModalShell title="Dashboard Settings" sections={{kpis:'KPIs', widgets:'Widgets'}} order={[]} onReorder={()=>{}} fixed={['kpis', 'widgets']}
       section={section} onSection={setSection} onClose={onClose} onApply={()=>onApply(draft)} toolbar={toolbar}
-      footerNote={`Pinned first: ${(dashKpiDef(draft.prominent) || {}).label || '—'}`}>
-      {section === 'kpis' ? DASH_KPI_GROUPS.map(g => (
-        <div key={g} style={{display:'flex', flexDirection:'column', gap:2, marginTop:6}}>
-          <div style={{...settingsSectionLabel, padding:'8px 6px 4px'}}>{g}</div>
-          {DASH_KPI_DEFS.filter(k => k.group === g && (!k.object || !Object.keys(OBJECT_NAMES).length || k.object in OBJECT_NAMES)).map(k => {
-            const prom = k.id === draft.prominent, on = prom || others.includes(k.id);
-            return <SettingsCheckRow key={k.id} label={k.label} checked={on} onToggle={()=>toggleKpi(k.id)}
-              right={radio(prom, ()=>makeProminent(k.id), `Pin ${k.label} as first`)}/>;
-          })}
-        </div>
-      )) : draft.widgets.map(w => {
-        const d = dashWidgetDef(w.id);
-        return <SettingsCheckRow key={w.id} label={d.label} checked={!w.hidden} onToggle={()=>toggleWidget(w.id)}
+      footerNote={`Pinned first: ${pinnedDef ? dashLabel(pinnedDef, pinned.level) : '—'}`}>
+      {section === 'kpis' ? DASH_KPI_GROUPS.map(g => {
+        const list = DASH_KPI_DEFS.filter(k => k.group === g && offer.kpis.includes(dashSlot(level, k.id)));
+        return !!list.length && (
+          <div key={g} style={{display:'flex', flexDirection:'column', gap:2, marginTop:6}}>
+            <div style={{...settingsSectionLabel, padding:'8px 6px 4px'}}>{g}</div>
+            {list.map(k => {
+              const id = dashSlot(level, k.id), prom = id === draft.prominent, on = prom || others.includes(id);
+              return <SettingsCheckRow key={id} label={dashLabel(k, level)} checked={on} onToggle={()=>toggleKpi(id)}
+                right={radio(prom, ()=>makeProminent(id), `Pin ${dashLabel(k, level)} as first`)}/>;
+            })}
+          </div>
+        );
+      }) : draft.widgets.map(w => {
+        const sl = dashSlotOf(w.id), d = dashWidgetDef(sl.id);
+        return <SettingsCheckRow key={w.id} label={dashLabel(d, sl.level)} checked={!w.hidden} onToggle={()=>toggleWidget(w.id)}
           right={<span style={{fontSize:12, color:T.attioMuted, flexShrink:0}}>{dashColumns(d.width)}</span>}/>;
       })}
     </SettingsModalShell>
@@ -1091,14 +1206,18 @@ function DashViewSettingsModal({config, onApply, onRearrange, onClose}){
 /* The page, on the Workflow canvas's dot grid: the greeting (View Settings and the KPIs / Graph
    switcher top right), the date filter, the KPI cards or the Graph, then Key Indicators beside
    Today's Tasks; generous side margins. */
+// The controls row's dropdown (the team), as its buttons.
+const dashSelect = {height:32, border:`1px solid ${T.borderStrong}`, borderRadius:8, padding:'0 12px', background:'#fff', fontSize:13, fontFamily:'inherit'};
 const dashGreeting = (d = new Date()) => { const h = zonedParts(d).h; return h < 12 ? 'Good Morning' : h < 17 ? 'Good Afternoon' : 'Good Evening'; };
 // The dashboard's records from the record hub (the dashboard, and a user's profile panel).
-function useDashBusinessData(hub){
+function useDashBusinessData(hub, everyPlan){
   const deals = (hub && hub.records && hub.records.deals) || [];
   const records = (hub && hub.records) || {};
-  // Only the payment plans the signed-in user may view (Payment Plans → View) count, and their invoices.
+  /* Only the payment plans the signed-in user may view (Payment Plans → View) count, and their
+     invoices. `everyPlan` (the dashboard): every plan — there a figure is given by its level's
+     permission (a Company figure is the company's, whatever the person may open record by record). */
   return React.useMemo(() => { const byId = Object.fromEntries(['contacts', 'deals', 'customers'].map(o => [o, new Map((records[o] || []).map(r => [String(r.id), r]))]));
-    const accounting = ((hub && hub.accounting) || []).filter(s => { const r = (byId[s.object] || new Map()).get(String(s.recordId)); return !r || paymentTermsCan('view', s.object, r); });
+    const accounting = ((hub && hub.accounting) || []).filter(s => { const r = (byId[s.object] || new Map()).get(String(s.recordId)); return everyPlan || !r || paymentTermsCan('view', s.object, r); });
     return dashBusinessData({deals, customers:records.customers || [], contacts:records.contacts || [], accounting, invoices:(hub && hub.invoices) || [],
     activities:(hub && hub.activities) || {}, users:(hub && hub.data.users) || []}); }, [deals, records.customers, records.contacts, hub && hub.accounting, hub && hub.invoices, hub && hub.activities]);
 }
@@ -1234,7 +1353,7 @@ function DashboardPage(){
   const [user, setUser] = React.useState(null);     // the sales professional whose profile is open
   const hub = useRecordHub();
   const deals = (hub && hub.records && hub.records.deals) || [];
-  const data = useDashBusinessData(hub);
+  const data = useDashBusinessData(hub, true);
   const openDeal = (d) => hub && hub.openRecord('deals', d.id, 'panel');
   // The CRM's open workflow violations, each with its record's owner (Compliance).
   const wf = useWorkflowEngineCtx();
@@ -1245,13 +1364,30 @@ function DashboardPage(){
   const openViolation = (v) => hub && hub.openViolation(v.object, v.id);
   const range = dashRangeOf(filter, new Date(data.now));
   const firstName = String(CURRENT_USER.name || '').split(/\s+/)[0];
+  // The person's own dashboard, of what their permissions give them.
+  const me = accessUser(), users = (hub && hub.data.users) || [], teams = (hub && hub.data.teams) || [];
+  const offer = dashOffer();
   // The dashboard's configuration (KPIs and widgets) — while rearranging, the draft being arranged.
-  const saved = dashConfigOf(hub), config = arranging || saved;
-  const saveConfig = (c) => hub && hub.setOverviewSettings(s => ({...(s || {}), dashboard:c}));
-  const kpiIds = [config.prominent, ...config.kpis];
-  const kpiCtx = {data, range, records:(hub && hub.records) || {}, settings:(hub && hub.data) || {}};
-  const shownWidgets = config.widgets.filter(w => !w.hidden).map(w => dashWidgetDef(w.id)).filter(dashWidgetVisible);
-  const widgetCtx = {hub, data, range, rangeKey:range.join('-'), rangeId:filter.id, deals, violations, settings:(hub && hub.data) || {}, onOpenUser:setUser, onOpenDeal:openDeal, onOpenViolation:openViolation};
+  const saved = normalizeDashConfig(dashSavedFor(hub, me), offer), config = arranging || saved;
+  const saveConfig = (c) => hub && hub.setOverviewSettings(st => ({...(st || {}), userDashboards:{...((st || {}).userDashboards || {}), [dashUserKey(me)]:c}}));
+  const slots = [config.prominent, ...config.kpis, ...config.widgets.filter(w => !w.hidden).map(w => w.id)].filter(Boolean).map(dashSlotOf);
+  /* The Team level reads the person's own team — or, for someone who may have the same figures
+     for the whole company (every Team slot shown is theirs at the Company level too), the team they pick. */
+  const teamSlots = slots.filter(sl => sl.level === 'team' && dashLevelsOf(dashKpiDef(sl.id) || dashWidgetDef(sl.id)).includes('company'));
+  const pickTeam = !!me && teams.length > 1 && teamSlots.length > 0 && teamSlots.every(sl => dashboardCan('company', sl.id));
+  const [teamPick, setTeamPick] = React.useState(null);
+  const teamId = pickTeam ? (teams.some(t => t.id === teamPick) ? teamPick : (me.teamId || teams[0].id)) : null;
+  const records = (hub && hub.records) || {};
+  const scopes = React.useMemo(() => Object.fromEntries(DASH_LEVEL_IDS.map(l => [l, dashLevelScope({data, records, deals, users}, l, teamId)])),
+    [data, records.contacts, records.deals, records.customers, users, teamId, me && me.id, me && me.teamId]);
+  const pageCtx = {hub, data, range, rangeKey:range.join('-'), rangeId:filter.id, records, deals, violations, users, settings:(hub && hub.data) || {}, onOpenUser:setUser, onOpenDeal:openDeal, onOpenViolation:openViolation};
+  const ctxOf = (level) => ({...pageCtx, ...scopes[level]});
+  const lead = config.prominent ? dashSlotOf(config.prominent).level : dashOfferLevels(offer.widgets)[0] || 'personal';
+  const kpiItems = [config.prominent, ...config.kpis].filter(Boolean).map(key => { const sl = dashSlotOf(key), def = dashKpiDef(sl.id);
+    return dashKpiVisible(def) ? {key, def, ctx:ctxOf(sl.level)} : null; }).filter(Boolean);
+  const shownWidgets = config.widgets.filter(w => !w.hidden).map(w => { const sl = dashSlotOf(w.id), def = dashWidgetDef(sl.id);
+    const title = def && dashLabel(def, sl.level);
+    return dashWidgetVisible(def) ? {id:w.id, width:def.width, label:title, render:() => def.render({...ctxOf(sl.level), title})} : null; }).filter(Boolean);
   // Rearranging: the four KPIs after the pinned one, and the shown widgets, move by drag; any of
   // the four can be pinned as first (the pinned one takes its place).
   const arrangeKpis = arranging && {
@@ -1278,12 +1414,13 @@ function DashboardPage(){
           {/* The date filter on the left; View Settings and the KPIs / Graph switcher on the right of the same row. */}
           <div style={{display:'flex', alignItems:'center', gap:10, flexWrap:'wrap'}}>
             <DateFilter value={filter} onChange={setFilter}/>
+            {pickTeam && !arranging && <div style={{width:180}}><Dropdown required value={teamId} ariaLabel="Team" options={teams.map(t => ({value:t.id, label:t.name}))} onChange={setTeamPick} controlStyle={dashSelect}/></div>}
             <div style={{flex:1}}/>
-            {/* Dashboard View Settings — the Super Admin's: KPIs, widgets and Rearrange. */}
+            {/* Dashboard View Settings — everyone's own: KPIs, widgets and Rearrange. */}
             {/* All KPIs — every KPI and its value, for everyone. */}
-            {!arranging && <AllKpisButton onClick={()=>setAllKpisOpen(true)}/>}
-            {dashCanConfigure() && !arranging && <ViewSettingsButton onClick={()=>setSettingsOpen(true)}/>}
-            {accountingViewAny() && !arranging && <DashViewSwitch value={view} onChange={setView}/>}
+            {!arranging && !!offer.kpis.length && <AllKpisButton onClick={()=>setAllKpisOpen(true)}/>}
+            {!arranging && <ViewSettingsButton onClick={()=>setSettingsOpen(true)}/>}
+            {accountingViewAny() && !arranging && !!kpiItems.length && <DashViewSwitch value={view} onChange={setView}/>}
           </div>
           {/* Rearranging: a bar to finish (Done saves; Cancel leaves it as it was). */}
           {arranging && (
@@ -1291,24 +1428,25 @@ function DashboardPage(){
               <Icon name="dragHandle" size={14} color={T.gray600}/>
               <span style={{flex:1, fontSize:13, color:T.attioText}}>Rearranging</span>
               <StSecondary label="Cancel" onClick={()=>setArranging(null)}/>
-              <StCta label="Done" onClick={()=>{ saveConfig(normalizeDashConfig(arranging)); setArranging(null); }}/>
+              <StCta label="Done" onClick={()=>{ saveConfig(normalizeDashConfig(arranging, offer)); setArranging(null); }}/>
             </div>
           )}
-          {view === 'graph' && accountingViewAny() && !arranging ? <TrendChart data={data} range={range}/>
-            : <DashKpiRow ids={kpiIds} ctx={kpiCtx} replay={range.join('-')} arrange={arrangeKpis}/>}
+          {/* The Graph reads the level of the KPI pinned first. */}
+          {view === 'graph' && accountingViewAny() && !arranging && kpiItems.length ? <TrendChart data={ctxOf(lead).data} range={range}/>
+            : <DashKpiRow items={kpiItems} replay={`${range.join('-')}|${teamId || ''}`} arrange={arrangeKpis}/>}
         </div>
         </div>
         {/* The widgets, in the three-column grid. */}
-        <DashWidgetGrid items={shownWidgets} ctx={widgetCtx} arrange={arrangeWidgets}/>
+        <DashWidgetGrid items={shownWidgets} ctx={pageCtx} arrange={arrangeWidgets}/>
       </div>
-      {allKpisOpen && <AllKpisPanel ctx={kpiCtx} filter={filter} onClose={()=>setAllKpisOpen(false)}/>}
-      {settingsOpen && <DashViewSettingsModal config={saved} onClose={()=>setSettingsOpen(false)}
-        onApply={(c)=>{ saveConfig(normalizeDashConfig(c)); setSettingsOpen(false); }}
-        onRearrange={(c)=>{ setSettingsOpen(false); setView('kpis'); setArranging(normalizeDashConfig(c)); }}/>}
+      {allKpisOpen && <AllKpisPanel ctxOf={ctxOf} offer={offer} level={lead} filter={filter} onClose={()=>setAllKpisOpen(false)}/>}
+      {settingsOpen && <DashViewSettingsModal config={saved} offer={offer} onClose={()=>setSettingsOpen(false)}
+        onApply={(c)=>{ saveConfig(normalizeDashConfig(c, offer)); setSettingsOpen(false); }}
+        onRearrange={(c)=>{ setSettingsOpen(false); setView('kpis'); setArranging(normalizeDashConfig(c, offer)); }}/>}
       {user && <OwnerProfilePanel key={user} name={user} fixed onClose={()=>setUser(null)}/>}
       {stub && <StubPanel title={stub} onClose={()=>setStub(null)}/>}
     </div>
   );
 }
 
-Object.assign(window, {DashboardPage, dashBusinessData, dashPeriodRange, USER_STATS, userStat, userStatsAllTime, userStatPerson, useDashBusinessData, UserStatistics, UserStatTrend, DASH_FILTERS});
+Object.assign(window, {dashPermissionRows, DashboardPage, dashBusinessData, dashPeriodRange, USER_STATS, userStat, userStatsAllTime, userStatPerson, useDashBusinessData, UserStatistics, UserStatTrend, DASH_FILTERS});

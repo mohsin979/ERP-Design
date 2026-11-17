@@ -128,7 +128,9 @@ function PlaybooksTab({data, setData, say}){
   const schema = {
     properties:cols, noun:'playbook', searchKeys:['name', 'sections'], canCreateProperty:false, boards:false, bulkActions:pbBulk.bulkActions,
     filterProps:[{key:'name', label:'Name', type:'text'}], selectValues:{},
-    renderCell:(key, r) => key === 'name' ? <ContactName name={r.name} onOpen={()=>setOpenId(r.id)} style={{fontSize:'inherit', fontWeight:500}}/> : undefined,
+    // Its name opens the editor straight away — the sections, and the playbook as it reads (a person who can't edit it sees its details).
+    renderCell:(key, r) => key === 'name' ? <ContactName name={r.name} style={{fontSize:'inherit', fontWeight:500}}
+      onOpen={()=>{ const p = list.find(x => x.id === r.id); if(can('edit', p)){ setOpenId(null); setEditing({playbook:p}); } else setOpenId(r.id); }}/> : undefined,
     renderActions:(r) => <RowActionsMenu title="Playbook Actions" width={MENU_W} items={actions(list.find(p => p.id === r.id))}/>,
   };
   const save = (vals) => {

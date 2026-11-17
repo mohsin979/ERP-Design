@@ -218,19 +218,32 @@ const templateContentOf = (t) => t.format
   ? {format:t.format, body:withoutKeptSignature(t.body), attachments:t.attachments || [], html:t.html || '', fileName:t.fileName || '', includeSignature:t.includeSignature !== false}
   : {format:'custom', body:'', attachments:[], html:t.html || richHtmlOf(t.body || ''), fileName:'', includeSignature:t.includeSignature !== false};
 
-// Attachments as chips (a file opens / downloads); `onRemove` adds ×.
+/* A file opened where an email is edited (the email template editor, a sequence's Edit Email —
+   2026-11-17): the built-in viewer (files.jsx FileViewer) in the Preview pane, in place of the
+   email's subject and body until it's closed, the panel a little wider for it. `useFileView()` → {file, open(a) — again
+   closes it —, close, extra: the width the panel gains}; EmailSplit takes it as `fileView`, and
+   the attachment chips inside it open and show the chosen file. */
+const FILE_VIEW_W = 240;
+const FileViewCtx = React.createContext(null);
+function useFileView(){
+  const [file, setFile] = React.useState(null);
+  return {file, open:(a) => setFile(f => f && f.id === a.id ? null : a), close:() => setFile(null), extra: file ? FILE_VIEW_W : 0};
+}
+// Attachments as chips; `onRemove` adds ×. Where a file can be viewed (FileViewCtx) a chip opens it and shows as chosen; elsewhere its name downloads it.
 function EmailAttachmentList({list, onRemove}){
+  const fv = React.useContext(FileViewCtx);
   if(!(list || []).length) return null;
   return (
     <div style={{display:'flex', flexWrap:'wrap', gap:6}}>
-      {list.map(a => (
-        <span key={a.id} style={{display:'inline-flex', alignItems:'center', gap:8, maxWidth:'100%', padding:'4px 6px 4px 4px', border:`1px solid ${T.border}`, borderRadius:8, background:'#fff'}}>
+      {list.map(a => { const on = !!(fv && fv.file && fv.file.id === a.id); return (
+        <span key={a.id} onClick={fv ? ()=>fv.open(a) : undefined} aria-pressed={fv ? on : undefined}
+          style={{display:'inline-flex', alignItems:'center', gap:8, maxWidth:'100%', padding:'4px 6px 4px 4px', border:`1px solid ${on ? T.black : T.border}`, borderRadius:8, background: on ? '#F4F5F7' : '#fff', cursor: fv ? 'pointer' : 'default'}}>
           <FileTile a={a} size={26}/>
-          <span onClick={()=>downloadFile(a)} title={a.name} style={{minWidth:0, fontSize:12.5, color:T.attioText, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', cursor: a.dataUrl ? 'pointer' : 'default'}}>{a.name}</span>
+          <span onClick={fv ? undefined : ()=>downloadFile(a)} title={a.name} style={{minWidth:0, fontSize:12.5, color:T.attioText, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', cursor: fv || a.dataUrl ? 'pointer' : 'default'}}>{a.name}</span>
           <span style={{fontSize:11.5, color:T.attioMuted, flexShrink:0}}>{fmtBytes(a.size)}</span>
-          {onRemove && <button type="button" title="Remove" onClick={()=>onRemove(a.id)} style={{border:'none', background:'transparent', cursor:'pointer', display:'flex', padding:2}}><Icon name="close" size={11} color={T.gray600}/></button>}
+          {onRemove && <button type="button" title="Remove" onClick={(e)=>{ e.stopPropagation(); if(on) fv.close(); onRemove(a.id); }} style={{border:'none', background:'transparent', cursor:'pointer', display:'flex', padding:2}}><Icon name="close" size={11} color={T.gray600}/></button>}
         </span>
-      ))}
+      ); })}
     </div>
   );
 }
@@ -318,17 +331,35 @@ function EmailPreview({content, subject}){
   </>;
 }
 /* An email's creation panel body: the fields on the left, the preview on the right (Brand's
-   Email Signature split). */
+   Email Signature split). `fileView` (useFileView, above): a file opened from its attachments
+   shows in the Preview pane in the email's place — its name, Download, Close, then the file. */
 const EMAIL_PANEL_W = 1080;
-function EmailSplit({form, preview}){
+function EmailSplit({form, preview, fileView}){
+  const file = fileView && fileView.file;
+  const iconBtn = (icon, title, onClick) => <button type="button" title={title} aria-label={title} onClick={onClick}
+    style={{width:28, height:28, borderRadius:8, border:'none', background:'transparent', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0}}><Icon name={icon} size={14} color={T.gray600}/></button>;
   return (
+    <FileViewCtx.Provider value={fileView || null}>
     <div style={{flex:1, minWidth:0, display:'flex'}}>
       <div style={{flex:'0 0 580px', maxWidth:'58%', minWidth:0, overflowY:'auto', padding:20}}>{stack(form)}</div>
       <div style={{flex:1, minWidth:0, overflowY:'auto', borderLeft:`1px solid ${T.border}`, background:T.headerBg, padding:20, display:'flex', flexDirection:'column', gap:12}}>
         <span style={{fontSize:11, fontWeight:600, color:T.attioFaint, textTransform:'uppercase', letterSpacing:.4}}>Preview</span>
-        {preview}
+        {/* An opened file takes the email's place in the pane (its subject and body); Close brings the email back. */}
+        {file ? (
+          <div style={{display:'flex', flexDirection:'column', gap:10, flexShrink:0}}>
+            <div style={{display:'flex', alignItems:'center', gap:8}}>
+              <FileTile a={file} size={26}/>
+              <span title={file.name} style={{flex:1, minWidth:0, fontSize:13, fontWeight:500, color:T.attioText, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{file.name}</span>
+              <span style={{fontSize:12, color:T.attioMuted, flexShrink:0}}>{fmtBytes(file.size)}</span>
+              {file.dataUrl && iconBtn('export', 'Download File', ()=>downloadFile(file))}
+              {iconBtn('close', 'Close File', fileView.close)}
+            </div>
+            <FileViewer key={file.id} a={file}/>
+          </div>
+        ) : <div style={{display:'flex', flexDirection:'column', gap:12, flexShrink:0}}>{preview}</div>}
       </div>
     </div>
+    </FileViewCtx.Provider>
   );
 }
 
@@ -539,5 +570,5 @@ function EmailThreadView({thread, open: openId, contact}){
   );
 }
 
-Object.assign(window, {fillEmailTokens, emailTokenHtml, withSenderSignature, FetchPropertyModal, EmailComposer, emailListValid, emailCopiesOf, EmailListInput, fillFirstName, EMAIL_FORMATS, emailFormatLabel, emailSignatureOf, signatureEmailHtml, emailHtmlOf, emailTextOf, newEmailContent,
+Object.assign(window, {useFileView, fillEmailTokens, emailTokenHtml, withSenderSignature, FetchPropertyModal, EmailComposer, emailListValid, emailCopiesOf, EmailListInput, fillFirstName, EMAIL_FORMATS, emailFormatLabel, emailSignatureOf, signatureEmailHtml, emailHtmlOf, emailTextOf, newEmailContent,
   switchEmailFormat, emailContentReady, emailContentToSave, templateContentOf, EmailAttachmentList, EmailContentFields, EmailPreview, EmailSplit, EMAIL_PANEL_W, emailFirstName, emailSubjectKey, emailThreadsOf, emailThreadOf, threadedEmailRows, EmailHtmlFrame, EmailBody, EmailThreadView});

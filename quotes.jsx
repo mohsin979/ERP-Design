@@ -2,23 +2,29 @@
 
    A quotation is a workspace record of its own (App: `quotes`), linked to the record it's for.
    Building one is six steps (QuoteBuilder):
-     1. Basics — the record (when not started from one), the recipient's name and email, the
-        quote's title, a description (rich text) and how long it's valid;
-     2. Services — the quote's currency (the default one to start with; another restates every
-        price at Settings' exchange rates), a saved quote template, or services added one by one from the catalog
+     1. Basics — a saved quote template to start from (it fills in the steps), the record (when
+        not started from one), the recipient's name and email, the quote's title, a description
+        (rich text) and how long it's valid;
+     2. Services — services added one by one from the catalog — Choose
+        Service: the saved services as cards in a window, one picked and added —
         (Settings → Templates → Services), or a new one made here (New service: the Services
         panel, the service then ready to add): each with its name, description and milestones
         (name, description, price — the price editable for this quote), or, without milestones,
         its price; the services subtotal;
-     3. Payment Plan — the payment plan for the quote's total (PaymentTermsFields, accounting.jsx:
+     3. Payment Plan — the quote's currency (part of the payment plan since 2026-11-17: the
+        default one to start with; another restates every price at Settings' exchange rates),
+        then the payment plan for the quote's total (PaymentTermsFields, accounting.jsx:
         One-Time, Installment or Recurring, Quote Signed or a fixed date), then the discount on
         the services subtotal (a percentage or an amount) and 5% VAT on the discounted subtotal,
         down to the total;
      4. Terms & Conditions — rich text;
      5. E-Signature — Require e-signature adds a signature section for the customer;
-     6. Branding — the quotation as the customer sees it, in the workspace's brand (Marketing →
+     6. Preview — the quotation as the customer sees it, in the workspace's brand (Settings →
         Brand: its full logo and the saved Digital Letterhead, used on every quote without
         choosing it); Save as Template, Save as Draft, Send Quote.
+   A quote template is made and edited in the same six steps (QuoteBuilder `template`): Basics
+   without the record, recipient and validity — the template's name and code, the quote's title
+   and description — and Preview with sample details.
    A quote keeps its own copy of each service as quoted. Its number (Q-<year>-<nnnn>) comes from a
    counter that only goes up, so a deleted quote's number isn't reused. Its payment plan is a plan
    (`payment`) for its total: the payments it makes (planSchedule) are dated once it's signed (Day N
@@ -32,8 +38,7 @@
 
    Quote templates (Settings → Templates → Quote Templates, each with a code) hold a configured
    quote's services and milestones, payment terms, discount and VAT, and terms; picking one on
-   the Services step fills those in. The Services and Payment Terms steps (QuoteServicesFields,
-   QuotePaymentFields, quoteConfigChecks) are the template's form too (templates.jsx).
+   Basics fills those in. A template is made in the same builder (QuoteBuilder `template`).
 
    Shown on the record's Quotes tab (RecordQuotesTab) and on Tools → Quotes (QuotesPage), both
    with the same quotation view (QuoteDocument). Documents (documents.jsx) share its letterhead
@@ -65,7 +70,7 @@ const BrandLogo = ({brand, height = 28}) => brand.logo
 const QUOTE_VAT_RATE = 5;   // the default VAT (%), on the discounted subtotal
 const qid = (p) => `${p}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
-/* A quote's currency: the default one when it's made, changeable on the Services step (its prices
+/* A quote's currency: the default one when it's made, changeable on the Payment Plan step (its prices
    restated at Settings' exchange rates). A quote saved before currencies could be chosen is AED. */
 const quoteCurrency = (q) => (q && q.currency) || LEGACY_CURRENCY;
 const itemsIn = (items, from, to) => (items || []).map(it => ({...it, price:convertAmount(it.price, from, to),
@@ -350,7 +355,7 @@ function sendQuoteVia(hub, q){
 /* ── The builder (new, or editing a draft) ── the creation side panel (CreatePanelFrame), wider
    for its six steps, which run down their own column on the left; the step's content on the
    right — on Basics, under Record Type and the record when it isn't known (Tools → Quotes). */
-const QUOTE_STEPS = ['Basics', 'Services', 'Payment Plan', 'Terms & Conditions', 'E-Signature', 'Branding'];
+const QUOTE_STEPS = ['Basics', 'Services', 'Payment Plan', 'Terms & Conditions', 'E-Signature', 'Preview'];
 const priceOk = (v) => v !== '' && v != null && Number.isFinite(Number(v)) && Number(v) >= 0;
 const itemPricesOk = (it) => (it.milestones || []).length ? it.milestones.every(m => priceOk(m.price)) : priceOk(it.price);
 /* What the Services and Payment Terms steps check (the builder and a quote template): a service
@@ -372,22 +377,49 @@ const QUOTE_SECTION = {fontSize:11, fontWeight:600, color:T.attioFaint, textTran
 const QUOTE_MONEY = {fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap'};
 const quoteSumRow = (l, v, strong) => <div style={{display:'flex', justifyContent:'space-between', gap:12, padding:'6px 0', fontSize: strong ? 15 : 13, fontWeight: strong ? 700 : 400, color:T.attioText}}><span>{l}</span><span style={QUOTE_MONEY}>{v}</span></div>;
 
-/* Services — a quote template to start from (`templates` / `onUseTemplate`, the builder only), a
-   service from the catalog (Add), or a new one (New service: the Services panel; the new service
-   is then selected, ready to add); each service added with its milestone prices (or its price)
-   editable here; the services subtotal. */
-function QuoteServicesFields({q, set, checks, templates, onUseTemplate}){
+/* Services (`template`: a quote template's) — a
+   saved service (Choose Service: the cards' window, above), or a new one (New Service, the filled
+   button: the Services panel; the new service goes straight onto the quote); each service added
+   with its milestone prices (or its price) editable here; the services subtotal. */
+/* Choose Service (2026-11-17): the saved services not on the quote yet, as cards — its name, its
+   price, what it covers and its milestones; pick one, then Add Service puts it on the quote. */
+function ServicePickerModal({services, onCancel, onAdd}){
+  const [picked, setPicked] = React.useState('');
+  const [q, setQ] = React.useState('');
+  const f = q.trim().toLowerCase(), shown = services.filter(s => !f || String(s.name || '').toLowerCase().includes(f));
+  return ReactDOM.createPortal(
+    <StModal title="Choose Service" primary="Add Service" width={760} canSubmit={!!picked} onCancel={onCancel} onSubmit={()=>picked && onAdd(picked)}>
+      <div style={{position:'relative'}}>
+        <div style={{position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', display:'flex'}}><Icon name="search" size={13} color={T.gray400}/></div>
+        <input autoFocus value={q} onChange={e=>setQ(e.target.value)} placeholder="Search services" aria-label="Search services" style={{...fieldInput, paddingLeft:30}}/>
+      </div>
+      <div role="radiogroup" aria-label="Services" style={{display:'grid', gridTemplateColumns:'repeat(2, minmax(0, 1fr))', gap:12, maxHeight:'min(460px, calc(100vh - 300px))', overflowY:'auto', padding:2}}>
+        {shown.map(s => { const svc = withMilestonePrices(s), on = s.id === picked, text = richTextPlain(s.description || ''); return (
+          <div key={s.id} role="radio" aria-checked={on} tabIndex={0} onClick={()=>setPicked(s.id)} onDoubleClick={()=>onAdd(s.id)}
+            onKeyDown={e=>{ if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); setPicked(s.id); } }}
+            style={{border:`1px solid ${on ? T.black : T.attioLine}`, boxShadow: on ? `0 0 0 1px ${T.black}` : 'none', borderRadius:12, padding:14, cursor:'pointer', display:'flex', flexDirection:'column', gap:8, minWidth:0, background:'#fff'}}>
+            <div style={{display:'flex', alignItems:'baseline', gap:10}}>
+              <span style={{flex:1, minWidth:0, fontSize:14, fontWeight:600, color:T.attioText}}>{s.name}</span>
+              <span style={{fontSize:13, color:T.attioText, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap'}}>{fmtMoney(servicePrice(svc), s.currency)}</span>
+            </div>
+            {text && <div style={{fontSize:12.5, color:T.attioMuted, lineHeight:1.5, display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', overflow:'hidden'}}>{text}</div>}
+            {(svc.milestones || []).length > 0 && <div style={{fontSize:12, color:T.gray600}}>{bulkPlural(svc.milestones.length, 'milestone')}</div>}
+          </div>); })}
+        {!shown.length && <div style={{gridColumn:'1 / -1', fontSize:13, color:T.attioMuted, padding:'16px 4px'}}>{services.length ? 'No services match' : 'No services to add'}</div>}
+      </div>
+    </StModal>, document.body);
+}
+function QuoteServicesFields({q, set, checks, template}){
   const hub = useRecordHub(), cur = quoteCurrency(q);
-  // Another currency restates every price (and an amount discount) in it.
-  const setCurrency = (c) => c && c !== cur && set({currency:c, items:itemsIn(q.items, cur, c), discount:discountIn(q.discount, cur, c)});
-  const [pick, setPick] = React.useState('');
+  const [choosing, setChoosing] = React.useState(false);
   const [creating, setCreating] = React.useState(false);
   const catalog = hub.services.filter(s => !q.items.some(it => it.serviceId === s.id));
   const label = {fontSize:12.5, color:T.gray600, marginBottom:6, display:'block'};
   const setMilestone = (iid, mid, p) => set({items:q.items.map(it => it.id !== iid ? it : {...it, milestones:it.milestones.map(m => m.id === mid ? {...m, ...p} : m)})});
   const setItem = (iid, p) => set({items:q.items.map(it => it.id !== iid ? it : {...it, ...p})});
   // A service in another currency comes in at Settings' exchange rate.
-  const addService = (id) => { const s = hub.services.find(x => x.id === id); if(s){ set({items:[...q.items, ...itemsIn([quoteItemOf(s)], s.currency, cur)], ...(q.title === '' ? {title:s.name} : {})}); setPick(''); } };
+  const addRecord = (s) => set({items:[...q.items, ...itemsIn([quoteItemOf(s)], s.currency, cur)], ...(q.title === '' ? {title:s.name} : {})});
+  const addService = (id) => { const s = hub.services.find(x => x.id === id); if(s) addRecord(s); };
   const priceInput = (value, onChange, ariaLabel) => (
     <div style={{width:150, flexShrink:0, position:'relative'}}>
       <span style={{position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', fontSize:12, color:T.attioMuted, pointerEvents:'none'}}>{cur}</span>
@@ -396,18 +428,10 @@ function QuoteServicesFields({q, set, checks, templates, onUseTemplate}){
     </div>
   );
   return (<>
-    <div style={{display:'grid', gridTemplateColumns: templates ? '200px minmax(0, 1fr) minmax(0, 1fr)' : '200px minmax(0, 1fr)', gap:12, alignItems:'end'}}>
-      <div style={{minWidth:0}}><label style={label}>Currency</label><FormSelect value={cur} options={currencyOptions()} onChange={setCurrency}/></div>
-      {templates && <div style={{minWidth:0}}><label style={label}>Quote template</label>
-        <FormSelect value={q.templateId || ''} placeholder={templates.length ? 'Select quote template' : 'No quote templates yet'}
-          options={templates.map(t => ({value:t.id, label:`${t.code} · ${t.name}`}))} onChange={onUseTemplate}/></div>}
-      <div style={{display:'flex', alignItems:'flex-end', gap:8, minWidth:0}}>
-        <div style={{flex:1, minWidth:0}}><label style={label}>Add a service</label>
-          <SearchableSelect value={pick} options={catalog.map(s => ({value:s.id, label:`${s.name} · ${fmtMoney(servicePrice(withMilestonePrices(s)), s.currency)}`}))} onChange={setPick}
-            placeholder={hub.services.length ? 'Select service' : 'No services yet'} searchPlaceholder="Search services"/></div>
-        <StCta label="Add" disabled={!pick} onClick={()=>addService(pick)}/>
-        {templateCan('services', 'create') && <StSecondary label="New Service" onClick={()=>setCreating(true)}/>}
-      </div>
+    {/* Choose Service: the saved services as cards (ServicePickerModal); New Service: the Services panel. */}
+    <div style={{display:'flex', alignItems:'center', gap:8}}>
+      <StSecondary label="Choose Service" onClick={()=>setChoosing(true)}/>
+      {templateCan('services', 'create') && <StCta label="New Service" onClick={()=>setCreating(true)}/>}
     </div>
     {q.items.map(it => (
       <div key={it.id} style={{border:`1px solid ${T.attioLine}`, borderRadius:12, padding:16, display:'flex', flexDirection:'column', gap:12}}>
@@ -436,17 +460,24 @@ function QuoteServicesFields({q, set, checks, templates, onUseTemplate}){
         </div>}
       </div>
     ))}
-    {!q.items.length && <div style={{fontSize:13, color:T.attioMuted}}>{templates ? 'Add the services this quote is for, or start from a quote template.' : 'Add the services this template is for.'}</div>}
+    {!q.items.length && <div style={{fontSize:13, color:T.attioMuted}}>{template ? 'Add the services this template is for.' : 'Add the services this quote is for.'}</div>}
     {q.items.length > 0 && <div style={{borderTop:`1px solid ${T.border}`, paddingTop:8}}>{quoteSumRow('Services subtotal', fmtMoney(checks.totals.subtotal, cur), true)}</div>}
+    {choosing && <ServicePickerModal services={catalog} onCancel={()=>setChoosing(false)} onAdd={(id)=>{ addService(id); setChoosing(false); }}/>}
     {creating && <ServiceFormPanel zIndex={90} onCancel={()=>setCreating(false)}
-      onSave={(vals)=>{ const rec = newServiceRecord(vals); hub.setServices(ss => [...ss, rec]); setPick(rec.id); setCreating(false); hub.toast('Service created'); }}/>}
+      onSave={(vals)=>{ const rec = newServiceRecord(vals); hub.setServices(ss => [...ss, rec]); addRecord(rec); setCreating(false); hub.toast('Service created'); }}/>}
   </>);
 }
-/* Payment Terms — the payment terms for the quote's total (PaymentTermsFields), then the discount
-   on the services subtotal (a percentage or an amount) and VAT on the discounted subtotal, down to the total. */
+/* Payment Plan — the quote's currency, then the payment terms for the quote's total
+   (PaymentTermsFields), then the discount on the services subtotal (a percentage or an amount)
+   and VAT on the discounted subtotal, down to the total. */
 function QuotePaymentFields({q, set, checks}){
   const {totals, discountOk} = checks, cur = quoteCurrency(q);
+  // Another currency restates every price (and an amount discount) in it.
+  const setCurrency = (c) => c && c !== cur && set({currency:c, items:itemsIn(q.items, cur, c), discount:discountIn(q.discount, cur, c)});
   return (<>
+    {/* The plan's first field, laid out as its own (accounting.jsx PaymentTermsFields). */}
+    {stack(<Field label="Currency" wide><div style={{display:'grid', gridTemplateColumns:`${PT_W}px ${PT_W}px`, gap:12}}>
+      <Dropdown required value={cur} options={currencyOptions()} controlStyle={{...fieldControl, height:PT_H, boxSizing:'border-box'}} ariaLabel="Currency" onChange={setCurrency}/><span/></div></Field>)}
     <PaymentTermsFields plan={quotePlanOf(q)} onChange={(p)=>set({payment:p})} total={totals.total} currency={cur}/>
     <div style={{borderTop:`1px solid ${T.border}`, margin:'4px -20px 0'}}/>
     <span style={QUOTE_SECTION}>Discount & tax</span>
@@ -471,11 +502,21 @@ function QuotePaymentFields({q, set, checks}){
   </>);
 }
 const QUOTE_STEPPER_W = 200, QUOTE_PANEL_W = 1160;
+/* A quote template as the quotation a customer would get (QuoteDocument), with sample details
+   where a quote has its own: who it's for, its record, number and dates. */
+const sampleQuoteOf = (t) => ({...t, number:`Q-${new Date().getFullYear()}-0000`, title:t.title || t.name, object:'deals', recordId:null,
+  sampleRecord:{name:'Sample Deal'}, recipient:{name:'Sample Client', email:'sample.client@email.com'}, createdAt:new Date(),
+  validUntil:ymdOf(new Date(Date.now() + 30 * 86400000)), eSignature:!!t.eSignature, status:'draft'});
 /* `mode` 'new' (`object` / `id`: the record it's for, when started from one) or 'edit' (`id`: the
    quote). Always full height at the CRM's right edge (placement 'fixed'), wherever it's opened.
-   `onClose(saved)`: the saved quote, or nothing (cancelled). */
-function QuoteBuilder({mode, id, object, onClose, placement = 'fixed'}){
+   `onClose(saved)`: the saved quote, or nothing (cancelled).
+   `template` {initial?, templates, onSave(values)} (2026-11-17): the same six steps make or edit a
+   quote template (Settings → Templates → Quote Templates) — Basics without a record, recipient or
+   validity: the template's name and code, the quote's title and description; Preview with sample
+   details. */
+function QuoteBuilder({mode, id, object, onClose, placement = 'fixed', template}){
   const hub = useRecordHub();
+  const isTpl = !!template, tpl0 = isTpl ? template.initial || null : null;
   const existing = mode === 'edit' ? hub.quotes.find(q => q.id === id) : null;
   const recordId0 = mode === 'new' && object && id != null ? id : null;
   const [step, setStep] = React.useState(0);
@@ -484,20 +525,23 @@ function QuoteBuilder({mode, id, object, onClose, placement = 'fixed'}){
   const person0 = target.id != null ? hubRecordPerson(hub, target.object, target.id) : null;
   const [q, setQ] = React.useState(() => existing ? {...JSON.parse(JSON.stringify(existing)), description:existing.description || richHtmlOf(existing.notes || ''), notes:undefined,
       items:(existing.items || []).map(withItemMilestonePrices), payment:quotePlanOf(existing), installments:undefined, discount:existing.discount || {type:'percent', value:''},
-      vatRate:existing.vatRate ?? QUOTE_VAT_RATE, terms:existing.terms || '', eSignature:!!existing.eSignature, currency:quoteCurrency(existing)} : {
+      vatRate:existing.vatRate ?? QUOTE_VAT_RATE, terms:existing.terms || '', eSignature:!!existing.eSignature, currency:quoteCurrency(existing)}
+    : tpl0 ? {name:tpl0.name || '', title:tpl0.title || '', recipient:{name:'', email:''}, description:tpl0.description || '', items:copyItems(tpl0.items), payment:quotePlanOf(tpl0),
+      discount:tpl0.discount || {type:'percent', value:''}, vatRate:tpl0.vatRate ?? QUOTE_VAT_RATE, terms:tpl0.terms || '', eSignature:!!tpl0.eSignature, templateId:null, currency:quoteCurrency(tpl0), validUntil:''}
+    : {name:'',
     title:'', recipient:{name:(person0 && person0.name) || '', email:(person0 && person0.email) || ''}, description:'', items:[], payment:newPaymentPlan(),
     discount:{type:'percent', value:''}, vatRate:QUOTE_VAT_RATE, terms:'', eSignature:false, templateId:null, currency:defaultCurrency(),
     validUntil:ymdOf(new Date(Date.now() + 30 * 86400000))});
   const set = (p) => setQ(x => ({...x, ...p}));
   // A record picked here fills in its person.
-  React.useEffect(() => { if(fixedRecord) return; const p = target.id != null ? hubRecordPerson(hub, target.object, target.id) : null; set({recipient:{name:(p && p.name) || '', email:(p && p.email) || ''}}); }, [target.object, target.id]);
+  React.useEffect(() => { if(fixedRecord || isTpl) return; const p = target.id != null ? hubRecordPerson(hub, target.object, target.id) : null; set({recipient:{name:(p && p.name) || '', email:(p && p.email) || ''}}); }, [target.object, target.id]);
   const [pick, setPick] = React.useState('');
-  const [expanded, setExpanded] = React.useState(false);   // Branding: the quotation in a larger modal
+  const [expanded, setExpanded] = React.useState(false);   // Preview: the quotation in a larger modal
   const [templating, setTemplating] = React.useState(null); // Save as template: its name
   const templates = quoteTemplatesOf(hub.data);
   const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((q.recipient.email || '').trim());
   const checks = quoteConfigChecks(q), totals = checks.totals;
-  const stepOk = [target.id != null && !!q.recipient.name.trim() && validEmail, checks.itemsOk, checks.discountOk && checks.paymentOk, true, true, true];
+  const stepOk = [isTpl ? !!q.name.trim() : target.id != null && !!q.recipient.name.trim() && validEmail, checks.itemsOk, checks.discountOk && checks.paymentOk, true, true, true];
   const draft = () => ({...q, title:q.title.trim() || (q.items[0] && q.items[0].name) || 'Quotation', recipient:{name:q.recipient.name.trim(), email:q.recipient.email.trim()},
     ...normalizeQuoteConfig(q), object:target.object, recordId:target.id});
   const save = (andSend) => {
@@ -511,36 +555,42 @@ function QuoteBuilder({mode, id, object, onClose, placement = 'fixed'}){
     if(andSend) sendQuoteVia(hub, saved); else hub.toast(existing ? 'Quote saved' : `Quote ${saved.number} saved as draft`);
     onClose(saved);
   };
-  // A saved template fills in the services and milestones, payment terms, discount and VAT, and terms.
+  // A template, saved from the steps: its name, the quote's title and description, and what the steps set.
+  const saveAsTemplate = () => template.onSave({name:q.name.trim(), title:q.title.trim(), description:q.description, ...normalizeQuoteConfig(q), vatRate:q.vatRate, terms:q.terms,
+    eSignature:!!q.eSignature, currency:q.currency});
+  // A saved template (chosen on Basics) fills in the title and description still empty, the services and milestones, payment terms, discount and VAT, terms and e-signature.
   const useTemplate = (tid) => {
     const t = templates.find(x => x.id === tid); if(!t) return;
     // Its prices in the quote's currency (Settings' exchange rates).
     const from = quoteCurrency(t), to = quoteCurrency(q);
     set({templateId:t.id, items:itemsIn(copyItems(t.items), from, to), payment:quotePlanOf(t),
       discount:discountIn({type:(t.discount || {}).type || 'percent', value:(t.discount || {}).value || ''}, from, to),
-      vatRate:t.vatRate ?? QUOTE_VAT_RATE, terms:t.terms || '', title:q.title || t.name});
+      vatRate:t.vatRate ?? QUOTE_VAT_RATE, terms:t.terms || '', title:q.title || t.title || t.name,
+      description: richIsEmpty(richHtmlOf(q.description)) ? t.description || '' : q.description, ...(t.eSignature != null ? {eSignature:!!t.eSignature} : {})});
   };
   const saveTemplate = (name) => {
     const d = draft();
-    const t = {id:`qt-${Date.now().toString(36)}`, code:nextTemplateCode(templates), name, items:d.items, payment:d.payment, discount:d.discount, vatRate:d.vatRate, terms:d.terms, currency:quoteCurrency(d),
+    const t = {id:`qt-${Date.now().toString(36)}`, code:nextTemplateCode(templates), name, title:d.title, description:d.description, eSignature:!!d.eSignature,
+      items:d.items, payment:d.payment, discount:d.discount, vatRate:d.vatRate, terms:d.terms, currency:quoteCurrency(d),
       createdBy:CURRENT_USER.name, createdAt:new Date()};
     hub.setData(x => ({...x, quoteTemplates:[...quoteTemplatesOf(x), t]}));
     setTemplating(null); hub.toast(`Template ${t.code} saved`);
   };
   const section = QUOTE_SECTION;
-  const preview = {...draft(), number: existing ? existing.number : quoteNumber(hub.quotes, true), createdAt: existing ? existing.createdAt : new Date(), status:'draft'};
-  const brand = orgBrand();
-  const last = QUOTE_STEPS.length - 1;
+  const preview = isTpl ? sampleQuoteOf({...q, name:q.name.trim() || 'Quote Template'})
+    : {...draft(), number: existing ? existing.number : quoteNumber(hub.quotes, true), createdAt: existing ? existing.createdAt : new Date(), status:'draft'};
+  const last = QUOTE_STEPS.length - 1, filled = isTpl && !!tpl0;
   return (
-    <CreatePanelFrame title={existing ? 'Edit Quote' : 'Add Quote'} onClose={()=>onClose()} placement={placement} width={QUOTE_PANEL_W} flush
+    <CreatePanelFrame title={isTpl ? (tpl0 ? 'Edit Quote Template' : 'Add Quote Template') : existing ? 'Edit Quote' : 'Add Quote'} onClose={()=>onClose()} placement={placement} width={QUOTE_PANEL_W} flush
       actions={<>
         {step > 0 && <StSecondary label="Back" onClick={()=>setStep(s => s - 1)}/>}
         <StSecondary label="Cancel" onClick={()=>onClose()}/>
         {step < last ? <StCta label="Next" disabled={!stepOk[step]} onClick={()=>setStep(s => s + 1)}/>
+          : isTpl ? <StCta label={tpl0 ? 'Save Changes' : 'Add Quote Template'} disabled={!stepOk.every(Boolean)} onClick={saveAsTemplate}/>
           : <>{templateCan('quoteTemplates', 'create') && <StSecondary label="Save as Template" onClick={()=>setTemplating(q.title.trim() || (q.items[0] && q.items[0].name) || '')}/>}
               <StSecondary label={existing ? 'Save Changes' : 'Save as Draft'} onClick={()=>save(false)}/><StCta label="Send Quote" disabled={!!q.validUntil && q.validUntil < ymdOf(new Date())} onClick={()=>save(true)}/></>}
       </>}>
-      {/* The steps, in their own column on the left. */}
+      {/* The steps, in their own column on the left. A template already made (`filled`): every step reads as done — no progress to show — and the open one is the light grey row. */}
       <div style={{width:QUOTE_STEPPER_W, flexShrink:0, borderRight:`1px solid ${T.border}`, padding:'16px 12px', display:'flex', flexDirection:'column', gap:2}}>
         {QUOTE_STEPS.map((st, i) => {
           const reachable = i <= step || stepOk.slice(0, i).every(Boolean);
@@ -550,28 +600,35 @@ function QuoteBuilder({mode, id, object, onClose, placement = 'fixed'}){
                 background: i === step ? T.headerBg : 'transparent', cursor: reachable ? 'pointer' : 'default',
                 fontSize:13, fontWeight: i === step ? 600 : 400, color: i === step ? T.attioText : T.attioMuted}}>
               <span style={{width:20, height:20, borderRadius:9999, fontSize:11, fontWeight:600, display:'inline-flex', alignItems:'center', justifyContent:'center', flexShrink:0,
-                background: i <= step ? T.black : '#fff', color: i <= step ? '#fff' : T.attioMuted, border: i <= step ? 'none' : `1px solid ${T.borderStrong}`}}>{i + 1}</span>
+                background: i <= step || filled ? T.black : '#fff', color: i <= step || filled ? '#fff' : T.attioMuted, border: i <= step || filled ? 'none' : `1px solid ${T.borderStrong}`}}>{i + 1}</span>
               {st}
             </button>
           );
         })}
       </div>
       <div style={{flex:1, minWidth:0, display:'flex', flexDirection:'column'}}>
-        {!fixedRecord && step === 0 && <div style={{padding:'16px 20px', borderBottom:`1px solid ${T.border}`, flexShrink:0}}><CreateRecordField value={target} onChange={setTarget}/></div>}
+        {!isTpl && !fixedRecord && step === 0 && <div style={{padding:'16px 20px', borderBottom:`1px solid ${T.border}`, flexShrink:0}}><CreateRecordField value={target} onChange={setTarget}/></div>}
         <div style={{flex:1, minHeight:0, overflowY:'auto', padding:20, display:'flex', flexDirection:'column', gap:16}}>
 
-          {/* 1 · Basics */}
-          {step === 0 && stack(<>
+          {/* 1 · Basics — a quote: a saved template to start from, who it's for, its title, description and validity; a template: its name and code, the title and description. */}
+          {step === 0 && (isTpl ? stack(<>
+            <Field label="Template Name"><input autoFocus value={q.name} onChange={e=>set({name:e.target.value})} placeholder="e.g. US NIW Standard" style={fieldText}/></Field>
+            <Field label="Code"><ReadValue>{tpl0 ? tpl0.code : nextTemplateCode(template.templates)}</ReadValue></Field>
+            <Field label="Quote Title"><input value={q.title} onChange={e=>set({title:e.target.value})} placeholder="e.g. US NIW Petition" style={fieldText}/></Field>
+            <Field label="Description"><RichTextEditor value={q.description} onChange={(v)=>set({description:v})} ariaLabel="Quote description"/></Field>
+          </>) : stack(<>
+            <Field label="Quote Template"><FormSelect value={q.templateId || ''} placeholder={templates.length ? 'Select quote template' : 'No quote templates yet'}
+              options={templates.map(t => ({value:t.id, label:`${t.code} · ${t.name}`}))} onChange={useTemplate}/></Field>
             <Field label="Recipient Name"><input value={q.recipient.name} onChange={e=>set({recipient:{...q.recipient, name:e.target.value}})} style={fieldText}/></Field>
             <Field label="Recipient Email"><input value={q.recipient.email} onChange={e=>set({recipient:{...q.recipient, email:e.target.value}})}
               style={{...fieldText, borderColor: q.recipient.email && !validEmail ? T.red : T.borderStrong}}/></Field>
             <Field label="Quote Title"><input value={q.title} onChange={e=>set({title:e.target.value})} placeholder="e.g. US NIW Petition" style={fieldText}/></Field>
             <Field label="Description"><RichTextEditor value={q.description} onChange={(v)=>set({description:v})} ariaLabel="Quote description"/></Field>
             <Field label="Valid Until"><DateField value={q.validUntil} onChange={(v)=>set({validUntil:v})}/></Field>
-          </>)}
+          </>))}
 
           {/* 2 · Services */}
-          {step === 1 && <QuoteServicesFields q={q} set={set} checks={checks} templates={templates} onUseTemplate={useTemplate}/>}
+          {step === 1 && <QuoteServicesFields q={q} set={set} checks={checks} template={isTpl}/>}
 
           {/* 3 · Payment Terms — the payment terms, then the discount and VAT. */}
           {step === 2 && <QuotePaymentFields q={q} set={set} checks={checks}/>}
@@ -587,23 +644,18 @@ function QuoteBuilder({mode, id, object, onClose, placement = 'fixed'}){
             <label style={{display:'flex', alignItems:'center', gap:10, fontSize:13.5, color:T.attioText, cursor:'pointer', alignSelf:'flex-start'}}>
               <UtToggle on={q.eSignature} onChange={(v)=>set({eSignature:v})}/> Require e-signature
             </label>
-            {q.eSignature && <div style={{opacity:.95}}><QuoteSignaturePreview name={q.recipient.name}/></div>}
+            {q.eSignature && <div style={{opacity:.95}}><QuoteSignaturePreview name={isTpl ? 'Sample Client' : q.recipient.name}/></div>}
           </>}
 
-          {/* 6 · Branding — the quotation in the Organization's brand. */}
+          {/* 6 · Preview — the quotation as the customer will see it (a template: with sample details). */}
           {step === 5 && <>
-            <div style={{display:'flex', alignItems:'center', gap:12, padding:'10px 12px', border:`1px solid ${T.attioLine}`, borderRadius:10}}>
-              <BrandLockup brand={brand}/>
-              <div style={{flex:1}}/>
-              {[brand.colors.primary, brand.colors.secondary].map((c, i) => <span key={i} title={i ? 'Secondary colour' : 'Primary colour'} style={{width:18, height:18, borderRadius:9999, background:c, border:`1px solid ${T.attioLine}`}}/>)}
-              <button type="button" onClick={()=>setExpanded(true)} style={btnSecondarySm}><Icon name="expand" size={13} color={T.gray600}/> Expand</button>
-            </div>
+            <button type="button" onClick={()=>setExpanded(true)} style={{...btnSecondarySm, alignSelf:'flex-end'}}><Icon name="expand" size={13} color={T.gray600}/> Expand</button>
             <QuoteDocument quote={preview}/>
           </>}
         </div>
       </div>
       {expanded && ReactDOM.createPortal(
-        <StModal title={`Quote ${preview.number}`} width={880} onCancel={()=>setExpanded(false)}>
+        <StModal title={isTpl ? 'Quote Template' : `Quote ${preview.number}`} width={880} onCancel={()=>setExpanded(false)}>
           <div style={{maxHeight:'70vh', overflowY:'auto'}}><QuoteDocument quote={preview}/></div>
         </StModal>, document.body)}
       {templating != null && ReactDOM.createPortal(
@@ -878,4 +930,4 @@ function QuotesPage(){
 }
 
 Object.assign(window, {quotePlanOf, quoteSchedule, BrandedDocument, InstallmentsTable, MarkSignedModal, QuoteSignaturePreview, keepQuoteBrand, quoteBrand, quoteNumber, DeleteQuoteModal, PercentAmountField, quoteSeqFloor, splitAmounts, quoteExpired, quoteStatusOf, tentativeOk, normalizeDue, readUpload, EvidenceFile, fmtTentative, tentativeDate, installmentAmount, SAMPLE_QUOTES, SAMPLE_QUOTE_TEMPLATES, quoteTemplatesOf, quoteTotals, quoteItemTotal, nextTemplateCode, copyItems, QuoteBuilder, QuoteDocument, RecordQuotesTab, QuoteActivityDetail, QuotesPage, quoteTotal, QUOTE_STATUS, sendQuoteVia,
-  QuoteServicesFields, QuotePaymentFields, quoteConfigChecks, normalizeQuoteConfig, QUOTE_SECTION, QUOTE_PANEL_W, QUOTE_VAT_RATE});
+  sampleQuoteOf, QuoteServicesFields, QuotePaymentFields, quoteConfigChecks, normalizeQuoteConfig, QUOTE_SECTION, QUOTE_PANEL_W, QUOTE_VAT_RATE});
