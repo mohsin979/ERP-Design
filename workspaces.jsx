@@ -750,10 +750,11 @@ function useBrandDraft({brand, admin, toast, setActions, key, blank, label, vali
 /* Email Signature: always personal (2026-11-16). This is the signature of the person looking at
    it — every field theirs to set: name, designation, email, phone, website, company address,
    additional info, and the company logo (Logo), shown or not. Since 2026-11-17 also: their own
-   photo (optional, kept small); a Secondary Language of their choice (none to start with) and,
+   profile photo (optional, kept small); a Secondary Language of their choice (none to start with) and,
    once one is chosen, the name, designation, company address and additional info in it, beside
    the first; a WhatsApp number (a WhatsApp button); and one CTA button — its
-   text, its link and its colour (black to start with). In the signature the email, phone and
+   text and its link (always black); the two buttons close the signature, after the additional
+   info. In the signature the email, phone and
    website are links; the address isn't. Saved on their user (`signature`);
    until then it starts as their name, Designation and email. Every email they send ends with
    it (emails.jsx emailSignatureOf) unless Include Email Signature is turned off on that email.
@@ -771,7 +772,7 @@ const SIGNATURE_FIELDS = [
   {key:'additional', label:'Additional Info', multiline:true}, {key:'additional2', label:'Additional Info', multiline:true, second:true},
 ];
 const SIGNATURE_BLANK = {includeLogo:true, photo:null, language2:'', name:'', name2:'', designation:'', designation2:'', email:'', phone:'', website:'', address:'', address2:'',
-  whatsapp:'', ctaLabel:'', ctaUrl:'', ctaColor:'#000000', additional:'', additional2:''};
+  whatsapp:'', ctaLabel:'', ctaUrl:'', additional:'', additional2:''};
 // The Secondary Language's choices: the app's languages (propertyTypes.jsx), without the first one.
 const signatureLanguages = () => LANGUAGE_LIST.filter(l => l !== 'English');
 // Written right to left — typed and shown so, in a plain face for its script (the app's own has no Arabic letters; the browser's stand-in is a calligraphic one).
@@ -779,7 +780,8 @@ const SIGNATURE_RTL = ['Arabic', 'Farsi', 'Pashto', 'Sindhi', 'Urdu'];
 const signatureRtl = (language) => SIGNATURE_RTL.includes(language);
 const SIGNATURE_RTL_FONT = "'Geeza Pro','Segoe UI',Tahoma,Arial,sans-serif";
 // A saved signature, complete — one saved while Arabic was the only second language (its *Ar fields) reads as Arabic.
-const signatureNormal = (sig) => { const {nameAr, designationAr, addressAr, additionalAr, ...rest} = sig || {}, old = {name2:nameAr, designation2:designationAr, address2:addressAr, additional2:additionalAr};
+// (A CTA colour saved while it could be chosen is dropped: the CTA is always black.)
+const signatureNormal = (sig) => { const {nameAr, designationAr, addressAr, additionalAr, ctaColor, ...rest} = sig || {}, old = {name2:nameAr, designation2:designationAr, address2:addressAr, additional2:additionalAr};
   const had = Object.values(old).some(v => String(v || '').trim());
   return {...SIGNATURE_BLANK, ...(had ? {language2:'Arabic', ...Object.fromEntries(Object.entries(old).filter(([, v]) => v))} : {}), ...rest}; };
 /* A person's photo for their signature: any image, kept small (a 160px square from its middle —
@@ -810,7 +812,7 @@ const CRM_SIGNATURES = {
     name:'Arslan Aman', name2:'أرسلان أمان', designation:'Client Solutions Consultant', designation2:'مستشار حلول العملاء',
     email:'arslanaman@hof-partners.com', phone:'+971 55 854 5261', website:'www.hof-partners.com',
     address:'1408, Opal Tower, Burj Khalifa Blvd,\nBusiness Bay, Dubai, United Arab Emirates', address2:'1408، برج أوبال، بوليفارد برج خليفة،\nالخليج التجاري، دبي، الإمارات العربية المتحدة',
-    whatsapp:'+971 55 854 5261', ctaLabel:'Book Free Consultation', ctaUrl:'https://www.hof-partners.com', ctaColor:'#D3E86F',
+    whatsapp:'+971 55 854 5261', ctaLabel:'Book Free Consultation', ctaUrl:'https://www.hof-partners.com',
     additional:'HOF Partners | Accounting | Tax | Advisory\nHOF Partners UAE & GCC\nWe support organizations across the UAE, GCC, US and UK with expert Accounting, Bookkeeping, VAT, Corporate Tax, E-Invoicing and Audit services built on trust, accuracy and compliance.',
     additional2:'إتش أو إف بارتنرز | محاسبة | ضرائب | استشارات\nندعم الشركات في الإمارات ودول الخليج والولايات المتحدة والمملكة المتحدة بخدمات المحاسبة ومسك الدفاتر والضرائب والفوترة الإلكترونية والتدقيق، بالثقة والدقة والامتثال.'},
 };
@@ -839,7 +841,7 @@ function BrandSignatureSection({brand, toast, setActions, data, setData}){
             <UtToggle on={sig.includeLogo} onChange={(v)=>set('includeLogo', v)}/> Show the company logo
           </label>
         </Field>
-        <Field label="Photo">
+        <Field label="Profile Photo">
           <div style={{display:'flex', alignItems:'center', gap:10, paddingTop:2}}>
             {sig.photo && <img src={sig.photo} alt="" style={{width:40, height:40, borderRadius:8, objectFit:'cover', border:`1px solid ${T.attioLine}`, flexShrink:0}}/>}
             <input ref={photoInput} type="file" accept="image/*" onChange={pickPhoto} style={{display:'none'}}/>
@@ -855,10 +857,6 @@ function BrandSignatureSection({brand, toast, setActions, data, setData}){
           <React.Fragment key={f.key}>
             <Field label={f.second ? `${f.label} (${sig.language2})` : f.label} required={f.required}><div dir={f.second && rtl ? 'rtl' : undefined} style={f.second && rtl ? {fontFamily:SIGNATURE_RTL_FONT} : undefined}>{brandTextField(sig[f.key] || '', (v)=>set(f.key, v), f.placeholder,
               {multiline:f.multiline, invalid:(f.key === 'email' && !brandEmailOk(sig.email)) || (f.cta && ctaHalf && !String(sig[f.key] || '').trim())})}</div></Field>
-            {f.key === 'ctaUrl' && <Field label="CTA Color">
-              <input type="color" aria-label="CTA color" value={validHex(sig.ctaColor) ? sig.ctaColor : '#000000'} onChange={e=>set('ctaColor', e.target.value.toUpperCase())}
-                style={{width:36, height:32, padding:2, border:`1px solid ${T.borderStrong}`, borderRadius:8, background:'#fff', cursor:'pointer'}}/>
-            </Field>}
           </React.Fragment>
         ))}
       </>}
