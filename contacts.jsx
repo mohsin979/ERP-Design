@@ -1956,7 +1956,8 @@ function ToolbarSearch({search, onSearch, width = 200, placeholder = 'Search', i
 /* `filterControls`: on the far right of the filters row (e.g. Merge Cases, Workflow Violations).
    `oneRow` (Overview → Activity, 2026-11-18): no search row — the search sits beside the
    section's title (ToolbarSearch) and Filters right after the view pills. */
-function RecordToolbar({inset = 'page', views, activeViewId, onSelectView, viewControls, controls, search, onSearch, filters, setFilters, appliedFilterCount, filterControls, oneRow = false, searchPlaceholder}){
+/* `searchInRow` (with `oneRow` — a record's activity, 2026-11-19): the search first in the row, Filters beside it. */
+function RecordToolbar({inset = 'page', views, activeViewId, onSelectView, viewControls, controls, search, onSearch, filters, setFilters, appliedFilterCount, filterControls, oneRow = false, searchPlaceholder, searchInRow = false}){
   const [showFilters, setShowFilters] = React.useState(false);
   const pad = TOOLBAR_INSETS[inset] || TOOLBAR_INSETS.page;
   const filterButton = (<>
@@ -1981,6 +1982,7 @@ function RecordToolbar({inset = 'page', views, activeViewId, onSelectView, viewC
   </>);
   if(oneRow) return (
     <div style={{display:'flex', alignItems:'center', gap:8, padding:pad.row1, borderBottom:`1px solid ${T.border}`}}>
+      {searchInRow && <ToolbarSearch search={search} onSearch={onSearch} placeholder={searchPlaceholder}/>}
       <div style={{display:'flex', alignItems:'center', gap:8, flex:'0 1 auto', minWidth:0, overflowX:'auto'}}>
         {views.map(v => <button key={v.id} onClick={()=>onSelectView(v.id)} style={viewPillStyle(activeViewId === v.id)}>{v.name}{v.count != null && ` (${v.count.toLocaleString('en-US')})`}</button>)}
       </div>

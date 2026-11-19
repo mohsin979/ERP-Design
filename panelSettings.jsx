@@ -12,7 +12,8 @@
 
    Properties (2026-11-19, as Card Settings' ordered properties): the ticked ones on top, dragged
    among themselves; the unticked below them — a property ticked far down joins the end of the
-   ticked, no long drag up (DragCheckList `tickedFirst`).
+   ticked, no long drag up (DragCheckList `tickedFirst`). Above the list, a property search (the
+   matches only tick on or off) and Select All / Deselect All.
 
    One setting for every contact, in both the side panel and the full page's left column —
    they are the same component, so they never differ. Opened from View Settings in the
@@ -143,6 +144,14 @@ const contactPanelKind = (props) => {
 };
 function PanelSettingsModal({draft, setDraft, sample, onApply, onClose, kind = CONTACT_PANEL_KIND}){
   const [section, setSection] = React.useState(draft.order[0]);
+  /* Properties (2026-11-19): a search over them, as Card Settings' — while searching, the matches
+     only tick on or off — and Select All / Deselect All for the whole list. */
+  const [query, setQuery] = React.useState('');
+  const propList = draft[kind.propertiesKey] || [];
+  const q = query.trim().toLowerCase();
+  const flipProp = (key) => set(kind.propertiesKey, list => tickedFirstOrder(tickedFirstOrder(list).map(x => x.key === key ? {...x, enabled:!x.enabled} : x)));
+  const allOn = propList.length > 0 && propList.every(x => x.enabled);
+  const setAllProps = (on) => set(kind.propertiesKey, list => list.map(x => ({...x, enabled:on})));
   const [addOpen, setAddOpen] = React.useState(false);
   const set = (key, value) => setDraft(d => ({...d, [key]: typeof value === 'function' ? value(d[key]) : value}));
   const dropdownOf = (type) => kind.dropdowns.find(d => d.key === type);
@@ -159,7 +168,21 @@ function PanelSettingsModal({draft, setDraft, sample, onApply, onClose, kind = C
   return (
     <SettingsModalShell title="Side Panel Settings" sections={kind.sections} order={draft.order}
       onReorder={(from, to)=>set('order', o => moveItem(o, from, to))}
-      section={section} onSection={setSection} onApply={onApply} onClose={onClose} fixed={['avatarSubtitle', ...(HERO_LIGHT_ONLY ? [] : ['cardStyle'])].filter(id => kind.sections[id])}
+      section={section} onSection={(id)=>{ setSection(id); setQuery(''); }} onApply={onApply} onClose={onClose}
+      toolbar={section === kind.propertiesKey && (
+        <div style={{padding:'0 20px 8px', display:'flex', alignItems:'center', gap:12}}>
+          <div style={{position:'relative', flex:1, minWidth:0}}>
+            <div style={{position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', display:'flex'}}>
+              <Icon name="search" size={13} color={T.gray400}/>
+            </div>
+            <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search properties" aria-label="Search properties"
+              style={{width:'100%', padding:'8px 10px 8px 30px', fontSize:13, fontFamily:'inherit', border:`1px solid ${T.borderStrong}`, borderRadius:8}}/>
+          </div>
+          <button type="button" onClick={()=>setAllProps(!allOn)} className={LINK_CLASS}
+            style={{border:'none', background:'transparent', padding:0, cursor:'pointer', fontFamily:'inherit', fontSize:13, color:T.attioText, whiteSpace:'nowrap', flexShrink:0}}>
+            {allOn ? 'Deselect All' : 'Select All'}</button>
+        </div>
+      )} fixed={['avatarSubtitle', ...(HERO_LIGHT_ONLY ? [] : ['cardStyle'])].filter(id => kind.sections[id])}
       preview={preview && (
         <div style={{background:'#fff', border:`1px solid ${T.borderStrong}`, borderRadius:10, padding:'16px 14px'}}>{preview}</div>
       )}>
@@ -223,8 +246,13 @@ function PanelSettingsModal({draft, setDraft, sample, onApply, onClose, kind = C
         </div>
       </>)}
 
-      {section === kind.propertiesKey && (
-        <DragCheckList tickedFirst items={draft[kind.propertiesKey]} labelOf={it => propLabel(it.key)} onChange={v=>set(kind.propertiesKey, v)}/>
+      {section === kind.propertiesKey && !q && (
+        <DragCheckList tickedFirst items={propList} labelOf={it => propLabel(it.key)} onChange={v=>set(kind.propertiesKey, v)}/>
+      )}
+      {section === kind.propertiesKey && q && propList.filter(it => String(propLabel(it.key)).toLowerCase().includes(q)).map(it =>
+        <SettingsCheckRow key={it.key} label={propLabel(it.key)} checked={it.enabled} onToggle={()=>flipProp(it.key)}/>)}
+      {section === kind.propertiesKey && q && !propList.some(it => String(propLabel(it.key)).toLowerCase().includes(q)) && (
+        <div style={{fontSize:12.5, color:T.gray400, padding:'8px 6px'}}>No properties match "{query.trim()}"</div>
       )}
     </SettingsModalShell>
   );

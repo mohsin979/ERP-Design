@@ -12,10 +12,11 @@
    while the record is open.
 
    On a record (2026-11-19, Mohsin) the feeds aren't pills: they're the record's journey —
-   Lead → Deal → Customer (RecordJourney), each step its label and the day its record was made
-   ("Landed <date>" on the Lead step), an arrow between; a step
-   picked shows its activity below, in place, and on another record's step the Add becomes
-   "Go to <Deal>" (JourneyGoTo) — the activity there names and links no record. A step the record
+   Lead → Deal → Customer (RecordJourney), each step its label only, folded to the record's own
+   step with "History" and "Next" to open each side; a step picked shows its activity below, in place. Under it one row: Search and Filters on the left;
+   on the right "Go to <Deal>" (JourneyGoTo, on another record's step only) and Add — always there,
+   adding to the record that's open, whichever step is shown. The activity of another record's
+   step names and links no record. A step the record
    hasn't reached is greyed and can't be picked. On a contact the Deal step is all its deals
    ("Deals (2)", their activity together) and the Customer step all its customers; on a deal the
    Deal step is that deal alone, the Contact step its contact and the Customer step its customers;
@@ -38,35 +39,43 @@ function associatedRecords(hub, object, record){
   return {contacts:contactsOf(self), deals:(self.dealIds || []).map(id => byId('deals', id)).filter(Boolean), customers:[]};
 }
 /* The journey's steps: each record type with the records at it — the record itself at its own.
-   A step names no one (Mohsin, 2026-11-19): its label, then the day its record was made (the
-   earliest, when there are several) — "Landed <date>" on the Lead step only, when the lead came
-   into the CRM; a Deal or Customer step just its date. The records' names are the step's tooltip. */
-const recordDateOf = (r) => { const d = new Date((r && (r.createdAt || r.created)) || NaN); return isNaN(d) ? null : d; };
-const fmtJourneyDate = (d) => d ? d.toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'}) : '';
+   A step is its label only — Lead, Deal, "Deals (2)" — no names or dates; the records' names are
+   its tooltip. It starts small (Mohsin, 2026-11-19): only the record's own step, with "History"
+   on its left when there are records before it (a deal's lead; a customer's lead and deal) and
+   "Next" on its right when there are records after it (a lead's deals and customers; a deal's
+   customers) — neither when there are none. Each opens only its side, with arrows between the
+   steps, and a close icon folds it again (back to the record's own activity if a step it hid was
+   picked). Every record starts folded. */
 function RecordJourney({hub, object, record, active, onSelect}){
   const assoc = associatedRecords(hub, object, record);
-  const objs = ACTIVITY_FEED_OBJECTS.filter(workspaceHasType);
-  const recsOf = (o) => o === object ? [record] : (assoc[o] || []);
-  const steps = objs.map(o => {
-    const recs = recsOf(o), landed = recs.map(recordDateOf).filter(Boolean).sort((a, b) => a - b)[0] || null;
-    return {o, recs, landed, label: recs.length > 1 ? `${typePlural(o, o.charAt(0).toUpperCase() + o.slice(1))} (${recs.length})` : HUB_NOUN[o]};
+  const steps = ACTIVITY_FEED_OBJECTS.filter(workspaceHasType).map(o => {
+    const recs = o === object ? [record] : (assoc[o] || []);
+    return {o, recs, label: recs.length > 1 ? `${typePlural(o, o.charAt(0).toUpperCase() + o.slice(1))} (${recs.length})` : HUB_NOUN[o]};
   });
+  const at = Math.max(0, steps.findIndex(x => x.o === object));
+  const before = steps.slice(0, at).filter(x => x.recs.length), after = steps.slice(at + 1).filter(x => x.recs.length);
+  const [open, setOpen] = React.useState({before:false, after:false});
+  React.useEffect(() => { setOpen({before:false, after:false}); }, [object, record && record.id]);
+  const fold = (side) => { setOpen(o => ({...o, [side]:false}));
+    if((side === 'before' ? before : after).some(x => x.o === active)) onSelect(object); };
+  const chip = (x) => { const on = x.o === active;
+    return <button key={x.o} type="button" role="tab" aria-selected={on} onClick={()=>onSelect(x.o)} title={x.recs.map(r => r.name).join(', ')}
+      style={{height:34, padding:'0 14px', borderRadius:10, fontFamily:'inherit', fontSize:13, fontWeight:600, color:T.attioText, cursor:'pointer', whiteSpace:'nowrap',
+        border:`1px solid ${on ? T.black : T.borderStrong}`, background: on ? '#F4F5F7' : '#fff', flexShrink:0}}>{x.label}</button>; };
+  const arrow = (k) => <span key={`a-${k}`} aria-hidden="true" style={{display:'flex', flexShrink:0}}><Icon name="arrowRight" size={14} color={T.gray600}/></span>;
+  const textBtn = {display:'inline-flex', alignItems:'center', gap:6, border:'none', background:'transparent', padding:'6px 2px', cursor:'pointer',
+    fontFamily:'inherit', fontSize:13, color:T.gray600, whiteSpace:'nowrap', flexShrink:0};
+  const closer = (side) => <button key={`x-${side}`} type="button" onClick={()=>fold(side)} title={side === 'before' ? 'Hide History' : 'Hide Next'}
+    aria-label={side === 'before' ? 'Hide history' : 'Hide next'} style={{...textBtn, padding:4}}><Icon name="close" size={12} color={T.gray600}/></button>;
   return (
-    <div role="tablist" aria-label="Record journey" style={{display:'flex', alignItems:'stretch', gap:6, padding:'12px 16px 0', overflowX:'auto'}}>
-      {steps.map((s, i) => { const on = s.o === active, reached = s.recs.length > 0;
-        return (
-          <React.Fragment key={s.o}>
-            {i > 0 && <span aria-hidden="true" style={{display:'flex', alignItems:'center', flexShrink:0, opacity: reached ? 1 : .45}}><Icon name="arrowRight" size={14} color={T.gray600}/></span>}
-            <button type="button" role="tab" aria-selected={on} disabled={!reached} onClick={()=>reached && onSelect(s.o)}
-              title={reached ? s.recs.map(r => r.name).join(', ') : undefined}
-              style={{flex:'1 1 0', minWidth:0, textAlign:'left', padding:'8px 12px', borderRadius:10, fontFamily:'inherit',
-                border:`1px solid ${on ? T.black : T.borderStrong}`, background: on ? '#F4F5F7' : '#fff', opacity: reached ? 1 : .45,
-                cursor: reached ? 'pointer' : 'default', display:'flex', flexDirection:'column', gap:4}}>
-              <span style={{fontSize:11, fontWeight:600, letterSpacing:.4, textTransform:'uppercase', color:T.attioMuted}}>{s.label}</span>
-              <span style={{fontSize:13, color:T.attioText, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', maxWidth:'100%'}}>{s.landed ? `${s.o === 'contacts' ? 'Landed ' : ''}${fmtJourneyDate(s.landed)}` : '—'}</span>
-            </button>
-          </React.Fragment>
-        ); })}
+    <div role="tablist" aria-label="Record journey" style={{display:'flex', alignItems:'center', flexWrap:'wrap', gap:8, padding:'12px 16px 0'}}>
+      {before.length > 0 && (open.before
+        ? <>{closer('before')}{before.map(x => <React.Fragment key={x.o}>{chip(x)}{arrow(x.o)}</React.Fragment>)}</>
+        : <button type="button" onClick={()=>setOpen(o => ({...o, before:true}))} className={LINK_CLASS} style={textBtn}><Icon name="clock" size={13} color={T.gray600}/>History</button>)}
+      {chip(steps[at])}
+      {after.length > 0 && (open.after
+        ? <>{after.map(x => <React.Fragment key={x.o}>{arrow(x.o)}{chip(x)}</React.Fragment>)}{closer('after')}</>
+        : <button type="button" onClick={()=>setOpen(o => ({...o, after:true}))} className={LINK_CLASS} style={textBtn}>Next<Icon name="arrowRight" size={13} color={T.gray600}/></button>)}
     </div>
   );
 }
@@ -196,13 +205,13 @@ function ActivityViewsArea({tabId, store, sources, schema, controls, viewSwitch,
             first level as the pills, the record feeds as the second row. */}
         {/* The toolbar's own top padding stands in for the header's gap, as under Highlights. */}
         {/* Overview: the search in the title's place ("Search Activity"), Filters beside the record pills (one toolbar row). */}
-        {heading && <div style={{padding:'16px 16px 0'}}><ToolbarSearch search={st.search} onSearch={(v)=>patch({search:v})} width={280} placeholder={searchLabel}/></div>}
+        {heading && !ra && <div style={{padding:'16px 16px 0'}}><ToolbarSearch search={st.search} onSearch={(v)=>patch({search:v})} width={280} placeholder={searchLabel}/></div>}
         {primary && primary.tabs && <PrimaryTabs inset="settings" items={primary.views} active={level} onSelect={setLevel}/>}
         {/* On a record: its journey in place of the feed pills (2026-11-19). */}
         {ra && <RecordJourney hub={hub} object={ownObject} record={ra.record} active={feedId} onSelect={setFeed}/>}
         <RecordToolbar inset="settings" views={primary && !primary.tabs ? primary.views : ra ? [] : feeds} activeViewId={primary && !primary.tabs ? level : feedId}
-          onSelectView={primary && !primary.tabs ? setLevel : setFeed} oneRow={!!heading} searchPlaceholder={searchLabel}
-          controls={<div style={{display:'flex', alignItems:'center', gap:8}}>{viewSwitch}{ra && !own ? <JourneyGoTo hub={hub} object={feedId} records={associatedRecords(hub, ownObject, ra.record)[feedId] || []}/> : controls}</div>}
+          onSelectView={primary && !primary.tabs ? setLevel : setFeed} oneRow={!!heading || !!ra} searchInRow={!!ra} searchPlaceholder={searchLabel}
+          controls={<div style={{display:'flex', alignItems:'center', gap:12}}>{viewSwitch}{ra && !own && <JourneyGoTo hub={hub} object={feedId} records={associatedRecords(hub, ownObject, ra.record)[feedId] || []}/>}{controls}</div>}
           search={st.search} onSearch={(v)=>patch({search:v})}
           filters={st.filters} setFilters={(f)=>patch({filters:typeof f === 'function' ? f(st.filters) : f})}
           appliedFilterCount={countAppliedFilters(st.filters, schema.filterProps)}/>
