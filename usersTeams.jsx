@@ -152,7 +152,7 @@ const ADMIN_RECORD_OBJECTS = ['contacts', 'deals', 'customers'];
    the record is removed (it stays after the record is reassigned to someone else). All <records>
    needs no Permission Life (`life` null). */
 const permissionObject = (key, one, many) => ({key, get tab(){ return typePlural(key, many); }, get noun(){ return typeSingular(key, one); }, get plural(){ return typePlural(key, many); }});
-const PERMISSION_OBJECTS = [permissionObject('contacts', 'Contact', 'Contacts'), permissionObject('deals', 'Deal', 'Deals'), permissionObject('customers', 'Customer', 'Customers')];
+const PERMISSION_OBJECTS = [permissionObject('contacts', 'Lead', 'Leads'), permissionObject('deals', 'Deal', 'Deals'), permissionObject('customers', 'Customer', 'Customers')];
 /* Tools, per Object: the activity a record carries. Each its own table — Create, View, Edit,
    Delete (Calls: Create only — placing a call; the calls themselves are Call Logs). Type and
    Permission Life go by the record the activity is on (its owner). The Tools switch turns every
@@ -462,7 +462,7 @@ const activityVisible = (object, record, a) => { const t = ACTIVITY_TOOL[a.type]
 const visibleActivities = (object, record, acts) => ACCESS.user ? (acts || []).filter(a => activityVisible(object, record, a)) : (acts || []);
 const activityCan = (object, record, a, action) => { const t = ACTIVITY_TOOL[a.type]; return !t || toolCan(object, record, t, action); };
 // Adding from an activity tab / quick action: the tool each creates.
-const ADD_TOOL = {'Note':'notes', 'Call':'calls', 'Log Call':'callLogs', 'Start Meeting':'meetings', 'Schedule Meeting':'meetings', 'Log Meeting':'meetings', 'Request Office Meeting':'meetings', 'Task':'tasks',
+const ADD_TOOL = {'Note':'notes', 'Call':'calls', 'Log Call':'callLogs', 'Start Meeting':'meetings', 'Schedule Meeting':'meetings', 'Log Meeting':'meetings', 'Request Office Meeting':'meetings', 'Support Note':'notes', 'Task':'tasks',
   call:'calls', task:'tasks', note:'notes', meeting:'meetings', 'Meeting':'meetings', 'Create task':'tasks', 'Add note':'notes', file:'files', quote:'quotes', document:'documents'};
 const canAdd = (object, record, what) => { const t = ADD_TOOL[what]; return !t || toolCan(object, record, t, 'create'); };
 
@@ -720,8 +720,9 @@ const USER_SELECT_VALUES = {status:USER_STATUSES, seat:USER_SEATS, preset:PERMIS
 const USER_COLUMNS = ['name', 'email', 'seat', 'team', 'preset', 'lastActive', 'created'];
 
 const isFilter = (prop, value) => ({nodes:[{id:`f-${prop}-${value}`, kind:'row', joinOp:'AND', prop, op:'is', value, value2:'', values:[]}]});
-// `columnWidths`: columns dragged to a width (2026-11-17), kept with the view.
-const VIEW_STATE = ['columnOrder', 'sort', 'search', 'filters', 'frozenLeft', 'frozenRight', 'actionsFrozen', 'rowsPerPage', 'viewMode', 'pipelineId', 'cardSettings', 'columnWidths'];
+// `columnWidths`: columns dragged to a width (2026-11-17), kept with the view. `mergedColumns`: the
+// view's merged columns (2026-11-18, Table Settings → Merge Columns; contacts.jsx), unset while it has none.
+const VIEW_STATE = ['columnOrder', 'sort', 'search', 'filters', 'frozenLeft', 'frozenRight', 'actionsFrozen', 'rowsPerPage', 'viewMode', 'pipelineId', 'cardSettings', 'columnWidths', 'mergedColumns'];
 const makeRecordView = (id, name, columns, opts = {}) => ({
   id, name, hidden:false, columnOrder:columns, frozenLeft:1, frozenRight:0, actionsFrozen:true, rowsPerPage:25,
   sort:null, viewMode:'table', search:'', filters:{nodes:[]}, ...opts,
@@ -780,7 +781,7 @@ function UsersTeamsSettings({data, setData}){
 /* `saveView:false` leaves out Save View (View Settings stays) — e.g. Settings → Pipelines. */
 /* `flushTop`: the page's top padding is cancelled too (a table that opens the page, with nothing
    above it), so the views row has the same space above and below. */
-function RecordViewsModule({schema, rows, defaultViews, columns, savedViews = true, saveView = true, viewCounts, actions, filterControls, overlay, initialFilters, initialViewId, focus, board, inset = 'settings', storeKey, flushTop, children}){
+function RecordViewsModule({schema, rows, defaultViews, columns, savedViews = true, saveView = true, viewCounts, actions, filterControls, overlay, initialFilters, initialViewId, focus, board, inset = 'settings', storeKey, flushTop, adaptSaved, children}){
   const makeDefault = (v, i) => makeRecordView(v.id, v.name, columns, {filters:v.filters || {nodes:[]}, sort:v.sort || null, isDefault:i === 0,
     ...(board ? {pipelineId:v.pipelineId || board.defaultPipelineId, ...(board.cardSettings ? {cardSettings:board.cardSettings.defaults()} : {})} : {})});
   /* A default view added later (`addOnce`, e.g. Quotes → Signed): views saved before it get it once
@@ -791,7 +792,8 @@ function RecordViewsModule({schema, rows, defaultViews, columns, savedViews = tr
     const seen = new Set([...list.map(v => v.id), ...((list[0] || {}).addedViews || [])]), add = once.filter(v => !seen.has(v.id));
     return add.length ? [...list.map((x, i) => i === 0 ? {...x, addedViews:[...(x.addedViews || []), ...add.map(v => v.id)]} : x), ...add.map(v => makeDefault(v, 1))] : list;
   };
-  const [views, setViews] = usePersistedState(storeKey || `views:${defaultViews[0].id}`, ()=>defaultViews.map(makeDefault), addLaterViews);
+  // `adaptSaved(list)`: the table's own one-time change to views saved before (Settings → Properties: Lead Properties).
+  const [views, setViews] = usePersistedState(storeKey || `views:${defaultViews[0].id}`, ()=>defaultViews.map(makeDefault), (list) => adaptSaved ? adaptSaved(addLaterViews(list)) : addLaterViews(list));
   const [activeViewId, setActiveViewId] = React.useState(initialViewId || defaultViews[0].id);
   const [deletingView, setDeletingView] = React.useState(null);   // a saved view asked to be deleted
   const activeView = views.find(v => v.id === activeViewId) || views[0];
@@ -836,7 +838,7 @@ function RecordViewsModule({schema, rows, defaultViews, columns, savedViews = tr
      (Table) the listed rows. */
   const viewInfo = {mode: board && st.viewMode === 'board' ? 'board' : 'table', pipelineId: board ? st.pipelineId || board.defaultPipelineId : null, rows:filtered};
   // Export (the second argument to `actions`): this view's rows and columns as CSV, named after the view.
-  const exportCsv = () => ({count:exportViewCsv({schema, rows:filtered, columnOrder:st.columnOrder, search:st.search, sort:st.sort, fileName:activeView.name}), name:activeView.name});
+  const exportCsv = () => ({count:exportViewCsv({schema, rows:filtered, columnOrder:st.columnOrder, search:st.search, sort:st.sort, fileName:activeView.name, mergedColumns:st.mergedColumns}), name:activeView.name});
 
   return (
     <RecordSchema.Provider value={{boards:!!board, selectable:true, ...schema}}>
@@ -844,7 +846,7 @@ function RecordViewsModule({schema, rows, defaultViews, columns, savedViews = tr
           padding is cancelled so the toolbar and grid run flush to the Settings navigation. */}
       <div style={{display:'flex', flexDirection:'column', position:'relative', flex:1, minHeight:0, ...(inset === 'settings' ? {margin:`${flushTop ? -12 : 0}px -16px -16px`} : {minWidth:0, overflow:'hidden'})}}>
         {/* The one record toolbar (contacts.jsx), as on Contacts. */}
-        <RecordToolbar inset={inset} views={visibleViews} activeViewId={activeViewId} onSelectView={setActiveViewId}
+        <RecordToolbar inset={inset} views={visibleViews} activeViewId={activeViewId} onSelectView={setActiveViewId} searchPlaceholder={recordSearchLabel(schema)}
           viewControls={savedViews && <>
             <ViewSettingsButton onClick={()=>setAllViewsOpen(true)}/>
             {saveView && <SaveViewMenu dirty={dirty} onSaveCopy={()=>setShowSaveAsCopy(true)} onSaveExisting={()=>setConfirmOverwrite(true)}/>}
@@ -861,7 +863,7 @@ function RecordViewsModule({schema, rows, defaultViews, columns, savedViews = tr
         {/* `overlay`: floats over the records, under the toolbar (e.g. Deals → Violations). */}
         <div style={{overflow:'hidden', flex:1, minHeight:0, display:'flex', flexDirection:'column', position:'relative'}}>
           {typeof overlay === 'function' ? overlay(viewInfo) : overlay}
-          {board && st.viewMode === 'board' ? board.render(filtered, {search:st.search, pipelineId:st.pipelineId, cardSettings:st.cardSettings}) : <ContactsDataGrid rows={filtered} resetKey={`${activeViewId}:${JSON.stringify(st.filters)}`} columnOrder={st.columnOrder} setColumnOrder={set('columnOrder')} columnWidths={st.columnWidths} setColumnWidths={set('columnWidths')} sort={st.sort} setSort={set('sort')} search={st.search}
+          {board && st.viewMode === 'board' ? board.render(filtered, {search:st.search, pipelineId:st.pipelineId, cardSettings:st.cardSettings}) : <ContactsDataGrid rows={filtered} resetKey={`${activeViewId}:${JSON.stringify(st.filters)}`} columnOrder={st.columnOrder} setColumnOrder={set('columnOrder')} mergedColumns={st.mergedColumns} onRenameMerged={(id, name)=>set('mergedColumns')(ms => (ms || []).map(m => m.id === id ? {...m, name} : m))} columnWidths={st.columnWidths} setColumnWidths={set('columnWidths')} sort={st.sort} setSort={set('sort')} search={st.search}
             frozenLeft={st.frozenLeft} frozenRight={st.frozenRight} actionsFrozen={st.actionsFrozen} rowsPerPage={st.rowsPerPage} onOpenContact={()=>{}}/>}
         </div>
       </div>
@@ -880,7 +882,7 @@ function RecordViewsModule({schema, rows, defaultViews, columns, savedViews = tr
           }}}
           // The chosen view's own table settings (the open view's as they stand).
           onOpenTableSettings={(id)=>{ const v = id === activeViewId ? st : (views.find(x => x.id === id) || st);
-            setTableSettingsDraft({columnOrder:v.columnOrder || st.columnOrder, frozenLeft:v.frozenLeft ?? 0, frozenRight:v.frozenRight ?? 0, actionsFrozen:v.actionsFrozen ?? true}); setActiveViewId(id); }}
+            setTableSettingsDraft({columnOrder:v.columnOrder || st.columnOrder, frozenLeft:v.frozenLeft ?? 0, frozenRight:v.frozenRight ?? 0, actionsFrozen:v.actionsFrozen ?? true, mergedColumns:v.mergedColumns || []}); setActiveViewId(id); }}
           onOpenCardSettings={(id)=>{
             if(!board || !board.cardSettings) return;
             const v = views.find(x => x.id === id);
@@ -898,7 +900,7 @@ function RecordViewsModule({schema, rows, defaultViews, columns, savedViews = tr
         </StModal> : null; })()}
       {tableSettingsDraft && (
         <TableSettingsModal draft={tableSettingsDraft} setDraft={setTableSettingsDraft} onClose={()=>setTableSettingsDraft(null)}
-          onApply={()=>{ setSt(x => ({...x, ...tableSettingsDraft})); setTableSettingsDraft(null); }}/>
+          onApply={()=>{ const {mergedColumns:mc, ...rest} = tableSettingsDraft; setSt(x => ({...x, ...rest, mergedColumns: mc && mc.length ? mc : undefined})); setTableSettingsDraft(null); }}/>
       )}
       {cardDraft && board && board.cardSettings && board.cardSettings.renderModal({draft:cardDraft, setDraft:setCardDraft,
         onClose:()=>setCardDraft(null), onApply:()=>{ set('cardSettings')(cardDraft); setCardDraft(null); }})}
@@ -1722,11 +1724,8 @@ function PermissionMatrixEditor({seat, perms, setPerms, readOnly}){
       {/* Left — categories; selecting one swaps the right-hand content. */}
       <div style={{width:200, flexShrink:0, borderRight:'1px solid #EFEFEF', padding:12, display:'flex', flexDirection:'column', gap:14}}>
         <span style={{fontSize:14, fontWeight:500, color:T.black}}>Permissions</span>
-        <div style={{position:'relative'}}>
-          <div style={{position:'absolute', left:12, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', display:'flex'}}><Icon name="search" size={14} color={T.gray600}/></div>
-          <input value={find} onChange={e=>setFind(e.target.value)} placeholder="Find or Ask"
-            style={{width:'100%', height:28, boxSizing:'border-box', padding:'0 10px 0 32px', fontSize:13, border:'1px solid #EFEFEF', borderRadius:8, background:'#FDFDFD', fontFamily:'inherit'}}/>
-        </div>
+        <ToolbarSearch search={find} onSearch={setFind} width="100%" placeholder="Search Permissions"
+          inputStyle={{height:28, boxSizing:'border-box', padding:'0 10px 0 30px', border:'1px solid #EFEFEF', background:'#FDFDFD'}}/>
         <div style={{display:'flex', flexDirection:'column', gap:6}}>
           {categories.map(c => (
             <div key={c} onClick={()=>{ setCategory(c); const t = (PERMISSION_TABS[c] || []).find(x => f && x.toLowerCase().includes(f)); if(t) setTabs(x => ({...x, [c]:t})); }}

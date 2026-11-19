@@ -313,7 +313,7 @@ function CallPanel({contact, onEnded, onClose, onRunProfile}){
                 <span style={{width:18, height:18, borderRadius:9999, background:T.black, display:'flex', alignItems:'center', justifyContent:'center'}}>
                   <Icon name="check" size={11} color="#fff"/>
                 </span>
-                Transcript saved to this contact’s activity
+                Transcript saved to this lead’s activity
               </span>
             ) : <span style={{color:T.attioMuted}}>No transcript was captured</span>
           )}

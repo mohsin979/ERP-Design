@@ -29,12 +29,12 @@
        BroadcastChannel; the server answers 409 to a save older than the one it has.
      A failed save (no server, storage full) is tried again until it goes through; the app says
        so (`hof-erp-save-failed`, then `hof-erp-save-ok`).
-   A form's inbox and a document's signing inbox take other pages' writes by design, so they're left out of this. */
+   A form's inbox, a document's signing inbox and a quote's view inbox take other pages' writes by design, so they're left out of this. */
 const DB = (() => {
   const ls = window.localStorage;
   const http = (method, url, body, async) => { const x = new XMLHttpRequest(); x.open(method, url, async); x.setRequestHeader('Content-Type', 'text/plain;charset=utf-8'); return [x, () => x.send(body == null ? null : body)]; };
   const TAB = Math.random().toString(36).slice(2);
-  const own = (k) => !/^(hof-erp-form-inbox|hof-erp-sign-inbox|meta:)/.test(k);
+  const own = (k) => !/^(hof-erp-form-inbox|hof-erp-sign-inbox|hof-erp-quote-views|meta:)/.test(k);
   const held = new Set();   // the keys this page read or wrote
   let stale = false, failing = false;
   const emit = (type) => { try { window.dispatchEvent(new Event(type)); } catch(e){} };

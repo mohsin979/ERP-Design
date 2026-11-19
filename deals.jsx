@@ -344,7 +344,7 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
   // A deal opens straight on its detail page (2026-11-17), not in the side panel first; the page can still be collapsed into the side panel and expanded again.
   const [detail, setDetail] = React.useState(null);   // {id, mode:'panel'|'full', tab?}
   // Deal side panel layout (View Settings from the deal's ⋯ menu) — one setting for every deal.
-  const [panelSettings, setPanelSettings] = usePersistedState('panel:deals', () => defaultDealPanelSettings(props));
+  const [panelSettings, setPanelSettings] = usePersistedState('panel:deals', () => defaultDealPanelSettings(props), quietPanelSettings);
   const [panelDraft, setPanelDraft] = React.useState(null);
   const [profileRun, setProfileRun] = React.useState(null);   // {contactId, dealId, templateIds, call}
   // Activity views on the deal's activity tabs (activityViews.jsx) — one set for every deal.
@@ -364,7 +364,7 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
   const toRow = (d) => dealRowOf(data, d);
   /* Filter by associated object → Contacts: every Contact filter property (Contacts' own list),
      read from the deal's contact — each row carries it. */
-  const contactAssoc = React.useMemo(()=>assocFilterSchema('Contacts', 'Contact', customContactSchema(objectFormProperties(data, 'contacts'))), [data.properties]);
+  const contactAssoc = React.useMemo(()=>assocFilterSchema('Contacts', typeSingular('contacts', 'Lead'), customContactSchema(objectFormProperties(data, 'contacts')), undefined, typePlural('contacts', 'Leads')), [data.properties, data.objects]);
   // A deal's contacts; the first is its person (Customer Profile, emails, calls).
   const contactsOfDeal = (d) => contactIdsOf(d).map(id => contacts.find(c => sameId(c.id, id))).filter(Boolean);
   // With the worked-out Deal properties: Associated Contact / Customer and Last Activity Date.
@@ -426,7 +426,7 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
       ids.forEach(id => onRecordDeleted && onRecordDeleted('deals', id));
       if(detail && ids.includes(detail.id)) setDetail(null);
     }});
-  const fullSchema = {...schema, recordObject:'deals', pipelineLabel:(id) => (pipelineOf(id) || pipelines[0] || {}).label || '',
+  const fullSchema = {...schema, mergeColumns:true, recordObject:'deals', pipelineLabel:(id) => (pipelineOf(id) || pipelines[0] || {}).label || '',
     // The name with the deal's workflow violations beside it.
     renderCell: (key, r) => key === 'name' ? <span data-deal-id={r.id} style={{display:'inline-flex', alignItems:'center', gap:8, minWidth:0, maxWidth:'100%'}}>
         <ContactName name={r.name} onOpen={()=>openDeal(r)} style={{fontSize:'inherit', fontWeight:500}}/><DealPromptMarker dealId={r.id}/></span>
@@ -475,7 +475,7 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
   // Edit deal: its Associated Contact(s), as many as the link allows.
   const editLinks = React.useMemo(() => form && form.mode === 'edit' && form.initial ? recordLinkFields(linkRecs, 'deals', form.initial, ['contacts']) : [], [form]);
   const association = [
-    ...(creatable.includes('contacts') ? [{object:'contacts', noun:'contact',
+    ...(creatable.includes('contacts') ? [{object:'contacts', noun:'lead',
       existing:contacts.filter(c => takesDeal('contacts', c)).map(c => recordOption(c)),
       pull:(id) => { const c = contacts.find(x => x.id === id) || {}; return {name:c.name || '', email:c.email || '', phone:c.phone || ''}; },
       fields:objectFormProperties(data, 'contacts').filter(p => p.onCreate),

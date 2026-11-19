@@ -141,7 +141,7 @@ function generateBusinessData({users, services, now = new Date(), takenNames = [
     const dealAt = created + between(1, 18) * BIZ_DAY;
     const hasDeal = dealAt < NOW - BIZ_DAY && chance(.5);
     if(!hasDeal){
-      contact.contactType = chance(.8) ? 'Subscriber' : 'Others';
+      contact.contactType = pick(['Assigned', 'Contacted', 'Contacted', 'Not Responded', 'Others']);
       contact.leadStatus = ageDays < 10 ? 'New' : 'Contacted';
       cActs.push({id:actId(`c${id}`), contactId:id, type:'email', at:new Date(atHour(created + BIZ_DAY)), source:'team', by:owner.name, direction:'sent', title:BIZ_SENT[0][0], body:BIZ_SENT[0][1]});
       if(chance(.5)) cActs.push({id:actId(`c${id}`), contactId:id, type:'call', at:new Date(atHour(created + between(2, 6) * BIZ_DAY)), source:'team', by:owner.name, direction:'outbound',
@@ -203,7 +203,7 @@ function generateBusinessData({users, services, now = new Date(), takenNames = [
       owner:owner.id, amount, currency:DEAL_CURRENCY, health: lost ? 'At Risk' : chance(.2) ? 'Needs Attention' : 'Healthy', created:stamp(dealAt), createdAt:dealAt,
       source:contact.source, closeDate:day(Math.max(closeDate, dealAt + BIZ_DAY)), actualCloseDate: closedAt ? stamp(closedAt) : '', stageEnteredAt, pipelineEnteredAt:dealAt};
     deals.push(deal);
-    contact.contactType = won ? (chance(.12) ? 'Evangelist' : 'Customer') : lost ? 'Others' : stage === 'postponed' ? 'Subscriber' : 'Opportunity';
+    contact.contactType = lost ? 'Others' : stage === 'postponed' ? 'Not Responded' : 'Opportunity';
     contact.leadStatus = 'Qualified';
 
     /* ── Activity along the way ── a consultation, calls every few days while it's live (at least

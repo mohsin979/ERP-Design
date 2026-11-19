@@ -3,7 +3,9 @@
    designer) plus this round's additions: Actions column (Delete only, type-to-confirm modal),
    Search + Filters (Filters is a UI stub only — no filter criteria defined), Export (the current
    view as CSV, exportViewCsv) + Table Settings buttons, and the All Views modal matching the new Figma reference
-   ("Claude Feeder - Contacts module all view modal", node 144:3152). */
+   ("Claude Feeder - Contacts module all view modal", node 144:3152).
+   Merge Columns (2026-11-18, Contacts / Deals / Customers): Table Settings → Merge Columns joins
+   2 to 3 properties into one column kept with the view (`mergedColumns`, see MERGE_PREFIX). */
 
 /* 30 sample rows — enough to actually exercise 25-per-page pagination (page 1 full, page 2
    with the remainder) rather than a single trivial page. */
@@ -127,13 +129,13 @@ const CONTACT_PROPERTIES = [
   /* Backs the Types of Contact pipeline used by the Board. It is an ordinary single-select
      property, so it is also selectable as a column and usable as a filter — that is the point
      of a property-based pipeline: the board and the table read the same field. */
-  {key:'contactType',   label:'Contact Type',       width:190},
+  {key:'contactType',   label:'Type of Lead',       width:190},
   {key:'jobTitle',      label:'Job Title',          width:190},
   {key:'company',       label:'Company Name',       width:200},
   {key:'industry',      label:'Industry',           width:170},
   {key:'source',        label:'Lead Source',        width:160},
   {key:'leadStatus',    label:'Lead Status',        width:150},
-  {key:'owner',         label:'Contact Owner',      width:170},
+  {key:'owner',         label:'Lead Owner',         width:170},
   {key:'ownerAssigned', label:'Owner Assignment Date', width:230},
   {key:'deals',         label:'Associated Deal',    width:200},
   {key:'customers',     label:'Associated Customer', width:200},
@@ -187,10 +189,10 @@ const FILTER_PROPS = [
   {key:'name',         label:'Name',               type:'text'},
   {key:'email',        label:'Email',              type:'text'},
   {key:'phone',        label:'Phone Number',       type:'text'},
-  {key:'owner',        label:'Contact Owner',      type:'text'},
+  {key:'owner',        label:'Lead Owner',         type:'text'},
   {key:'company',      label:'Primary Company',    type:'text'},
   {key:'lastActivity', label:'Last Activity Date', type:'date'},
-  {key:'contactType',  label:'Types of Contact',   type:'select'},
+  {key:'contactType',  label:'Type of Lead',       type:'select'},
   {key:'created',      label:'Create Date',        type:'date'},
 ];
 
@@ -249,7 +251,7 @@ const selectValues = (key, values = SELECT_VALUES) => values[key] || [];
    available width, so they run right up to Actions, which stays fixed at the far right; when they're wider than the
    space they keep their own widths and the table scrolls. */
 const CONTACTS_SCHEMA = {properties:CONTACT_PROPERTIES, filterProps:FILTER_PROPS, selectValues:SELECT_VALUES,
-  noun:'contact', searchKeys:['name', 'email'], boards:true, selectable:true, fillWidth:true, canCreateProperty:true};
+  noun:'lead', searchKeys:['name', 'email'], boards:true, selectable:true, fillWidth:true, canCreateProperty:true};
 const RecordSchema = React.createContext(null);
 const resolveRecordSchema = (sc) => {
   const byKey = (k) => sc.properties.find(p => p.key === k) || (sc.extendedObject ? extendedPropOf(k) : undefined);
@@ -257,14 +259,30 @@ const resolveRecordSchema = (sc) => {
 };
 const useRecordSchema = () => resolveRecordSchema(React.useContext(RecordSchema) || CONTACTS_SCHEMA);
 
+/* Merged columns (2026-11-18, Contacts / Deals / Customers — schema `mergeColumns`): Table Settings →
+   Merge Columns puts 2 to 3 properties in one column, kept with the view as `mergedColumns`
+   [{id, name, keys}] and listed in the column order as `merge:<id>`. The cell shows the values one
+   per line (an empty one a dash), and every row is tall enough for the most lines; the column moves,
+   freezes, resizes and is renamed (header ⋯ → Rename) like any other, but doesn't sort. A property
+   in a merged column has no column of its own. Export: one column, the values on separate lines. */
+const MERGE_PREFIX = 'merge:';
+const MERGE_MIN = 2, MERGE_MAX = 3;
+const isMergedKey = (k) => typeof k === 'string' && k.startsWith(MERGE_PREFIX);
+const mergedOf = (list, k) => isMergedKey(k) ? (list || []).find(m => MERGE_PREFIX + m.id === k) || null : null;
+// The properties a column order reads: its own columns and those inside its merged columns.
+const columnReadKeys = (columnOrder, mergedColumns) => columnOrder.flatMap(k => { const m = mergedOf(mergedColumns, k); return m ? m.keys : isMergedKey(k) ? [] : [k]; });
+// A merged column as a column: its name, as wide as its widest property.
+const mergedColumnOf = (m, byKey) => ({key:MERGE_PREFIX + m.id, label:m.name, merged:true, keys:m.keys,
+  width:Math.max(180, ...m.keys.map(k => (byKey(k) || {}).width || 170))});
+
 /* The grid's rows as the table lists them: Customer Profile / Accounting columns read onto the
    rows, then the search, then the sort (the table and Export share this). */
-function gridRowsOf(rows, {columnOrder, search, sort, searchKeys, ordered}){
-  const extKeys = columnOrder.filter(isExtendedKey);
+function gridRowsOf(rows, {columnOrder, search, sort, searchKeys, ordered, mergedColumns}){
+  const extKeys = columnReadKeys(columnOrder, mergedColumns).filter(isExtendedKey);
   const read = extKeys.length ? rows.map(r => ({...r, ...Object.fromEntries(extKeys.map(k => [k, extendedValue(k, r)]))})) : rows;
   const q = (search || '').trim().toLowerCase();
   const searched = !q ? read : read.filter(r => searchKeys.some(k => String(r[k] || '').toLowerCase().includes(q)));
-  if(!sort || ordered) return searched;
+  if(!sort || ordered || isMergedKey(sort.key)) return searched;
   const dir = sort.dir === 'asc' ? 1 : -1;
   // Numbers sort as numbers, dates by date (stored as "Sep 8, 2026", with or without a time); everything else as text.
   const time = (v) => v instanceof Date ? v.getTime() : typeof v === 'string' && /^([A-Z][a-z]{2} \d{1,2}, \d{4}|\d{4}-\d{2}-\d{2})/.test(v) ? Date.parse(v.replace(' · ', ' ')) : NaN;
@@ -277,10 +295,13 @@ function gridRowsOf(rows, {columnOrder, search, sort, searchKeys, ordered}){
 
 /* Export: the current view downloaded as CSV — its rows (filters, search and sort applied, every
    page) and its columns in their order, each cell as the table shows it. */
-function exportViewCsv({schema, rows, columnOrder, search, sort, fileName}){
+function exportViewCsv({schema, rows, columnOrder, search, sort, fileName, mergedColumns}){
   const sc = resolveRecordSchema(schema || CONTACTS_SCHEMA);
-  const list = gridRowsOf(rows, {columnOrder, search, sort, searchKeys:sc.searchKeys, ordered:sc.ordered});
+  const list = gridRowsOf(rows, {columnOrder, search, sort, searchKeys:sc.searchKeys, ordered:sc.ordered, mergedColumns});
+  const cols = columnOrder.filter(k => !isMergedKey(k) || mergedOf(mergedColumns, k));
   const text = (key, row) => {
+    const m = mergedOf(mergedColumns, key);
+    if(m) return m.keys.map(k => text(k, row)).filter(Boolean).join('\n');
     const cell = sc.renderCell ? sc.renderCell(key, row) : undefined;
     if(typeof cell === 'string' || typeof cell === 'number') return String(cell);
     if(isExtendedKey(key)) return extendedValueText(key, row) || '';
@@ -288,7 +309,8 @@ function exportViewCsv({schema, rows, columnOrder, search, sort, fileName}){
     return v || v === 0 ? String(v) : '';
   };
   const esc = (v) => /[",\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
-  const lines = [columnOrder.map(k => esc((sc.propByKey(k) || {}).label || k)), ...list.map(r => columnOrder.map(k => esc(text(k, r))))];
+  const label = (k) => { const m = mergedOf(mergedColumns, k); return m ? m.name : (sc.propByKey(k) || {}).label || k; };
+  const lines = [cols.map(k => esc(label(k))), ...list.map(r => cols.map(k => esc(text(k, r))))];
   const blob = new Blob(['\ufeff' + lines.map(l => l.join(',')).join('\r\n')], {type:'text/csv;charset=utf-8'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = `${fileName}.csv`;
@@ -918,7 +940,8 @@ function FilterModal({filters, setFilters, onClose}){
   </>);
 }
 
-function ThreeDotMenu({onMoveLeft, onMoveRight, onSortAsc, onSortDesc, canMove=true, visible=true, align='right'}){
+// `onRename` (a merged column): Rename in place of the two sorts — a merged column doesn't sort.
+function ThreeDotMenu({onMoveLeft, onMoveRight, onSortAsc, onSortDesc, onRename, canMove=true, visible=true, align='right'}){
   const [open, setOpen] = React.useState(false);
   const shown = visible || open;
   return (
@@ -933,8 +956,9 @@ function ThreeDotMenu({onMoveLeft, onMoveRight, onSortAsc, onSortDesc, canMove=t
       <MenuShell open={open} onClose={()=>setOpen(false)} anchorRight={align==='right'} width={168}>
         {canMove && <MenuItem label="Move Column Left" onClick={()=>{onMoveLeft(); setOpen(false);}}/>}
         {canMove && <MenuItem label="Move Column Right" onClick={()=>{onMoveRight(); setOpen(false);}}/>}
+        {onRename ? <MenuItem label="Rename" onClick={()=>{onRename(); setOpen(false);}}/> : <>
         <MenuItem label="Sort Ascending" onClick={()=>{onSortAsc(); setOpen(false);}}/>
-        <MenuItem label="Sort Descending" onClick={()=>{onSortDesc(); setOpen(false);}}/>
+        <MenuItem label="Sort Descending" onClick={()=>{onSortDesc(); setOpen(false);}}/></>}
       </MenuShell>
     </div>
   );
@@ -947,7 +971,7 @@ function ThreeDotMenu({onMoveLeft, onMoveRight, onSortAsc, onSortDesc, canMove=t
 /* `paid`: the record has payments recorded — it can't be deleted, so this says so, with Close only. */
 /* Delete a record (or several, BulkDeleteModal): typed "Delete" confirms. `paid`: it has payments
    recorded, so it can't be deleted — said so, with only Close. */
-function DeleteConfirmModal({contactName, note, noun = 'Contact', paid, onCancel, onConfirm}){
+function DeleteConfirmModal({contactName, note, noun = 'Lead', paid, onCancel, onConfirm}){
   const [value, setValue] = React.useState('');
   const canDelete = value === 'Delete';
   if(paid) return (
@@ -970,15 +994,20 @@ function DeleteConfirmModal({contactName, note, noun = 'Contact', paid, onCancel
 /* `columnWidths` / `setColumnWidths` (2026-11-17): widths set by dragging a column header's right
    border, by column key — kept with the view; a column without one keeps its own width (scaled to fill). */
 function ContactsDataGrid({rows, columnOrder, setColumnOrder, sort, setSort, search, actions, onOpenContact,
-                           frozenLeft=0, frozenRight=0, actionsFrozen=true, rowsPerPage=25, resetKey, columnWidths, setColumnWidths, loading}){
-  const {propByKey, colWidth:baseColWidth, renderCell, renderActions, noun, nounPlural, searchKeys, selectable, fillWidth, onRowReorder,
+                           frozenLeft=0, frozenRight=0, actionsFrozen=true, rowsPerPage=25, resetKey, columnWidths, setColumnWidths, loading,
+                           mergedColumns, onRenameMerged}){
+  const {propByKey:schemaPropByKey, colWidth:schemaColWidth, renderCell, renderActions, noun, nounPlural, searchKeys, selectable, fillWidth, onRowReorder,
          pinGutter = true, paginate = true, ordered = false, bulkActions, actionsWidth, recordObject} = useRecordSchema();
-  /* `recordObject` (Contacts, Deals, Customers — 2026-11-19): the name column starts with the record's
+  /* `recordObject` (Contacts, Deals, Customers — 2026-11-19): the name starts with the record's
      avatar (its Avatar property: photo, else first letter); the email and phone are blue links — a
      new email to the record, a call to it. */
   const hub = useRecordHub();
   // The Actions column: its usual width, or the schema's own (`actionsWidth`: a list with an action beside the ⋯ menu — Users).
   const ACTIONS_W = actionsWidth || ACTIONS_WIDTH;
+  // Merged columns read as columns of their own (`merge:<id>`); everything else as the schema has it.
+  const propByKey = (k) => { if(!isMergedKey(k)) return schemaPropByKey(k); const m = mergedOf(mergedColumns, k); return m ? mergedColumnOf(m, schemaPropByKey) : undefined; };
+  const baseColWidth = (k) => isMergedKey(k) ? ((propByKey(k) || {}).width || 180) : schemaColWidth(k);
+  const [renaming, setRenaming] = React.useState(null);   // {key, name} — a merged column's header being renamed
   const plural = nounPlural || `${noun}s`;
   /* `onRowReorder(fromId, toId)` (opt-in, e.g. pipeline stages): rows drag by the handle in the
      gutter, which takes the selection checkbox's place. `pinGutter:false` leaves the gutter
@@ -1093,8 +1122,12 @@ function ContactsDataGrid({rows, columnOrder, setColumnOrder, sort, setSort, sea
 
   // Customer Profile / Accounting columns read onto the rows (as numbers where they are — sorting
   // and search use them), then searched and sorted (gridRowsOf, shared with Export).
-  const extSig = columnOrder.filter(isExtendedKey).join('|');
-  const sortedRows = React.useMemo(() => gridRowsOf(rows, {columnOrder, search, sort, searchKeys, ordered}), [rows, search, sort, extSig]);
+  const extSig = columnReadKeys(columnOrder, mergedColumns).filter(isExtendedKey).join('|');
+  const sortedRows = React.useMemo(() => gridRowsOf(rows, {columnOrder, search, sort, searchKeys, ordered, mergedColumns}), [rows, search, sort, extSig]);
+  // With a merged column every row is tall enough for its most lines (20px a line).
+  const MERGE_LINE_H = 20;
+  const mergeLines = Math.max(0, ...displayOrder.map(k => { const c = propByKey(k); return c && c.merged ? c.keys.length : 0; }));
+  const ROW_H = mergeLines > 1 ? Math.max(T.attioRowH, mergeLines * MERGE_LINE_H + 12) : T.attioRowH;
 
   // Ticked rows that are gone (deleted, or filtered out of the table) aren't selected any more.
   React.useEffect(() => { setSelected(s => { if(!s.size) return s; const ids = new Set(sortedRows.map(r => r.id)); const n = new Set([...s].filter(id => ids.has(id))); return n.size === s.size ? s : n; }); }, [sortedRows]);
@@ -1169,6 +1202,22 @@ function ContactsDataGrid({rows, columnOrder, setColumnOrder, sort, setSort, sea
   const rightOffsetOf = (i) => (actionsFrozen ? ACTIONS_W : 0)
     + displayOrder.slice(i+1).reduce((s,k)=>s+colWidth(k), 0);
 
+  /* One property's value as its cell shows it (also each line of a merged column). Contact keeps
+     Attio's primary-record treatment wherever it sits: the same clickable name as the Board cards. */
+  const plainContent = (key, row) => renderCell && renderCell(key, row) !== undefined ? renderCell(key, row) : key === 'name' ? (
+    <ContactName name={row.name} onOpen={()=>onOpenContact(row)} style={{fontSize:'inherit', fontWeight:500}}/>
+  ) : isExtendedKey(key) ? (extendedValueText(key, row) || '—') : (dateShown(formatValue(row[key])) || (row[key] === 0 ? 0 : '—'));
+  const cellContent = (key, row) => {
+    const content = plainContent(key, row), own = renderCell && renderCell(key, row) !== undefined;
+    if(recordObject && key === 'name') return <span style={{display:'inline-flex', alignItems:'center', gap:8, minWidth:0, maxWidth:'100%', verticalAlign:'middle'}}><RecordAvatar name={row.name} photo={row.photo}/>{content}</span>;
+    if(recordObject && hub && !own && (key === 'email' || key === 'phone') && String(formatValue(row[key]) || '').trim())
+      return <button type="button" className={REACH_LINK_CLASS} title={key === 'email' ? 'Email' : 'Call'} onMouseDown={e=>e.stopPropagation()}
+        onClick={e=>{ e.stopPropagation(); key === 'email' ? hub.composeEmail({object:recordObject, id:row.id}) : hub.startCall({object:recordObject, id:row.id}); }}
+        style={{border:'none', background:'transparent', padding:0, font:'inherit', cursor:'pointer', maxWidth:'100%', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', textAlign:'left'}}>{content}</button>;
+    return content;
+  };
+  const cellEmpty = (key, row) => { const c = plainContent(key, row); return c === '—' || c == null || c === ''; };
+
   const cellFreeze = (i, isHeader) => {
     if(isFrozenLeft(i))  return {position:'sticky', left:leftOffsetOf(i),  zIndex:isHeader?5:2,
       background:T.headerBg, borderRight:`${i===frozenLeft-1?2:1}px solid ${i===frozenLeft-1?stickyBorderColor:T.attioLine}`};
@@ -1225,10 +1274,17 @@ function ContactsDataGrid({rows, columnOrder, setColumnOrder, sort, setSort, sea
                     style={{position:'absolute', top:0, right:-4, width:8, height:'100%', cursor:'col-resize', zIndex:2,
                       background: resizing && resizing.key === key ? T.attioBlue : 'transparent', backgroundClip:'content-box', padding:'0 3px', boxSizing:'border-box'}}/>}
                   <div style={{display:'flex', alignItems:'center', gap:12, justifyContent: moneyCol(key) ? 'flex-end' : 'flex-start'}}>
-                    <span title={col.extended ? extendedFullLabel(col) : undefined} style={{fontWeight:500, color:T.attioMuted, whiteSpace:'nowrap'}}>{col.label}{sortIndicator(key)}</span>
-                    {!ordered && <ThreeDotMenu visible={hoverCol===key} align={i===0 ? 'left' : 'right'}
+                    {renaming && renaming.key === key ? (
+                      <input autoFocus onFocus={e=>e.target.select()} value={renaming.name} aria-label="Column name" onMouseDown={e=>e.stopPropagation()}
+                        onChange={e=>setRenaming({key, name:e.target.value})}
+                        onBlur={()=>{ const n = renaming.name.trim(); if(n && n !== col.label && onRenameMerged) onRenameMerged(key.slice(MERGE_PREFIX.length), n); setRenaming(null); }}
+                        onKeyDown={e=>{ if(e.key === 'Enter') e.currentTarget.blur(); if(e.key === 'Escape'){ e.stopPropagation(); setRenaming(null); } }}
+                        style={{flex:1, minWidth:0, fontSize:14, fontWeight:500, fontFamily:'inherit', color:T.attioText, padding:'3px 6px', border:`1px solid ${T.attioBlue}`, borderRadius:6, outline:'none'}}/>
+                    ) : <span title={col.extended ? extendedFullLabel(col) : undefined} style={{fontWeight:500, color:T.attioMuted, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{col.label}{col.merged ? '' : sortIndicator(key)}</span>}
+                    {!ordered && !(renaming && renaming.key === key) && <ThreeDotMenu visible={hoverCol===key} align={i===0 ? 'left' : 'right'}
                       onMoveLeft={()=>moveCol(key,-1)} onMoveRight={()=>moveCol(key,1)}
-                      onSortAsc={()=>setSort({key, dir:'asc'})} onSortDesc={()=>setSort({key, dir:'desc'})}/>}
+                      onSortAsc={()=>setSort({key, dir:'asc'})} onSortDesc={()=>setSort({key, dir:'desc'})}
+                      onRename={col.merged && onRenameMerged ? ()=>setRenaming({key, name:col.label}) : undefined}/>}
                   </div>
                 </th>
               );
@@ -1253,7 +1309,7 @@ function ContactsDataGrid({rows, columnOrder, setColumnOrder, sort, setSort, sea
               style={onRowReorder && rowDrag.over === rowIdx ? {background:T.blueLight} : isFocusRow(row) ? {background:VIOLATION_TONE.bg, outline:`1px solid ${VIOLATION_TONE.color}`, outlineOffset:-1} : undefined}>
               {gutterOn && <td style={{
                 position: pinGutter ? 'sticky' : 'static', left:0, zIndex:3, background: pinGutter ? T.headerBg : 'transparent',
-                width:SELECT_GUTTER, minWidth:SELECT_GUTTER, height:T.attioRowH,
+                width:SELECT_GUTTER, minWidth:SELECT_GUTTER, height:ROW_H,
                 borderBottom:`1px solid ${T.attioLine}`, padding:'0 0 0 14px', cursor: onRowReorder ? 'grab' : undefined, ...focusBg(row),
               }}>
                 {onRowReorder
@@ -1261,38 +1317,31 @@ function ContactsDataGrid({rows, columnOrder, setColumnOrder, sort, setSort, sea
                   : <RowCheckbox checked={selected.has(row.id)} onChange={()=>toggleOne(row.id)}/>}
               </td>}
 
-              {displayOrder.map((key, i) => (
+              {displayOrder.map((key, i) => { const mc = propByKey(key), merged = !!(mc && mc.merged);
+                return (
                 <td key={key} style={{
-                  width:colWidth(key), minWidth:colWidth(key), height:T.attioRowH,
+                  width:colWidth(key), minWidth:colWidth(key), height:ROW_H,
                   borderBottom:`1px solid ${T.attioLine}`, borderRight:`1px solid ${T.attioLine}`,
-                  padding:'0 12px', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis',
+                  padding: merged ? '6px 12px' : '0 12px', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis',
                   ...(moneyCol(key) ? {textAlign:'right', fontVariantNumeric:'tabular-nums'} : {}),
-                  color: !row[key] ? T.attioFaint : (key==='email' || (recordObject && key==='phone') ? T.attioBlue : T.attioText),
+                  color: merged ? T.attioText : !row[key] ? T.attioFaint : (key==='email' || (recordObject && key==='phone') ? T.attioBlue : T.attioText),
                   background: draggingKey === key ? T.blueLight : 'transparent',
                   ...cellFreeze(i, false),
                   ...(draggingKey === key ? {background:T.blueLight} : {}),
                   ...focusBg(row),
                 }}>
-                  {(() => {
-                    const own = renderCell && renderCell(key, row) !== undefined;
-                    const content = own ? renderCell(key, row) : key === 'name' ? (
-                      /* Contact keeps Attio's primary-record treatment wherever it sits: the same clickable name as the Board cards; opens the Contact Detail panel. */
-                      <ContactName name={row.name} onOpen={()=>onOpenContact(row)} style={{fontSize:'inherit', fontWeight:500}}/>
-                    ) : isExtendedKey(key) ? (extendedValueText(key, row) || '—') : (dateShown(formatValue(row[key])) || (row[key] === 0 ? 0 : '—'));
-                    if(recordObject && key === 'name') return <span style={{display:'inline-flex', alignItems:'center', gap:8, minWidth:0, maxWidth:'100%', verticalAlign:'middle'}}><RecordAvatar name={row.name} photo={row.photo}/>{content}</span>;
-                    if(recordObject && hub && !own && (key === 'email' || key === 'phone') && String(formatValue(row[key]) || '').trim())
-                      return <button type="button" className={REACH_LINK_CLASS} title={key === 'email' ? 'Email' : 'Call'} onMouseDown={e=>e.stopPropagation()}
-                        onClick={e=>{ e.stopPropagation(); key === 'email' ? hub.composeEmail({object:recordObject, id:row.id}) : hub.startCall({object:recordObject, id:row.id}); }}
-                        style={{border:'none', background:'transparent', padding:0, font:'inherit', cursor:'pointer', maxWidth:'100%', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', textAlign:'left'}}>{content}</button>;
-                    return content;
-                  })()}
+                  {/* A merged column: its properties' values, one per line (an empty one a dash). */}
+                  {merged ? mc.keys.map(k => { const empty = cellEmpty(k, row);
+                    return <div key={k} style={{height:MERGE_LINE_H, lineHeight:`${MERGE_LINE_H}px`, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap',
+                      ...(moneyCol(k) ? {textAlign:'right', fontVariantNumeric:'tabular-nums'} : {}),
+                      color: empty ? T.attioFaint : (k==='email' || (recordObject && k==='phone') ? T.attioBlue : T.attioText)}}>{cellContent(k, row)}</div>; }) : cellContent(key, row)}
                 </td>
-              ))}
+              ); })}
 
               <td style={{
                 position: actionsFrozen ? 'sticky' : 'static', right:0,
                 zIndex: actionsFrozen ? 2 : 1, background: actionsFrozen ? T.headerBg : '#fff',
-                width:ACTIONS_W, minWidth:ACTIONS_W, height:T.attioRowH,
+                width:ACTIONS_W, minWidth:ACTIONS_W, height:ROW_H,
                 borderBottom:`1px solid ${T.attioLine}`,
                 borderLeft: actionsFrozen && frozenRight===0
                   ? `2px solid ${stickyBorderColor}` : `1px solid ${T.attioLine}`,
@@ -1328,7 +1377,7 @@ function ContactsDataGrid({rows, columnOrder, setColumnOrder, sort, setSort, sea
    page when none matches), its list at least 120px wide (2026-11-19). */
 /* `selectedCount` renders at the bottom-left of this bar — the selection readout lives here
    rather than in a banner above the grid, so selecting rows never shifts the table down. */
-function Pagination({page, totalPages, onChange, totalRows, selectedCount=0, noun='contact', nounPlural, bulk}){
+function Pagination({page, totalPages, onChange, totalRows, selectedCount=0, noun='lead', nounPlural, bulk}){
   if (totalRows === 0) return null;
   const pages = Array.from({length:totalPages}, (_, i) => ({value:i + 1, label:String(i + 1)}));
   const btnStyle = (active) => ({
@@ -1410,8 +1459,16 @@ function SaveAsCopyModal({defaultName, onCancel, onConfirm}){
    are frozen). Counts make non-contiguous freezing unrepresentable, so the rule "frozen columns
    stay contiguous from their side" holds by construction rather than by validation — the UI then
    only offers Freeze on the column adjacent to a frozen block, and Unfreeze on its edge. */
+/* Merge Columns (schema `mergeColumns`: Contacts, Deals, Customers): the footer's left button opens
+   MergeColumnsModal over this one; a merged column is a row here like any column, with an edit
+   icon that opens it again; removing it unmerges it. Its properties aren't offered on their own
+   (greyed, with the merged column's name) while merged. */
 function TableSettingsModal({draft, setDraft, onApply, onClose}){
-  const {properties, propByKey, canCreateProperty, extendedObject} = useRecordSchema();
+  const {properties, propByKey:schemaPropByKey, canCreateProperty, extendedObject, mergeColumns} = useRecordSchema();
+  const mergedColumns = draft.mergedColumns || [];
+  const propByKey = (k) => { const m = mergedOf(mergedColumns, k); return m ? mergedColumnOf(m, schemaPropByKey) : schemaPropByKey(k); };
+  const mergedHolding = (k) => mergedColumns.find(m => m.keys.includes(k)) || null;
+  const [merging, setMerging] = React.useState(null);   // {} a new merged column | a merged column being edited
   useEscapeClose(onClose);
   const [query, setQuery] = React.useState('');
   const dragIdx = React.useRef(null);
@@ -1432,6 +1489,8 @@ function TableSettingsModal({draft, setDraft, onApply, onClose}){
         // a removed column must not leave a frozen block counting something that is gone
         frozenLeft:  i < frozenLeft  ? frozenLeft - 1  : frozenLeft,
         frozenRight: i > lastIdx - frozenRight ? frozenRight - 1 : frozenRight,
+        // a merged column taken out is unmerged: its properties are offered again
+        ...(isMergedKey(key) ? {mergedColumns: mergedColumns.filter(m => MERGE_PREFIX + m.id !== key)} : {}),
       });
     } else {
       // new columns land in the scrollable middle, just before any right-frozen block
@@ -1450,6 +1509,20 @@ function TableSettingsModal({draft, setDraft, onApply, onClose}){
     set({columnOrder: next});
   };
 
+  /* Saving a merged column: its properties' own columns leave the table; a new one takes the place
+     of the first of them (keeping its frozen side), or lands in the scrollable middle. */
+  const saveMerged = ({id, name, keys}) => {
+    const mid = id || uid('m'), mkey = MERGE_PREFIX + mid;
+    const tagged = columnOrder.map((k, i) => ({k, side: i < frozenLeft ? 'L' : i > lastIdx - frozenRight ? 'R' : 'M'}));
+    let placed = columnOrder.includes(mkey);
+    const out = [];
+    tagged.forEach(t => { if(!keys.includes(t.k)) return out.push(t); if(!placed){ out.push({k:mkey, side:t.side}); placed = true; } });
+    if(!placed){ const r = out.findIndex(t => t.side === 'R'); out.splice(r < 0 ? out.length : r, 0, {k:mkey, side:'M'}); }
+    set({columnOrder: out.map(t => t.k), frozenLeft: out.filter(t => t.side === 'L').length, frozenRight: out.filter(t => t.side === 'R').length,
+      mergedColumns: id ? mergedColumns.map(m => m.id === id ? {...m, name, keys} : m) : [...mergedColumns, {id:mid, name, keys}]});
+    setMerging(null);
+  };
+
   const freezeLeftAt  = (i) => set({frozenLeft: i+1});
   const freezeRightAt = (i) => set({frozenRight: lastIdx - i + 1});
   const unfreezeLeft  = () => set({frozenLeft: frozenLeft-1});
@@ -1457,6 +1530,17 @@ function TableSettingsModal({draft, setDraft, onApply, onClose}){
 
   const available = properties.filter(p =>
     p.label.toLowerCase().includes(query.trim().toLowerCase()));
+
+  // A property to tick; one in a merged column is greyed, with that column's name.
+  const propertyItem = (key, label) => { const m = mergedHolding(key);
+    return (
+      <div key={key} onClick={m ? undefined : ()=>toggleProperty(key)} aria-disabled={!!m || undefined}
+        style={{display:'flex', alignItems:'center', gap:10, padding:'7px 6px', borderRadius:6, cursor: m ? 'default' : 'pointer', fontSize:13, color: m ? T.gray400 : T.attioText}}>
+        <span style={{display:'flex', opacity: m ? .45 : 1, pointerEvents: m ? 'none' : undefined}}><RowCheckbox checked={!!m || columnOrder.includes(key)} onChange={()=>toggleProperty(key)}/></span>
+        <span style={{flex:1, minWidth:0}}>{label}</span>
+        {m && <span style={{fontSize:11.5, color:T.gray400, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', maxWidth:120}}>{m.name}</span>}
+      </div>
+    ); };
 
   const rowBox = {
     display:'flex', alignItems:'center', gap:10, padding:'8px 10px',
@@ -1498,21 +1582,9 @@ function TableSettingsModal({draft, setDraft, onApply, onClose}){
               </button>}
             </div>
             <div style={{flex:1, overflowY:'auto', padding:'0 16px 16px', display:'flex', flexDirection:'column', gap:2}}>
-              {available.map(p => (
-                <div key={p.key} onClick={()=>toggleProperty(p.key)}
-                  style={{display:'flex', alignItems:'center', gap:10, padding:'7px 6px', borderRadius:6, cursor:'pointer', fontSize:13, color:T.attioText}}>
-                  <RowCheckbox checked={columnOrder.includes(p.key)} onChange={()=>toggleProperty(p.key)}/>
-                  <span>{p.label}</span>
-                </div>
-              ))}
+              {available.map(p => propertyItem(p.key, p.label))}
               {/* Customer Profile Properties and Accounting Properties, each a group to open. */}
-              {extendedObject && <ExtendedPropertyGroups query={query} renderItem={(it) => (
-                <div key={it.key} onClick={()=>toggleProperty(it.key)}
-                  style={{display:'flex', alignItems:'center', gap:10, padding:'7px 6px', borderRadius:6, cursor:'pointer', fontSize:13, color:T.attioText}}>
-                  <RowCheckbox checked={columnOrder.includes(it.key)} onChange={()=>toggleProperty(it.key)}/>
-                  <span>{it.label}</span>
-                </div>
-              )}/>}
+              {extendedObject && <ExtendedPropertyGroups query={query} renderItem={(it) => propertyItem(it.key, it.label)}/>}
               {available.length === 0 && !(extendedObject && query.trim() && extendedItems().some(it => [it.label, it.group].some(x => x && x.toLowerCase().includes(query.trim().toLowerCase())))) && (
                 <div style={{fontSize:12.5, color:T.gray400, padding:'8px 6px'}}>No properties match "{query}"</div>
               )}
@@ -1573,6 +1645,7 @@ function TableSettingsModal({draft, setDraft, onApply, onClose}){
                       {canFreezeLeft && <button title="Freeze to the left" onClick={()=>freezeLeftAt(i)} style={freezeBtn}><Icon name="freeze" size={14} color={T.gray600}/></button>}
                       {canFreezeRight && <button title="Freeze to the right" onClick={()=>freezeRightAt(i)} style={freezeBtn}><Icon name="freeze" size={14} color={T.gray600}/></button>}
                       {canUnfreeze && <button title="Unfreeze" onClick={fl ? unfreezeLeft : unfreezeRight} style={{...freezeBtn, borderColor:T.attioBlue}}><Icon name="unfreeze" size={14} color={T.attioBlue}/></button>}
+                      {p && p.merged && <button title="Edit merged column" onClick={()=>setMerging(mergedOf(mergedColumns, key))} style={freezeBtn}><Icon name="edit" size={14} color={T.gray600}/></button>}
                       <button title="Remove column" onClick={()=>toggleProperty(key)}
                         style={{border:'none', background:'transparent', cursor:'pointer', display:'flex', color:T.gray400}}>
                         <Icon name="close" size={14} color={T.gray400}/>
@@ -1602,11 +1675,87 @@ function TableSettingsModal({draft, setDraft, onApply, onClose}){
         </div>
 
         <div style={{display:'flex', alignItems:'center', justifyContent:'flex-end', gap:8, padding:'14px 20px', borderTop:`1px solid ${T.border}`}}>
+          {mergeColumns && <div style={{marginRight:'auto'}}><StSecondary label="Merge Columns" onClick={()=>setMerging({})}/></div>}
           <StSecondary label="Cancel" onClick={onClose}/>
           <StCta label="Apply" onClick={onApply}/>
         </div>
       </div>
+      {merging && <MergeColumnsModal initial={merging} propByKey={schemaPropByKey}
+        taken={new Set(mergedColumns.filter(m => m.id !== merging.id).flatMap(m => m.keys))}
+        onClose={()=>setMerging(null)} onSave={(v)=>saveMerged({...v, id:merging.id})}/>}
     </div>
+  );
+}
+
+/* Merge Columns — over Table Settings: Select Properties (2 to 3, dragged into order; any property
+   Table Settings offers but one already in another merged column), then Name It. `initial`: {} for
+   a new merged column, or the one being edited {id, name, keys}. */
+function MergeColumnsModal({initial, propByKey, taken, onSave, onClose}){
+  const {properties, extendedObject} = useRecordSchema();
+  const editing = !!initial.id;
+  const [step, setStep] = React.useState(1);
+  const [keys, setKeys] = React.useState(initial.keys || []);
+  const [name, setName] = React.useState(initial.name || '');
+  const [query, setQuery] = React.useState('');
+  const dragIdx = React.useRef(null);
+  const [dragOver, setDragOver] = React.useState(null);
+  const full = keys.length >= MERGE_MAX;
+  const toggle = (k) => setKeys(ks => ks.includes(k) ? ks.filter(x => x !== k) : ks.length >= MERGE_MAX ? ks : [...ks, k]);
+  const move = (from, to) => { if(from == null || to == null || from === to) return; setKeys(ks => { const n = ks.slice(); const [m] = n.splice(from, 1); n.splice(to, 0, m); return n; }); };
+  const labelOf = (k) => { const p = propByKey(k); return p ? (p.extended ? extendedFullLabel(p) : p.label) : k; };
+  const q = query.trim().toLowerCase();
+  const available = properties.filter(p => !taken.has(p.key) && p.label.toLowerCase().includes(q));
+  const item = (key, label) => { const on = keys.includes(key), off = !on && full;
+    return (
+      <div key={key} onClick={off ? undefined : ()=>toggle(key)}
+        style={{display:'flex', alignItems:'center', gap:10, padding:'7px 6px', borderRadius:6, cursor: off ? 'default' : 'pointer', fontSize:13, color: off ? T.gray400 : T.attioText}}>
+        <span style={{display:'flex', opacity: off ? .45 : 1, pointerEvents: off ? 'none' : undefined}}><RowCheckbox checked={on} onChange={()=>toggle(key)}/></span>
+        <span>{label}</span>
+      </div>
+    ); };
+  const canName = name.trim().length > 0;
+  const submit = () => step === 1 ? (keys.length >= MERGE_MIN && setStep(2)) : (canName && onSave({name:name.trim(), keys}));
+  return (
+    <StModal zIndex={130} width={step === 1 ? 720 : 440} title={step === 1 ? 'Select Properties' : 'Name It'} onCancel={onClose}
+      primary={step === 1 ? 'Continue' : editing ? 'Save Changes' : 'Merge Columns'} canSubmit={step === 1 ? keys.length >= MERGE_MIN : canName} onSubmit={submit}
+      textAction={step === 2 ? {label:'Back', onClick:()=>setStep(1)} : undefined}>
+      {step === 1 ? (
+        <div style={{display:'flex', margin:'-18px -20px', height:'min(420px, 60vh)'}}>
+          <div style={{width:340, borderRight:`1px solid ${T.border}`, display:'flex', flexDirection:'column', minHeight:0}}>
+            <div style={{padding:'14px 16px'}}>
+              <div style={{position:'relative'}}>
+                <div style={{position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', display:'flex'}}><Icon name="search" size={13} color={T.gray400}/></div>
+                <input autoFocus value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search Properties"
+                  style={{width:'100%', padding:'8px 10px 8px 30px', fontSize:13, fontFamily:'inherit', border:`1px solid ${T.borderStrong}`, borderRadius:8}}/>
+              </div>
+            </div>
+            <div style={{flex:1, overflowY:'auto', padding:'0 16px 16px', display:'flex', flexDirection:'column', gap:2}}>
+              {available.map(p => item(p.key, p.label))}
+              {extendedObject && <ExtendedPropertyGroups query={query} keep={(it) => !taken.has(it.key)} renderItem={(it) => item(it.key, it.label)}/>}
+            </div>
+          </div>
+          <div style={{flex:1, display:'flex', flexDirection:'column', minHeight:0}}>
+            <div style={{padding:'14px 20px 8px', fontSize:11.5, fontWeight:600, letterSpacing:.4, color:T.gray400}}>SELECTED PROPERTIES ({keys.length} of {MERGE_MAX})</div>
+            <div style={{flex:1, overflowY:'auto', padding:'0 20px 16px', display:'flex', flexDirection:'column', gap:6}}>
+              {keys.map((k, i) => (
+                <div key={k} draggable onDragStart={()=>dragIdx.current = i} onDragOver={(e)=>{ e.preventDefault(); setDragOver(i); }} onDragLeave={()=>setDragOver(null)}
+                  onDrop={()=>{ move(dragIdx.current, i); dragIdx.current = null; setDragOver(null); }}
+                  style={{display:'flex', alignItems:'center', gap:10, padding:'8px 10px', border:`1px solid ${T.borderStrong}`, borderRadius:8, background:'#fff', fontSize:13, cursor:'grab',
+                    outline: dragOver === i ? `2px solid ${T.attioBlue}` : 'none', outlineOffset:-2}}>
+                  <Icon name="dragHandle" size={15} color={T.gray400}/>
+                  <span style={{flex:1, minWidth:0, color:T.attioText}}>{labelOf(k)}</span>
+                  <button title="Remove" onClick={()=>toggle(k)} style={{border:'none', background:'transparent', cursor:'pointer', display:'flex'}}><Icon name="close" size={14} color={T.gray400}/></button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div><label style={fieldLabel}>Column Name</label>
+          <input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="Enter a column name"
+            onKeyDown={e=>{ if(e.key === 'Enter') submit(); }} style={fieldInput}/></div>
+      )}
+    </StModal>
   );
 }
 
@@ -1773,10 +1922,75 @@ const viewPillStyle = (isActive) => ({
   padding:'6px 12px', borderRadius:8, fontWeight: isActive ? 600 : 500,
   color: isActive ? '#fff' : T.gray800, flexShrink:0, fontFamily:'inherit',
 });
-/* `filterControls`: on the far right of the filters row (e.g. Merge Cases, Workflow Violations). */
-function RecordToolbar({inset = 'page', views, activeViewId, onSelectView, viewControls, controls, search, onSearch, filters, setFilters, appliedFilterCount, filterControls}){
+/* A list's own search (2026-11-18): named for what it searches — "Search Contacts",
+   "Search Calls", "Search Activity" — and, while it's focused, a dropdown with Ask Spring (what
+   Spring does with it isn't defined yet: it opens Spring's placeholder panel). The header's
+   Find or Ask is the global search and stays as it is. Also on its own (Overview → Activity). */
+const recordSearchLabel = (schema) => {
+  const noun = (schema && schema.noun) || 'record', crm = {lead:'contacts', contact:'contacts', deal:'deals', customer:'customers'}[noun];
+  const many = crm ? typePlural(crm, `${noun}s`) : (schema && schema.nounPlural) || `${noun}s`;
+  return `Search ${String(many).replace(/\b\w/g, c => c.toUpperCase())}`;
+};
+function ToolbarSearch({search, onSearch, width = 200, placeholder = 'Search', inputStyle}){
+  const [focused, setFocused] = React.useState(false);
+  const [spring, setSpring] = React.useState(false);
+  return (
+    // The field's own width, so the Ask Spring dropdown matches it.
+    <div style={{position:'relative', width, maxWidth:'100%', flexShrink:0}}>
+      <div style={{position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', display:'flex'}}><Icon name="search" size={13} color={T.gray400}/></div>
+      <input value={search} onChange={e=>onSearch(e.target.value)} placeholder={placeholder} aria-label={placeholder}
+        onFocus={()=>setFocused(true)} onBlur={()=>setFocused(false)}
+        style={{padding:'7px 10px 7px 30px', fontSize:13, border:`1px solid ${T.borderStrong}`, borderRadius:8, width:'100%', fontFamily:'inherit', ...(inputStyle || {})}}/>
+      {/* Pressing in the dropdown keeps the field focused, so the click lands. */}
+      {focused && (
+        <div onMouseDown={e=>e.preventDefault()} style={{position:'absolute', top:'calc(100% + 4px)', left:0, width:'100%', zIndex:60,
+          background:'#fff', border:`1px solid ${T.borderStrong}`, borderRadius:8, boxShadow:'0 8px 24px rgba(16,24,40,.10)', padding:4}}>
+          <MenuItem icon={<img src="assets/brand/spring-logo.svg" alt="" width={20} height={10} style={{display:'block'}}/>} label="Ask Spring"
+            onClick={()=>{ setSpring(true); document.activeElement && document.activeElement.blur(); }}/>
+        </div>
+      )}
+      {spring && <StubPanel title="Spring" zIndex={130} onClose={()=>setSpring(false)}/>}
+    </div>
+  );
+}
+/* `filterControls`: on the far right of the filters row (e.g. Merge Cases, Workflow Violations).
+   `oneRow` (Overview → Activity, 2026-11-18): no search row — the search sits beside the
+   section's title (ToolbarSearch) and Filters right after the view pills. */
+function RecordToolbar({inset = 'page', views, activeViewId, onSelectView, viewControls, controls, search, onSearch, filters, setFilters, appliedFilterCount, filterControls, oneRow = false, searchPlaceholder}){
   const [showFilters, setShowFilters] = React.useState(false);
   const pad = TOOLBAR_INSETS[inset] || TOOLBAR_INSETS.page;
+  const filterButton = (<>
+      {/* The modal opens where the button is, so it is anchored inside this wrapper. */}
+      <div style={{position:'relative', flexShrink:0}}>
+        <button onClick={()=>setShowFilters(o=>!o)} style={{...toolbarButton,
+          border:`1px solid ${appliedFilterCount ? T.attioBlue : T.borderStrong}`,
+          background: appliedFilterCount ? T.blueLight : '#fff',
+          color: appliedFilterCount ? T.attioBlue : T.gray800,
+        }}>
+          <Icon name="filter" size={13} color={appliedFilterCount ? T.attioBlue : T.gray600}/>
+          {appliedFilterCount ? `Filter ${appliedFilterCount}` : 'Filters'}
+        </button>
+        {showFilters && <FilterModal filters={filters} setFilters={setFilters} onClose={()=>setShowFilters(false)}/>}
+      </div>
+      {appliedFilterCount > 0 && (
+        <button onClick={()=>setFilters(EMPTY_FILTERS())} className={LINK_CLASS} style={{
+          border:'none', background:'transparent', color:T.gray600, fontSize:12.5, flexShrink:0,
+          cursor:'pointer', padding:'7px 2px', fontFamily:'inherit',
+        }}>Clear All</button>
+      )}
+  </>);
+  if(oneRow) return (
+    <div style={{display:'flex', alignItems:'center', gap:8, padding:pad.row1, borderBottom:`1px solid ${T.border}`}}>
+      <div style={{display:'flex', alignItems:'center', gap:8, flex:'0 1 auto', minWidth:0, overflowX:'auto'}}>
+        {views.map(v => <button key={v.id} onClick={()=>onSelectView(v.id)} style={viewPillStyle(activeViewId === v.id)}>{v.name}{v.count != null && ` (${v.count.toLocaleString('en-US')})`}</button>)}
+      </div>
+      {filterButton}
+      <div style={{flex:1}}/>
+      {filterControls && <div style={{display:'flex', alignItems:'center', gap:8, flexShrink:0}}>{filterControls}</div>}
+      {viewControls && <div style={{display:'flex', alignItems:'center', gap:8, flexShrink:0}}>{viewControls}</div>}
+      {controls && <div style={{display:'flex', alignItems:'center', gap:10, flexShrink:0}}>{controls}</div>}
+    </div>
+  );
   return (<>
     {/* Row 1. No page title — the CRM navigation already provides that context. The view pills
         scroll horizontally on their own; View Settings and Save View sit outside that scrolling
@@ -1796,29 +2010,8 @@ function RecordToolbar({inset = 'page', views, activeViewId, onSelectView, viewC
 
     {/* Row 2: Search + Filters */}
     <div style={{display:'flex', alignItems:'center', gap:10, padding:pad.row2, borderBottom:`1px solid ${T.border}`}}>
-      <div style={{position:'relative'}}>
-        <div style={{position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', pointerEvents:'none'}}><Icon name="search" size={13} color={T.gray400}/></div>
-        <input value={search} onChange={e=>onSearch(e.target.value)} placeholder="Find or Ask"
-          style={{padding:'7px 10px 7px 30px', fontSize:13, border:`1px solid ${T.borderStrong}`, borderRadius:8, width:200, fontFamily:'inherit'}}/>
-      </div>
-      {/* The modal opens where the button is, so it is anchored inside this wrapper. */}
-      <div style={{position:'relative'}}>
-        <button onClick={()=>setShowFilters(o=>!o)} style={{...toolbarButton,
-          border:`1px solid ${appliedFilterCount ? T.attioBlue : T.borderStrong}`,
-          background: appliedFilterCount ? T.blueLight : '#fff',
-          color: appliedFilterCount ? T.attioBlue : T.gray800,
-        }}>
-          <Icon name="filter" size={13} color={appliedFilterCount ? T.attioBlue : T.gray600}/>
-          {appliedFilterCount ? `Filter ${appliedFilterCount}` : 'Filters'}
-        </button>
-        {showFilters && <FilterModal filters={filters} setFilters={setFilters} onClose={()=>setShowFilters(false)}/>}
-      </div>
-      {appliedFilterCount > 0 && (
-        <button onClick={()=>setFilters(EMPTY_FILTERS())} className={LINK_CLASS} style={{
-          border:'none', background:'transparent', color:T.gray600, fontSize:12.5,
-          cursor:'pointer', padding:'7px 2px', fontFamily:'inherit',
-        }}>Clear All</button>
-      )}
+      <ToolbarSearch search={search} onSearch={onSearch} placeholder={searchPlaceholder}/>
+      {filterButton}
       {filterControls && <div style={{marginLeft:'auto', display:'flex', alignItems:'center', gap:8}}>{filterControls}</div>}
     </div>
   </>);
@@ -1872,9 +2065,10 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
   const [ownActivities, setOwnActivities] = React.useState(()=>sharedActivities ? {} : generateActivities(SAMPLE_CONTACTS));
   const activities = sharedActivities || ownActivities, setActivities = setSharedActivities || setOwnActivities;
   // The first view is the default view, shared with everyone in the team/company.
-  // Saved (store.jsx); the default view saved as "All contacts" reads in Title Case.
-  const [views, setViews] = usePersistedState('views:contacts', ()=>[makeView('v1', 'All Contacts', {isDefault:true})],
-    (vs) => (vs || []).map(v => v.id === 'v1' && v.name === 'All contacts' ? {...v, name:'All Contacts'} : v));
+  /* Saved (store.jsx). The default view saved as "All contacts" / "All Contacts" reads "All Leads"
+     (2026-11-19), once — noted on the view (`leadName`), so a name given to it later stays. */
+  const [views, setViews] = usePersistedState('views:contacts', ()=>[makeView('v1', 'All Leads', {isDefault:true, leadName:true})],
+    (vs) => (vs || []).map(v => v.id !== 'v1' || v.leadName ? v : {...v, leadName:true, ...(/^All contacts$/i.test(v.name) ? {name:'All Leads'} : {})}));
   const [activeViewId, setActiveViewId] = React.useState('v1');
   const [deletingView, setDeletingView] = React.useState(null);   // a saved view asked to be deleted
   const [allViewsOpen, setAllViewsOpen] = React.useState(false);
@@ -1884,7 +2078,7 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
   const [cardSettingsDraft, setCardSettingsDraft] = React.useState(null);
   /* Contact side panel layout (View Settings from the contact's ⋯ menu) — one setting for every
      contact, side panel and full page alike. */
-  const [panelSettingsSaved, setPanelSettings] = usePersistedState('panel:contacts', DEFAULT_PANEL_SETTINGS);
+  const [panelSettingsSaved, setPanelSettings] = usePersistedState('panel:contacts', DEFAULT_PANEL_SETTINGS, quietPanelSettings);
   const panelSettings = withContactPanelProperties(panelSettingsSaved, contactProperties);
   const [panelSettingsDraft, setPanelSettingsDraft] = React.useState(null);
   const [contactForm, setContactForm] = React.useState(null);   // {mode:'add'|'edit', initial, id?}
@@ -1938,10 +2132,12 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
   const [rowsPerPage, setRowsPerPage] = React.useState(activeView.rowsPerPage ?? 25);
   const [cardSettings, setCardSettings] = React.useState(activeView.cardSettings || DEFAULT_CARD_SETTINGS());
   const [columnWidths, setColumnWidths] = React.useState(activeView.columnWidths || {});
+  const [mergedColumns, setMergedColumns] = React.useState(activeView.mergedColumns || []);
 
   React.useEffect(()=>{
     setColumnOrder(activeView.columnOrder);
     setColumnWidths(activeView.columnWidths || {});
+    setMergedColumns(activeView.mergedColumns || []);
     setSort(activeView.sort);
     setViewMode(activeView.viewMode);
     setPipelineId(activeView.pipelineId || 'typesOfContact');
@@ -1965,7 +2161,8 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
     || actionsFrozen !== (activeView.actionsFrozen ?? true)
     || rowsPerPage !== (activeView.rowsPerPage ?? 25)
     || JSON.stringify(cardSettings) !== JSON.stringify(activeView.cardSettings || DEFAULT_CARD_SETTINGS())
-    || JSON.stringify(columnWidths) !== JSON.stringify(activeView.columnWidths || {});
+    || JSON.stringify(columnWidths) !== JSON.stringify(activeView.columnWidths || {})
+    || JSON.stringify(mergedColumns) !== JSON.stringify(activeView.mergedColumns || []);
 
   // Board cards' activity: what the acting user may see on each contact (tool permissions).
   const shownActivities = Object.fromEntries(contacts.map(c => [c.id, visibleActivities('contacts', c, activities[c.id])]));
@@ -2026,10 +2223,10 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
     },
     // The contact's Deals tab: its deals; each opens on the Deals page.
     renderTab: (tab, openTab, q) => tab.id === 'deals' && dealsFor && detail ? (
-      <AssociatedRecords columns={ASSOCIATED_DEAL_COLUMNS} rows={dealsFor(detail.id)} q={q} empty="No deals for this contact yet"
+      <AssociatedRecords columns={ASSOCIATED_DEAL_COLUMNS} rows={dealsFor(detail.id)} q={q} empty="No deals for this lead yet"
         onOpen={(d)=>onOpenDeal && onOpenDeal(d.id, detail.mode)}/>
     ) : tab.id === 'customers' && customersFor && detail ? (
-      <AssociatedRecords columns={ASSOCIATED_CUSTOMER_COLUMNS} rows={customersFor(detail.id)} q={q} empty="No customers for this contact yet"
+      <AssociatedRecords columns={ASSOCIATED_CUSTOMER_COLUMNS} rows={customersFor(detail.id)} q={q} empty="No customers for this lead yet"
         onOpen={(x)=>onOpenCustomer && onOpenCustomer(x.id, detail.mode)}/>
     ) : undefined,
     /* Create a profile from the Customer Profile tab: same flow, template pre-chosen. Uses the
@@ -2138,7 +2335,7 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
         if(a.object === 'customers' && a.existingId && onLinkCustomer) onLinkCustomer(a.existingId, {contactId:id});
       });
     }
-    showToast(contactForm.mode === 'edit' ? 'Contact saved' : 'Contact added');
+    showToast(contactForm.mode === 'edit' ? 'Lead saved' : 'Lead added');
     setContactForm(null);
   };
   const appliedFilterCount = React.useMemo(()=>countAppliedFilters(filters, objectSchema.filterProps), [filters, objectSchema]);
@@ -2159,11 +2356,11 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
 
   const saveAsCopy = (name) => {
     const newId = 'v' + Date.now();
-    setViews(vs => [...vs, makeView(newId, name, {columnOrder, sort, viewMode, pipelineId, search, filters, frozenLeft, frozenRight, actionsFrozen, rowsPerPage, cardSettings, columnWidths})]);
+    setViews(vs => [...vs, makeView(newId, name, {columnOrder, sort, viewMode, pipelineId, search, filters, frozenLeft, frozenRight, actionsFrozen, rowsPerPage, cardSettings, columnWidths, mergedColumns})]);
     setActiveViewId(newId);
     setShowSaveAsCopy(false);
   };
-  const confirmSaveExisting = () => { persist(activeView.id, {columnOrder, sort, viewMode, pipelineId, search, filters, frozenLeft, frozenRight, actionsFrozen, rowsPerPage, cardSettings, columnWidths}); setConfirmOverwrite(false); };
+  const confirmSaveExisting = () => { persist(activeView.id, {columnOrder, sort, viewMode, pipelineId, search, filters, frozenLeft, frozenRight, actionsFrozen, rowsPerPage, cardSettings, columnWidths, mergedColumns}); setConfirmOverwrite(false); };
 
   // Each view with how many contacts it lists (as saved).
   const visibleViews = React.useMemo(()=>views.filter(v=>!v.hidden).map(v => ({...v, count:viewRowCount(filterRows, v.filters, v.search, objectSchema)})),
@@ -2187,9 +2384,9 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
   const setContactViolationMode = (on) => engineCtx && engineCtx.setViolationMode(on ? 'contacts' : false);
 
   return (
-    <RecordSchema.Provider value={{...objectSchema, bulkActions:contactBulkActions, recordObject:'contacts'}}>
+    <RecordSchema.Provider value={{...objectSchema, bulkActions:contactBulkActions, mergeColumns:true, recordObject:'contacts'}}>
     <div style={{flex:1, display:'flex', flexDirection:'column', minWidth:0, overflow:'hidden', position:'relative'}}>
-      <RecordToolbar inset="page" views={visibleViews} activeViewId={activeViewId} onSelectView={setActiveViewId}
+      <RecordToolbar inset="page" views={visibleViews} activeViewId={activeViewId} onSelectView={setActiveViewId} searchPlaceholder={recordSearchLabel({noun:'lead'})}
         viewControls={<>
           <ViewSettingsButton onClick={()=>setAllViewsOpen(true)}/>
           <SaveViewMenu dirty={dirty} onSaveCopy={()=>setShowSaveAsCopy(true)} onSaveExisting={()=>setConfirmOverwrite(true)}/>
@@ -2198,8 +2395,8 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
           {/* The pipeline a Board is grouped by: only in Board mode, beside the switcher. */}
           {viewMode === 'board' && <PipelineSelector pipelineId={pipelineId} onChange={setPipelineId}/>}
           <TableBoardSwitch mode={viewMode} onChange={setViewMode}/>
-          <button onClick={()=>{ const n = exportViewCsv({schema:objectSchema, rows:filteredContacts, columnOrder, search, sort, fileName:activeView.name}); logExport('contacts', n, `${typePlural('contacts', 'Contacts')} → ${activeView.name}`); }} style={toolbarButton}><Icon name="export" size={13} color={T.gray600}/> Export</button>
-          <NewButton label={`New ${typeSingular('contacts', 'Contact')}`} onClick={()=>setContactForm({mode:'add', initial:null})}/>
+          <button onClick={()=>{ const n = exportViewCsv({schema:objectSchema, rows:filteredContacts, columnOrder, search, sort, fileName:activeView.name, mergedColumns}); logExport('contacts', n, `${typePlural('contacts', 'Leads')} → ${activeView.name}`); }} style={toolbarButton}><Icon name="export" size={13} color={T.gray600}/> Export</button>
+          <NewButton label={`New ${typeSingular('contacts', 'Lead')}`} onClick={()=>setContactForm({mode:'add', initial:null})}/>
         </>}
         search={search} onSearch={setSearch} filters={filters} setFilters={setFilters} appliedFilterCount={appliedFilterCount}
         filterControls={<><MergeCasesButton object="contacts"/><ViolationsButton object="contacts" pipelines={[pipelineId]} active={contactViolationMode} onClick={()=>setContactViolationMode(!contactViolationMode)}/></>}/>
@@ -2209,6 +2406,7 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
       {contactViolationMode && <ViolationPanel object="contacts" pipelines={[pipelineId]} onClose={()=>setContactViolationMode(false)}/>}
       {viewMode === 'table' ? (
         <ContactsDataGrid rows={filteredContacts} resetKey={`${activeViewId}:${JSON.stringify(filters)}`} columnOrder={columnOrder} setColumnOrder={setColumnOrder} columnWidths={columnWidths} setColumnWidths={setColumnWidths}
+          mergedColumns={mergedColumns} onRenameMerged={(id, name)=>setMergedColumns(ms => ms.map(m => m.id === id ? {...m, name} : m))}
           frozenLeft={frozenLeft} frozenRight={frozenRight} actionsFrozen={actionsFrozen} rowsPerPage={rowsPerPage}
           sort={sort} setSort={setSort} search={search}
           actions={tableRowActions} onOpenContact={openContact}/>
@@ -2220,7 +2418,7 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
           onChangeStage={(contactId, stageId)=>{
             // Records → Edit → Move between pipeline stages.
             const c0 = contacts.find(c => c.id === contactId);
-            if(c0 && !stageMoveCan('contacts', c0)) return hub && hub.toast("You can't move this contact between stages");
+            if(c0 && !stageMoveCan('contacts', c0)) return hub && hub.toast("You can't move this lead between stages");
             setContacts(cs => cs.map(c => c.id===contactId ? withStage(pipelineById(pipelineId), c, stageId) : c));
           }}
           actions={tableRowActions} activities={shownActivities} onOpenContact={openContact}
@@ -2245,8 +2443,8 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
             if(patch.rowsPerPage!==undefined) setRowsPerPage(patch.rowsPerPage);
           }}}
           // The chosen view's own table settings (the open view's as they stand).
-          onOpenTableSettings={(id)=>{ const v = views.find(x=>x.id===id) || {}; setTableSettingsDraft(id === activeViewId ? {columnOrder, frozenLeft, frozenRight, actionsFrozen}
-            : {columnOrder:v.columnOrder || columnOrder, frozenLeft:v.frozenLeft ?? 0, frozenRight:v.frozenRight ?? 0, actionsFrozen:v.actionsFrozen ?? true}); setActiveViewId(id); }}
+          onOpenTableSettings={(id)=>{ const v = views.find(x=>x.id===id) || {}; setTableSettingsDraft(id === activeViewId ? {columnOrder, frozenLeft, frozenRight, actionsFrozen, mergedColumns}
+            : {columnOrder:v.columnOrder || columnOrder, frozenLeft:v.frozenLeft ?? 0, frozenRight:v.frozenRight ?? 0, actionsFrozen:v.actionsFrozen ?? true, mergedColumns:v.mergedColumns || []}); setActiveViewId(id); }}
           onOpenCardSettings={(id)=>{ setActiveViewId(id); setCardSettingsDraft(JSON.parse(JSON.stringify(id === activeViewId ? cardSettings : (views.find(v=>v.id===id).cardSettings || DEFAULT_CARD_SETTINGS())))); }}
           liveViewMode={viewMode} livePipelineId={pipelineId}/>
       )}
@@ -2254,7 +2452,7 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
       {/* Deleting a saved view: asked first. With none left, the default view comes back. */}
       {deletingView && (() => { const v = views.find(x => x.id === deletingView);
         return v ? <StModal title="Delete View" primary="Delete View" danger onCancel={()=>setDeletingView(null)}
-          onSubmit={()=>{ const next = views.filter(x => x.id !== v.id), finalViews = next.length ? next : [makeView('v1', 'All Contacts', {isDefault:true})];
+          onSubmit={()=>{ const next = views.filter(x => x.id !== v.id), finalViews = next.length ? next : [makeView('v1', 'All Leads', {isDefault:true, leadName:true})];
             setViews(finalViews); if(activeViewId === v.id) setActiveViewId(finalViews[0].id); setDeletingView(null); }}>
           <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>"{v.name}" will be deleted. This can't be undone.</div>
         </StModal> : null; })()}
@@ -2267,6 +2465,7 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
             setFrozenLeft(tableSettingsDraft.frozenLeft);
             setFrozenRight(tableSettingsDraft.frozenRight);
             setActionsFrozen(tableSettingsDraft.actionsFrozen);
+            setMergedColumns(tableSettingsDraft.mergedColumns || []);
             setTableSettingsDraft(null);
           }}/>
       )}
@@ -2299,7 +2498,7 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
       {contactBulkModal}
       {pendingDelete && (
         <DeleteConfirmModal contactName={pendingDelete.name} paid={recordHasPayments('contacts', pendingDelete.id)}
-          note={associatedNote([['deal', 'deals', dealsFor ? dealsFor(pendingDelete.id).length : 0], ['customer', 'customers', customersFor ? customersFor(pendingDelete.id).length : 0]], 'contact')}
+          note={associatedNote([['deal', 'deals', dealsFor ? dealsFor(pendingDelete.id).length : 0], ['customer', 'customers', customersFor ? customersFor(pendingDelete.id).length : 0]], 'lead')}
           onCancel={()=>setPendingDelete(null)}
           onConfirm={()=>{
             const id = pendingDelete.id;
@@ -2309,13 +2508,13 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
             onRecordDeleted && onRecordDeleted('contacts', id);
             if(detail && detail.id === id) setDetail(null);
             setPendingDelete(null);
-            showToast('Contact deleted');
+            showToast('Lead deleted');
           }}/>
       )}
-      {changingOwner && <ChangeOwnerModal record={changingOwner} noun="Contact" users={users.filter(u => u.status === 'Activated')} ownerName={userLabel}
+      {changingOwner && <ChangeOwnerModal record={changingOwner} noun="Lead" users={users.filter(u => u.status === 'Activated')} ownerName={userLabel}
         onClose={()=>setChangingOwner(null)} onSave={(owner)=>{ updateContact(changingOwner.id, {owner}); setChangingOwner(null); }}/>}
       {/* Enrich contact is listed as an action, but what it does is not defined yet. */}
-      {enrichFor && <StubPanel title="Enrich contact" onClose={()=>setEnrichFor(null)}/>}
+      {enrichFor && <StubPanel title="Enrich lead" onClose={()=>setEnrichFor(null)}/>}
 {(() => {
         const dc = detail && contacts.find(x => x.id === detail.id);
         if(!dc) return null;
@@ -2380,5 +2579,5 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
   );
 }
 
-Object.assign(window, {viewPillStyle, viewRowCount, exportViewCsv, gridRowsOf, withScopeFilters, recordScopeFilterProps, newContactRecord, contactView, ownerUserOptions, assocFilterSchema, withAssocRecords, withAssocFilters, RecordToolbar, TableBoardSwitch, toolbarButton, toolbarIconButton, ContactsModule, RecordSchema, useRecordSchema, ContactsDataGrid, Pagination, SaveViewMenu, FilterModal,
-  TableSettingsModal, ViewSettingsDrawer, ConfirmOverwriteModal, SaveAsCopyModal, applyFilters, countAppliedFilters, EMPTY_FILTERS});
+Object.assign(window, {ToolbarSearch, recordSearchLabel, viewPillStyle, viewRowCount, exportViewCsv, gridRowsOf, withScopeFilters, recordScopeFilterProps, newContactRecord, contactView, ownerUserOptions, assocFilterSchema, withAssocRecords, withAssocFilters, RecordToolbar, TableBoardSwitch, toolbarButton, toolbarIconButton, ContactsModule, RecordSchema, useRecordSchema, ContactsDataGrid, Pagination, SaveViewMenu, FilterModal,
+  TableSettingsModal, MergeColumnsModal, isMergedKey, mergedOf, ViewSettingsDrawer, ConfirmOverwriteModal, SaveAsCopyModal, applyFilters, countAppliedFilters, EMPTY_FILTERS});

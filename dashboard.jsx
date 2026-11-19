@@ -181,9 +181,9 @@ const USER_STATS = [
   {key:'dealsClosed',      get label(){ return `${dashDeals()} Closed`; }, kind:'count', read:(p, r) => p.ev.closed.filter(x => dashIn(x.at, r)).length},
   {key:'dealsWon',         get label(){ return `${dashDeal()} Won`; }, kind:'count', read:(p, r) => p.ev.closed.filter(x => x.outcome === 'won' && dashIn(x.at, r)).length},
   {key:'dealsLost',        get label(){ return `${dashDeal()} Lost`; }, kind:'count', read:(p, r) => p.ev.closed.filter(x => x.outcome === 'lost' && dashIn(x.at, r)).length},
-  {key:'contactToClosed',  get label(){ return `Contact to ${dashDeal()} Closed`; }, needs:'contacts', kind:'days',  read:(p, r) => dashAvg(p.ev.closed.filter(x => dashIn(x.at, r)), x => x.contactToClosed)},
-  {key:'contactToDeal',    get label(){ return `Contact to ${dashDeal()}`; }, needs:'contacts', kind:'days',  read:(p, r) => dashAvg(p.ev.closed.filter(x => dashIn(x.at, r)), x => x.contactToDeal)},
-  {key:'contactToCustomer',label:'Contact to Customer', needs:'contacts', kind:'days',  read:(p, r) => dashAvg(p.ev.closed.filter(x => dashIn(x.at, r)), x => x.contactToCustomer)},
+  {key:'contactToClosed',  get label(){ return `Lead to ${dashDeal()} Closed`; }, needs:'contacts', kind:'days',  read:(p, r) => dashAvg(p.ev.closed.filter(x => dashIn(x.at, r)), x => x.contactToClosed)},
+  {key:'contactToDeal',    get label(){ return `Lead to ${dashDeal()}`; }, needs:'contacts', kind:'days',  read:(p, r) => dashAvg(p.ev.closed.filter(x => dashIn(x.at, r)), x => x.contactToDeal)},
+  {key:'contactToCustomer',label:'Lead to Customer', needs:'contacts', kind:'days',  read:(p, r) => dashAvg(p.ev.closed.filter(x => dashIn(x.at, r)), x => x.contactToCustomer)},
   {key:'qualifiedToWon',   get label(){ return `Qualified Client to ${dashDeal()} Won`; }, kind:'days',  read:(p, r) => dashAvg(p.ev.closed.filter(x => dashIn(x.at, r)), x => x.qualifiedToWon)},
   {key:'responseTime',     label:'Client Response Time',         kind:'hours', read:(p, r) => dashAvg(p.ev.responses.filter(x => dashIn(x.at, r)), x => x.hours)},
   {key:'invoiceToCash',    label:'Invoice to Cash',              kind:'hours', accounting:true, read:(p, r) => dashAvg(p.ev.payments.filter(x => x.sent != null && dashIn(x.at, r)), x => Math.max(0, x.at - x.sent) / 36e5)},
@@ -301,8 +301,8 @@ const DASH_KPIS = [
 const dashWinRate = (k) => k.closed ? Math.round(k.won / k.closed * 100) : null;
 const DASH_KPI_GROUPS = ['Financial', 'Conversion', 'Record Volume', 'Business Performance'];
 const dashStage = (ctx, object) => stageTotals((ctx.records || {})[object], object, ctx.range);
-const DASH_RECORD_NOUN = {get contacts(){ return typePlural('contacts', 'Contacts'); }, get deals(){ return dashDeals(); }, get customers(){ return typePlural('customers', 'Customers'); }};
-const DASH_RECORD_ONE = {contacts:'Contact', deals:'Deal', customers:'Customer'};
+const DASH_RECORD_NOUN = {get contacts(){ return typePlural('contacts', 'Leads'); }, get deals(){ return dashDeals(); }, get customers(){ return typePlural('customers', 'Customers'); }};
+const DASH_RECORD_ONE = {contacts:'Lead', deals:'Deal', customers:'Customer'};
 const DASH_KPI_DEFS = [
   ...DASH_KPIS.map(k => ({id:k.key, group:'Financial', label:k.label, icon:k.icon, kind:'money', accounting:true, hint:k.hint,
     read:(ctx) => companyKpis(ctx.data, ctx.range)[k.key]})),
@@ -317,7 +317,7 @@ const DASH_KPI_DEFS = [
   ...['contacts', 'deals', 'customers'].map(o => ({id:`closed:${o}`, object:o, group:'Record Volume', get label(){ return `Total Closed ${typePlural(o, DASH_RECORD_NOUN[o])}`; }, icon:o, kind:'count',
     get hint(){ return `${DASH_RECORD_NOUN[o]} that reached a Won, Lost or Undecided stage in the period`; }, read:(ctx) => dashStage(ctx, o).closed,
     sub:(ctx) => { const k = dashStage(ctx, o); return `W ${k.won} / L ${k.lost} / U ${k.undecided}`; }})),
-  {id:'contactToDeal', object:'contacts', group:'Business Performance', get label(){ return `Contact to ${dashDeal()}`; }, icon:'contacts', kind:'hours', get hint(){ return `Business Velocity: average time from first contact to ${dashDeal().toLowerCase()} creation`; },
+  {id:'contactToDeal', object:'contacts', group:'Business Performance', get label(){ return `Lead to ${dashDeal()}`; }, icon:'contacts', kind:'hours', get hint(){ return `Business Velocity: average time from lead creation to ${dashDeal().toLowerCase()} creation`; },
     read:(ctx) => companyVelocity(ctx.data, ctx.range).contactToDeal, sub:() => 'Business Velocity'},
   {id:'dealToCustomer', group:'Business Performance', get label(){ return `${dashDeal()} to Customer`; }, icon:'customers', kind:'hours', get hint(){ return `Business Velocity: average time from ${dashDeal().toLowerCase()} creation to its customer being created`; },
     read:(ctx) => companyVelocity(ctx.data, ctx.range).dealToCustomer, sub:() => 'Business Velocity'},
@@ -676,8 +676,8 @@ const FAME_TABS = [
   {id:'compliance', label:'Compliance', rankBy:'violations', best:'low', columns:[{key:'violations', label:'Violations', fmt:(n)=>String(n),
     render:(r, ctx) => <ViolationsValue list={r.violationList} onOpen={ctx.openViolation}/>}]},
   {id:'speed', label:'Speed', rankBy:'contactToClosed', best:'low', wide:true, columns:[
-    {key:'contactToClosed', get label(){ return `Contact to ${dashDeal()} Closed`; }, needs:'contacts', fmt:fmtDays}, {key:'contactToDeal', get label(){ return `Contact to ${dashDeal()}`; }, needs:'contacts', fmt:fmtDays},
-    {key:'contactToCustomer', label:'Contact to Customer', needs:'contacts', fmt:fmtDays}, {key:'qualifiedToWon', get label(){ return `Qualified Client to ${dashDeal()} Won`; }, fmt:fmtDays}]},
+    {key:'contactToClosed', get label(){ return `Lead to ${dashDeal()} Closed`; }, needs:'contacts', fmt:fmtDays}, {key:'contactToDeal', get label(){ return `Lead to ${dashDeal()}`; }, needs:'contacts', fmt:fmtDays},
+    {key:'contactToCustomer', label:'Lead to Customer', needs:'contacts', fmt:fmtDays}, {key:'qualifiedToWon', get label(){ return `Qualified Client to ${dashDeal()} Won`; }, fmt:fmtDays}]},
 ];
 // The tabs as the workspace has them: no Contact column without Contacts (HOF Partners) — ranked by the first left.
 const fameTabs = () => FAME_TABS.map(t => { const columns = t.columns.filter(c => !c.needs || workspaceHasType(c.needs));
@@ -884,7 +884,7 @@ function DashWidgetCard({title, right, children}){
 function VelocityList({velocity}){
   const rows = [
     // Contact to Deal only where the workspace has Contacts (not HOF Partners).
-    ...(workspaceHasType('contacts') ? [{key:'contactToDeal', label:`Contact to ${dashDeal()}`, icon:'contacts', hint:`Average time from first contact to ${dashDeal().toLowerCase()} creation`}] : []),
+    ...(workspaceHasType('contacts') ? [{key:'contactToDeal', label:`Lead to ${dashDeal()}`, icon:'contacts', hint:`Average time from lead creation to ${dashDeal().toLowerCase()} creation`}] : []),
     {key:'dealToCustomer', label:`${dashDeal()} to Customer`, icon:'customers', hint:`Average time from ${dashDeal().toLowerCase()} creation to its customer being created`},
     {key:'response', label:'Client Response Time', icon:'envelope', hint:'Average time for a client to reply to a call or email'},
     // Invoice to Cash is an accounting figure: it needs View Payment Terms.

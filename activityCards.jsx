@@ -18,7 +18,9 @@
      Task   — name, description, status (radios), task type, assigned to, assigned by; then its
               Notes (ActivityNotes: Notes linked to the task). Its header moves it on: Start (Not
               Started → In Progress), Put on Hold, Resume (On Hold → In Progress), Complete.
-     Note   — readable text; Edit makes it a field.
+     Note   — readable text; Edit makes it a field. A Support Note (2026-11-19) carries a red tag
+              and is also listed on the record's Support Notes tab; @tags notify and email the
+              people tagged; replies are one level deep (noteTools.jsx, NoteReplies).
      Owner change — previous and new owner; Edit reassigns the owner (through the normal owner
               update, so it records its own Owner change).
 
@@ -26,6 +28,9 @@
               meeting logged by hand: organiser, platform, title, link). Read-only: title,
               platform, transcript (Read / Add transcript), time stamp, link (the organiser is in
               the header); then its Notes (ActivityNotes: Notes linked to the meeting).
+   Overview, Calls, Notes, Emails and Meetings (2026-11-18): the activity is a time trail
+   (ActivityTrail) — Upcoming, then each month; time and date left of a rail; its one action on the
+   right (trailAction). Tasks keep their Table / Board.
    Every ⋯ menu follows one arrangement (detailMenu). Edits and new items go through onUpdate / onAdd
    (ContactsModule) — the one activity store the Overview, cards and side panel also read. */
 
@@ -162,15 +167,27 @@ const newId = (type) => `${type}-${Date.now()}-${Math.random().toString(36).slic
    and Edit are separate states: Edit shows only the editable fields. Emails stay read-only
    with Reply in Edit's place. */
 
-function DetailFrame({head, children, actions}){
+/* In an activity's own side panel (a record's activity, 2026-11-18) the actions — Edit
+   and ⋯, or Cancel and Save while editing — sit in a footer at the bottom right, not in the header. */
+const DetailFooterCtx = React.createContext(false);
+/* What an activity was opened to do from Overview's time trail: 'note' starts a new note under it (ActivityNotes). */
+const DetailIntentCtx = React.createContext(null);
+/* The activity's trail action (Overview's time trail — trailAction), given by ActivityTab to the
+   side panel: {what, el} — its filled button, last in the footer, beside Edit / ⋯; the detail
+   leaves out what it would repeat (an email's Reply under Follow Up, Reply or Edit). */
+const DetailPrimaryCtx = React.createContext(null);
+function DetailFrame({head, children, actions, editing}){
+  const footer = React.useContext(DetailFooterCtx);
+  const primary = React.useContext(DetailPrimaryCtx), main = footer && !editing && primary ? primary.el : null;
   return (
     <div style={{flex:1, minHeight:0, display:'flex', flexDirection:'column'}}>
       <div style={{flexShrink:0, display:'flex', alignItems:'center', gap:12, minHeight:50, boxSizing:'border-box',
                    padding:'9px 24px', borderBottom:`1px solid ${T.border}`, background:'#fff'}}>
         <div style={{flex:1, minWidth:0, display:'flex'}}>{head}</div>
-        <div style={{flexShrink:0, display:'flex', alignItems:'center', gap:8}}>{actions}</div>
+        {!footer && <div style={{flexShrink:0, display:'flex', alignItems:'center', gap:8}}>{actions}</div>}
       </div>
       <div style={{flex:1, minHeight:0, overflowY:'auto', padding:'20px 24px'}}>{children}</div>
+      {footer && (actions || main) && <div style={{flexShrink:0, display:'flex', alignItems:'center', justifyContent:'flex-end', gap:8, padding:'12px 20px', borderTop:`1px solid ${T.border}`, background:'#fff'}}>{actions}{main}</div>}
     </div>
   );
 }
@@ -207,6 +224,7 @@ const timeStampField = (at) => <Field label="Time Stamp"><ReadValue>{fmtActStamp
    behaviour is defined. */
 function DetailMoreMenu({items}){
   const [open, setOpen] = React.useState(false);
+  const footer = React.useContext(DetailFooterCtx);   // in the panel's footer: the menu opens upwards
   const del = useActivityDelete();
   const [confirm, setConfirm] = React.useState(null);   // the Delete item being confirmed
   const run = (it) => { if(it.deleteAct && del) return setConfirm(it); it.onClick(); };
@@ -221,7 +239,7 @@ function DetailMoreMenu({items}){
         display:'flex', alignItems:'center', justifyContent:'center', background: open ? T.headerBg : 'transparent'}}>
         <Icon name="moreDots" size={15} color={T.gray600}/>
       </button>
-      <MenuShell open={open} onClose={()=>setOpen(false)} anchorRight width={210}>
+      <MenuShell open={open} onClose={()=>setOpen(false)} anchorRight up={footer} width={210}>
         {items.map(it => <MenuItem key={it.label} label={it.label} danger={it.danger} onClick={()=>{ setOpen(false); run(it); }}/>)}
       </MenuShell>
     </div>
@@ -317,47 +335,72 @@ function NoteEdited({n, contact}){
     </StModal>}
   </>);
 }
+/* Replies are one level deep (2026-11-19): a reply can be answered — the answer sits under it,
+   indented (`parentId`); answering an answer adds to the same thread under its reply. @tags in a
+   reply notify and email the people tagged (noteTools.jsx). Deleting a reply deletes its answers. */
 function NoteReplies({a, onUpdate, canReply, canRemove}){
+  const hub = useRecordHub(), tagged = useMentionNotify();
+  const users = React.useMemo(() => hub ? mentionUsers(hub.data) : [], [hub && hub.data.users]);
   const [text, setText] = React.useState('');
   const [files, setFiles] = React.useState([]);
-  const [writing, setWriting] = React.useState(false);
+  const [writing, setWriting] = React.useState(null);   // null, 'top' (a new reply) or the id of the reply being answered
   const [removing, setRemoving] = React.useState(null);
   const replies = a.replies || [];
+  const top = replies.filter(r => !r.parentId || !replies.some(p => p.id === r.parentId));
+  const answersOf = (id) => replies.filter(r => r.parentId === id);
   const ok = !!text.trim() || files.length > 0;
-  const add = () => { if(!ok) return;
-    onUpdate(a.id, {replies:[...replies, {id:`rp-${Date.now().toString(36)}`, body:text.trim(), by:CURRENT_USER.name, at:new Date().toISOString(), ...(files.length ? {attachments:files} : {})}]});
-    setText(''); setFiles([]); setWriting(false); };
+  const close = () => { setText(''); setFiles([]); setWriting(null); };
+  const add = () => { if(!ok) return; const body = text.trim();
+    onUpdate(a.id, {replies:[...replies, {id:`rp-${Date.now().toString(36)}`, body, by:CURRENT_USER.name, at:new Date().toISOString(),
+      ...(writing !== 'top' ? {parentId:writing} : {}), ...(files.length ? {attachments:files} : {}), ...withMentions(null, tagged('', body, 'a reply'))}]});
+    close(); };
+  const box = (
+    <div data-mentions="1" style={{display:'flex', flexDirection:'column', gap:8}}>
+      <textarea autoFocus value={text} onChange={e=>setText(e.target.value)} rows={3} placeholder="Write a reply" aria-label="Reply" style={{...fieldText, resize:'vertical', lineHeight:1.5}}/>
+      <EmailAttachmentsField list={files} update={setFiles}/>
+      <div style={{display:'flex', justifyContent:'flex-end', gap:8}}>
+        <button onClick={close} style={btnSecondarySm}>Cancel</button>
+        <button onClick={add} disabled={!ok} style={btnPrimarySm(ok)}>Reply</button>
+      </div>
+    </div>
+  );
+  // An answer is answered in its reply's thread (one level).
+  const item = (r, threadId) => (
+    <div key={r.id} style={{display:'flex', flexDirection:'column', gap:6}}>
+      <div style={{display:'flex', alignItems:'center', gap:8, minHeight:28}}>
+        <div style={{flex:1, minWidth:0, display:'flex', alignItems:'center', gap:6, fontSize:13, color:T.attioMuted}}>
+          <PersonAvatar kind="team" name={r.by}/><PersonName kind="team" name={r.by}/>
+          <span style={{fontSize:11.5, whiteSpace:'nowrap'}}>{fmtActStamp(new Date(r.at))}</span>
+        </div>
+        {canRemove && <DetailMoreMenu items={[{label:'Delete Reply', icon:'trash', danger:true, onClick:()=>setRemoving(r)}]}/>}
+      </div>
+      {r.body && <div style={{fontSize:13, lineHeight:1.55, color:T.attioText, whiteSpace:'pre-wrap'}}><MentionText text={r.body} users={users}/></div>}
+      {(r.attachments || []).length > 0 && <EmailAttachmentList list={r.attachments}/>}
+      {canReply && writing !== threadId && <button type="button" onClick={()=>{ setText(''); setFiles([]); setWriting(threadId); }} className={LINK_CLASS}
+        style={{alignSelf:'flex-start', border:'none', background:'transparent', padding:0, cursor:'pointer', fontFamily:'inherit', fontSize:12.5, color:T.attioText}}>Reply</button>}
+    </div>
+  );
   return (
     <div style={{marginTop:8, paddingTop:16, borderTop:`1px solid ${T.border}`, display:'flex', flexDirection:'column', gap:12}}>
       <div style={{display:'flex', alignItems:'center', gap:8}}>
         <span style={{fontSize:14, fontWeight:600, color:T.attioText}}>Replies ({replies.length})</span>
-        {canReply && !writing && <button title="Reply" aria-label="Reply" onClick={()=>setWriting(true)} style={{...btnSecondarySm, padding:'5px 7px'}}><Icon name="plus" size={13} color={T.attioText}/></button>}
+        {canReply && writing !== 'top' && <button title="Reply" aria-label="Reply" onClick={()=>{ setText(''); setFiles([]); setWriting('top'); }} style={{...btnSecondarySm, padding:'5px 7px'}}><Icon name="plus" size={13} color={T.attioText}/></button>}
       </div>
-      {writing && <div style={{display:'flex', flexDirection:'column', gap:8}}>
-        <textarea autoFocus value={text} onChange={e=>setText(e.target.value)} rows={3} placeholder="Write a reply" aria-label="Reply" style={{...fieldText, resize:'vertical', lineHeight:1.5}}/>
-        <EmailAttachmentsField list={files} update={setFiles}/>
-        <div style={{display:'flex', justifyContent:'flex-end', gap:8}}>
-          <button onClick={()=>{ setText(''); setFiles([]); setWriting(false); }} style={btnSecondarySm}>Cancel</button>
-          <button onClick={add} disabled={!ok} style={btnPrimarySm(ok)}>Reply</button>
-        </div>
-      </div>}
-      {replies.map(r => (
-        <div key={r.id} style={{display:'flex', flexDirection:'column', gap:6}}>
-          <div style={{display:'flex', alignItems:'center', gap:8, minHeight:28}}>
-            <div style={{flex:1, minWidth:0, display:'flex', alignItems:'center', gap:6, fontSize:13, color:T.attioMuted}}>
-              <PersonAvatar kind="team" name={r.by}/><PersonName kind="team" name={r.by}/>
-              <span style={{fontSize:11.5, whiteSpace:'nowrap'}}>{fmtActStamp(new Date(r.at))}</span>
-            </div>
-            {canRemove && <DetailMoreMenu items={[{label:'Delete Reply', icon:'trash', danger:true, onClick:()=>setRemoving(r)}]}/>}
+      {writing === 'top' && box}
+      {top.map(r => { const answers = answersOf(r.id);
+        return (
+          <div key={r.id} style={{display:'flex', flexDirection:'column', gap:10}}>
+            {item(r, r.id)}
+            {(answers.length > 0 || writing === r.id) && <div style={{marginLeft:12, paddingLeft:16, borderLeft:`2px solid ${T.border}`, display:'flex', flexDirection:'column', gap:10}}>
+              {answers.map(x => item(x, r.id))}
+              {writing === r.id && box}
+            </div>}
           </div>
-          {r.body && <div style={{fontSize:13, lineHeight:1.55, color:T.attioText, whiteSpace:'pre-wrap'}}>{r.body}</div>}
-          {(r.attachments || []).length > 0 && <EmailAttachmentList list={r.attachments}/>}
-        </div>
-      ))}
+        ); })}
       {!replies.length && !writing && <div style={{fontSize:13, color:T.attioMuted}}>No replies yet</div>}
       {removing && <StModal title="Delete Reply" primary="Delete Reply" danger onCancel={()=>setRemoving(null)}
-        onSubmit={()=>{ onUpdate(a.id, {replies:replies.filter(x => x.id !== removing.id)}); setRemoving(null); }}>
-        <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>This removes the reply and its attachments. It can't be undone.</div>
+        onSubmit={()=>{ onUpdate(a.id, {replies:replies.filter(x => x.id !== removing.id && x.parentId !== removing.id)}); setRemoving(null); }}>
+        <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>{answersOf(removing.id).length ? 'This removes the reply, its attachments and the replies under it.' : 'This removes the reply and its attachments.'} It can't be undone.</div>
       </StModal>}
     </div>
   );
@@ -369,23 +412,29 @@ function NoteDetail({a, contact, calls, onUpdate, onStub, across}){
   const [editing, setEditing] = React.useState(false);
   // Edited in the rich text editor (a plain note saved before opens as paragraphs).
   const [text, setText] = React.useState(richHtmlOf(a.body || ''));
+  const [support, setSupport] = React.useState(!!a.support);
+  const hub = useRecordHub(), tagged = useMentionNotify();
+  const users = React.useMemo(() => hub ? mentionUsers(hub.data) : [], [hub && hub.data.users]);
   const call = a.callId && calls.find(c => c.id === a.callId);
   const meeting = a.meetingId && calls.find(c => c.id === a.meetingId);
   const task = a.taskId && calls.find(c => c.id === a.taskId);
-  const cancel = () => { setText(richHtmlOf(a.body || '')); setEditing(false); };
-  const save = () => { onUpdate(a.id, noteEditPatch(a, sanitizeRichText(text), contact)); setEditing(false); };
+  const cancel = () => { setText(richHtmlOf(a.body || '')); setSupport(!!a.support); setEditing(false); };
+  const save = () => { const body = sanitizeRichText(text), changed = body !== sanitizeRichText(richHtmlOf(a.body || ''));
+    onUpdate(a.id, {...(changed ? noteEditPatch(a, body, contact) : {}), support, ...withMentions(a, tagged(a.body, body))}); setEditing(false); };
+  const dirty = !richIsEmpty(text) && (sanitizeRichText(text) !== sanitizeRichText(richHtmlOf(a.body || '')) || support !== !!a.support);
   return (
-    <DetailFrame head={detailHead(a, contact, across)} actions={editing ? saveBar(cancel, save, !richIsEmpty(text) && sanitizeRichText(text) !== sanitizeRichText(richHtmlOf(a.body || '')))
+    <DetailFrame editing={editing} head={detailHead(a, contact, across)} actions={editing ? saveBar(cancel, save, dirty)
       : activityEditBar(a, ()=>setEditing(true), detailMenu({a, onUpdate, onStub, own:[stubItem('Copy Note', onStub, 'copy')], runProfile:true, deleteLabel:'Delete Note'}))}>
       <div style={{display:'flex', flexDirection:'column', gap:12}}>
+        {!editing && a.support && <SupportNoteTag/>}
         {!editing && recordFirst(across)}
         {/* A note saved from a call keeps that context. */}
         {!editing && a.callId && <div style={{fontSize:12, color:T.attioMuted}}>Linked to call{call ? ` · ${fmtActStamp(call.at)}` : ''}</div>}
         {!editing && a.meetingId && <div style={{fontSize:12, color:T.attioMuted}}>Linked to meeting{meeting ? ` · ${fmtActStamp(meeting.at)}` : ''}</div>}
         {!editing && a.taskId && <div style={{fontSize:12, color:T.attioMuted}}>Linked to task{task && task.title ? ` · ${task.title}` : ''}</div>}
         {editing
-          ? <RichTextEditor value={text} onChange={setText} minHeight={180} ariaLabel="Note"/>
-          : <RichTextView html={a.body} style={{fontSize:13.5, lineHeight:1.65}}/>}
+          ? <><div data-mentions="1"><RichTextEditor value={text} onChange={setText} minHeight={180} ariaLabel="Note"/></div><SupportNoteSwitch on={support} onChange={setSupport}/></>
+          : <RichTextView html={a.body} mentions={users} style={{fontSize:13.5, lineHeight:1.65}}/>}
         {!editing && <NoteEdited n={a} contact={contact}/>}
         {!editing && personLed(across) && stack(recordFields(across))}
         {!editing && across && timeStampField(a.at)}
@@ -403,6 +452,8 @@ function NoteDetail({a, contact, calls, onUpdate, onStub, across}){
    following the call's permissions. */
 const fmtNoteStamp = (at) => fmtActStamp(new Date(at));
 function ActivityNoteItem({n, contact, canEdit, canDelete, onSave, onDelete}){
+  const hub = useRecordHub();
+  const users = React.useMemo(() => hub ? mentionUsers(hub.data) : [], [hub && hub.data.users]);
   const [editing, setEditing] = React.useState(false);
   const [text, setText] = React.useState('');
   const [confirm, setConfirm] = React.useState(false);
@@ -428,23 +479,25 @@ function ActivityNoteItem({n, contact, canEdit, canDelete, onSave, onDelete}){
       {editing
         ? <div style={{display:'flex', flexDirection:'column', gap:8}}>
             {/* Edited as written — its formatting kept (a rich-text note, as on the Notes tab). */}
-            <RichTextEditor value={text} onChange={setText} minHeight={90} ariaLabel="Note"/>
+            <div data-mentions="1"><RichTextEditor value={text} onChange={setText} minHeight={90} ariaLabel="Note"/></div>
             <div style={{display:'flex', justifyContent:'flex-end', gap:8}}>
               {saveBar(()=>setEditing(false), ()=>{ onSave(sanitizeRichText(text)); setEditing(false); }, !richIsEmpty(text) && text !== (n.body || ''))}
             </div>
           </div>
-        : <><RichTextView html={n.body} style={{fontSize:13, lineHeight:1.55, color:T.attioText}}/><NoteEdited n={n} contact={contact}/></>}
+        : <><RichTextView html={n.body} mentions={users} style={{fontSize:13, lineHeight:1.55, color:T.attioText}}/><NoteEdited n={n} contact={contact}/></>}
     </div>
   );
 }
 function ActivityNotes({a, contact, notes, link, onUpdate, onAdd, own}){
   const ra = useRecordAccess(), del = useActivityDelete();
-  const [adding, setAdding] = React.useState(false);
+  const intent = React.useContext(DetailIntentCtx);
+  const [adding, setAdding] = React.useState(intent === 'note');
   const [text, setText] = React.useState('');
   const can = (x, action) => !ra || activityCan(ra.object, ra.record, x, action);
   const canAddNote = !ra || canAdd(ra.object, ra.record, 'Note');
   const list = [...(own ? [own] : []), ...[...notes].sort((x, y) => new Date(x.at) - new Date(y.at))];
-  const add = () => { onAdd({id:newId('note'), type:'note', source:'you', by:null, body:text.trim(), [link]:a.id}); setText(''); setAdding(false); };
+  const tagged = useMentionNotify();
+  const add = () => { const body = text.trim(); onAdd({id:newId('note'), type:'note', source:'you', by:null, body, [link]:a.id, ...withMentions(null, tagged('', body))}); setText(''); setAdding(false); };
   return (
     <div style={{marginTop:20, paddingTop:20, borderTop:`1px solid ${T.border}`, display:'flex', flexDirection:'column', gap:14}}>
       <div style={{display:'flex', alignItems:'center', gap:8}}>
@@ -453,7 +506,7 @@ function ActivityNotes({a, contact, notes, link, onUpdate, onAdd, own}){
           <Icon name="plus" size={13} color={T.attioText}/>
         </button>}
       </div>
-      {adding && <div style={{display:'flex', flexDirection:'column', gap:8}}>
+      {adding && <div data-mentions="1" style={{display:'flex', flexDirection:'column', gap:8}}>
         <textarea autoFocus value={text} onChange={e=>setText(e.target.value)} rows={3} placeholder="Add a note" aria-label="Note" style={{...fieldText, resize:'vertical', lineHeight:1.5}}/>
         <div style={{display:'flex', justifyContent:'flex-end', gap:8}}>
           <button onClick={()=>{ setText(''); setAdding(false); }} style={btnSecondarySm}>Cancel</button>
@@ -464,7 +517,7 @@ function ActivityNotes({a, contact, notes, link, onUpdate, onAdd, own}){
         ? <ActivityNoteItem key="own" n={{...a, body:a.body}} contact={contact} canEdit={can(a, 'edit')} canDelete={can(a, 'delete')}
             onSave={body=>onUpdate(a.id, {body})} onDelete={()=>onUpdate(a.id, {body:''})}/>
         : <ActivityNoteItem key={n.id} n={n} contact={contact} canEdit={can(n, 'edit')} canDelete={can(n, 'delete')}
-            onSave={body=>onUpdate(n.id, noteEditPatch(n, body, contact))} onDelete={()=>del && del(n)}/>)}
+            onSave={body=>onUpdate(n.id, {...noteEditPatch(n, body, contact), ...withMentions(n, tagged(n.body, body))})} onDelete={()=>del && del(n)}/>)}
       {!list.length && !adding && <div style={{fontSize:13, color:T.attioMuted}}>No notes yet</div>}
     </div>
   );
@@ -500,7 +553,7 @@ function CallDetail({a, contact, team, comments, onUpdate, onAdd, onStub, across
   const head = detailHead(a, contact, across);
   return (
     // A call made through the system has nothing to edit (its notes have their own ⋯).
-    <DetailFrame head={head} actions={editing ? saveBar(cancel, save, dirty)
+    <DetailFrame editing={editing} head={head} actions={editing ? saveBar(cancel, save, dirty)
       : activityEditBar(a, a.logged ? ()=>{ setD(blank()); setEditing(true); } : null, detailMenu({a, onUpdate, onStub, deleteLabel: a.logged ? 'Delete Call Log' : 'Delete Call'}))}>
       {stack(<>
         {!editing && recordFirst(across)}
@@ -533,13 +586,16 @@ function EmailDetail({a, contact, acts, onStub, onUpdate, across}){
   // The email's own record (it may be shown on an associated record's feed).
   const where = (hub && hubFindActivity(hub, a.id)) || (ra && {object:ra.object, recordId:ra.record.id});
   const host = React.useContext(ComposeHostCtx);
+  const inFooter = React.useContext(DetailFooterCtx), given = React.useContext(DetailPrimaryCtx);
+  const primary = inFooter ? given : null, scheduledEdit = !!(primary && primary.what === 'edit');
   const compose = (kind) => !(hub && where) ? onStub(kind === 'replyTo' ? 'Reply' : 'Forward')
     : host ? host.compose({object:where.object, id:where.recordId, [kind]:a}) : hub.composeEmail({object:where.object, id:where.recordId, [kind]:a});
   return (
     // Emails stay read-only; Reply and Forward open the composer.
     <DetailFrame head={detailHead(a, contact, across)} actions={<>
-      {headerBtn('Reply', ()=>compose('replyTo'))}
-      <DetailMoreMenu items={detailMenu({a, onUpdate, onStub, own:[{label:'Forward Email', icon:'forward', onClick:()=>compose('forward')}], runProfile:true, deleteLabel:'Delete Email'})}/>
+      {/* Under the trail's Follow Up, Reply or Edit (the footer's filled button) no Reply of its own; a scheduled email, not sent yet, isn't forwarded. */}
+      {!(primary && ['reply', 'followUp', 'edit'].includes(primary.what)) && headerBtn('Reply', ()=>compose('replyTo'))}
+      <DetailMoreMenu items={detailMenu({a, onUpdate, onStub, own: scheduledEdit ? [] : [{label:'Forward Email', icon:'forward', onClick:()=>compose('forward')}], runProfile:true, deleteLabel:'Delete Email'})}/>
     </>}>
       {stack(<>
         {recordFirst(across)}
@@ -573,7 +629,7 @@ function EmailLogDetail({a, contact, team, onUpdate, onStub, across}){
   // Save only once something has actually changed — the same rule for every detail.
   const dirty = !!d.title.trim() && !!d.body.trim() && ((d.poc && placed) || d.title.trim() !== orig.title || d.body.trim() !== orig.body);
   return (
-    <DetailFrame head={detailHead(a, contact, across)} actions={editing ? saveBar(cancel, save, dirty)
+    <DetailFrame editing={editing} head={detailHead(a, contact, across)} actions={editing ? saveBar(cancel, save, dirty)
       : activityEditBar(a, ()=>{ setD(blank()); setEditing(true); }, detailMenu({a, onUpdate, onStub, runProfile:true, deleteLabel:'Delete Email Log'}))}>
       {stack(<>
         {!editing && recordFirst(across)}
@@ -615,7 +671,7 @@ function TaskDetail({a, contact, team, comments = [], onUpdate, onAdd, onStub, a
     ...(a.status === 'onHold' ? [['Resume', 'inProgress']] : [['Put on Hold', 'onHold']]),
     ['Complete', 'completed']];
   return (
-    <DetailFrame head={activityHead(a, contact)} actions={editing ? saveBar(cancel, save, !!d.title.trim() && dirty)
+    <DetailFrame editing={editing} head={activityHead(a, contact)} actions={editing ? saveBar(cancel, save, !!d.title.trim() && dirty)
       : <>{steps.map(([label, status]) => <React.Fragment key={label}>{headerBtn(label, ()=>onUpdate(a.id, {status}))}</React.Fragment>)}
         {activityEditBar(a, ()=>{ setD(blank()); setEditing(true); }, detailMenu({a, onUpdate, onStub, own:[stubItem('Reassign Task', onStub, 'userSwitch'), stubItem('Copy Task Description', onStub, 'copy')], deleteLabel:'Delete Task'}))}</>}>
       {stack(<>
@@ -707,11 +763,30 @@ function MeetingDetail({a, contact, team, comments, onUpdate, onAdd, onStub, acr
     setEditing(false);
   };
   const teamOptions = team.map(n => ({value:n, label: n === contact.owner ? `${n} (Owner)` : n}));
+  /* Reschedule (2026-11-18): a scheduled meeting still to come moves to another date and
+     time — "Meeting rescheduled" on the record's trail keeps where it was. */
+  const ra = useRecordAccess();
+  const canMove = !a.logged && a.status === 'scheduled' && new Date(a.scheduledFor || a.at).getTime() > Date.now() && (!ra || activityCan(ra.object, ra.record, a, 'edit'));
+  const whenParts = () => { const z = zonedParts(new Date(a.scheduledFor || a.at)), p = (n) => String(n).padStart(2, '0'); return {date:`${z.y}-${p(z.m + 1)}-${p(z.d)}`, time:`${p(z.h)}:${p(z.mi)}`}; };
+  const [moving, setMoving] = React.useState(null);   // {date, time} while rescheduling
+  const movedTo = moving && moving.date && moving.time ? taskDueValue(moving.date, moving.time).due : null;
+  const moveOk = !!movedTo && new Date(movedTo).getTime() > Date.now() && new Date(movedTo).getTime() !== new Date(a.scheduledFor || a.at).getTime();
+  const saveMove = () => {
+    const from = new Date(a.scheduledFor || a.at);
+    onUpdate(a.id, {at:movedTo, scheduledFor:movedTo, completedNotified:false});
+    onAdd({id:newId('resched'), type:'meetingRescheduled', meetingId:a.id, title:a.title || 'Meeting', from, to:movedTo, source:'you', by:CURRENT_USER.name});
+    setMoving(null);
+  };
   return (
-    <DetailFrame head={detailHead(a, contact, across)} actions={editing ? saveBar(cancel, save, dirty)
-      : activityEditBar(a, ()=>{ setD(blank()); setEditing(true); }, detailMenu({a, onUpdate, onStub, deleteLabel: a.logged ? 'Delete Meeting Log' : 'Delete Meeting'}))}>
-      {!editing && a.officeRequest && <OfficeRequestBlock a={a} onUpdate={onUpdate}/>}
-      {stack(<>
+    <DetailFrame editing={editing || !!moving} head={detailHead(a, contact, across)} actions={editing ? saveBar(cancel, save, dirty)
+      : moving ? saveBar(()=>setMoving(null), saveMove, moveOk)
+      : <>{canMove && headerBtn('Reschedule', ()=>setMoving(whenParts()))}{activityEditBar(a, ()=>{ setD(blank()); setEditing(true); }, detailMenu({a, onUpdate, onStub, deleteLabel: a.logged ? 'Delete Meeting Log' : 'Delete Meeting'}))}</>}>
+      {!editing && !moving && a.officeRequest && <OfficeRequestBlock a={a} onUpdate={onUpdate}/>}
+      {moving && stack(<>
+        <Field label="Date"><DateField required value={moving.date} onChange={v=>setMoving(m => ({...m, date:v}))} ariaLabel="New meeting date"/></Field>
+        <Field label="Time"><TimeField required value={moving.time} onChange={v=>setMoving(m => ({...m, time:v}))} ariaLabel="New meeting time"/></Field>
+      </>)}
+      {!moving && stack(<>
         {!editing && recordFirst(across)}
         {!editing && a.location && <Field label="Location"><ReadValue>{a.location}</ReadValue></Field>}
         {/* Read-only: Title, Platform, Transcript, Time Stamp, Link — the organiser is in the
@@ -733,7 +808,7 @@ function MeetingDetail({a, contact, team, comments, onUpdate, onAdd, onStub, acr
               className={LINK_CLASS} style={{color:T.attioText}}>{a.link}</a></div>
           : <ReadValue/>}</Field>}
       </>)}
-      {!editing && <ActivityNotes a={a} contact={contact} notes={comments} link="meetingId" onUpdate={onUpdate} onAdd={onAdd}/>}
+      {!editing && !moving && <ActivityNotes a={a} contact={contact} notes={comments} link="meetingId" onUpdate={onUpdate} onAdd={onAdd}/>}
     </DetailFrame>
   );
 }
@@ -839,7 +914,7 @@ function OfficeRequestBlock({a, onUpdate}){
 /* A stage move, a property change, a customer created from the record, a task reassigned, a payment change or records
    merged into it (each value replaced, before → after): what changed, read-only. */
 function HistoryChangeDetail({a, contact}){
-  const rows = a.type === 'stageChange' ? [['Previous stage', (a.from || {}).label], ['New stage', (a.to || {}).label]]
+  const rows = a.type === 'stageChange' ? [...(isPipelineChange(a) ? [['Previous pipeline', (a.from || {}).pipelineLabel], ['New pipeline', (a.to || {}).pipelineLabel]] : []), ['Previous stage', (a.from || {}).label], ['New stage', (a.to || {}).label]]
     : a.type === 'propertyChange' ? [['Property', a.label], ['Previous value', a.from], ['New value', a.to]]
     : a.type === 'recordsMerged' ? [['Merged records', activityHeadline(a)], ...(a.changes || []).map(c => [c.label, `${c.from || '—'} → ${c.to || '—'}`])]
     : a.type === 'recordsSplit' ? [['Split from', activityHeadline(a)]]
@@ -852,6 +927,41 @@ function HistoryChangeDetail({a, contact}){
     </DetailFrame>
   );
 }
+/* The record's story (2026-11-18): what each new activity says when it's opened. */
+const FORM_VIA_LABEL = {meta:'Meta Lead Ad', website:'Website', link:'Form link'};
+const SEQUENCE_ACTION_LABEL = {enrolled:'Enrolled', exited:'Exited', unsubscribed:'Unsubscribed'};
+function StoryDetail({a, contact, acts}){
+  const fieldRows = (rows) => rows.filter(([, v]) => v !== undefined).map(([label, value], i) => <Field key={`${label}-${i}`} label={label}><ReadValue>{value === '' || value == null ? '—' : String(value)}</ReadValue></Field>);
+  let rows = [], extra = null;
+  if(a.type === 'formSubmitted'){
+    // Every answer as it was submitted, in the form's order.
+    rows = [['Form', a.formName], ['Submitted Through', FORM_VIA_LABEL[a.via] || 'Form'], ...(a.answers || []).map(x => [x.label, x.value])];
+  } else if(a.type === 'recordCreated'){
+    rows = [['Record', a.name], ['Created Through', a.formName ? `Form · ${a.formName}` : a.viaWorkflow ? 'Workflow' : 'By hand'], ['Created By', a.by || (a.source === 'client' ? 'Client' : '')]];
+    // What workflows changed as it was created (within a couple of minutes).
+    const t = new Date(a.at).getTime();
+    const after = (acts || []).filter(x => x.id !== a.id && (x.type === 'propertyChange' || x.type === 'ownerChange' || x.type === 'stageChange') && x.viaWorkflow
+      && new Date(x.at).getTime() >= t && new Date(x.at).getTime() - t <= 2 * 60000).sort((x, y) => new Date(x.at) - new Date(y.at));
+    if(after.length) extra = (<>
+      <div style={{fontSize:13, fontWeight:600, color:T.attioText, paddingTop:8}}>Changed by Workflows</div>
+      {fieldRows(after.map(x => x.type === 'propertyChange' ? [x.label, `${x.from || '—'} → ${x.to || '—'}`]
+        : x.type === 'ownerChange' ? ['Owner', `${userLabel(x.from) || 'No owner'} → ${userLabel(x.to) || 'No owner'}`]
+        : ['Stage', `${(x.from || {}).label || '—'} → ${(x.to || {}).label || '—'}`]))}
+      <div style={{fontSize:12, color:T.attioMuted}}>{[...new Set(after.map(x => x.by).filter(Boolean))].join(', ')}</div>
+    </>);
+  } else if(a.type === 'dealCreated') rows = [[typeSingular('deals', 'Deal'), a.dealName]];
+  else if(a.type === 'duplicateFound') rows = [['Merge Status', a.status], ['Matches', activityHeadline(a)], ['Matched On', (a.on || []).join(', ')]];
+  else if(a.type === 'sequence') rows = [['Sequence', a.sequenceName], ['Status', SEQUENCE_ACTION_LABEL[a.action] || a.action], ...(a.reason ? [['Reason', a.reason]] : []), ...(a.emails != null ? [['Emails Scheduled', a.emails]] : [])];
+  else if(a.type === 'meetingRescheduled') rows = [['Meeting', a.title], ['Was', a.from ? fmtActStamp(new Date(a.from)) : ''], ['Now', a.to ? fmtActStamp(new Date(a.to)) : '']];
+  else if(a.type === 'profile') rows = [['Template', a.formName], ...(a.field ? [['Property', a.field]] : []), ...(a.value !== undefined ? [['Value', a.value]] : [])];
+  else if(a.type === 'invoice') rows = [['Invoice', a.number], ['Amount', a.amountText], ['Payment', a.payment], ['Plan', a.planNumber]];
+  else if(a.type === 'workflow') rows = [['Workflow', a.title], ...String(a.body || '').split('\n').filter(Boolean).map((l, i) => [i ? '' : 'Steps', l])];
+  return (
+    <DetailFrame head={activityHead(a, contact)}>
+      {stack(<>{fieldRows(rows)}{extra}</>)}
+    </DetailFrame>
+  );
+}
 function OwnerChangeDetail({a, contact, team, onReassign}){
   const [editing, setEditing] = React.useState(false);
   const [owner, setOwner] = React.useState(contact.owner || null);
@@ -859,7 +969,7 @@ function OwnerChangeDetail({a, contact, team, onReassign}){
   // Reassigning goes through the normal owner update, which records its own Owner change.
   const save = () => { if(owner && owner !== contact.owner && onReassign) onReassign(owner); setEditing(false); };
   return (
-    <DetailFrame head={activityHead(a, contact)} actions={editing ? saveBar(cancel, save, !!owner && owner !== contact.owner) : editBar(()=>{ setOwner(contact.owner || null); setEditing(true); })}>
+    <DetailFrame editing={editing} head={activityHead(a, contact)} actions={editing ? saveBar(cancel, save, !!owner && owner !== contact.owner) : editBar(()=>{ setOwner(contact.owner || null); setEditing(true); })}>
       {stack(<>
         {editing
           ? <Field label="Reassign Owner"><Select value={owner} options={team} placeholder="Select owner" onChange={setOwner}/></Field>
@@ -885,6 +995,7 @@ function ActivityDetail({a, contact, team, acts, onUpdate, onAdd, onStub, onReas
   if(a.type === 'fileChange') return <FileChangeDetail a={a} contact={contact}/>;
   if(a.type === 'quote') return <QuoteActivityDetail a={a} contact={contact}/>;
   if(a.type === 'document') return <DocumentActivityDetail a={a} contact={contact}/>;
+  if(['formSubmitted', 'recordCreated', 'dealCreated', 'duplicateFound', 'sequence', 'meetingRescheduled', 'profile', 'invoice', 'workflow'].includes(a.type)) return <StoryDetail a={a} contact={contact} acts={acts}/>;
   return null;
 }
 
@@ -968,12 +1079,18 @@ function NewItemPanel({title, children, canSave, onSave, onCancel, primary = 'Sa
 
 /* A note is rich text (richText.jsx — the Quotes and Services editor): bold, italic, underline,
    numbered / bulleted / alphabetical lists and links, kept as HTML in `body`. */
-function NewNote({onAdd, onDone}){
+/* `support`: the Support Note switch starts on (the record's Support Notes tab — 2026-11-19).
+   @tags in it notify and email the people tagged (noteTools.jsx). */
+function NewNote({onAdd, onDone, support:startSupport = false}){
   const [html, setHtml] = React.useState('');
+  const [support, setSupport] = React.useState(startSupport);
+  const tagged = useMentionNotify();
   return (
     <NewItemPanel title="Add Note" primary="Add Note" canSave={!richIsEmpty(html)} onCancel={()=>onDone(null)}
-      onSave={()=>{ const id = newId('note'); onAdd({id, type:'note', source:'you', by:null, body:sanitizeRichText(html)}); onDone(id); }}>
-      <Field label="Note"><RichTextEditor value={html} onChange={setHtml} placeholder="Write a note" minHeight={180} ariaLabel="Note"/></Field>
+      onSave={()=>{ const id = newId('note'), body = sanitizeRichText(html);
+        onAdd({id, type:'note', source:'you', by:null, body, ...(support ? {support:true} : {}), ...withMentions(null, tagged('', body, 'a note'))}); onDone(id); }}>
+      <Field label="Note"><div data-mentions="1"><RichTextEditor value={html} onChange={setHtml} placeholder="Write a note" minHeight={180} ariaLabel="Note"/></div></Field>
+      <SupportNoteSwitch on={support} onChange={setSupport}/>
     </NewItemPanel>
   );
 }
@@ -1103,7 +1220,7 @@ function NewTask({team, contact, onAdd, onDone, initial}){
 
 /* ── Tab ─────────────────────────────────────────────────────────────────────────────────── */
 
-const ACTIVITY_TAB_TYPES = {activity:null, calls:'call', email:'email', tasks:'task', notes:'note', meetings:'meeting'};   // Meetings: the Deal tabs
+const ACTIVITY_TAB_TYPES = {activity:null, calls:'call', email:'email', tasks:'task', notes:'note', supportNotes:'note', meetings:'meeting'};   // Meetings: the Deal tabs
 
 /* The tab's add action, at the right of the toolbar: a primary button. Where a tab offers more
    than one type, it still opens the list of types. */
@@ -1111,6 +1228,7 @@ const ACTIVITY_ADD = {
   activity: {label:'Add',       menu:['Note', 'Call', 'Log Call', 'Start Meeting', 'Schedule Meeting', 'Log Meeting', 'Task', 'Email', 'Log Email']},
   calls:    {label:'Add Call',  menu:['Call', 'Log Call']},
   notes:    {label:'Add Note',  pick:'Note'},
+  supportNotes: {label:'Add Support Note', pick:'Support Note'},
   email:    {label:'Add Email', menu:['Email', 'Log Email']},
   tasks:    {label:'Add Task',  pick:'Task'},
   meetings: {label:'Add Meeting', menu:['Start Meeting', 'Schedule Meeting', 'Log Meeting', 'Request Office Meeting']},
@@ -1156,16 +1274,89 @@ function ActivityNavItem({a, contact, context, selected, onSelect, record, count
   );
 }
 
+/* A record's activity as a time trail (2026-11-18): Overview, Calls, Notes, Emails and
+   Meetings (Tasks keeps its Table / Board): Upcoming first, then each month, newest first. Each activity has its time and date
+   on the left of a rail, its row as before (ActivityRow, without the date), and on the right one
+   action where it has one (Mohsin's list, 2026-11-18):
+     Email sent → Follow Up (the composer, in its thread)  ·  Email received → Reply
+     Email scheduled → Edit (the composer with everything as scheduled, its date and time too; Mohsin
+       2026-11-18 — it was Discard; Delete Email stays in its ⋯)  ·  Email log → none
+     Call or Call log: Connected → Schedule Meeting; No answer, Left voicemail, Disconnected → Call Again
+     Meeting → Add Note (opens it with a new note started)
+     Workflow → Revert, for those with the Workflows · Revert permission while it can still be undone
+     ·  everything else → none.
+   A row opens the activity in its side panel. */
+const trailAction = (a) => {
+  if(a.type === 'email') return a.status === 'scheduled' ? 'edit' : a.logged ? null : a.direction === 'received' ? 'reply' : 'followUp';
+  if(a.type === 'call') return /^connected/i.test(a.outcome || '') ? 'meeting' : /no answer|voicemail|disconnected/i.test(a.outcome || '') ? 'callAgain' : null;
+  if(a.type === 'workflow') return a.runId ? 'revert' : null;
+  return a.type === 'meeting' ? 'note' : null;
+};
+const TRAIL_ACTION_LABEL = {reply:'Reply', followUp:'Follow Up', edit:'Edit', meeting:'Schedule Meeting', callAgain:'Call Again', note:'Add Note', revert:'Revert'};
+// What each action needs the person to be allowed to do on the record.
+const TRAIL_ACTION_TOOL = {reply:'Email', followUp:'Email', meeting:'Schedule Meeting', callAgain:'Call', note:'Note'};
+const TRAIL_TIME_W = 84;
+// `context`: how the rows read (the tab's, as its list read them); `countOf(a)`: an email thread's size (Emails).
+function ActivityTrail({list, contact, recordOf, selectedId, onOpen, onAction, canDo, empty, context = 'all', countOf}){
+  const now = Date.now();
+  const groups = new Map();
+  list.forEach(a => { const d = new Date(a.at);
+    const key = d.getTime() > now ? 'Upcoming' : d.toLocaleDateString('en-US', {month:'long', year:'numeric'});
+    if(!groups.has(key)) groups.set(key, []); groups.get(key).push(a); });
+  if(!list.length) return <EmptyState compact title={empty}/>;
+  return [...groups].map(([key, items]) => (
+    <section key={key} style={{paddingBottom:8}}>
+      <div style={{padding:'14px 20px 6px', fontSize:13, fontWeight:600, color:T.attioText}}>{key}</div>
+      {items.map((a, i) => <TrailRow key={a.id} a={a} contact={contact} upcoming={key === 'Upcoming'} first={i === 0} last={i === items.length - 1} context={context}
+        count={countOf ? countOf(a) : 1} record={recordOf && recordOf(a)} selected={selectedId === a.id} onOpen={onOpen} onAction={onAction} canDo={canDo}/>)}
+    </section>
+  ));
+}
+function TrailRow({a, contact, upcoming, first, last, record, selected, onOpen, onAction, canDo, context = 'all', count = 1}){
+  const [h, setH] = React.useState(false);
+  const plainRecords = !!(React.useContext(OpenRecordCtx) || {}).all;
+  const d = new Date(a.at);
+  const action = trailAction(a), shownAction = action && canDo(a, action) ? action : null;
+  return (
+    <div onClick={()=>onOpen(a)} onMouseEnter={()=>setH(true)} onMouseLeave={()=>setH(false)}
+      style={{display:'flex', alignItems:'stretch', padding:'0 20px', cursor:'pointer', background: selected ? '#F4F5F7' : h ? T.headerBg : 'transparent', transition:'background 120ms ease'}}>
+      <div style={{width:TRAIL_TIME_W, flexShrink:0, textAlign:'right', padding:'14px 0 10px', whiteSpace:'nowrap'}}>
+        <div style={{fontSize:12.5, fontWeight:600, color:T.attioText, lineHeight:'17px'}}>{fmtActTime(d)}</div>
+        <div style={{fontSize:11.5, color:T.attioMuted, marginTop:1}}>{fmtActDate(d)}</div>
+      </div>
+      {/* The rail: one line through the month, a dot at each activity — hollow while it's still to come. */}
+      <div style={{width:36, flexShrink:0, position:'relative', display:'flex', justifyContent:'center'}}>
+        <span style={{position:'absolute', left:'50%', width:1, marginLeft:-0.5, top: first ? 19 : 0, bottom: last ? 'calc(100% - 19px)' : 0, background:T.border}}/>
+        <span style={{position:'relative', marginTop:14, width:9, height:9, borderRadius:9, boxSizing:'border-box',
+          background: upcoming ? '#fff' : T.gray600, border:`1.5px solid ${upcoming ? T.gray400 : T.gray600}`}}/>
+      </div>
+      <div style={{flex:1, minWidth:0, padding:'6px 0'}}>
+        {/* On a record's journey (`all`) the row names no record (2026-11-19). */}
+        <ActivityRow a={a} contact={contact} context={context} first hideWhen record={record && !plainRecords ? {object:record.object, id:record.record.id, name:record.record.name} : null}/>
+      </div>
+      <div style={{flexShrink:0, minWidth:72, display:'flex', flexDirection:'column', alignItems:'flex-end', gap:8, paddingTop:13}}>
+        {shownAction && <button onClick={e=>{ e.stopPropagation(); onAction(a, shownAction); }} className={LINK_CLASS}
+          style={{border:'none', background:'transparent', padding:0, height:18, cursor:'pointer', fontSize:12.5, fontFamily:'inherit', color:T.attioText, whiteSpace:'nowrap'}}>
+          {TRAIL_ACTION_LABEL[shownAction]}</button>}
+        {count > 1 && <span title={`${count} emails in this thread`} style={{fontSize:11, fontWeight:600, color:T.gray600, background:T.headerBg, borderRadius:9999, padding:'1px 7px'}}>{count}</span>}
+      </div>
+    </div>
+  );
+}
+
 // `emptyText`: replaces the tab's empty message (e.g. when a view's search or filters hide everything).
 // `prefill`: what a new item's form starts with (a task's name and type).
 /* `recordOf(act)` → {object, record}: an associated feed — each item names the record it's on,
    and opens on that record (its details, edits and comments go to it). */
 /* `acts`: what the tab lists (its filters and search applied); `allActs`: the record's whole activity —
    what an opened item reads (a call's notes, an email's thread), so a filter can't hide them. */
+// A record's activity opens in a side panel a little wider than other detail panels (640, not 560 — Mohsin 2026-11-19).
+const ACTIVITY_SIDE_W = 640;
 function ActivityTab({tabId, taskView = 'board', contact, acts, allActs, team, adding, setAdding, prefill, onUpdate, onAdd, onStub, onReassign, emptyText, recordOf}){
   const hub = useRecordHub();
   const type = ACTIVITY_TAB_TYPES[tabId];
-  const all = type ? acts.filter(a => a.type === type) : listedActivities(acts);
+  // Support Notes (2026-11-19): the notes marked Support Note.
+  const all = type ? acts.filter(a => a.type === type && (tabId !== 'supportNotes' || a.support)) : listedActivities(acts);
   /* Emails: one row per thread — its latest email, with how many it has (emails.jsx). A row's
      record (an associated record's feed) keeps threads apart per record. */
   const threads = type === 'email' ? threadedEmailRows([...all].sort((x, y) => emailTime(y) - emailTime(x)), (a) => a,
@@ -1176,9 +1367,34 @@ function ActivityTab({tabId, taskView = 'board', contact, acts, allActs, team, a
   const ra = useRecordAccess();
   const [selectedId, setSelectedId] = React.useState(null);
   const [compose, setCompose] = React.useState(null);   // Reply / Forward: the composer's options
-  const selected = list.find(a => a.id === selectedId) || list[0] || null;
+  const [intent, setIntent] = React.useState(null);     // Overview's trail: what the opened activity is for ('note')
+  const open = (a, why = null) => { setSelectedId(a.id); setIntent(why); };
+  const [meetingFor, setMeetingFor] = React.useState(null);   // Schedule Meeting from the trail for an associated record's call: {object, record}
+  // The trail's actions — the same in the trail and as the side panel's filled button (DetailPrimaryCtx).
+  const wfCtx = useWorkflowEngineCtx();
+  const runOf = (a) => wfCtx && a.runId ? (wfCtx.state.runs || []).find(r => r.id === a.runId) || null : null;
+  const canTrail = (a, what) => { const on = recordOf && recordOf(a), o = on ? on.object : ra && ra.object, r = on ? on.record : ra && ra.record;
+    // Revert: the run is still kept, not reverted, has something to undo, and the person may revert.
+    if(what === 'revert'){ const run = runOf(a); return !!run && !run.reverted && automationRevertible(run) && workflowCan('revert'); }
+    if(!o) return true;
+    return what === 'edit' ? activityCan(o, r, a, 'edit') : canAdd(o, r, TRAIL_ACTION_TOOL[what]); };
+  const runTrail = (a, what) => {
+    if(what === 'note') return open(a, 'note');
+    if(what === 'revert'){ wfCtx.api.revertRun(a.runId); return hub && hub.toast('Workflow reverted'); }
+    // The record the activity is on (an associated feed's is another record).
+    const where = (hub && hubFindActivity(hub, a.id)) || (ra && {object:ra.object, recordId:ra.record.id});
+    if(!where) return onStub(TRAIL_ACTION_LABEL[what]);
+    if(what === 'reply' || what === 'followUp') return setCompose({object:where.object, id:where.recordId, replyTo:a, ...(what === 'followUp' ? {title:'Follow Up'} : {})});
+    if(what === 'callAgain') return hub.startCall({object:where.object, id:where.recordId});
+    if(what === 'edit') return setCompose({object:where.object, id:where.recordId, edit:a, title:'Edit Email'});
+    if(what === 'meeting'){ const on = recordOf && recordOf(a); setSelectedId(null); setMeetingFor(on ? {object:on.object, record:on.record} : null); setAdding('Schedule Meeting'); }
+  };
+  const primaryOf = (a) => { const what = a && trailAction(a);
+    return what && canTrail(a, what) ? {what, el:<button key="primary" onClick={()=>runTrail(a, what)} style={btnPrimarySm()}>{TRAIL_ACTION_LABEL[what]}</button>} : null; };
+  // Nothing is open until an activity is picked: it opens in its own side panel (below).
+  const selected = list.find(a => a.id === selectedId) || null;
   const done = (id) => { setAdding(null); if(id) setSelectedId(id); };
-  const empty = emptyText || {activity:'No activity yet', calls:'No calls yet', email:'No emails yet', tasks:'No tasks yet', notes:'No notes yet', meetings:'No meetings yet'}[tabId];
+  const empty = emptyText || {activity:'No activity yet', calls:'No calls yet', email:'No emails yet', tasks:'No tasks yet', notes:'No notes yet', supportNotes:'No support notes yet', meetings:'No meetings yet'}[tabId];
   // A new email from this record, or a reply / forward of one shown here.
   const emailOpts = adding === 'Email' && ra ? {object:ra.object, id:ra.record.id} : compose;
   const closeEmail = (result, id) => { setAdding(a => a === 'Email' ? null : a); setCompose(null); if(id) setSelectedId(id); };
@@ -1198,7 +1414,8 @@ function ActivityTab({tabId, taskView = 'board', contact, acts, allActs, team, a
         return <>
           {taskView === 'table' ? <TaskTable entries={entries} onOpen={(e)=>setSelectedId(e.act.id)}/>
             : <TaskStatusBoard entries={entries} onUpdate={update} onOpen={(e)=>setSelectedId(e.act.id)} showAssignee/>}
-          {open && <PageSidePanel title={open.act.title || 'Task'} onClose={()=>setSelectedId(null)}>
+          {open && <PageSidePanel width={ACTIVITY_SIDE_W} title={open.act.title || 'Task'} onClose={()=>setSelectedId(null)}>
+            <DetailFooterCtx.Provider value={true}>
             <div style={{flex:1, minHeight:0, display:'flex', flexDirection:'column'}}>
               {own(open) ? <ActivityDetail key={open.act.id} a={open.act} contact={contact} team={team} acts={allActs || acts} onUpdate={onUpdate} onAdd={onAdd} onStub={onStub} onReassign={onReassign}/>
                 : <RecordAccessCtx.Provider value={{object:open.object, record:open.record}}>
@@ -1207,51 +1424,57 @@ function ActivityTab({tabId, taskView = 'board', contact, acts, allActs, team, a
                       onStub={onStub} onReassign={()=>{}} across={{object:open.object, record:open.record, perspective:'person', hideType:true}}/>
                   </RecordAccessCtx.Provider>}
             </div>
+            </DetailFooterCtx.Provider>
           </PageSidePanel>}
         </>;
       })() : <>
-      {/* Left — the navigation column, full height, divided from the detail by one vertical
-          line (the same treatment as main nav | page and side panel | content). */}
-      <div style={{width:380, flexShrink:0, overflowY:'auto', borderRight:`1px solid ${T.border}`, padding:'8px 0'}}>
-        {list.map(a => (
-          <ActivityNavItem key={a.id} a={a} contact={contact} context={context} count={threadCount(a)}
-            record={recordOf && recordOf(a) && (({object, record}) => ({object, id:record.id, name:record.name}))(recordOf(a))}
-            selected={selected && selected.id === a.id} onSelect={()=>setSelectedId(a.id)}/>
-        ))}
-        {!list.length && <EmptyState compact title={empty}/>}
+      {/* The activity list, full width (2026-11-18); an activity picked opens in its own
+          side panel — its details, with Edit and ⋯ at the bottom right (DetailFooterCtx). */}
+      <div style={{flex:1, minWidth:0, overflowY:'auto', padding:'8px 0'}}>
+        {/* The time trail, on Overview and on Calls, Notes, Emails and Meetings (2026-11-18). */}
+        <ActivityTrail list={list} contact={contact} recordOf={recordOf} selectedId={selected && selected.id} empty={empty}
+          context={context} countOf={threads ? threadCount : undefined}
+          onOpen={(a)=>open(a)} canDo={canTrail} onAction={runTrail}/>
       </div>
-
-      {/* Right — the selected item's content (DetailFrame). */}
-      <div style={{flex:1, minWidth:0, minHeight:0, display:'flex', flexDirection:'column'}}>
-        {selected && (() => {
-          const on = recordOf && recordOf(selected);
-          if(!on) return <ActivityDetail key={selected.id} a={selected} contact={contact} team={team} acts={allActs || acts}
-            onUpdate={onUpdate} onAdd={onAdd} onStub={onStub} onReassign={onReassign}/>;
-          // On an associated record: as on the Tools pages, with the record named in the details.
-          const view = {...on.record, owner:userLabel(on.record.owner) || on.record.owner};
-          return (
-            <RecordAccessCtx.Provider value={{object:on.object, record:on.record}}>
-              <ActivityDetail key={selected.id} a={selected} contact={view} team={team} acts={(hub.activities[on.object] || {})[on.record.id] || []}
-                onUpdate={(id, patch)=>hub.update(on.object, on.record.id, id, patch)} onAdd={(x)=>hub.add(on.object, on.record.id, x)}
-                onStub={onStub} onReassign={()=>{}} across={{object:on.object, record:on.record, perspective:'person', hideType:true}}/>
-            </RecordAccessCtx.Provider>
-          );
-        })()}
-      </div>
+      {selected && (() => {
+        const on = recordOf && recordOf(selected);
+        const title = (ACTIVITY_TYPES[selected.type] || {}).label || 'Activity';
+        const view = on && {...on.record, owner:userLabel(on.record.owner) || on.record.owner};
+        return (
+          <PageSidePanel width={ACTIVITY_SIDE_W} title={title} onClose={()=>{ setSelectedId(null); setIntent(null); }}>
+            <DetailFooterCtx.Provider value={true}><DetailIntentCtx.Provider value={intent}><DetailPrimaryCtx.Provider value={primaryOf(selected)}>
+              <div key={`${selected.id}:${intent || ''}`} style={{flex:1, minHeight:0, display:'flex', flexDirection:'column'}}>
+                {!on ? <ActivityDetail key={selected.id} a={selected} contact={contact} team={team} acts={allActs || acts}
+                    onUpdate={onUpdate} onAdd={onAdd} onStub={onStub} onReassign={onReassign}/>
+                  // On an associated record: as on the Tools pages, with the record named in the details.
+                  : <RecordAccessCtx.Provider value={{object:on.object, record:on.record}}>
+                      <ActivityDetail key={selected.id} a={selected} contact={view} team={team} acts={(hub.activities[on.object] || {})[on.record.id] || []}
+                        onUpdate={(id, patch)=>hub.update(on.object, on.record.id, id, patch)} onAdd={(x)=>hub.add(on.object, on.record.id, x)}
+                        onStub={onStub} onReassign={()=>{}} across={{object:on.object, record:on.record, perspective:'person', hideType:true}}/>
+                    </RecordAccessCtx.Provider>}
+              </div>
+            </DetailPrimaryCtx.Provider></DetailIntentCtx.Provider></DetailFooterCtx.Provider>
+          </PageSidePanel>
+        );
+      })()}
       </>}
 
       {/* A new item: the creation side panel over this area, without the record section — the
           record is this one. */}
       {adding === 'Note' && <NewNote onAdd={onAdd} onDone={done}/>}
+      {adding === 'Support Note' && <NewNote support onAdd={onAdd} onDone={done}/>}
       {adding === 'Log Call' && <NewLogCall contact={contact} team={team} onAdd={onAdd} onDone={done}/>}
       {adding === 'Log Meeting' && <NewLogMeeting contact={contact} team={team} onAdd={onAdd} onDone={done}/>}
       {adding === 'Log Email' && <NewLogEmail contact={contact} team={team} onAdd={onAdd} onDone={done}/>}
-      {adding === 'Schedule Meeting' && <NewScheduleMeeting contact={contact} team={team} onAdd={onAdd} onDone={done}/>}
+      {adding === 'Schedule Meeting' && (meetingFor
+        ? <NewScheduleMeeting contact={{...meetingFor.record, owner:userLabel(meetingFor.record.owner) || meetingFor.record.owner}} team={team}
+            onAdd={(x)=>hub.add(meetingFor.object, meetingFor.record.id, x)} onDone={()=>{ setMeetingFor(null); setAdding(null); }}/>
+        : <NewScheduleMeeting contact={contact} team={team} onAdd={onAdd} onDone={done}/>)}
       {adding === 'Task' && <NewTask team={team} contact={contact} initial={prefill} onAdd={onAdd} onDone={done}/>}
-      {emailOpts && <EmailComposer key={adding === 'Email' ? 'new' : 'reply'} {...emailOpts} onClose={closeEmail}/>}
+      {emailOpts && <EmailComposer key={adding === 'Email' ? 'new' : emailOpts.edit ? `edit:${emailOpts.edit.id}` : 'reply'} {...emailOpts} onClose={closeEmail}/>}
     </div>
     </ComposeHostCtx.Provider>
   );
 }
 
-Object.assign(window, {OfficeMeetingRequestModal, CreatePanelFrame, ContentSidePanel, APP_HEADER_H, PageVisibleCtx, CreatePanelCtx, CreateRecordField, ComposeHostCtx, ActivityDetail, NewNote, NewLogCall, NewLogEmail, NewLogMeeting, NewScheduleMeeting, NewTask, SCHEDULE_DURATIONS, ActivityTab, ActivityAddButton, ACTIVITY_TAB_TYPES});
+Object.assign(window, {DetailFooterCtx, OfficeMeetingRequestModal, CreatePanelFrame, ContentSidePanel, APP_HEADER_H, PageVisibleCtx, CreatePanelCtx, CreateRecordField, ComposeHostCtx, ActivityDetail, NewNote, NewLogCall, NewLogEmail, NewLogMeeting, NewScheduleMeeting, NewTask, SCHEDULE_DURATIONS, ActivityTab, ActivityAddButton, ACTIVITY_TAB_TYPES});

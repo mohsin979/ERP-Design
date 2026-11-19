@@ -121,7 +121,7 @@ function StandardRecordMenu({object, record, noun, email, phone, copyText:copied
 }
 function ContactActionsMenu({contact, onEdit, onDelete, onEnrich, onCopied, onTool, onOwner, onCreateRecord, onViewSettings, visible=true}){
   return (
-    <StandardRecordMenu object="contacts" record={contact} noun="Contact" email={contact.email} phone={contact.phone} copyText={contactCopyText(contact)}
+    <StandardRecordMenu object="contacts" record={contact} noun="Lead" email={contact.email} phone={contact.phone} copyText={contactCopyText(contact)}
       onTool={onTool && ((k) => onTool(k, contact))}
       onCreateDeal={onCreateRecord && (() => onCreateRecord('Create deal', contact))}
       onCreateCustomer={onCreateRecord && (() => onCreateRecord('Create customer', contact))}
@@ -141,7 +141,7 @@ const QUICK_ACTION_DEFS = {
   // Named by the workspace's record types (HOF Partners: Create Lead, Go to Lead).
   createDeal:{get label(){ return `Create ${typeSingular('deals', 'Deal')}`; }, icon:'deals', needs:'deals'},
   createCustomer:{get label(){ return `Create ${typeSingular('customers', 'Customer')}`; }, icon:'customers', needs:'customers'},
-  goToContact:{get label(){ return `Go to ${typeSingular('contacts', 'Contact')}`; }, icon:'contacts', needs:'contacts'},
+  goToContact:{get label(){ return `Go to ${typeSingular('contacts', 'Lead')}`; }, icon:'contacts', needs:'contacts'},
   // A customer's parent deal; it takes Create Deal's place once the customer has one (switched on as Create Deal is).
   goToDeal:{get label(){ return `Go to ${typeSingular('deals', 'Deal')}`; }, icon:'deals', inherits:'createDeal', needs:'deals'},
 };
@@ -157,10 +157,14 @@ const customerHasDeal = (c) => !!(c && (c.dealIds || []).length);
 const customerTakesDeal = (c) => !!c && (c.dealIds || []).length < linkRuleLimit('customers', 'deals');
 const QUICK_ACTION_AVAILABLE = {customers:{createDeal:(r) => customerTakesDeal(r), goToDeal:(r) => customerHasDeal(r)}};
 const quickActionAvailable = (object, key, record) => { const f = (QUICK_ACTION_AVAILABLE[object] || {})[key]; return !f || !record || f(record); };
-const OBJECT_NOUNS = {get contacts(){ return typeSingular('contacts', 'Contact'); }, get deals(){ return typeSingular('deals', 'Deal'); }, get customers(){ return typeSingular('customers', 'Customer'); }};
+const OBJECT_NOUNS = {get contacts(){ return typeSingular('contacts', 'Lead'); }, get deals(){ return typeSingular('deals', 'Deal'); }, get customers(){ return typeSingular('customers', 'Customer'); }};
 // The Object's quick actions in the open workspace: none that goes to or creates a record type it doesn't have.
 const objectQuickActions = (object) => (OBJECT_QUICK_ACTIONS[object] || []).filter(k => !(QUICK_ACTION_DEFS[k] || {}).needs || workspaceHasType(QUICK_ACTION_DEFS[k].needs));
 const quickActionLabel = (object, key) => { const d = QUICK_ACTION_DEFS[key]; return !d ? key : typeof d.label === 'function' ? d.label(OBJECT_NOUNS[object]) : d.label; };
+/* The name under a side panel's quick action icon (2026-11-18): just what it is — Call,
+   Email, Task, Note, Owner, Contact, Deal — and "Create …" only where it creates a deal or customer. */
+const QUICK_SHORT = {owner:'Owner', get goToContact(){ return typeSingular('contacts', 'Lead'); }, get goToDeal(){ return typeSingular('deals', 'Deal'); }};
+const quickActionShort = (object, key) => QUICK_SHORT[key] || quickActionLabel(object, key);
 const quickActionLabels = (object) => Object.fromEntries(objectQuickActions(object).map(k => [k, quickActionLabel(object, k)]));
 // Saved before Quote replaced Send Quote.
 const QUICK_ACTION_RENAMES = {sendQuote:'quote'};
@@ -179,7 +183,7 @@ const defaultQuickActions = (object, enabled) => normalizeQuickActions(null, obj
 // The enabled quick actions a record shows, with their labels and icons (tools by permission).
 const shownQuickActions = (list, object, record) => normalizeQuickActions(list, object)
   .filter(q => q.enabled && (!QUICK_TOOL_KEYS.includes(q.key) || canAdd(object, record, q.key)) && quickActionAvailable(object, q.key, record))
-  .map(q => ({key:q.key, label:quickActionLabel(object, q.key), icon:QUICK_ACTION_DEFS[q.key].icon}));
+  .map(q => ({key:q.key, label:quickActionLabel(object, q.key), short:quickActionShort(object, q.key), icon:QUICK_ACTION_DEFS[q.key].icon}));
 /* A side panel's primary quick action (View Settings → Quick Actions → Primary, 2026-11-17): one
    of the actions the record shows, drawn on its own beneath the icons as a filled button with its
    icon and name — and so left out of the icons. None unless one is chosen (`primaryKey`). */
@@ -428,7 +432,7 @@ function recordLinkFields(records, object, self, others){
     const countOf = (r) => st.holder === object ? counts.get(String(r.id)) || 0 : linkedOf(records, o, r, object).length;
     const options = (records[o] || []).filter(r => isLinked(object, self, o, r) || countOf(r) < rule.perY)
       .map(r => recordOption(r));
-    return {key:o, noun:typeNoun(o, o.replace(/s$/, '')), multiple:rule.perX > 1, options};
+    return {key:o, noun:typeNoun(o, o === 'contacts' ? 'lead' : o.replace(/s$/, '')), multiple:rule.perX > 1, options};
   });
 }
 // A record's links as the fields' values, and the fields' values back as id lists ({[type]: ids}).
@@ -448,7 +452,7 @@ const linkFieldIds = (fields, values) => Object.fromEntries(fields.map(f => { co
    onSave(values, association, links). `zIndex`: over a modal it's opened from. */
 /* `canEditField(p)`: editing, the fields the signed-in user may change (Records → Edit — its stage
    moves and property values); the others aren't offered, and keep their values. */
-function ContactFormModal({mode, initial, properties, owners, stages, onCancel, onSave, noun = 'contact', optionsFor: optionsForProp, adjust, association, links, initialLinks, zIndex, canEditField}){
+function ContactFormModal({mode, initial, properties, owners, stages, onCancel, onSave, noun = 'lead', optionsFor: optionsForProp, adjust, association, links, initialLinks, zIndex, canEditField}){
   const fields = (properties || []).filter(p => mode === 'edit' ? !p.auto && (!canEditField || canEditField(p)) : p.onCreate)
     .map(p => mode === 'edit' ? {...p, required:!!p.mandatory} : p);
   const [v, setV] = React.useState(() => emptyValues(fields, initial));
@@ -494,4 +498,4 @@ function ContactFormModal({mode, initial, properties, owners, stages, onCancel, 
   );
 }
 
-Object.assign(window, {TOAST_MS, TOAST_ACTION_MS, customerHasDeal, customerTakesDeal, quickActionAvailable, RecordFields, AssociatedCreation, RecordLinkField, recordLinkFields, linkFieldValues, linkFieldIds, RecordActionsMenu, StandardRecordMenu, RECORD_TOOLS, ChangeOwnerModal, associatedNote, QUICK_ACTION_DEFS, QUICK_TOOL_KEYS, OBJECT_QUICK_ACTIONS, objectQuickActions, OBJECT_NOUNS, quickActionLabel, quickActionLabels, normalizeQuickActions, defaultQuickActions, shownQuickActions, splitQuickActions, runQuickAction, copyAction, viewSettingsItem, contactCopyText, ContactActionsMenu, ContactFormModal, CopyToast, copyText, todayLabel});
+Object.assign(window, {quickActionShort, TOAST_MS, TOAST_ACTION_MS, customerHasDeal, customerTakesDeal, quickActionAvailable, RecordFields, AssociatedCreation, RecordLinkField, recordLinkFields, linkFieldValues, linkFieldIds, RecordActionsMenu, StandardRecordMenu, RECORD_TOOLS, ChangeOwnerModal, associatedNote, QUICK_ACTION_DEFS, QUICK_TOOL_KEYS, OBJECT_QUICK_ACTIONS, objectQuickActions, OBJECT_NOUNS, quickActionLabel, quickActionLabels, normalizeQuickActions, defaultQuickActions, shownQuickActions, splitQuickActions, runQuickAction, copyAction, viewSettingsItem, contactCopyText, ContactActionsMenu, ContactFormModal, CopyToast, copyText, todayLabel});

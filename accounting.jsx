@@ -913,7 +913,8 @@ function RecordAccounting({object, record}){
   const savePayment = (scheduleId, instId, v) => {
     const base = all.find(s => s.id === scheduleId), inst0 = base && base.installments.find(x => x.id === instId);
     if(!inst0 || base.frozen || !(Number(v.amount) > 0) || installmentState(base, inst0).status !== 'unpaid') return;   // a payment is more than 0; forward only
-    if(paymentTypeOf(base) === 'one-time') logPayment(base, 'Marked Paid', {detail:`${fmtMoney(v.amount, scheduleCurrency(base))} · Paid on ${fmtQuoteDate(v.paidOn)}`});
+    // "Payment received" on the record's trail for every payment (2026-11-18 — was "Marked Paid", One-Time plans only).
+    logPayment(base, 'Payment received', {detail:`${fmtMoney(v.amount, scheduleCurrency(base))} · ${inst0.description || 'Payment'}${v.status === 'partial' ? ' · part payment' : ''} · Paid on ${fmtQuoteDate(v.paidOn)}`});
     const today = ymdOf(new Date()), at = new Date();
     const payment = {id:acId('pay'), amount:v.amount, paidOn:v.paidOn, recordedAt:at, recordedBy:CURRENT_USER.name, evidence:(v.evidence.file || v.evidence.link) ? v.evidence : null};
     const invoice = currentInvoiceOf(invoices, base.id, instId) || issueInvoices(hub, [{s:base, inst:inst0, on:today}])[0];

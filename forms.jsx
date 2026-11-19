@@ -96,6 +96,10 @@ function submitFormValues(hub, engineCtx, form, via, values, at){
      stage) and on Form Submitted — before the form's list is saved. */
   if(engineCtx) engineCtx.api.beginFormSubmission(form, sub);
   const id = hub.createRecord(form.target, vals, {via});
+  /* On the record's trail, first (2026-11-18): "Form submitted" — the form, where it came
+     from and every answer as it was filled, mapped to a property or not. */
+  if(id != null && hub.add) hub.add(form.target, id, {type:'formSubmitted', source:'client', by:'', at:new Date(sub.at.getTime() - 1), formId:form.id, formName:form.name || '', via:via || null,
+    submissionId:sub.id, answers:form.fields.map(f => { const p = formFieldProperty(f); return {label:f.label || 'Untitled field', value:String(formatPropertyValueOf(p, answers[f.id]) || '')}; })});
   if(engineCtx && id != null) engineCtx.api.formSubmitted(form.target, id, form.id, {...sub, recordId:id});
   hub.setForms(fs => fs.map(f => f.id === form.id ? {...f, submissions:[...(f.submissions || []), {...sub, recordId:id}], updatedAt:new Date()} : f));
   return {id, vals};

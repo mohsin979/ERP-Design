@@ -1001,25 +1001,25 @@ const brandedEmail = ({title, paragraphs, list, cta, signed = true}) => {
 const sampleToken = (key, label) => `<span data-token="${key}">${label}</span>`;
 const DEFAULT_EMAIL_TEMPLATES = [
   {id:'et-welcome', name:'Welcome to US NIW', subject:'Welcome to your US NIW journey', createdBy:'Waleed bin Zaman', format:'html',
-    body:`<p>Hi ${sampleToken('contacts:name', 'Contact · Full Name')},</p>`
-      + `<p>Welcome to HOF. Your US National Interest Waiver case is now open, and your consultant ${sampleToken('contacts:owner', 'Contact · Contact Owner')} will guide you through every step.</p>`
+    body:`<p>Hi ${sampleToken('contacts:name', 'Lead · Full Name')},</p>`
+      + `<p>Welcome to HOF. Your US National Interest Waiver case is now open, and your consultant ${sampleToken('contacts:owner', 'Lead · Lead Owner')} will guide you through every step.</p>`
       + `<p>Your client portal holds your documents, your payment schedule and the progress of your petition.</p>`
       + `<p><a data-cta="primary" href="https://portal.hofmigration.com">View Your Client Portal</a></p>`
       + `<p>If you have a question at any point, reply to this email.</p>`},
   {id:'et-ccl', name:'Client Care Letter', subject:'Your Client Care Letter', createdBy:'Abdullah Saith', format:'simple', assignedTo:{teams:[{id:'team-abdullah', off:[]}], users:[]},
-    body:`<p>Dear ${sampleToken('contacts:name', 'Contact · Full Name')},</p>`
+    body:`<p>Dear ${sampleToken('contacts:name', 'Lead · Full Name')},</p>`
       + `<p>Your Client Care Letter for ${sampleToken('deals:name', 'Deal · Deal Name')} is attached. It sets out the scope of our services, the agreed fee of ${sampleToken('deals:amount', 'Deal · Deal Amount')} and how we will work together.</p>`
       + `<p>Please read it carefully, sign it and send it back. If anything is unclear, reply to this email and we will help.</p>`,
     attachments:[{id:'att-sample-ccl', name:'Client Care Letter.pdf', size:184320, mime:'application/pdf'}]},
   {id:'et-payment', name:'Payment Reminder', subject:'A reminder about your payment', createdBy:'Hamza Siddiqui', format:'html',
-    body:`<p>Hi ${sampleToken('contacts:name', 'Contact · Full Name')},</p>`
+    body:`<p>Hi ${sampleToken('contacts:name', 'Lead · Full Name')},</p>`
       + `<p>This is a friendly reminder that your next payment of ${sampleToken('acc:nextPaymentAmount', 'Accounting · Next Payment Amount')} is due on ${sampleToken('acc:nextInstallmentDueDate', 'Accounting · Next Payment Due Date')}.</p>`
       + `<p>Your balance still to pay is ${sampleToken('acc:outstanding', 'Accounting · Total Outstanding')}. Paying on time keeps your case moving without delays.</p>`
       + `<p><a data-cta="primary" href="https://portal.hofmigration.com/pay">Pay Now</a></p>`
       + `<p><a data-cta="secondary" href="https://portal.hofmigration.com/payments">View Payment Schedule</a></p>`},
   {id:'et-followup', name:'Consultation Follow-up', subject:'Following up on your consultation', createdBy:'Ali Noor', format:'simple', assignedTo:{teams:[], users:['ali-noor', 'anaya-malik', 'usman-tariq']},
     body:`<p>Hi {{first_name}},</p>`
-      + `<p>It was great speaking with you. Here is a short summary of what we covered and the next steps for your application from ${sampleToken('contacts:country', 'Contact · Country')}:</p>`
+      + `<p>It was great speaking with you. Here is a short summary of what we covered and the next steps for your application from ${sampleToken('contacts:country', 'Lead · Country')}:</p>`
       + `<ul><li>Your eligibility for the US National Interest Waiver.</li><li>The evidence we recommend gathering for your petition.</li><li>The expected timeline from filing to decision.</li></ul>`
       + `<p>You can <a href="https://hofmigration.com/book">book your next call</a> whenever you are ready.</p>`},
   {id:'et-documents', name:'Document Request', subject:'Documents we need from you', createdBy:'Waleed bin Zaman', format:'custom', fileName:'document-request.html', includeSignature:true,

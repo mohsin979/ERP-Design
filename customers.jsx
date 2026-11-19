@@ -34,7 +34,7 @@ const SAMPLE_CUSTOMERS = () => {
        (the deal or contact it came from), Customer Since and Associated Company (its contact's). */
     const pl = DEFAULT_PIPELINES().find(x => x.id === pipeline), st = pl && pl.stages.find(x => x.id === stage);
     return {id:`cust-${n}`, name, email:own.email ?? (c && name === c.name ? c.email : ''), phone:own.phone ?? (c && name === c.name ? c.phone : ''),
-      owner, pipeline, stage, status:own.status || (st && isClosedStage(st) ? 'Closed' : 'Active'), source:dealIds.length ? 'Deal' : 'Contact',
+      owner, pipeline, stage, status:own.status || (st && isClosedStage(st) ? 'Closed' : 'Active'), source:dealIds.length ? 'Deal' : 'Lead',
       customerSince:dateOnly(created), company:own.company ?? (c ? c.company || '' : ''), contactIds:c ? [c.id] : [], dealIds, created};
   };
   const NIW = 'usa-niw-service', CA = 'canada-aus-service';
@@ -85,12 +85,13 @@ const CUSTOMER_TABS = [
   {id:'email',    label:'Emails',            icon:'envelope',    list:true},
   {id:'tasks',    label:'Tasks',            icon:'tasks',       list:true},
   {id:'meetings', label:'Meetings',         icon:'videoCamera', list:true},
-  {id:'quotes',   label:'Quotes',           icon:'quote',       list:true},
-  {id:'accounting', label:'Accounting',     icon:'coins',       list:false},
-  {id:'files',    label:'Files',            icon:'folder',      list:true},
   {id:'profile',  label:'Customer Profile', icon:'profile',     list:false},
+  {id:'accounting', label:'Accounting',     icon:'coins',       list:false},
+  {id:'quotes',   label:'Quotes',           icon:'quote',       list:true},
+  {id:'files',    label:'Files',            icon:'folder',      list:true},
   {id:'documents', label:'Documents',       icon:'files',    list:true},
-  {id:'contacts', label:'Contacts',         icon:'contacts',    list:true},
+  {id:'supportNotes', label:'Support Notes', icon:'notepad', list:true},   // the record's Support Notes (2026-11-19)
+  {id:'contacts', label:'Leads',            icon:'contacts',    list:true},
   {id:'deals',    label:'Deals',            icon:'deals',       list:true},
 ];
 
@@ -144,7 +145,7 @@ const CUSTOMER_RELATED_FIELDS = [
 ];
 // Card properties: every Customer property but Customer Name (always on top), and its associated contact and deals.
 const customerCardProperties = (props) => [...props.filter(p => p.key !== 'name').map(p => ({key:p.key, label:p.label})),
-  ...(workspaceHasType('contacts') ? [{key:'contact', label:'Associated Contact'}] : []), {key:'deals', label:`Associated ${typePlural('deals', 'Deals')}`}];
+  ...(workspaceHasType('contacts') ? [{key:'contact', label:'Associated Lead'}] : []), {key:'deals', label:`Associated ${typePlural('deals', 'Deals')}`}];
 const DEFAULT_CUSTOMER_CARD_SETTINGS = () => ({
   order: ['quickActions', 'properties', 'smartFeatures', 'dropdowns', 'relatedProperties'],
   quickActions: defaultQuickActions('customers'),
@@ -159,6 +160,7 @@ const CUSTOMER_RECORD_KIND = {object:'customers', noun:'customer', dataAttr:'dat
 /* ── Side panel sections and View Settings ── as on a deal. */
 const CUSTOMER_PANEL_SECTIONS = {
   avatarSubtitle:     'Avatar subtitle',
+  cardStyle:          'Card Style',
   quickActions:       'Quick Actions',
   smartSummary:       'Smart Summary',
   dropdowns:          'Dropdowns',
@@ -177,7 +179,7 @@ const CUSTOMER_PANEL_BASE_PROPERTIES = [
   {key:'profileType',   label:'Customer Profile Type'},
   {key:'created',       label:'Created Date'},
   {key:'lastActivity',  label:'Last Activity Date'},
-  {key:'contact',       label:'Associated Contact'},
+  {key:'contact',       label:'Associated Lead'},
   {key:'deals',         label:'Associated Deals'},
 ];
 // Labels from Settings; every other Customer property follows (name, email and phone head the panel).
@@ -198,8 +200,8 @@ const defaultCustomerPanelSettings = (props) => ({
   subtitle: 'stage',
   order: ['quickActions', 'smartSummary', 'dropdowns', 'customerProperties'],
   quickActions: defaultQuickActions('customers'),
-  smartSummary: {enabled:true},
-  dropdowns: [{id:'d-all', type:'all', enabled:true, count:10}],
+  smartSummary: {enabled:false},
+  dropdowns: [{id:'d-all', type:'all', enabled:false, count:10}],
   customerProperties: customerPanelProperties(props).map(p => ({key:p.key, enabled:true})),
 });
 // A custom property added since the settings were saved joins the end, shown. (And the panel's primary quick action, where none was ever set: Call.)
@@ -249,16 +251,17 @@ function CustomerActionsMenu({customer, onTool, onCreateDeal, onGoToDeal, onEdit
 /* ── Record detail ─────────────────────────────────────────────────────────────────────── */
 
 function CustomerNameRow({customer, subtitle, headerActions}){
+  const c = heroName(React.useContext(PanelHeroCtx));
   return (
     <div style={{display:'flex', alignItems:'center', gap:10, minWidth:0}}>
-      <span style={{width:36, height:36, borderRadius:9999, background:T.attioText, flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center'}}>
-        <Icon name="customers" size={17} color="#fff"/>
+      <span style={{width:36, height:36, borderRadius:9999, background:c.avatar, flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center'}}>
+        <Icon name="customers" size={17} color={c.mark}/>
       </span>
       <div style={{minWidth:0, flex:1}}>
-        <div style={{fontSize:17, fontWeight:600, color:T.attioText, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{customer.name}</div>
-        {subtitle && <div style={{fontSize:12.5, color:T.attioMuted, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{subtitle}</div>}
+        <div style={{fontSize:17, fontWeight:600, color:c.name, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{customer.name}</div>
+        {subtitle && <div style={{fontSize:12.5, color:c.sub, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{subtitle}</div>}
       </div>
-      {headerActions && <div style={{display:'flex', alignItems:'center', gap:2, flexShrink:0}}>{headerActions}</div>}
+      {headerActions && <div style={{display:'flex', alignItems:'center', gap:2, flexShrink:0, ...c.actions}}>{headerActions}</div>}
     </div>
   );
 }
@@ -275,7 +278,7 @@ function CustomerInfo({customer, view, acts, contacts = [], deals, keys, props, 
     created:       {value:customer.created},
     lastActivity:  {value:latestActivityDate(acts)},
     nextActivity:  {value:nextActivityDate(acts)},
-    contact:       {value:contacts.length ? contacts : null, list:true, noun:'contact', open:(c) => onOpenContact(c)},
+    contact:       {value:contacts.length ? contacts : null, list:true, noun:'lead', open:(c) => onOpenContact(c)},
     deals:         {value:deals.length ? deals : null, list:true, noun:'deal', open:(d) => onOpenDeal(d)},
   };
   const labels = Object.fromEntries(customerPanelProperties(props).map(p => [p.key, p.label]));
@@ -326,11 +329,11 @@ function CustomerDetail({mode, customer, view, acts, contact, contacts = [], dea
     if(tab.id === 'profile') return profileOwner
       ? <CustomerProfileTab contact={profileOwner} profiles={profiles} onCall={()=>onStub('Call')}
           onCreate={(templateId)=>onCreateProfile(profileOwner, templateId)} onStub={onStub}/>
-      : <div style={{padding:'40px 24px', textAlign:'center', fontSize:13, color:T.gray400}}>This customer has no contact, so it has no Customer Profile.</div>;
+      : <div style={{padding:'40px 24px', textAlign:'center', fontSize:13, color:T.gray400}}>This customer has no lead, so it has no Customer Profile.</div>;
     if(tab.id === 'deals') return <AssociatedRecords columns={ASSOCIATED_DEAL_COLUMNS} rows={deals.map(d => dealListRow(data, d))} q={q}
       onOpen={(d)=>onOpenDeal(d)} empty={`No ${typePlural('deals', 'Deals').toLowerCase()} for this customer`}/>;
     if(tab.id === 'contacts') return <AssociatedRecords columns={ASSOCIATED_CONTACT_COLUMNS} rows={contacts.map(contactView)} q={q}
-      onOpen={(c)=>onOpenContact(c)} empty="No contacts for this customer"/>;
+      onOpen={(c)=>onOpenContact(c)} empty="No leads for this customer"/>;
     return undefined;
   };
   return (
@@ -369,7 +372,7 @@ function CustomersModule({data, customers, setCustomers, activities, setActiviti
   const [changingOwner, setChangingOwner] = React.useState(null);
   const [pendingDelete, setPendingDelete] = React.useState(null);
   const [creatingDeal, setCreatingDeal] = React.useState(null);   // the customer a deal is being created for
-  const [panelSettings, setPanelSettings] = usePersistedState('panel:customers', () => defaultCustomerPanelSettings(props));
+  const [panelSettings, setPanelSettings] = usePersistedState('panel:customers', () => defaultCustomerPanelSettings(props), quietPanelSettings);
   const [panelDraft, setPanelDraft] = React.useState(null);
   const [activityViewState, setActivityViewState] = React.useState({});
   const [profileRun, setProfileRun] = React.useState(null);   // {contactId, customerId, templateIds, call}
@@ -397,7 +400,7 @@ function CustomersModule({data, customers, setCustomers, activities, setActiviti
   /* Filter by associated object → Contacts (every Contact filter property, read from the
      customer's contact) and → Deals (whether it has deals, and every Deal filter property: a
      customer matches when any of its deals does). */
-  const contactAssoc = React.useMemo(()=>assocFilterSchema('Contacts', 'Contact', customContactSchema(objectFormProperties(data, 'contacts'))), [data.properties]);
+  const contactAssoc = React.useMemo(()=>assocFilterSchema('Contacts', typeSingular('contacts', 'Lead'), customContactSchema(objectFormProperties(data, 'contacts')), undefined, typePlural('contacts', 'Leads')), [data.properties, data.objects]);
   // Named as the workspace names Deals (HOF Partners: Leads); the filter keys stay 'Deals'.
   const dealAssoc = React.useMemo(()=>assocFilterSchema('Deals', typeSingular('deals', 'Deal'), dealFilterSchema(data), `Has associated ${typePlural('deals', 'Deals').toLowerCase()}`, typePlural('deals', 'Deals')),
     [data.properties, data.pipelines, data.users, data.objects]);
@@ -455,7 +458,7 @@ function CustomersModule({data, customers, setCustomers, activities, setActiviti
       ids.forEach(id => onRecordDeleted && onRecordDeleted('customers', id));
       if(detail && ids.includes(detail.id)) setDetail(null);
     }});
-  const fullSchema = {...schema, recordObject:'customers', pipelineLabel:(id) => (pipelineOf(id) || pipelines[0] || {}).label || '',
+  const fullSchema = {...schema, mergeColumns:true, recordObject:'customers', pipelineLabel:(id) => (pipelineOf(id) || pipelines[0] || {}).label || '',
     renderCell:(key, r) => key === 'name' ? <span data-customer-id={r.id} style={{display:'inline-flex', alignItems:'center', gap:8, minWidth:0, maxWidth:'100%'}}>
         <ContactName name={r.name} onOpen={()=>openCustomer(r)} style={{fontSize:'inherit', fontWeight:500}}/><DealPromptMarker dealId={r.id}/></span>
       : key === 'status' && r.status ? <StatusPill status={r.status} map={STATUS_PILLS}/> : undefined,
@@ -516,7 +519,7 @@ function CustomersModule({data, customers, setCustomers, activities, setActiviti
       {customerBulk.bulkModal}
       {/* Delete Customer: its activity goes with it; its contact and deals stay as they are. */}
       {pendingDelete && <DeleteConfirmModal contactName={pendingDelete.name} noun="Customer" paid={recordHasPayments('customers', pendingDelete.id)}
-        note={associatedNote([['contact', 'contacts', contactsOf(pendingDelete).length], ['deal', 'deals', dealsOf(pendingDelete).length]], 'customer')}
+        note={associatedNote([['lead', 'leads', contactsOf(pendingDelete).length], ['deal', 'deals', dealsOf(pendingDelete).length]], 'customer')}
         onCancel={()=>setPendingDelete(null)}
         onConfirm={()=>{
           const id = pendingDelete.id;

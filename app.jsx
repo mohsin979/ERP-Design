@@ -707,8 +707,24 @@ function App(){
      reason. Saved; the owner is a user ID (the sample data names the owner). */
   const [contacts, setContacts] = usePersistedState('contacts', () =>
     seedList(() => SAMPLE_CONTACTS).map(c => ({...c, owner:userIdOf(c.owner, settingsData.users)})), (cs) => withBiz(cs, 'contacts'));
-  // Contacts saved in a Types of Contact stage that was removed (the Lead stages) move to the first stage.
-  React.useEffect(() => { if(contacts.some(c => REMOVED_CONTACT_STAGES.includes(c.contactType))) setContacts(cs => cs.map(withoutRemovedStage)); }, []);
+  // Leads saved in a Type of Lead stage that's gone, or out of step with their owner, take a current one (board.jsx withoutRemovedStage).
+  React.useEffect(() => { if(contacts.some(c => withoutRemovedStage(c) !== c)) setContacts(cs => cs.map(withoutRemovedStage)); }, []);
+  /* Type of Lead follows the owner (Mohsin, 2026-11-19): a Not Assigned lead given an owner moves to
+     Assigned; a lead whose owner is removed moves back to Not Assigned; a new lead takes the stage
+     its owner gives it when none was chosen. Whoever or whatever changed the owner (a person, a
+     bulk action, a workflow, an import). */
+  const leadOwnersSeen = React.useRef(null);
+  React.useEffect(() => {
+    const prev = leadOwnersSeen.current;
+    leadOwnersSeen.current = new Map(contacts.map(c => [String(c.id), c.owner || '']));
+    if(!prev) return;
+    const next = (c) => { const was = prev.get(String(c.id)), now = c.owner || '';
+      if(was === undefined) return !now ? (c.contactType !== 'Not Assigned' ? 'Not Assigned' : null) : (!c.contactType || c.contactType === 'Not Assigned') ? 'Assigned' : null;
+      if(was === now) return null;
+      return !now ? (c.contactType !== 'Not Assigned' ? 'Not Assigned' : null) : (!was && (!c.contactType || c.contactType === 'Not Assigned')) ? 'Assigned' : null; };
+    const moves = new Map(contacts.map(c => [String(c.id), next(c)]).filter(([, v]) => v));
+    if(moves.size) setContacts(cs => cs.map(c => moves.has(String(c.id)) ? {...c, contactType:moves.get(String(c.id))} : c));
+  }, [contacts]);
   // Sample contacts saved before Industry was defined get its mocked value.
   React.useEffect(() => { if(contacts.some(c => c.industry === undefined)) setContacts(cs => withSampleValues(cs, SAMPLE_CONTACTS, ['industry'])); }, []);
   const [contactActivities, setContactActivities] = usePersistedState('contactActivities', () => SEED ? withUpcomingMeetings(withSampleAttachments(generateActivities(SAMPLE_CONTACTS)), 9) : {},
@@ -722,7 +738,9 @@ function App(){
   const [customers, setCustomersRaw] = React.useState(() => {
     const pipes = recordPipelines(settingsData, 'customers');
     return withBiz(withSampleValues(withStageEntry(withSeeded(savedSlice('customers'), seedList(SAMPLE_CUSTOMERS), prevSettings.seededCustomers)), SAMPLE_CUSTOMERS(), ['status', 'source', 'customerSince', 'company']), 'customers')
-      .map(c => ({...migrateCustomer(c, pipes, deals), owner:userIdOf(c.owner, settingsData.users)}));
+      .map(c => ({...migrateCustomer(c, pipes, deals), owner:userIdOf(c.owner, settingsData.users)}))
+      // Customer Source "Contact" reads "Lead" (2026-11-19), once — with the settings' `leadNames` (dataModel.jsx withLeadNames).
+      .map(c => !prevSettings.leadNames && c.source === 'Contact' ? {...c, source:'Lead'} : c);
   });
   const [customerActivities, setCustomerActivities] = React.useState(() => {
     const sample = SEED ? withUpcomingMeetings(withSampleAttachments(SAMPLE_CUSTOMER_ACTIVITIES(SAMPLE_CUSTOMERS(), settingsData.users)), 3) : {};
@@ -777,9 +795,30 @@ function App(){
   const formIds = (settingsData.profileForms || []).map(f => f.id);
   const enabledIn = (mine) => [...new Set(Array.isArray(mine._enabled) ? mine._enabled : [mine._type, ...formIds.filter(id => mine[id])].filter(Boolean))].filter(id => formIds.includes(id));
   const withEnabled = (mine, ids) => ({...mine, _enabled:[...new Set([...enabledIn(mine), ...ids])]});
-  const saveProfileForm = (contactId, formId, {values, meta}) => setProfileFormData(m => ({...m, [contactId]:{...withEnabled(m[contactId] || {}, [formId]), [formId]:{values, meta, updatedAt:new Date().toISOString()}}}));
+  /* "Customer Profile created / updated" on the trail (2026-11-18, decided: on every
+     linked record) — the person's contact and each of its deals and customers; a profile held by a
+     deal or customer without a contact, on that record. */
+  const logProfile = (holderId, formId, action, extra) => {
+    const form = (settingsData.profileForms || []).find(f => f.id === formId) || {};
+    const act = {type:'profile', action, formId, formName:form.name || 'Customer Profile', source:'you', by:CURRENT_USER.name, ...(extra || {})};
+    const isContact = contacts.some(c => sameId(c.id, holderId));
+    const targets = isContact ? [['contacts', contacts.find(c => sameId(c.id, holderId)).id],
+        ...deals.filter(d => contactIdsOf(d).some(id => sameId(id, holderId))).map(d => ['deals', d.id]),
+        ...customers.filter(c => contactIdsOf(c).some(id => sameId(id, holderId))).map(c => ['customers', c.id])]
+      : [[recordObjectOf(holderId), holderId]];
+    targets.forEach(([o, id]) => hubAdd(o, id, act));
+  };
+  const saveProfileForm = (contactId, formId, {values, meta}) => {
+    logProfile(contactId, formId, ((profileFormData[contactId] || {})[formId]) ? 'updated' : 'created');
+    setProfileFormData(m => ({...m, [contactId]:{...withEnabled(m[contactId] || {}, [formId]), [formId]:{values, meta, updatedAt:new Date().toISOString()}}}));
+  };
   // One answer edited in place (its source: Manual).
-  const saveProfileField = (contactId, formId, fieldId, value) => setProfileFormData(m => {
+  const saveProfileField = (contactId, formId, fieldId, value) => {
+    const form = (settingsData.profileForms || []).find(f => f.id === formId) || {}, field = (form.fields || []).find(f => f.id === fieldId) || {};
+    logProfile(contactId, formId, ((profileFormData[contactId] || {})[formId]) ? 'updated' : 'created', {field:field.label || 'Property', value:value === '' || value == null ? '' : String(value)});
+    saveProfileFieldRaw(contactId, formId, fieldId, value);
+  };
+  const saveProfileFieldRaw = (contactId, formId, fieldId, value) => setProfileFormData(m => {
     const mine = withEnabled(m[contactId] || {}, [formId]), cur = mine[formId] || {values:{}, meta:{}};
     const values = {...cur.values}, meta = {...(cur.meta || {})};
     if(value === '' || value == null){ delete values[fieldId]; delete meta[fieldId]; } else { values[fieldId] = value; meta[fieldId] = {source:'manual', at:new Date().toISOString()}; }
@@ -814,6 +853,15 @@ function App(){
   setMoneyDefaults(settingsData.defaults);   // the default currency and exchange rates (Settings → Defaults)
   setTaskPipelines(taskPipelinesOf(settingsData));
   setContactPipelines(objectPipelines(settingsData, 'contacts'));
+  /* The Type of Lead stages of 2026-11-19 (board.jsx CONTACT_TYPE_STAGES), once: the saved pipeline
+     takes them (a stage kept by name keeps its settings) and the Type of Lead property its options. */
+  React.useEffect(() => {
+    if(settingsData.leadStagesV1) return;
+    setSettingsData(d => ({...d, leadStagesV1:true,
+      pipelines:(d.pipelines || []).map(p => p.id !== 'typesOfContact' ? p
+        : {...p, stages:CONTACT_TYPE_STAGES.map(st => ({type:'open', ...((p.stages || []).find(x => x.value === st.value) || {}), id:st.id, label:st.label, value:st.value}))}),
+      properties:(d.properties || []).map(p => p.objectId === 'contacts' && p.key === 'contactType' ? {...p, options:LEAD_STAGE_VALUES.slice()} : p)}));
+  }, []);
   setStagePipelines(settingsData.pipelines);
   setObjectNames(settingsData.objects);
   setOwnerLabels(settingsData.properties);   // owners named by each record type's owner property (board.jsx)
@@ -871,7 +919,7 @@ function App(){
     if(contacts.some(differs)) setContacts(cs => cs.map(c => differs(c) ? {...c, ...next(c)} : c));
   }, [contacts, deals, customers, contactActivities, dealActivities, customerActivities]);
   // Overview View Settings per record type — pinned Highlights and Snapshots (overviewSettings.jsx).
-  const [overviewSettings, setOverviewSettings] = usePersistedState('overviewSettings', {});
+  const [overviewSettings, setOverviewSettings] = usePersistedState('overviewSettings', {}, withTabOrderV2);
   const mergeRecordsRef = React.useRef(null);   // the merge below, for the workflow action Merge Record
   const engine = useWorkflowEngine({data:settingsData, setData:setSettingsData, deals, setDealsRaw, dealActivities, setDealActivities, setContacts,
     customers, setCustomersRaw, customerActivities, setCustomerActivities, contacts, contactActivities, setContactActivities,
@@ -1243,7 +1291,7 @@ function App(){
     openViolation:(object, id) => { setCrmActive(object); engine.value.openViolation(object, id); }};
   const withEngine = (el) => (
     <WorkflowEngineCtx.Provider value={engineValue}>
-      <RecordHubProvider value={hubValue}><ProfileFormsCtx.Provider value={profileFormsStore}>{el}</ProfileFormsCtx.Provider><PublicFormInbox/><DocumentSignInbox/><InvoiceIssuer/></RecordHubProvider>
+      <RecordHubProvider value={hubValue}><ProfileFormsCtx.Provider value={profileFormsStore}>{el}</ProfileFormsCtx.Provider><PublicFormInbox/><DocumentSignInbox/><QuoteViewInbox/><QuoteExpiryWatch/><InvoiceIssuer/><DictationHost/><MentionsHost/></RecordHubProvider>
       {engine.openPromptId && <WorkflowPromptModal key={engine.openPromptId} promptId={engine.openPromptId} direct={engine.promptDirect} onClose={engine.closePrompt} hidden={eventAway}/>}
       <WorkflowNotices notices={engine.notices} onDismiss={engine.dismissNotice} onView={engine.value.openEvent}/>
       {engine.event && <AutomaticActionModal key={engine.event.id} event={engine.event} onClose={engine.closeEvent} hidden={eventAway}/>}
@@ -1321,8 +1369,10 @@ function App(){
    ERP home, with the open CRM instance. Moving onto, off or between these links starts the page over. */
 const PUBLIC_FORM_ROUTE = formPublicRoute(window.location.hash);
 const PUBLIC_SIGN_ROUTE = documentSignRoute(window.location.hash);
+const PUBLIC_QUOTE_ROUTE = quoteViewRoute(window.location.hash);   // the client's view of a quote (quotes.jsx)
 window.addEventListener('hashchange', () => { if(JSON.stringify(formPublicRoute(window.location.hash)) !== JSON.stringify(PUBLIC_FORM_ROUTE)
-  || JSON.stringify(documentSignRoute(window.location.hash)) !== JSON.stringify(PUBLIC_SIGN_ROUTE)) window.location.reload(); });
+  || JSON.stringify(documentSignRoute(window.location.hash)) !== JSON.stringify(PUBLIC_SIGN_ROUTE)
+  || JSON.stringify(quoteViewRoute(window.location.hash)) !== JSON.stringify(PUBLIC_QUOTE_ROUTE)) window.location.reload(); });
 /* Signed in with a CRM instance open that isn't theirs (the last one opened in this browser): the
    first instance they have opens instead (workspaces.jsx). */
 function CrmGate(){
@@ -1330,4 +1380,4 @@ function CrmGate(){
   React.useEffect(() => { if(to) reloadInto({crmId:to}); }, []);
   return to ? null : <App/>;
 }
-ReactDOM.createRoot(document.getElementById('root')).render(PUBLIC_FORM_ROUTE ? <PublicFormPage route={PUBLIC_FORM_ROUTE}/> : PUBLIC_SIGN_ROUTE ? <PublicSignPage route={PUBLIC_SIGN_ROUTE}/> : SESSION ? <CrmGate/> : <LoginScreen/>);
+ReactDOM.createRoot(document.getElementById('root')).render(PUBLIC_FORM_ROUTE ? <PublicFormPage route={PUBLIC_FORM_ROUTE}/> : PUBLIC_SIGN_ROUTE ? <PublicSignPage route={PUBLIC_SIGN_ROUTE}/> : PUBLIC_QUOTE_ROUTE ? <PublicQuotePage route={PUBLIC_QUOTE_ROUTE}/> : SESSION ? <CrmGate/> : <LoginScreen/>);

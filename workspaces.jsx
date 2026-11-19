@@ -24,7 +24,7 @@
    ERP Settings (the ERP home's Setting tile):
      Organization — the Organization's name and logo (its own mark — white label).
      Users        — the CRM's record list and Filters (as CRM → Users & Teams → Users): Add user
-                    (+), Find or Ask, Filters, and everyone (Name, Email, People, CRM) — opened from
+                    (+), Search Users, Filters, and everyone (Name, Email, People, CRM) — opened from
                     a branch's Members link, filtered to that branch; ⋯ Access:
                     Organization role, People branch (a Super Admin's People branches), CRM
                     branches — each with the person's role there, read-only (set in that CRM's
@@ -409,7 +409,7 @@ function ErpUsersPage({data, setData, focus}){
   };
   const saved = (crmUsers) => { if(crmUsers.length) setData(d => ({...d, users:[...d.users, ...crmUsers.filter(u => !d.users.some(x => x.id === u.id))]})); setPanel(null); };
   /* The CRM's record list (usersTeams.jsx RecordViewsModule): its toolbar — the view, Add user
-     (the CRM Users' icon-only +), Find or Ask, Filters, Clear all — and grid. No saved views: they
+     (the CRM Users' icon-only +), Search Users, Filters, Clear all — and grid. No saved views: they
      would be kept in the open CRM branch's store, and this list is the Organization's. */
   return (
     <SettingsPage fill>

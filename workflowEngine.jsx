@@ -212,7 +212,7 @@ const activityConditionFields = (data) => [
 const recordObjectOf = (id) => { const s = String(id ?? ''); return s.startsWith('cust-') ? 'customers' : /^\d+$/.test(s) ? 'contacts' : 'deals'; };
 const recordKey = (id) => { const o = recordObjectOf(id); return o === 'customers' ? {customerId:id} : o === 'contacts' ? {contactId:Number(id)} : {dealId:id}; };
 // A record's noun as the workspace names its type (HOF Partners: "lead").
-const recordNoun = (id) => { const o = recordObjectOf(id); return typeNoun(o, ({customers:'customer', contacts:'contact', deals:'deal'})[o]); };
+const recordNoun = (id) => { const o = recordObjectOf(id); return typeNoun(o, ({customers:'customer', contacts:'lead', deals:'deal'})[o]); };
 // Objects whose records have activity (the activity conditions apply to them).
 const ACTIVITY_RECORD_OBJECTS = ['contacts', 'deals', 'customers'];
 /* ── Data scopes (property triggers) ── a property trigger reads one of four sets of properties:
@@ -284,8 +284,8 @@ const USER_METRIC_FIELDS = [
   {key:'invoiceCash', label:'Total Invoice Cash'}, {key:'cashReceived', label:'Total Cash Received'}, {key:'cashForecasted', label:'Total Cash Forecasted'},
   {key:'dealsCreated', get label(){ return `Total ${wfDeals()} Created`; }}, {key:'dealsClosed', get label(){ return `${wfDeals()} Closed`; }},
   {key:'dealsWon', get label(){ return `${wfDeal()} Won`; }}, {key:'dealsLost', get label(){ return `${wfDeal()} Lost`; }},
-  {key:'contactToClosed', get label(){ return `Contact to ${wfDeal()} Closed (days)`; }, needs:'contacts'}, {key:'contactToDeal', get label(){ return `Contact to ${wfDeal()} (days)`; }, needs:'contacts'},
-  {key:'contactToCustomer', label:'Contact to Customer (days)', needs:'contacts'}, {key:'qualifiedToWon', get label(){ return `Qualified Client to ${wfDeal()} Won (days)`; }},
+  {key:'contactToClosed', get label(){ return `Lead to ${wfDeal()} Closed (days)`; }, needs:'contacts'}, {key:'contactToDeal', get label(){ return `Lead to ${wfDeal()} (days)`; }, needs:'contacts'},
+  {key:'contactToCustomer', label:'Lead to Customer (days)', needs:'contacts'}, {key:'qualifiedToWon', get label(){ return `Qualified Client to ${wfDeal()} Won (days)`; }},
   {key:'responseTime', label:'Client Response Time (hours)'}, {key:'invoiceToCash', label:'Invoice to Cash (hours)'},
 ];
 USER_METRIC_FIELDS.forEach(f => { f.kind = 'number'; });
@@ -721,6 +721,7 @@ const withSeeded = (saved, defaults, seeded) => !saved ? defaults
    Close Date — when it reaches a closed stage (Stage Type Won, Lost or Undecided), cleared if it
    moves back to an Open one — and its Deal Source; a customer's Customer Source and Customer Since. */
 // A stage's name, as the pipeline names it now (kept on the record's history when it moves).
+const pipelineLabelIn = (data, pipelineId) => { const pl = (data.pipelines || []).find(x => x.id === pipelineId); return pl ? (pl.label || pl.name || '') : ''; };
 const stageLabelIn = (data, pipelineId, stageId) => { const pl = (data.pipelines || []).find(x => x.id === pipelineId), st = pl && pl.stages.find(s => s.id === stageId); return st ? st.label : ''; };
 const isClosedStageIn = (data, pipelineId, stageId) => {
   const pl = (data.pipelines || []).find(x => x.id === pipelineId), st = pl && pl.stages.find(s => s.id === stageId);
@@ -738,7 +739,7 @@ function recordSystemValues(data, p, d, now){
     return n;
   }
   if(obj === 'customers' && !p){
-    const source = d.source || ((d.dealIds || []).length ? 'Deal' : contactIdsOf(d).length ? 'Contact' : 'Manual');
+    const source = d.source || ((d.dealIds || []).length ? 'Deal' : contactIdsOf(d).length ? 'Lead' : 'Manual');
     return {...d, source, customerSince:d.customerSince || dateOnly(d.created) || todayLabel()};
   }
   return d;
@@ -1066,8 +1067,21 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
     /* Stage history: every move of an existing record (a person's, or a workflow's — named), with
        the stages' names as they were. */
     changes.filter(c => c.prev).forEach(c => addActivity(c.next.id, {id:wfNewId('stg'), ...recordKey(c.next.id), type:'stageChange', at:new Date(now),
-      from:{pipeline:c.prev.pipeline, stage:c.prev.stage, label:stageLabelIn(dataRef.current, c.prev.pipeline, c.prev.stage)},
-      to:{pipeline:c.next.pipeline, stage:c.next.stage, label:stageLabelIn(dataRef.current, c.next.pipeline, c.next.stage)}, ...changedBy()}));
+      from:{pipeline:c.prev.pipeline, stage:c.prev.stage, label:stageLabelIn(dataRef.current, c.prev.pipeline, c.prev.stage), pipelineLabel:pipelineLabelIn(dataRef.current, c.prev.pipeline)},
+      to:{pipeline:c.next.pipeline, stage:c.next.stage, label:stageLabelIn(dataRef.current, c.next.pipeline, c.next.stage), pipelineLabel:pipelineLabelIn(dataRef.current, c.next.pipeline)}, ...changedBy()}));
+    /* The record's own story (2026-11-18): "<Record> created" on a new record — by whom,
+       through which form (a form submission marks itself, WF_FORM_PENDING) — and its first owner as
+       "Owner assigned"; a new deal is noted on its contacts ("Deal created"), as a new customer is.
+       Not while records are merged, split or reverted back. */
+    if(!WF_QUIET_HISTORY && !(chain && chain.revert)) created.forEach(d => {
+      const obj = recordObjectOf(d.id), noun = typeSingular(obj, {contacts:'Lead', deals:'Deal', customers:'Customer'}[obj]);
+      const form = WF_FORM_PENDING && WF_FORM_PENDING.submission && WF_FORM_PENDING.submission.object === obj ? WF_FORM_PENDING.form : null;
+      const who = form ? {source:'client', by:''} : changedBy();
+      addActivity(d.id, {id:wfNewId('new'), ...recordKey(d.id), type:'recordCreated', at:new Date(now), noun, name:d.name || '', ...(form ? {formName:form.name || ''} : {}), ...who});
+      if(d.owner) addActivity(d.id, {id:wfNewId('own'), ...recordKey(d.id), type:'ownerChange', at:new Date(now + 1), from:null, to:d.owner, ...changedBy()});
+      if(obj === 'deals') contactIdsOf(d).map(String).filter(id => next.some(r => String(r.id) === id)).forEach(id =>
+        addActivity(id, {id:wfNewId('dcr'), ...recordKey(id), type:'dealCreated', at:new Date(now), dealId:d.id, dealName:d.name || '', ...changedBy()}));
+    });
     // A new customer: noted on its deals and its contacts ("Customer created").
     created.filter(d => recordObjectOf(d.id) === 'customers').forEach(d =>
       [...(d.dealIds || []), ...contactIdsOf(d).map(String)].filter(id => next.some(r => r.id === id)).forEach(id =>
@@ -1494,6 +1508,9 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
       if(now){ sent++; emit({type:'emailSent', recordId:deal.id, pipelineId:deal.pipeline, attrs:{activityId:act.id, templateId:e.templateId}}, childChain(run)); }
       else { scheduled++; emit({type:'emailScheduled', recordId:deal.id, pipelineId:deal.pipeline, attrs:{activityId:act.id, templateId:e.templateId}}, childChain(run)); }
     });
+    // Enrolled in a sequence: on the record's trail, by the workflow or the person who enrolled it.
+    if(firstSeq && sent + scheduled > 0) logSequence(deal.id, 'enrolled', firstSeq, {emails:sent + scheduled,
+      ...(workflowId ? {source:'team', by:`${(getWorkflow(workflowId) || {}).name || 'Workflow'} (workflow)`, viaWorkflow:workflowId} : {source:'you', by:CURRENT_USER.name})});
     return [sent && `${plural(sent, 'email')} sent`, scheduled && `${plural(scheduled, 'email')} scheduled`, skipped && `${plural(skipped, 'email')} skipped (no recipient)`,
       passed && `${plural(passed, 'email')} skipped (date passed)`].filter(Boolean).join(', ');
   }
@@ -1506,6 +1523,12 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
      sequence never stops. */
   const SEQ_EXIT_EVENTS = {call:(ev) => ev.type === 'callMade' || (ev.type === 'callLogged' && ev.attrs && ev.attrs.added && ev.attrs.logged),
     emailReceived:(ev) => ev.type === 'emailReceived', meeting:(ev) => ev.type === 'meetingScheduled'};
+  /* A sequence on the record's trail (2026-11-18): enrolled, exited (by hand, by its Exit
+     Criteria, by a workflow) — logged as it happens, since the scheduled emails it removes leave no trace. */
+  function logSequence(recordId, action, seq, extra){
+    addActivity(recordId, {id:wfNewId('seq'), ...recordKey(recordId), type:'sequence', at:new Date(), action, sequenceId:seq.id, sequenceName:seq.name || 'Sequence', source:'team', by:'', ...(extra || {})});
+  }
+  const SEQ_EXIT_REASON = {call:'Call happened', emailReceived:'Email received', meeting:'Meeting booked'};
   function exitSequencesOn(ev){
     if(!ev.recordId || !Object.values(SEQ_EXIT_EVENTS).some(f => f(ev))) return;
     const pending = actsOf(ev.recordId).filter(a => a.type === 'email' && a.status === 'scheduled' && a.sequenceId);
@@ -1514,6 +1537,9 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
     const leaving = pending.filter(a => { const q = seqs.find(x => x.id === a.sequenceId), x = q && q.exit;
       return !!(x && x.on && (x.events || []).some(k => SEQ_EXIT_EVENTS[k] && SEQ_EXIT_EVENTS[k](ev))); });
     if(leaving.length) editActivities(m => ({...m, [ev.recordId]:(m[ev.recordId] || []).filter(a => !leaving.some(x => x.id === a.id))}));
+    [...new Set(leaving.map(a => a.sequenceId))].forEach(id => { const q = seqs.find(x => x.id === id); if(!q) return;
+      const why = (q.exit.events || []).find(k => SEQ_EXIT_EVENTS[k] && SEQ_EXIT_EVENTS[k](ev));
+      logSequence(ev.recordId, 'exited', q, {reason:`Exit Criteria · ${SEQ_EXIT_REASON[why] || 'met'}`}); });
   }
 
   /* Log Meeting / Log Call by a workflow (Create Meeting, Add Call Log): what happened, recorded as a
@@ -1571,7 +1597,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
       const linked = canLink(linkRecordsOf(dealsRef.current), from, rec, 'contacts', {id:newContactId});
       setDealsTracked(ds => [...ds.map(d => linked && d.id === rec.id ? withLinkId(d, 'contactIds', newContactId) : d), contactView(newContactRecord(newContactId, values))], childChain(run));
       recordEffect({kind:'record', object:'contacts', recordId:newContactId});
-      return `Contact created: ${values.name || ''}${linked ? ` · linked to this ${fromNoun}` : ` · not linked (the ${fromNoun} already has a contact)`}`;
+      return `Lead created: ${values.name || ''}${linked ? ` · linked to this ${fromNoun}` : ` · not linked (the ${fromNoun} already has a lead)`}`;
     }
     if(!['customers', 'deals'].includes(object) || from === object) return `${objectName(data, object)}: not defined yet`;
     const pipes = recordPipelines(data, object), pl = pipes.find(x => x.id === values.pipeline) || pipes[0];
@@ -1796,7 +1822,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
       }
       /* Move to Specific Pipeline: into the chosen stage of the pipeline, else its first stage. */
       case 'moveToPipeline': {
-        if(recordObjectOf(deal.id) === 'contacts') return {status:'skipped', result:'A contact moves by its Types of Contact'};
+        if(recordObjectOf(deal.id) === 'contacts') return {status:'skipped', result:'A lead moves by its Type of Lead'};
         const pl = pipelineById2(data, c.pipeline);
         if(!pl) return {status:'skipped', result:'No pipeline chosen'};
         const stage = c.stage && pl.stages.some(st => st.id === c.stage) ? c.stage : ((pl.stages.find(st => !isClosedStage(st)) || pl.stages[0] || {}).id);
@@ -1825,6 +1851,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
         if(!pending.length) return {status:'done', result:`No emails scheduled from \u201c${seq.name}\u201d`};
         editActivities(m => ({...m, [deal.id]:(m[deal.id] || []).filter(a => !pending.some(x => x.id === a.id))}));
         pending.forEach(a => recordEffect({kind:'activityRemoved', recordId:deal.id, activityId:a.id, type:'email', title:a.title, scheduledFor:a.scheduledFor, activity:a}));
+        logSequence(deal.id, 'exited', seq, {reason:'Workflow', by:`${w.name || 'Workflow'} (workflow)`, viaWorkflow:w.id});
         return {status:'done', result:`Exited \u201c${seq.name}\u201d · ${plural(pending.length, 'scheduled email')} cancelled`};
       }
       // Create Meeting: a meeting that happened, logged (Track: the owner is asked to log it).
@@ -2124,7 +2151,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
              One-to-many), so a deal that already has one keeps it. */
           const linked = deal.contactId == null;
           if(linked) setDealsTracked(ds => ds.map(d => d.id === deal.id ? {...d, contactId:newContactId} : d), childChain(run));
-          outcome = `Contact created: ${input.values.name || ''}${linked ? ' · linked to this deal' : ' · not linked (the deal already has a contact)'}`;
+          outcome = `Lead created: ${input.values.name || ''}${linked ? ' · linked to this deal' : ' · not linked (the deal already has a lead)'}`;
         } else if(p.payload.object === 'customers' && recordObjectOf(deal.id) === 'deals'){
           /* A customer created through this deal: linked to it (Deals ↔ Customers) and to the deal's
              contact (Contacts → Customers). */
@@ -2532,7 +2559,13 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
       idx.status.forEach((status, id) => {
         if(!DUPLICATE_TYPES.includes(status) || was.status.get(id) === status) return;
         const rec = dealsRef.current.find(r => recordObjectOf(r.id) === object && String(r.id) === String(id));
-        if(rec) emit({type:'recordDuplicated', recordId:rec.id, pipelineId:rec.pipeline, attrs:{status}});
+        if(!rec) return;
+        // On its trail: "Duplicate found" / "Form refill", with the records it matches and on what.
+        const kase = (idx.cases || []).find(c => c.ids.some(x => String(x) === String(id)));
+        addActivity(rec.id, {id:wfNewId('dup'), ...recordKey(rec.id), type:'duplicateFound', at:new Date(), status, source:'team', by:'',
+          matches:kase ? kase.records.filter(r => String(r.id) !== String(id)).map(r => ({id:r.id, name:r.name || ''})) : [],
+          on:kase ? Object.keys(kase.on || {}).map(k => k === 'email' ? 'Email' : 'Phone') : []});
+        emit({type:'recordDuplicated', recordId:rec.id, pipelineId:rec.pipeline, attrs:{status}});
       });
     });
   }, [merge]);
@@ -2726,6 +2759,8 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
     exitSequence: (recordId, sequenceId) => {
       const pending = actsOf(recordId).filter(a => a.type === 'email' && a.status === 'scheduled' && a.sequenceId === sequenceId);
       if(pending.length) editActivities(m => ({...m, [recordId]:(m[recordId] || []).filter(a => !pending.some(x => x.id === a.id))}));
+      const seq = emailSequencesOf(dataRef.current).find(q => q.id === sequenceId);
+      if(pending.length && seq) logSequence(recordId, 'exited', seq, {reason:'Exited by hand', source:'you', by:CURRENT_USER.name});
       return pending.length;
     },
     // A form submission about to create its record (forms.jsx submitFormValues): seen by workflows as the record is created.

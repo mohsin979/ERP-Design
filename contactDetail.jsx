@@ -23,31 +23,80 @@ const nameInitials = (name) => (name || '').split(/\s+/).slice(0,2).map(w => w[0
 
 function CopyButton({text, label, onCopied}){
   const [h, setH] = React.useState(false);
+  const dark = React.useContext(PanelHeroCtx);
   return (
     <button title={`Copy ${label}`} onMouseEnter={()=>setH(true)} onMouseLeave={()=>setH(false)}
       onClick={e=>{ e.stopPropagation(); copyText(text).then(ok => onCopied(ok ? `${label[0].toUpperCase()+label.slice(1)} copied` : 'Copy failed')); }}
-      style={{border:'none', background: h ? T.headerBg : 'transparent', borderRadius:6, width:24, height:24,
+      style={{border:'none', background: h ? (dark ? HERO.fillHover : T.headerBg) : 'transparent', borderRadius:6, width:24, height:24,
               display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', flexShrink:0}}>
-      <Icon name="copy" size={13} color={T.attioMuted}/>
+      <Icon name="copy" size={13} color={dark ? HERO.muted : T.attioMuted}/>
     </button>
   );
 }
 
 /* Email and phone are link-style: clicking opens the product's own Email / Call action (not a
    mailto:/tel: link), so the touchpoint stays inside the CRM. Copy is a separate icon. */
+/* The side panel's header card (2026-11-18): name, email and phone, the quick actions
+   and the Primary one, as a small dark-mode card — a deep blue-black ground with a faint blue glow
+   and a fine dot grid, everything on it white (the Primary a white button). It stays at the top of
+   the panel while the properties scroll under it. PanelHeroCtx: inside it, so its rows draw white
+   on dark. PanelNameCtx: the name row the record shell hands its body, with the panel's Close /
+   Expand / ⋯. */
+const PanelHeroCtx = React.createContext(false);
+const PanelNameCtx = React.createContext(null);
+const HERO = {bg:'#0B0D12', text:'#FFFFFF', muted:'#FFFFFF', link:'#FFFFFF', line:'rgba(255,255,255,0.18)', fill:'rgba(255,255,255,0.06)', fillHover:'rgba(255,255,255,0.14)', icon:'#FFFFFF'};
+const HERO_BG = [
+  'radial-gradient(110% 85% at 100% 0%, rgba(64,110,255,0.30) 0%, rgba(64,110,255,0) 58%)',
+  'radial-gradient(90% 70% at 0% 100%, rgba(90,130,255,0.14) 0%, rgba(90,130,255,0) 62%)',
+  'radial-gradient(circle, rgba(255,255,255,0.05) 0.8px, transparent 1.1px)',
+].join(', ');
+// The light version (Side Panel Settings → Card Style → Light): a pale blue-white ground, the same glow and dots in soft grey.
+const HERO_LIGHT_BG = [
+  'radial-gradient(110% 85% at 100% 0%, rgba(64,110,255,0.14) 0%, rgba(64,110,255,0) 58%)',
+  'radial-gradient(90% 70% at 0% 100%, rgba(90,130,255,0.08) 0%, rgba(90,130,255,0) 62%)',
+  'radial-gradient(circle, rgba(15,23,42,0.07) 0.8px, transparent 1.1px)',
+].join(', ');
+const HERO_DOTS = '10px 10px';
+// Links on the card stay white on hover (the app's blue hover is for light backgrounds).
+if(typeof document !== 'undefined' && !document.getElementById('hof-hero-style')){
+  const st = document.createElement('style'); st.id = 'hof-hero-style';
+  st.textContent = '.hof-hero .hof-link{text-decoration-color:rgba(255,255,255,.55)}.hof-hero .hof-link:hover,.hof-hero button:hover>.hof-link{color:#fff!important;text-decoration-color:#fff!important}';
+  document.head.appendChild(st);
+}
+/* `variant`: Side Panel Settings → Card Style — 'dark' (to start with) or 'light' (its rows as
+   anywhere else: dark text, the black Primary). */
+// Light only for now (2026-11-18): the dark card and the Card Style choice are kept for later.
+const HERO_LIGHT_ONLY = true;
+function PanelHeroCard({children, variant}){
+  const light = HERO_LIGHT_ONLY || variant === 'light';
+  return (
+    <div className={light ? undefined : 'hof-hero'} style={{position:'sticky', top:0, zIndex:3, borderRadius:16, padding:'18px 18px 20px', display:'flex', flexDirection:'column', gap:14,
+      background: light ? '#F6F8FE' : HERO.bg, backgroundImage: light ? HERO_LIGHT_BG : HERO_BG, backgroundSize:`auto, auto, ${HERO_DOTS}`,
+      border:`1px solid ${light ? 'rgba(15,23,42,0.08)' : 'rgba(255,255,255,0.06)'}`,
+      boxShadow:`0 -16px 0 #fff, 0 8px 24px ${light ? 'rgba(15,23,42,.06)' : 'rgba(11,13,18,.18)'}`}}>
+      <PanelHeroCtx.Provider value={!light}>{children}</PanelHeroCtx.Provider>
+    </div>
+  );
+}
+// A name row's colours, white on the dark card.
+const heroName = (dark) => ({name: dark ? HERO.text : T.attioText, sub: dark ? HERO.muted : T.attioMuted, avatar: dark ? '#FFFFFF' : T.attioText, mark: dark ? '#0B0D12' : '#fff',
+  // The panel's ⋯ / Expand / Close icons are drawn for white backgrounds: shown white here.
+  actions: dark ? {filter:'brightness(0) invert(1)'} : {}});
+
 function ContactLine({icon, value, label, onOpen, onCopied}){
+  const dark = React.useContext(PanelHeroCtx);
   if(!value) return (
     <div style={{display:'flex', alignItems:'center', gap:8, height:26}}>
-      <Icon name={icon} size={14} color={T.attioFaint}/>
-      <span style={{fontSize:13, color:T.attioFaint}}>No {label}</span>
+      <Icon name={icon} size={14} color={dark ? HERO.muted : T.attioFaint}/>
+      <span style={{fontSize:13, color: dark ? HERO.muted : T.attioFaint}}>No {label}</span>
     </div>
   );
   return (
     <div style={{display:'flex', alignItems:'center', gap:8, height:26, minWidth:0}}>
-      <Icon name={icon} size={14} color={T.attioMuted}/>
+      <Icon name={icon} size={14} color={dark ? HERO.muted : T.attioMuted}/>
       <button onClick={onOpen} title={label === 'email' ? 'Email' : 'Call'} className={LINK_CLASS}
         style={{border:'none', background:'transparent', padding:0, cursor:'pointer', fontSize:13,
-                color:T.attioText, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', minWidth:0}}>
+                color: dark ? HERO.link : T.attioText, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', minWidth:0}}>
         {value}
       </button>
       <CopyButton text={value} label={label} onCopied={onCopied}/>
@@ -56,15 +105,23 @@ function ContactLine({icon, value, label, onOpen, onCopied}){
 }
 
 /* Icon-only quick action; the label lives in the tooltip and accessible name. */
-function QuickAction({icon, label, onClick}){
+/* `caption`: the action's short name beneath the icon (the side panel's quick actions). */
+function QuickAction({icon, label, onClick, caption}){
   const [h, setH] = React.useState(false);
-  return (
+  const dark = React.useContext(PanelHeroCtx);
+  const btn = (
     <button onClick={onClick} title={label} aria-label={label}
       onMouseEnter={()=>setH(true)} onMouseLeave={()=>setH(false)}
       style={{width:34, height:32, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0,
-              border:`1px solid ${T.borderStrong}`, background: h ? T.headerBg : '#fff', borderRadius:8, cursor:'pointer'}}>
-      <Icon name={icon} size={15} color={T.gray600}/>
+              border:`1px solid ${dark ? HERO.line : T.borderStrong}`, background: dark ? (h ? HERO.fillHover : HERO.fill) : h ? T.headerBg : '#fff', borderRadius:8, cursor:'pointer'}}>
+      <Icon name={icon} size={15} color={dark ? HERO.icon : T.gray600}/>
     </button>
+  );
+  if(!caption) return btn;
+  return (
+    <div style={{display:'flex', flexDirection:'column', alignItems:'center', gap:5, minWidth:34}}>
+      {btn}<span onClick={onClick} style={{fontSize:11.5, color: dark ? HERO.muted : T.attioMuted, whiteSpace:'nowrap', cursor:'pointer', lineHeight:1.2}}>{caption}</span>
+    </div>
   );
 }
 
@@ -73,19 +130,21 @@ function QuickAction({icon, label, onClick}){
    separate top bar. The full-screen view uses it without actions, inside its own column. */
 /* `subtitle`: what View settings puts under the name (Avatar subtitle) — Job Title by default. */
 const contactSubtitle = (contact, settings) => { const k = (settings || DEFAULT_PANEL_SETTINGS()).subtitle; return k ? (contact[k] == null ? '' : String(formatValue(contact[k]))) : ''; };
-// `user`: a person's profile (not a record) keeps the initials in black.
+// `user`: a person's profile (not a record) keeps its initials.
 function NameRow({contact, subtitle, headerActions, user}){
+  const c = heroName(React.useContext(PanelHeroCtx));
   return (
     <div style={{display:'flex', alignItems:'center', gap:10, minWidth:0}}>
       {/* The record's avatar (its Avatar property, 2026-11-19): its photo, else its first letter. */}
-      {user ? <span style={{width:36, height:36, borderRadius:9999, background:T.attioText, color:'#fff', flexShrink:0,
-          fontSize:13, fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center'}}>{nameInitials(contact.name)}</span>
-        : <RecordAvatar name={contact.name} photo={contact.photo} size={36}/>}
+      {user ? <span style={{
+        width:36, height:36, borderRadius:9999, background:c.avatar, color:c.mark, flexShrink:0,
+        fontSize:13, fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center',
+      }}>{nameInitials(contact.name)}</span> : <RecordAvatar name={contact.name} photo={contact.photo} size={36}/>}
       <div style={{minWidth:0, flex:1}}>
-        <div style={{fontSize:17, fontWeight:600, color:T.attioText, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{contact.name}</div>
-        {subtitle && <div style={{fontSize:12.5, color:T.attioMuted, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{subtitle}</div>}
+        <div style={{fontSize:17, fontWeight:600, color:c.name, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{contact.name}</div>
+        {subtitle && <div style={{fontSize:12.5, color:c.sub, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{subtitle}</div>}
       </div>
-      {headerActions && <div style={{display:'flex', alignItems:'center', gap:2, flexShrink:0}}>{headerActions}</div>}
+      {headerActions && <div style={{display:'flex', alignItems:'center', gap:2, flexShrink:0, ...c.actions}}>{headerActions}</div>}
     </div>
   );
 }
@@ -118,16 +177,17 @@ const contactQuickHandlers = (contact, actions, onStub, onCall) => ({onStub,
    its icon and name (contactActions.jsx splitQuickActions). `onRun(action)`. */
 function QuickActionsBlock({items, primaryKey, object, record, onRun}){
   const {primary, icons} = splitQuickActions(items, primaryKey, object, record);
+  const dark = React.useContext(PanelHeroCtx);
   if(!primary && !icons.length) return null;
   return (
     <div style={{display:'flex', flexDirection:'column', gap:10}}>
-      {icons.length > 0 && <div style={{display:'flex', gap:8, flexWrap:'wrap'}}>
-        {icons.map(q => <QuickAction key={q.key} icon={q.icon} label={q.label} onClick={()=>onRun(q)}/>)}
+      {icons.length > 0 && <div style={{display:'flex', gap:16, flexWrap:'wrap', alignItems:'flex-start'}}>
+        {icons.map(q => <QuickAction key={q.key} icon={q.icon} label={q.label} caption={q.short} onClick={()=>onRun(q)}/>)}
       </div>}
       {primary && <button onClick={()=>onRun(primary)}
-        style={{display:'flex', alignItems:'center', justifyContent:'center', gap:8, width:'100%', height:34, border:'none', borderRadius:8, background:T.black, color:'#fff',
+        style={{display:'flex', alignItems:'center', justifyContent:'center', gap:8, width:'100%', height:34, border:'none', borderRadius:8, background: dark ? '#FFFFFF' : T.black, color: dark ? '#0B0D12' : '#fff',
                 fontSize:13, fontWeight:500, fontFamily:'inherit', cursor:'pointer'}}>
-        <Icon name={primary.icon} size={14} color="#fff"/>{primary.label}
+        <Icon name={primary.icon} size={14} color={dark ? '#0B0D12' : '#fff'}/>{primary.short || primary.label}
       </button>}
     </div>
   );
@@ -226,7 +286,7 @@ function ContactInfo({contact, acts, onStub, keys, onOpenDeals, onOpenCustomers,
      menu (Edit contact). Rows are the Contact properties from Settings (contactPanelProperties):
      the worked-out ones, then each property's stored value. */
   const special = {
-    owner:         {value:contact.owner, open:(v)=>onStub(`Contact Owner · ${v}`), ownerLink:true},
+    owner:         {value:contact.owner, open:(v)=>onStub(`Lead Owner · ${v}`), ownerLink:true},
     ownerAssigned: {value:owner.assigned},
     ownerAssignedBy: {value:owner.assignedBy},
     ownerChanged:  {value:owner.changed},
@@ -242,7 +302,7 @@ function ContactInfo({contact, acts, onStub, keys, onOpenDeals, onOpenCustomers,
   return (
     <div>
       <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:6}}>
-        <span style={{fontSize:11, fontWeight:600, color:T.attioFaint, textTransform:'uppercase', letterSpacing:.4}}>Contact Properties</span>
+        <span style={{fontSize:11, fontWeight:600, color:T.attioFaint, textTransform:'uppercase', letterSpacing:.4}}>Lead Properties</span>
       </div>
       {shown.map(r => (
         <div key={r.key} style={{display:'flex', alignItems:'baseline', gap:12, padding:'7px 0', borderBottom:`1px solid ${T.attioLine}`, minHeight:32}}>
@@ -341,10 +401,15 @@ function ContactDetailBody({contact, acts, onStub, onCopied, onCall, withName=tr
     contactProperties: () => <ContactInfo contact={contact} acts={acts} onStub={onStub} onOpenDeals={actions && actions.onOpenDeals} onOpenCustomers={actions && actions.onOpenCustomers} panelProperties={panelProperties}
       keys={ps.contactProperties.filter(p => p.enabled).map(p => p.key)}/>,
   };
+  const nameRow = React.useContext(PanelNameCtx);
   return (
     <div style={{display:'flex', flexDirection:'column', gap:18}}>
-      <DetailHeader contact={contact} onStub={onStub} onCopied={onCopied} onCall={onCall} withName={withName} subtitle={contactSubtitle(contact, ps)}/>
-      {ps.order.map(id => { const el = sections[id] && sections[id](); return el ? <React.Fragment key={id}>{el}</React.Fragment> : null; })}
+      <PanelHeroCard variant={ps.cardStyle}>
+        {nameRow}
+        <DetailHeader contact={contact} onStub={onStub} onCopied={onCopied} onCall={onCall} withName={withName && !nameRow} subtitle={contactSubtitle(contact, ps)}/>
+        {sections.quickActions()}
+      </PanelHeroCard>
+      {ps.order.filter(id => id !== 'quickActions').map(id => { const el = sections[id] && sections[id](); return el ? <React.Fragment key={id}>{el}</React.Fragment> : null; })}
     </div>
   );
 }
@@ -366,11 +431,12 @@ const CONTACT_TABS = [
   {id:'email',    label:'Emails',            icon:'envelope', list:true},
   {id:'tasks',    label:'Tasks',            icon:'tasks',    list:true},
   {id:'meetings', label:'Meetings',         icon:'videoCamera', list:true},
-  {id:'quotes',   label:'Quotes',           icon:'quote',    list:true},
-  {id:'accounting', label:'Accounting',     icon:'coins',    list:false},
-  {id:'files',    label:'Files',            icon:'folder',   list:true},
   {id:'profile',  label:'Customer Profile', icon:'profile',  list:false},
+  {id:'accounting', label:'Accounting',     icon:'coins',    list:false},
+  {id:'quotes',   label:'Quotes',           icon:'quote',    list:true},
+  {id:'files',    label:'Files',            icon:'folder',   list:true},
   {id:'documents', label:'Documents',       icon:'files',    list:true},
+  {id:'supportNotes', label:'Support Notes', icon:'notepad', list:true},   // the record's Support Notes (2026-11-19)
   {id:'deals',    label:'Deals',            icon:'deals',    list:true},
   {id:'customers', label:'Customers',       icon:'customers', list:true},
 ];
@@ -505,13 +571,7 @@ function ContactWorkspace({contact, acts, onStub, onCall, onCreateProfile, profi
       {/* Files, Quotes and Documents bring their own toolbars (files.jsx, quotes.jsx, documents.jsx). */}
       {(tab.list || overview) && !(isActivityTab && activityViews) && !['files', 'quotes', 'documents'].includes(tab.id) && (
         <div style={{display:'flex', alignItems:'center', gap:10, padding:'12px 20px', borderBottom:`1px solid ${T.border}`, flexShrink:0}}>
-          <div style={{position:'relative'}}>
-            <div style={{position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', display:'flex'}}>
-              <Icon name="search" size={13} color={T.gray400}/>
-            </div>
-            <input value={q} onChange={e=>setQ(e.target.value)} placeholder={`Search ${actLabel.toLowerCase()}`}
-              style={{padding:'7px 10px 7px 30px', fontSize:13, border:`1px solid ${T.borderStrong}`, borderRadius:8, width:220, fontFamily:'inherit'}}/>
-          </div>
+          <ToolbarSearch search={q} onSearch={setQ} width={220} placeholder={`Search ${actLabel}`}/>
           <button onClick={()=>onStub(`Filter ${actLabel}`)} style={{display:'flex', alignItems:'center', gap:6, border:`1px solid ${T.borderStrong}`, background:'#fff', borderRadius:8, padding:'7px 12px', fontSize:13, color:T.gray800, cursor:'pointer'}}>
             <Icon name="filter" size={13} color={T.gray600}/> Filters
           </button>
@@ -527,7 +587,8 @@ function ContactWorkspace({contact, acts, onStub, onCall, onCreateProfile, profi
         </div>
       ) : isActivityTab && activityViews ? (
         <ActivityViewsArea tabId={actTabId} store={activityViews.store} sources={activityViews.sources} heading={overview ? 'Activity' : null}
-          schema={activityViews.schemaFor(actTabId)} controls={<div style={{display:'flex', alignItems:'center', gap:8}}>{actTabId === 'tasks' && <TableBoardSwitch mode={taskView} onChange={setTaskView}/>}<ActivityAddButton tabId={actTabId} onPick={pickAdd}/></div>}
+          schema={activityViews.schemaFor(actTabId)} viewSwitch={actTabId === 'tasks' && <TableBoardSwitch mode={taskView} onChange={setTaskView}/>}
+          controls={<ActivityAddButton tabId={actTabId} onPick={pickAdd}/>}
           render={(shown, emptyText, recordOf) => (
             <div style={{flex:1, minHeight:0, display:'flex', overflow:'hidden'}}>
               <ActivityTab tabId={actTabId} taskView={taskView} contact={contact} acts={shown} allActs={acts} emptyText={emptyText} recordOf={recordOf} team={team || []} adding={adding} setAdding={setAdding} prefill={prefill}
@@ -782,7 +843,7 @@ function OwnerProfilePanel({name, onClose, user: userProp, editable, onSaveProfi
 /* Another record (a Deal) uses the same shell, passing `backLabel`, `renderName(headerActions)`,
    `menu`, `body` and `workspace` in place of the contact's. */
 function ContactDetail({mode, contact, acts, properties, panelProperties, onClose, onExpand, onCollapse, onStub, onCopied, actions, profiles, requestedTab, panelSettings, onOpenPanelSettings, team, onUpdateActivity, onAddActivity, onReassignOwner,
-                        backLabel = 'Contacts', renderName, menu, body, workspace, activityViews}){
+                        backLabel = 'Leads', renderName, menu, body, workspace, activityViews}){
   const full = mode === 'full';
   const ra = useRecordAccess();
   const openObject = ra ? ra.object : 'contacts', openId = ra && ra.record ? ra.record.id : contact && contact.id;
@@ -849,10 +910,11 @@ function ContactDetail({mode, contact, acts, properties, panelProperties, onClos
           width: full ? DETAIL_COLUMN_W : DETAIL_PANEL_W - 1, flexShrink:0, display:'flex', flexDirection:'column',
           borderRight:`1px solid ${full ? T.border : 'transparent'}`, transition: t('width'),
         }}>
-          <div style={{padding:'16px 14px 12px 20px', flexShrink:0}}>
-            {/* Side panel: Close, Expand and the menu sit right of the name. Full screen: only
-                the menu — Close and Collapse live in the top bar, and nothing is duplicated. */}
-            {(() => {
+          {/* The name row (Side panel: Close, Expand and the menu right of the name; full screen:
+              only the menu — Close and Collapse live in the top bar) goes into the body's header
+              card (PanelHeroCard), which stays at the top while the properties scroll. */}
+          <div style={{flex:1, minHeight:0, overflowY:'auto', padding:'16px 20px 24px'}}>
+            <PanelNameCtx.Provider value={(() => {
               // ⋯, then Open Full Screen, then × at the far right (as every panel).
               const headerActions = <>
                 {menu || <ContactActionsMenu contact={contact} {...actions} onViewSettings={onOpenPanelSettings || (()=>onStub('Side Panel Settings'))}/>}
@@ -860,9 +922,7 @@ function ContactDetail({mode, contact, acts, properties, panelProperties, onClos
                 {!full && <button title="Close" onClick={onClose} style={barIconBtn}><Icon name="close" size={13} color={T.gray600}/></button>}
               </>;
               return renderName ? renderName(headerActions) : <NameRow contact={contact} subtitle={contactSubtitle(contact, panelSettings)} headerActions={headerActions}/>;
-            })()}
-          </div>
-          <div style={{flex:1, minHeight:0, overflowY:'auto', padding:'0 20px 24px'}}>
+            })()}>
             <ViolationNotice/>
             <AutomationNotice recordId={contact && contact.id}/>
             {/* Collaborators (an approved office meeting's colleague): who else works this record. */}
@@ -873,6 +933,7 @@ function ContactDetail({mode, contact, acts, properties, panelProperties, onClos
               </div>)}
             {body || <ContactDetailBody contact={contact} acts={acts} onStub={onStub} onCopied={onCopied}
               onCall={actions && actions.onCall} withName={false} settings={panelSettings} actions={actions} panelProperties={panelProperties}/>}
+            </PanelNameCtx.Provider>
           </div>
         </div>
 
@@ -898,4 +959,4 @@ function ContactDetail({mode, contact, acts, properties, panelProperties, onClos
   );
 }
 
-Object.assign(window, {PropertyRowLabel, AssociatedRecordsValue, panelEditSpec, PanelEditableValue, ContactDetail, ContactDetailBody, ContactWorkspace, ownerDates, NameRow, ContactLine, QuickAction, OwnerLink, barIconBtn, CONTACT_TABS});
+Object.assign(window, {PanelHeroCtx, PanelNameCtx, PanelHeroCard, heroName, PropertyRowLabel, AssociatedRecordsValue, panelEditSpec, PanelEditableValue, ContactDetail, ContactDetailBody, ContactWorkspace, ownerDates, NameRow, ContactLine, QuickAction, OwnerLink, barIconBtn, CONTACT_TABS});

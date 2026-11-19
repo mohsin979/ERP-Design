@@ -41,6 +41,15 @@ const ACTIVITY_TYPES = {
   payment:     {label:'Payment',      icon:'coins'},       // a One-Time payment marked Paid or Unpaid, its amount changed, or the payment type switched (accounting.jsx)
   recordsMerged: {label:'Records merged', icon:'merge'},   // other records merged into this one: their names and the values replaced (merge.jsx)
   recordsSplit:  {label:'Records split',  icon:'merge'},   // a merge split again: the records this one was merged with (merge.jsx)
+  /* The record's whole story in the Overview's trail (2026-11-18, Mohsin's list): */
+  formSubmitted: {label:'Form submitted', icon:'forms'},     // a Marketing form submitted, with its answers (forms.jsx)
+  recordCreated: {label:'Record created', icon:'plus'},      // the record itself was created — by a person, a form or a workflow (workflowEngine.jsx)
+  dealCreated:   {label:'Deal created',   icon:'deals'},     // a deal made from this contact (workflowEngine.jsx)
+  duplicateFound:{label:'Duplicate found', icon:'merge'},    // this record turned out a Duplicate or a Form Refill of another (workflowEngine.jsx)
+  sequence:      {label:'Sequence',       icon:'envelope'},  // enrolled in, exited or unsubscribed from an email sequence
+  meetingRescheduled: {label:'Meeting rescheduled', icon:'calendar'},   // a scheduled meeting moved to another time (activityCards.jsx)
+  profile:       {label:'Customer Profile', icon:'profile'}, // a Customer Profile created or updated (app.jsx)
+  invoice:       {label:'Invoice issued', icon:'files'},     // an invoice issued for a payment (invoices.jsx)
 };
 /* The contact-facing types, used to seed each contact's mock history. */
 const CARD_ACTIVITY_ORDER = ['email', 'call', 'meeting', 'task', 'note'];
@@ -345,10 +354,20 @@ function activityHeadline(a){
     case 'workflow':    return a.title;
     case 'recordsMerged': return (a.merged || []).map(m => m.name || 'Unnamed').join(', ');
     case 'recordsSplit': return (a.records || []).map(m => m.name || 'Unnamed').join(', ');
+    case 'formSubmitted': return a.formName || 'Form';
+    case 'recordCreated': return a.name || '';
+    case 'dealCreated': return a.dealName || '';
+    case 'duplicateFound': return (a.matches || []).map(m => m.name || 'Unnamed').join(', ');
+    case 'sequence': return a.sequenceName || 'Sequence';
+    case 'meetingRescheduled': return `${a.title || 'Meeting'} · ${a.from ? fmtActStamp(new Date(a.from)) : '—'} → ${a.to ? fmtActStamp(new Date(a.to)) : '—'}`;
+    case 'profile': return [a.formName, a.field].filter(Boolean).join(' · ');
+    case 'invoice': return [a.number, a.amountText].filter(Boolean).join(' · ');
   }
   return '';
 }
 
+// A stage change into another pipeline (its pipelines are named on it since 2026-11-18).
+const isPipelineChange = (a) => a.type === 'stageChange' && a.from && a.to && a.from.pipeline && a.to.pipeline && a.from.pipeline !== a.to.pipeline;
 function activityWhen(a){
   if(a.type === 'task'){
     if(a.status === 'completed') return {text:'Done', tone:'muted'};
@@ -431,8 +450,20 @@ function activityLines(a, contact, context = 'all'){
       : all ? act(a.logged ? 'Call log' : 'Call', 'by') : (who ? act('', 'by') : act('Call')), detail:callResult(a), when};
     // Always an internal team member: "Meeting by [name]".
     case 'meeting': return {lead: all ? act('Meeting', 'by') : (who ? act('', 'by') : act('Meeting')), detail:a.title, when};
-    case 'ownerChange': return {lead:act('Owner changed', 'by'), detail:`${userLabel(a.from) || 'No owner'} → ${userLabel(a.to) || 'No owner'}`, when};
-    case 'stageChange': return {lead:act('Stage changed', 'by'), detail:activityHeadline(a), when};
+    // The first owner a record gets is "Owner assigned"; after that, "Owner changed".
+    case 'ownerChange': return a.from ? {lead:act('Owner changed', 'by'), detail:`${userLabel(a.from) || 'No owner'} → ${userLabel(a.to) || 'No owner'}`, when}
+      : {lead:act('Owner assigned', 'by'), detail:userLabel(a.to) || 'No owner', when};
+    // A move into another pipeline is "Pipeline changed", with the pipelines named.
+    case 'stageChange': return isPipelineChange(a) ? {lead:act('Pipeline changed', 'by'), detail:`${(a.from || {}).pipelineLabel || '—'} → ${(a.to || {}).pipelineLabel || '—'} · ${(a.to || {}).label || '—'}`, when}
+      : {lead:act('Stage changed', 'by'), detail:activityHeadline(a), when};
+    case 'formSubmitted': return {lead:act('Form submitted', 'by'), detail:activityHeadline(a), when};
+    case 'recordCreated': return {lead:act(`${a.noun || 'Record'} created`, 'by'), detail:activityHeadline(a), when};
+    case 'dealCreated': return {lead:act(`${typeSingular('deals', 'Deal')} created`, 'by'), detail:a.dealName, when};
+    case 'duplicateFound': return {lead:act(a.status === 'Form Refill' ? 'Form refill' : 'Duplicate found'), detail:activityHeadline(a), when};
+    case 'sequence': return {lead:act(a.action === 'unsubscribed' ? 'Unsubscribed' : a.action === 'exited' ? 'Exited sequence' : 'Enrolled in sequence', 'by'), detail:activityHeadline(a), when};
+    case 'meetingRescheduled': return {lead:act('Meeting rescheduled', 'by'), detail:activityHeadline(a), when};
+    case 'profile': return {lead:act(a.action === 'created' ? 'Customer Profile created' : 'Customer Profile updated', 'by'), detail:activityHeadline(a), when};
+    case 'invoice': return {lead:act('Invoice issued'), detail:activityHeadline(a), when};
     case 'propertyChange': return {lead:act('Property changed', 'by'), detail:activityHeadline(a), when};
     case 'customerCreated': return {lead:act('Customer created', 'by'), detail:a.customerName, when};
     case 'taskReassigned': return {lead:act('Task reassigned', 'by'), detail:activityHeadline(a), when};
@@ -444,8 +475,8 @@ function activityLines(a, contact, context = 'all'){
       ? {lead:act(all ? 'File received' : 'Received', 'from'), detail:a.name, when}
       : {lead:act(all ? 'File added' : 'Added', 'by'), detail:a.name, when};
     case 'fileChange': return {lead:act('File deleted', 'by'), detail:a.fileName, when};
-    case 'quote': return {lead:act(a.status === 'signed' ? 'Quote signed' : a.status === 'sent' ? 'Quote sent' : 'Quote created', 'by'), detail:a.title, when};
-    case 'document': return {lead:act(a.status === 'signed' ? 'Document signed' : a.status === 'sent' ? 'Document sent' : 'Document created', 'by'), detail:a.title, when};
+    case 'quote': return {lead:act(a.status === 'signed' ? 'Quote signed' : a.status === 'sent' ? 'Quote sent' : a.status === 'viewed' ? 'Quote viewed' : a.status === 'expired' ? 'Quote expired' : 'Quote created', 'by'), detail:a.title, when};
+    case 'document': return {lead:act(a.status === 'signed' ? 'Document signed' : a.status === 'sent' ? 'Document sent' : a.status === 'viewed' ? 'Document viewed' : 'Document created', 'by'), detail:a.title, when};
   }
   return {lead:{prefix: ACTIVITY_TYPES[a.type] ? ACTIVITY_TYPES[a.type].label : '', name:'', owner:false, cc:''}, detail:'', when};
 }
@@ -520,7 +551,8 @@ function ActivityLead({a, lead, style}){
 
 /* `record` ({object, id, name}): the associated record the activity is on (a record's Deal /
    Customer / Contact feeds) — named after the lead, as on Tools' person-led rows, and opens it. */
-function ActivityRow({a, contact, first, context = 'all', compact = false, record}){
+/* `hideWhen`: no date (Overview's time trail shows it on its own, left of the rail). */
+function ActivityRow({a, contact, first, context = 'all', compact = false, record, hideWhen = false}){
   const l = activityLines(a, contact, context);
   const meta = ACTIVITY_TYPES[a.type];
   const one = {whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'};
@@ -542,10 +574,11 @@ function ActivityRow({a, contact, first, context = 'all', compact = false, recor
             </span>
           </span>
         ) : <ActivityLead a={a} lead={lead} style={quiet}/>}
-        {compact && <span style={{...quiet, flexShrink:0, whiteSpace:'nowrap'}}>{l.when}</span>}
+        {a.type === 'note' && a.support && <SupportNoteTag/>}
+        {compact && !hideWhen && <span style={{...quiet, flexShrink:0, whiteSpace:'nowrap'}}>{l.when}</span>}
         </div>
         {l.detail && <div title={l.detail} style={{...one, fontSize:13, fontWeight:500, color:T.attioText, marginTop:4}}>{l.detail}</div>}
-        {!compact && <div style={{...one, ...quiet, marginTop:2}}>{l.when}</div>}
+        {!compact && !hideWhen && <div style={{...one, ...quiet, marginTop:2}}>{l.when}</div>}
       </div>
     </div>
   );
@@ -708,7 +741,7 @@ function ActivityHistory({acts}){
   );
 }
 
-Object.assign(window, {isRealTouch, latestTouch, isOverdue, taskDueParts, taskDueValue, fmtTaskDue, ymdOf, 
+Object.assign(window, {isPipelineChange, isRealTouch, latestTouch, isOverdue, taskDueParts, taskDueValue, fmtTaskDue, ymdOf, 
   ACTIVITY_TYPES, generateActivities, withSampleTaskDescriptions, buildActivitySummary,
   ActivitySection, ActivityHistory, SummaryBlock, ActivityDropdown, HistoryItem, activityBox,
   ActivityRow, ActivityLead, activityLines, activityActor, listedActivities, leadText,

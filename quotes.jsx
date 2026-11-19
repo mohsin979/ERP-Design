@@ -42,6 +42,10 @@
    quote's services and milestones, payment terms, discount and VAT, and terms; picking one on
    Basics fills those in. A template is made in the same builder (QuoteBuilder `template`).
 
+   The client's link (2026-11-18): #q~<CRM branch>~<quote> opens the quotation alone
+   (PublicQuotePage) — Copy Link on a sent quote, and in its email; the first view is "Quote viewed"
+   on the record's trail, and a quote past its date "Quote expired" (QuoteViewInbox, QuoteExpiryWatch).
+
    Shown on the record's Quotes tab (RecordQuotesTab) and on Tools → Quotes (QuotesPage), both
    with the same quotation view (QuoteDocument). Documents (documents.jsx) share its letterhead
    frame (BrandedDocument) and the brand a sent one keeps (keepQuoteBrand / quoteBrand).
@@ -195,9 +199,9 @@ function QuoteStatusPill({status}){ return <StatusPill status={status} map={QUOT
    signature section. A quote template's preview (templates.jsx) is the same page with sample
    details: `quote.sampleRecord` stands in for its record. */
 // `flat`: no card border (the PDF's page).
-function QuoteDocument({quote, flat}){
+function QuoteDocument({quote, flat, brand:given}){
   const hub = useRecordHub();
-  const brand = quoteBrand(quote);
+  const brand = given || quoteBrand(quote);
   const record = quote.sampleRecord || hubRecord(hub, quote.object, quote.recordId);
   const t = quoteTotals(quote), cur = quoteCurrency(quote);
   const muted = {fontSize:12, color:T.attioMuted};
@@ -409,7 +413,7 @@ async function sendQuoteVia(hub, q){
       + `\nTotal: ${fmtMoney(t.total, cur)}` + (q.validUntil ? `\nValid until ${fmtQuoteDate(q.validUntil)}.` : '')
       + (!quoteShowsPlan(q) ? '' : q.payment ? `\n\nPayment plan (${PAYMENT_TYPE_LABEL[quotePlanOf(q).paymentType]}):\n` + quoteSchedule(q).map((x, i) => `${i + 1}. ${x.description} — ${fmtMoney(x.amount, cur)} — due ${fmtQuoteDate(x.dueDate) || x.tentative}`).join('\n') + (planOngoing(quotePlanOf(q)) ? '\nUntil cancelled' : '')
         : (q.installments || []).length ? `\n\nPayment plan:\n` + q.installments.map((x, i) => `${i + 1}. ${x.description} — ${round2(x.percent)}% — ${fmtMoney(installmentAmount(q, x), cur)}${fmtTentative(x.due) ? ` — ${fmtTentative(x.due)}` : ''}`).join('\n') : '')
-      + (q.eSignature ? `\n\nPlease review and sign the quotation.` : '') + `\n\nKind regards,\n${CURRENT_USER.name}`});
+      + (q.eSignature ? `\n\nPlease review and sign the quotation.` : '') + `\n\nView your quotation here:\n${quoteLink(q)}` + `\n\nKind regards,\n${CURRENT_USER.name}`});
   hub.toast(`Quote ${q.number} sent`);
 }
 
@@ -802,6 +806,8 @@ function quoteActions(hub, q, {onDelete, onEdit, onSign} = {}){
     ...(q.status === 'draft' ? [{label:'Edit Quote', onClick:()=>onEdit ? onEdit(q.id) : hub.editQuote(q.id)}] : []),
     ...(q.status === 'draft' && !expired ? [{label:'Send Quote', onClick:()=>sendQuoteVia(hub, q)}] : []),
     {label:'Download PDF', onClick:()=>{ hub.toast('Preparing the PDF'); downloadQuotePdf(hub, q); }},
+    // The client's link to view it (the quote's sent email carries it too).
+    ...(q.status !== 'draft' ? [{label:'Copy Link', onClick:()=>copyText(quoteLink(q)).then(ok => hub.toast(ok ? 'Quote link copied' : 'Copy failed'))}] : []),
     ...(q.status !== 'signed' ? [{label:'Delete Quote', danger:true, onClick:()=>onDelete && onDelete(q)}] : []),
   ];
 }
@@ -941,6 +947,85 @@ function RecordQuotesTab({contact}){
 }
 
 // A quote activity opened from the Activity feed: the quotation (if it still exists).
+/* ── The client's view (2026-11-18) ── #q~<CRM branch>~<quote>: the quotation alone, for
+   the client, signed in or not — in the brand it went out with. Opening it leaves a view in the
+   branch's quote inbox (store.jsx DB), taken in by the app (QuoteViewInbox): "Quote viewed" on the
+   record's trail, the first time. A quote past its Valid Until date gets "Quote expired" there
+   (QuoteExpiryWatch). */
+const QUOTE_VIEW_INBOX_KEY = (crmId) => `hof-erp-quote-views:${crmId}`;
+const quoteLink = (q, crmId = ACTIVE_CRM.id) => `${window.location.origin}${window.location.pathname}#q~${crmId}~${q.id}`;
+const quoteViewRoute = (hash) => { const m = /^#q~([A-Za-z0-9._-]+)~([A-Za-z0-9._-]+)$/.exec(hash || ''); return m ? {crmId:m[1], quoteId:m[2]} : null; };
+const readQuoteViews = (crmId) => { try { return JSON.parse(DB.fresh(QUOTE_VIEW_INBOX_KEY(crmId)) || '[]') || []; } catch(e){ return []; } };
+const writeQuoteViews = (crmId, list) => { try { DB.setItem(QUOTE_VIEW_INBOX_KEY(crmId), JSON.stringify(list)); DB.flush(); return true; } catch(e){ return false; } };
+function PublicQuotePage({route}){
+  const found = React.useMemo(() => {
+    if(!ORG_REGISTRY.crm.some(c => c.id === route.crmId)) return null;
+    let saved = null; try { const raw = DB.getItem(crmStoreKey(route.crmId)); saved = raw ? JSON.parse(raw) : null; } catch(e){}
+    const q = saved && (saved.quotes || []).find(x => x.id === route.quoteId && x.status !== 'draft');
+    if(!q) return null;
+    const b = (q.brandId && (saved.quoteBrands || {})[q.brandId]) || crmBrandOf(route.crmId);
+    // The record it's for, by name (the page has no hub to look it up in).
+    const rec = (saved[q.object] || []).find(r => String(r.id) === String(q.recordId));
+    return {q:rec ? {...q, sampleRecord:rec} : q, brand:{...b, colors:{...DEFAULT_BRAND(), ...(b.colors || {})}}};
+  }, []);
+  React.useEffect(() => { if(found) writeQuoteViews(route.crmId, [...readQuoteViews(route.crmId), {id:`qv-${Date.now().toString(36)}`, quoteId:route.quoteId, at:new Date().toISOString()}]); }, []);
+  const bar = {background:'#fff', border:`1px solid ${T.border}`, borderRadius:12, padding:'14px 16px', fontSize:13, color:T.attioText};
+  return (
+    <div style={{minHeight:'100%', background:T.headerBg, padding:'32px 16px', boxSizing:'border-box', overflowY:'auto'}}>
+      <div style={{maxWidth:DOC_PAGE_W, margin:'0 auto', display:'flex', flexDirection:'column', gap:12}}>
+        {!found ? <div style={{...bar, textAlign:'center', padding:'28px 16px'}}>
+            <div style={{fontSize:16, fontWeight:600}}>This quotation isn’t available</div>
+            <div style={{color:T.attioMuted, marginTop:6}}>The link may be wrong, or the quotation was deleted.</div></div>
+          : <>
+            {quoteExpired(found.q) && <div style={bar}>This quotation expired on {fmtQuoteDate(found.q.validUntil)}.</div>}
+            <QuoteDocument quote={found.q} brand={found.brand}/>
+          </>}
+      </div>
+    </div>
+  );
+}
+function QuoteViewInbox(){
+  const hub = useRecordHub();
+  const live = React.useRef(hub); live.current = hub;
+  React.useEffect(() => {
+    const crmId = ACTIVE_CRM.id;
+    const take = () => {
+      if(DB.isStale()) return;
+      const pending = readQuoteViews(crmId);
+      if(!pending.length) return;
+      const hub = live.current, quotes = hub.quotes || [];
+      writeQuoteViews(crmId, pending.filter(r => !quotes.some(q => q.id === r.quoteId)));
+      const seen = {};
+      pending.forEach(r => { const q = quotes.find(x => x.id === r.quoteId);
+        if(!q || q.viewedAt || seen[q.id]) return;
+        seen[q.id] = r.at;
+        hub.add(q.object, q.recordId, {type:'quote', status:'viewed', title:`${q.number} · ${q.title}`, quoteId:q.id, source:'client', by:'', at:new Date(r.at)});
+      });
+      if(Object.keys(seen).length) hub.setQuotes(qs => qs.map(q => seen[q.id] ? {...q, viewedAt:seen[q.id]} : q));
+    };
+    take();
+    const onStorage = (e) => { if(e.key === QUOTE_VIEW_INBOX_KEY(crmId)) take(); };
+    window.addEventListener('storage', onStorage);
+    const poll = DB.sqlite ? setInterval(take, 4000) : null;
+    return () => { window.removeEventListener('storage', onStorage); if(poll) clearInterval(poll); };
+  }, []);
+  return null;
+}
+/* "Quote expired" on the record's trail, once, the day a draft or sent quote passes its Valid Until
+   date — from 2026-11-18 on (quotes that expired before keep their history as it was). */
+const QUOTE_EXPIRY_LOG_FROM = '2026-11-17';
+function QuoteExpiryWatch(){
+  const hub = useRecordHub();
+  const [day, setDay] = React.useState(() => ymdOf(new Date()));
+  React.useEffect(() => { const t = setInterval(() => setDay(ymdOf(new Date())), 60000); return () => clearInterval(t); }, []);
+  React.useEffect(() => {
+    const due = (hub.quotes || []).filter(q => quoteExpired(q) && !q.expiredLogged && q.validUntil >= QUOTE_EXPIRY_LOG_FROM && q.recordId != null);
+    if(!due.length) return;
+    due.forEach(q => hub.add(q.object, q.recordId, {type:'quote', status:'expired', title:`${q.number} · ${q.title}`, quoteId:q.id, source:'team', by:''}));
+    hub.setQuotes(qs => qs.map(q => due.some(d => d.id === q.id) ? {...q, expiredLogged:true} : q));
+  }, [day, hub.quotes]);
+  return null;
+}
 function QuoteActivityDetail({a, contact}){
   const hub = useRecordHub();
   const q = hub && hub.quotes.find(x => x.id === a.quoteId);
@@ -975,7 +1060,7 @@ function QuotesPage(){
     properties:QUOTE_COLUMNS, noun:'quote', searchKeys:['number', 'title', 'recordName', 'recipientName'], canCreateProperty:false, bulkActions:quoteBulk.bulkActions,
     filterProps:[{key:'statusLabel', label:'Status', type:'select'}, {key:'objectLabel', label:'Record Type', type:'select'}, {key:'total', label:'Total', type:'number'},
       {key:'createdBy', label:'Created By', type:'select'}],
-    selectValues:{statusLabel:['Draft', 'Sent', 'Signed', 'Expired'], objectLabel:['Contact', 'Deal', 'Customer'], createdBy:[...new Set(hub.quotes.map(q => q.createdBy).filter(Boolean))]},
+    selectValues:{statusLabel:['Draft', 'Sent', 'Signed', 'Expired'], objectLabel:['Lead', 'Deal', 'Customer'], createdBy:[...new Set(hub.quotes.map(q => q.createdBy).filter(Boolean))]},
     renderCell:(key, r) => key === 'number' ? <ContactName name={r.number} onOpen={()=>setOpenId(r.id)} style={{fontSize:'inherit', fontWeight:500}}/>
       : key === 'recordName' && r.recordName !== '—' ? <HubRecordLink object={r.object} id={r.recordId} name={r.recordName}/>
       : key === 'statusLabel' ? <QuoteStatusPill status={quoteStatusOf(r)}/> : undefined,
@@ -1005,5 +1090,5 @@ function QuotesPage(){
   );
 }
 
-Object.assign(window, {quotePdfBlob, downloadQuotePdf, hasBankDetails, quoteShowsPlan, quotePlanOf, quoteSchedule, BrandedDocument, InstallmentsTable, MarkSignedModal, QuoteSignaturePreview, keepQuoteBrand, quoteBrand, quoteNumber, DeleteQuoteModal, PercentAmountField, quoteSeqFloor, splitAmounts, quoteExpired, quoteStatusOf, tentativeOk, normalizeDue, readUpload, EvidenceFile, fmtTentative, tentativeDate, installmentAmount, SAMPLE_QUOTES, SAMPLE_QUOTE_TEMPLATES, quoteTemplatesOf, quoteTotals, quoteItemTotal, nextTemplateCode, copyItems, QuoteBuilder, QuoteDocument, RecordQuotesTab, QuoteActivityDetail, QuotesPage, quoteTotal, QUOTE_STATUS, sendQuoteVia,
+Object.assign(window, {quotePdfBlob, downloadQuotePdf, hasBankDetails, quoteShowsPlan, quotePlanOf, quoteSchedule, BrandedDocument, InstallmentsTable, MarkSignedModal, QuoteSignaturePreview, keepQuoteBrand, quoteBrand, quoteNumber, DeleteQuoteModal, PercentAmountField, quoteSeqFloor, splitAmounts, quoteExpired, quoteStatusOf, tentativeOk, normalizeDue, readUpload, EvidenceFile, fmtTentative, tentativeDate, installmentAmount, SAMPLE_QUOTES, SAMPLE_QUOTE_TEMPLATES, quoteTemplatesOf, quoteTotals, quoteItemTotal, nextTemplateCode, copyItems, QuoteBuilder, QuoteDocument, RecordQuotesTab, QuoteActivityDetail, QuotesPage, quoteTotal, QUOTE_STATUS, sendQuoteVia, quoteLink, quoteViewRoute, PublicQuotePage, QuoteViewInbox, QuoteExpiryWatch,
   sampleQuoteOf, QuoteServicesFields, QuotePaymentFields, quoteConfigChecks, normalizeQuoteConfig, QUOTE_SECTION, QUOTE_PANEL_W, QUOTE_VAT_RATE});

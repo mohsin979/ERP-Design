@@ -83,6 +83,9 @@ function issueInvoices(hub, items, {quiet} = {}){
   let all = [...(hub.invoices || [])];
   const made = items.map(({s, inst, on}) => { const v = buildInvoice(hub, s, inst, {on, number:invoiceNumber(all, on.slice(0, 4)), brandId}); all = [...all, v]; return v; });
   hub.setInvoices(list => [...list, ...made.filter(v => !currentInvoiceOf(list, v.planId, v.instId))]);
+  // "Invoice issued" on the record's trail (2026-11-18), then the email it goes out in.
+  if(!quiet && hub.add) made.forEach(v => hub.add(v.object, v.recordId, {type:'invoice', invoiceId:v.id, number:v.number, amountText:fmtMoney(v.amount, v.currency),
+    payment:v.description, planNumber:v.planNumber || '', source:'team', by:''}));
   if(!quiet) made.forEach(v => logInvoiceEmail(hub, v));
   return made;
 }
@@ -266,7 +269,7 @@ function InvoicesPage(){
     properties:INVOICE_COLUMNS, noun:'invoice', searchKeys:['number', 'recordName', 'planNumber', 'description'], canCreateProperty:false, bulkActions:bulk.bulkActions,
     filterProps:[{key:'statusLabel', label:'Status', type:'select'}, {key:'objectLabel', label:'Record Type', type:'select'}, {key:'currency', label:'Currency', type:'select'},
       {key:'amountValue', label:'Amount', type:'number'}],
-    selectValues:{statusLabel:Object.values(INVOICE_STATUS).map(s => s.label), objectLabel:['Contact', 'Deal', 'Customer'], currency:[...new Set(visible.map(v => v.currency))]},
+    selectValues:{statusLabel:Object.values(INVOICE_STATUS).map(s => s.label), objectLabel:['Lead', 'Deal', 'Customer'], currency:[...new Set(visible.map(v => v.currency))]},
     renderCell:(key, r) => key === 'number' ? <ContactName name={r.number} onOpen={()=>setOpenId(r.id)} style={{fontSize:'inherit', fontWeight:500}}/>
       : key === 'recordName' && r.recordName !== '—' ? <HubRecordLink object={r.object} id={r.recordId} name={r.recordName}/>
       : key === 'statusLabel' ? <StatusPill status={invoiceStatusOf(r, today)} map={INVOICE_STATUS}/> : undefined,

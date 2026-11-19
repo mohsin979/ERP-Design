@@ -44,7 +44,7 @@
    email is on — a property of another record type reads its first linked record of that type —
    and nothing where the record has no value. A template's own preview shows the chip.
 
-   Tools → Emails is every email in the workspace: Inbox (received), Sent and Scheduled, with
+   Tools → Emails is every email in the workspace: Threads (every sent and received email, one row per conversation), Sent, Received and Scheduled, with
    the record each belongs to (tools.jsx). Nothing is really sent: there is no mailbox behind
    the prototype. */
 
@@ -53,7 +53,7 @@ const emailFirstName = (name) => String(name || '').trim().split(/\s+/)[0] || ''
 const fillFirstName = (s, person) => String(s || '').replace(/\{\{\s*first_name\s*\}\}/g, emailFirstName(person && person.name) || 'there');
 
 /* ── Fetch Property ── (see the header) */
-const EMAIL_TOKEN_OBJECTS = {contacts:'Contact', deals:'Deal', customers:'Customer'};
+const EMAIL_TOKEN_OBJECTS = {contacts:'Lead', deals:'Deal', customers:'Customer'};
 // Where a property is fetched from: the workspace's record types, then Accounting and Customer Profile.
 const emailTokenSources = () => [...hubObjects().map(o => ({value:o, label:typeSingular(o, EMAIL_TOKEN_OBJECTS[o])})), {value:'acc', label:'Accounting'}, {value:'pf', label:'Customer Profile'}];
 // A source's properties: [{value: the token's key, label, section}] — a Customer Profile property under its form.
@@ -85,7 +85,9 @@ const fillEmailTokens = (html, ctx) => !ctx || !ctx.record ? html : String(html 
 const EMAIL_TEXT_TOKEN = /\{\{\s*([^{}]+?)\s*\}\}/g;
 function emailTokenLabelKey(data, label){
   for(const s of emailTokenSources()){ const hit = emailTokenOptions(data, s.value).find(o => `${o.section || s.label} · ${o.label}` === label); if(hit) return hit.value; }
-  return null;
+  // A subject written before Contact was called Lead ("{{Contact · Full Name}}", dataModel.jsx leadTokenLabel) still fills in.
+  const now = leadTokenLabel(label);
+  return now !== label ? emailTokenLabelKey(data, now) : null;
 }
 const fillSubjectTokens = (text, ctx) => !ctx || !ctx.record ? text : String(text || '').replace(EMAIL_TEXT_TOKEN, (m, label) => {
   const key = emailTokenLabelKey(ctx.data || {}, label); return key ? String(emailTokenValue(key, ctx) ?? '') : m; });
@@ -401,6 +403,9 @@ function unsubscribeRecord(hub, object, id){
   if(!rec) return 0;
   const pending = (((hub.activities || {})[object] || {})[rec.id] || []).filter(a => a.type === 'email' && a.status === 'scheduled' && a.sequenceId);
   pending.forEach(a => hub.remove(object, rec.id, a.id));
+  // On the record's trail: "Unsubscribed" — by the record's person — and the sequences it left.
+  const names = [...new Set(pending.map(a => ((typeof emailSequencesOf === 'function' ? emailSequencesOf(hub.data) : []).find(q => q.id === a.sequenceId) || {}).name).filter(Boolean))];
+  if(hub.add) hub.add(object, rec.id, {type:'sequence', action:'unsubscribed', source:'client', by:'', sequenceName:names.join(', ') || 'Every sequence', reason:'Unsubscribe link'});
   return pending.length;
 }
 function EmailPreview({content, subject, unsubscribe}){
@@ -459,13 +464,30 @@ function EmailListInput({label, value, onChange, style}){
 // Who an email went to, on one line: "to a@x.com · cc b@x.com · bcc c@x.com".
 const emailRecipientsLine = (m) => [['to', m.to], ['cc', m.cc], ['bcc', m.bcc]].filter(([, l]) => l && l.length).map(([k, l]) => `${k} ${l.join(', ')}`).join(' · ');
 
+/* What a scheduled email being edited starts with: its content as written (`content`); one made
+   before that (a sequence's, a workflow's) from its sequence email's own copy or its template — first
+   name and fetched properties filled in again as it's saved —, else its text. */
+function editContentOf(a, data){
+  if(a.content) return {...a.content};
+  const tpls = emailTemplatesOf(data), tpl = a.templateId && tpls.find(t => t.id === a.templateId);
+  const seq = a.sequenceId && emailSequencesOf(data).find(q => q.id === a.sequenceId);
+  const own = seq && (seq.emails || []).find(e => e.templateId === a.templateId && e.email && e.email.format);
+  if(own) return templateContentOf(own.email);
+  if(tpl) return templateContentOf(tpl);
+  return a.format === 'custom' ? {...newEmailContent(), format:'custom', body:'', html:a.html || ''}
+    : {...newEmailContent(), format:a.format || 'simple', body:richHtmlOf(a.body || ''), attachments:a.attachments || []};
+}
+
 /* The composer — the creation side panel (CreatePanelFrame). `object` / `id`: the record (chosen
    here, under Record Type, when not given). `replyTo` / `forward`: the email it answers or passes
    on. `placement`: 'inline' over the area it's opened from, or 'fixed' at the CRM's right edge.
    `onClose(result, id, target)`: 'sent' / 'scheduled', the new email's id and its record, or nothing (cancelled).
    `recipients` [{object, id}]: several records — one email each, to the record's own address;
-   `onSent()` once they're sent or scheduled. */
-function EmailComposer({object, id, replyTo, forward, recipients, onSent, onClose, placement = 'inline'}){
+   `onSent()` once they're sent or scheduled.
+   `edit`: a scheduled email of the record (the trail's Edit, 2026-11-18) — everything as
+   scheduled, its date and time too; Save Changes keeps it scheduled (changed), Send Now Instead
+   sends it now. The same email: no new one is added. */
+function EmailComposer({object, id, replyTo, forward, recipients, onSent, onClose, placement = 'inline', title, edit}){
   const hub = useRecordHub();
   // Several records: who each one reaches; those without an email address are skipped.
   const many = recipients && recipients.length ? recipients.map(r => ({...r, person:hubRecordPerson(hub, r.object, r.id)})) : null;
@@ -480,10 +502,10 @@ function EmailComposer({object, id, replyTo, forward, recipients, onSent, onClos
   /* A reply goes back to whoever wrote: an email the team sent is answered to its recipients (and
      its Cc), one received to the record's address; a forward starts with no one. */
   const replyAddress = replyTo && replyTo.direction === 'sent' && (replyTo.to || []).find(x => EMAIL_ADDRESS.test(String(x).trim()));
-  const [to, setTo] = React.useState(() => forward ? '' : replyAddress || (person && person.email) || '');
-  const [cc, setCc] = React.useState(() => replyTo && (replyTo.cc || []).length ? replyTo.cc.join(', ') : ''), [bcc, setBcc] = React.useState('');
-  const [templateId, setTemplateId] = React.useState('');
-  const [subject, setSubject] = React.useState(() => base ? `${forward ? 'Fwd' : 'Re'}: ${String(base.title || '').replace(/^(Re|Fwd):\s*/i, '')}` : '');
+  const [to, setTo] = React.useState(() => edit ? (edit.to || [])[0] || '' : forward ? '' : replyAddress || (person && person.email) || '');
+  const [cc, setCc] = React.useState(() => edit ? (edit.cc || []).join(', ') : replyTo && (replyTo.cc || []).length ? replyTo.cc.join(', ') : ''), [bcc, setBcc] = React.useState(() => edit ? (edit.bcc || []).join(', ') : '');
+  const [templateId, setTemplateId] = React.useState(() => (edit && edit.templateId) || '');
+  const [subject, setSubject] = React.useState(() => edit ? edit.title || '' : base ? `${forward ? 'Fwd' : 'Re'}: ${String(base.title || '').replace(/^(Re|Fwd):\s*/i, '')}` : '');
   /* A new email (Simple Text Body); a forward carries the message under it —
      who sent it, when, its subject, the message as written and its attachments. */
   const forwarded = React.useMemo(() => !forward ? '' : sanitizeRichText(`<p>---------- Forwarded message ----------</p>`
@@ -491,15 +513,19 @@ function EmailComposer({object, id, replyTo, forward, recipients, onSent, onClos
     + `Date: ${fmtActStamp(new Date(forward.at))}<br>Subject: ${String(forward.title || '').replace(/[<>]/g, '')}</p>`
     + (forward.html ? forward.html : richHtmlOf(forward.body || ''))), []);
   const [content, setContent] = React.useState(() => {
+    // An email being edited: its content as written (`content`, kept since 2026-11-18), else rebuilt from what it keeps.
+    if(edit) return editContentOf(edit, hub.data);
     const c = newEmailContent();
     return forward ? {...c, body:c.body + forwarded, attachments:[...(c.attachments || []), ...(forward.attachments || [])]} : c;
   });
-  const [scheduling, setScheduling] = React.useState(false);
-  const [date, setDate] = React.useState(() => ymdOf(new Date(Date.now() + 86400000)));
-  const [time, setTime] = React.useState('09:00');
+  const [scheduling, setScheduling] = React.useState(!!edit);
+  const editWhen = edit && zonedParts(new Date(edit.scheduledFor || edit.at)), pad2 = (n) => String(n).padStart(2, '0');
+  const [date, setDate] = React.useState(() => editWhen ? `${editWhen.y}-${pad2(editWhen.m + 1)}-${pad2(editWhen.d)}` : ymdOf(new Date(Date.now() + 86400000)));
+  const [time, setTime] = React.useState(() => editWhen ? `${pad2(editWhen.h)}:${pad2(editWhen.mi)}` : '09:00');
   const [error, setError] = React.useState('');
   // A record picked here fills in its email.
-  React.useEffect(() => { if(!fixed && !forward) setTo((person && person.email) || ''); }, [target.object, target.id]);
+  const firstTarget = React.useRef(true);
+  React.useEffect(() => { if(firstTarget.current){ firstTarget.current = false; if(edit) return; } if(!fixed && !forward) setTo((person && person.email) || ''); }, [target.object, target.id]);
   /* A template brings its subject, format and content. {{first_name}} and its fetched properties
      stay as written until the email is sent, then they're the record's — so changing the record
      after picking the template still greets the right person (the preview shows them filled in).
@@ -530,7 +556,7 @@ function EmailComposer({object, id, replyTo, forward, recipients, onSent, onClos
     const emailOf = (newId, address, p, t) => {
       const named = (v) => filledFor(v, t, p);
       const c = {...content, body:named(content.body), html:named(content.html)};
-      return {id:newId, type:'email', direction:'sent', title:fillSubjectTokens(named(subject), {object:t.object, record:hubRecord(hub, t.object, t.id), records:hub.records, data:hub.data}).trim(), body:emailTextOf(c), html:emailHtmlOf(c), format:content.format,
+      return {id:newId, type:'email', direction:'sent', title:fillSubjectTokens(named(subject), {object:t.object, record:hubRecord(hub, t.object, t.id), records:hub.records, data:hub.data}).trim(), body:emailTextOf(c), html:emailHtmlOf(c), format:content.format, content:c,
         ...(attachments.length ? {attachments} : {}), to:[address], ...emailCopiesOf(cc, bcc), source:'you', by:CURRENT_USER.name,
         status: later ? 'scheduled' : 'sent', ...(later ? {at:when, scheduledFor:when} : {}), ...(templateId ? {templateId} : {}),
         ...(replyTo ? {replyToId:replyTo.id} : {}), ...(forward ? {forwardOfId:forward.id} : {})};
@@ -542,17 +568,27 @@ function EmailComposer({object, id, replyTo, forward, recipients, onSent, onClos
       if(onSent) onSent();
       return onClose(later ? 'scheduled' : 'sent');
     }
+    if(edit){
+      // The scheduled email itself, changed — still scheduled, or sent now.
+      const {id:_x, ...changed} = emailOf(edit.id, to.trim(), person, target);
+      // A sequence's email keeps its Unsubscribe link (the sequence's Include Unsubscribe Button).
+      const seq = edit.sequenceId && emailSequencesOf(hub.data).find(q => q.id === edit.sequenceId);
+      if(seq && seq.unsubscribe) changed.html = withUnsubscribeLink(changed.html, target);
+      hub.update(target.object, target.id, edit.id, {...changed, ...(later ? {} : {at:new Date(), scheduledFor:null})});
+      hub.toast(later ? 'Email updated' : 'Email sent');
+      return onClose(later ? 'scheduled' : 'sent', edit.id, target);
+    }
     hub.add(target.object, target.id, emailOf(newIdOf, to.trim(), person, target));
     hub.toast(later ? 'Email scheduled' : 'Email sent');
     onClose(later ? 'scheduled' : 'sent', newIdOf, target);
   };
   return (
-    <CreatePanelFrame title={replyTo ? 'Reply' : forward ? 'Forward' : 'Add Email'} onClose={()=>onClose()} placement={placement} width={EMAIL_PANEL_W} flush
+    <CreatePanelFrame title={title || (replyTo ? 'Reply' : forward ? 'Forward' : 'Add Email')} onClose={()=>onClose()} placement={placement} width={EMAIL_PANEL_W} flush
       top={!fixed && !many && <CreateRecordField value={target} onChange={setTarget}/>}
       actions={<>
         <StSecondary label="Cancel" onClick={()=>onClose()}/>
         <StSecondary label={scheduling ? 'Send Now Instead' : 'Schedule'} onClick={()=>{ setScheduling(s => !s); setError(''); }}/>
-        <StCta label={scheduling ? 'Schedule Send' : 'Send'} disabled={!ready} onClick={()=>send(scheduling)}/>
+        <StCta label={scheduling ? (edit ? 'Save Changes' : 'Schedule Send') : 'Send'} disabled={!ready} onClick={()=>send(scheduling)}/>
       </>}>
       <EmailSplit form={<>
         <Field label="To">{many

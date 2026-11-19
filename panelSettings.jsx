@@ -10,29 +10,36 @@
    Choosing one shows it; choosing it again, or unticking it, leaves none (`primaryAction`). To
    start with: a contact's Create Deal, a deal's Create Customer, a customer's Call.
 
+   Properties (2026-11-19, as Card Settings' ordered properties): the ticked ones on top, dragged
+   among themselves; the unticked below them — a property ticked far down joins the end of the
+   ticked, no long drag up (DragCheckList `tickedFirst`).
+
    One setting for every contact, in both the side panel and the full page's left column —
    they are the same component, so they never differ. Opened from View Settings in the
    contact's ⋯ menu; applies on Apply. */
 
 const PANEL_SECTIONS = {
   avatarSubtitle:    'Avatar subtitle',   // fixed: what shows under the name (not a place in the layout)
+  cardStyle:         'Card Style',        // fixed: the header card's look — Dark or Light (2026-11-18)
   quickActions:      'Quick Actions',
   smartSummary:      'Smart Summary',
   dropdowns:         'Dropdowns',
-  contactProperties: 'Contact Properties',
+  contactProperties: 'Lead Properties',
 };
 
+// The side panel's header card: dark (to start with) or light (contactDetail.jsx PanelHeroCard).
+const CARD_STYLES = [{value:'dark', label:'Dark'}, {value:'light', label:'Light'}];
 // The shared quick actions (contactActions.jsx) — the same set and labels as the card and the ⋯ menu.
 const PANEL_QUICK_ACTIONS = quickActionLabels('contacts');
 
 /* The side panel's Contact Properties, in their existing order. Contact Owner and Associated
    Deals are clickable (relationship) properties — see CLICKABLE_PROPERTIES. */
 const PANEL_PROPERTIES = [
-  {key:'owner',         label:'Contact Owner'},
+  {key:'owner',         label:'Lead Owner'},
   {key:'ownerAssigned', label:'Owner Assignment Date'},
   {key:'ownerAssignedBy', label:'Owner Assigned By'},
   {key:'ownerChanged',  label:'Owner Change Date'},
-  {key:'contactType',   label:'Type of Contact'},
+  {key:'contactType',   label:'Type of Lead'},
   {key:'profileType',   label:'Customer Profile Type'},
   {key:'created',       label:'Created Date'},
   {key:'lastContacted', label:'Last Contacted'},
@@ -78,22 +85,42 @@ const DEFAULT_PANEL_SETTINGS = () => withPrimaryAction({
   subtitle: 'jobTitle',
   order: ['quickActions', 'smartSummary', 'dropdowns', 'contactProperties'],
   quickActions: defaultQuickActions('contacts'),
-  smartSummary: {enabled:true},
-  dropdowns: [{id:'d-all', type:'all', enabled:true, count:10}],
+  smartSummary: {enabled:false},
+  dropdowns: [{id:'d-all', type:'all', enabled:false, count:10}],
   contactProperties: PANEL_PROPERTIES.map(p => ({key:p.key, enabled:true})),
 }, 'contacts');
+
+/* Summary and Activity off in the side panel (2026-11-18): Smart Summary and every
+   activity dropdown switched off — new settings start so, saved ones are switched off once
+   (`quietPanel`), and either can be switched back on in Side Panel Settings. */
+const QUIET_PANEL_V = 1;
+const quietPanelSettings = (s) => !s || typeof s !== 'object' || (s.quietPanel || 0) >= QUIET_PANEL_V ? s
+  : {...s, quietPanel:QUIET_PANEL_V, smartSummary:{...(s.smartSummary || {}), enabled:false}, dropdowns:(s.dropdowns || []).map(d => ({...d, enabled:false}))};
 
 /* A draggable checkbox list — Quick Actions, Dropdowns and Contact Properties all use it. */
 /* onChange receives an updater (list => next list), so quick successive changes never overwrite
    each other. */
-function DragCheckList({items, labelOf, onChange, right}){
-  const drag = useDragReorder((from, to) => onChange(list => moveItem(list, from, to)));
+/* `tickedFirst` (property lists, 2026-11-19): the ticked ones on top in their order, the only ones
+   dragged; the unticked below a line. Ticking one puts it at the end of the ticked; unticking, at
+   the top of the unticked. */
+const tickedFirstOrder = (list) => [...list.filter(x => x.enabled), ...list.filter(x => !x.enabled)];
+function DragCheckList({items, labelOf, onChange, right, tickedFirst}){
+  const arrange = tickedFirst ? tickedFirstOrder : (l) => l;
+  const change = (fn) => onChange(list => arrange(fn(arrange(list))));
+  const drag = useDragReorder((from, to) => change(list => moveItem(list, from, to)));
   const idOf = (x) => x.id || x.key;
-  return items.map((it, i) => (
-    <SettingsCheckRow key={idOf(it)} label={labelOf(it)} checked={it.enabled}
-      onToggle={()=>onChange(list => list.map(x => idOf(x) === idOf(it) ? {...x, enabled:!x.enabled} : x))}
-      drag={drag.props(i)} dragOver={drag.over === i} right={right && right(it)}/>
-  ));
+  const shown = arrange(items), ticked = shown.filter(x => x.enabled).length;
+  return shown.map((it, i) => {
+    const movable = !tickedFirst || it.enabled;
+    return (
+      <React.Fragment key={idOf(it)}>
+        {tickedFirst && i === ticked && i > 0 && <div style={{borderTop:`1px solid ${T.border}`, margin:'6px 6px'}}/>}
+        <SettingsCheckRow label={labelOf(it)} checked={it.enabled}
+          onToggle={()=>change(list => list.map(x => idOf(x) === idOf(it) ? {...x, enabled:!x.enabled} : x))}
+          drag={movable ? drag.props(i) : null} dragOver={movable && drag.over === i} handleSpace={tickedFirst} right={right && right(it)}/>
+      </React.Fragment>
+    );
+  });
 }
 
 /* `kind`: another record's panel (Deals) — its sections, quick action labels, dropdowns, its
@@ -132,7 +159,7 @@ function PanelSettingsModal({draft, setDraft, sample, onApply, onClose, kind = C
   return (
     <SettingsModalShell title="Side Panel Settings" sections={kind.sections} order={draft.order}
       onReorder={(from, to)=>set('order', o => moveItem(o, from, to))}
-      section={section} onSection={setSection} onApply={onApply} onClose={onClose} fixed={['avatarSubtitle']}
+      section={section} onSection={setSection} onApply={onApply} onClose={onClose} fixed={['avatarSubtitle', ...(HERO_LIGHT_ONLY ? [] : ['cardStyle'])].filter(id => kind.sections[id])}
       preview={preview && (
         <div style={{background:'#fff', border:`1px solid ${T.borderStrong}`, borderRadius:10, padding:'16px 14px'}}>{preview}</div>
       )}>
@@ -141,6 +168,13 @@ function PanelSettingsModal({draft, setDraft, sample, onApply, onClose, kind = C
         <div style={{padding:'4px 6px', maxWidth:320}}>
           <label style={fieldLabel}>Subtitle</label>
           <FormSelect value={draft.subtitle ?? ''} placeholder="Select subtitle" options={kind.subtitleOptions} onChange={v=>set('subtitle', v)}/>
+        </div>
+      )}
+
+      {section === 'cardStyle' && (
+        <div style={{padding:'4px 6px', maxWidth:320}}>
+          <label style={fieldLabel}>Card Style</label>
+          <FormSelect value={draft.cardStyle || 'dark'} options={CARD_STYLES} onChange={v=>v && set('cardStyle', v)}/>
         </div>
       )}
 
@@ -190,10 +224,10 @@ function PanelSettingsModal({draft, setDraft, sample, onApply, onClose, kind = C
       </>)}
 
       {section === kind.propertiesKey && (
-        <DragCheckList items={draft[kind.propertiesKey]} labelOf={it => propLabel(it.key)} onChange={v=>set(kind.propertiesKey, v)}/>
+        <DragCheckList tickedFirst items={draft[kind.propertiesKey]} labelOf={it => propLabel(it.key)} onChange={v=>set(kind.propertiesKey, v)}/>
       )}
     </SettingsModalShell>
   );
 }
 
-Object.assign(window, {PanelSettingsModal, DEFAULT_PANEL_SETTINGS, PANEL_PROPERTIES, DragCheckList, contactPanelProperties, withContactPanelProperties, contactPanelKind});
+Object.assign(window, {quietPanelSettings, PanelSettingsModal, DEFAULT_PANEL_SETTINGS, PANEL_PROPERTIES, DragCheckList, contactPanelProperties, withContactPanelProperties, contactPanelKind});

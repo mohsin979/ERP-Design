@@ -270,7 +270,7 @@ function FilesTab({acts, contact, team, onStub}){
   return (
     <RecordSchema.Provider value={schema}>
       <div style={{flex:1, minHeight:0, display:'flex', flexDirection:'column'}}>
-        <RecordToolbar inset="settings" views={FILE_VIEWS} activeViewId={view} onSelectView={(id)=>{ setView(id); setSelectedId(null); }}
+        <RecordToolbar inset="settings" views={FILE_VIEWS} activeViewId={view} onSelectView={(id)=>{ setView(id); setSelectedId(null); }} searchPlaceholder="Search Files"
           controls={view === 'added' && can('create') && <>
             <input ref={input} type="file" multiple onChange={upload} style={{display:'none'}}/>
             <button onClick={()=>input.current && input.current.click()} style={{...btnPrimarySm(), display:'inline-flex', alignItems:'center', gap:6}}>

@@ -38,21 +38,33 @@
    finished bulk action clears the selection. Without `bulk` (Customers) a stage's menu is
    Select All alone. */
 
+/* Type of Lead — the leads' pipeline (Mohsin, 2026-11-19): Not Assigned, Assigned, Contacted,
+   Opportunity, Not Responded, Others. A lead without an owner is Not Assigned; giving it an owner
+   moves it to Assigned, removing its owner moves it back (app.jsx). */
 const CONTACT_TYPE_STAGES = [
-  {id:'subscriber',  label:'Subscriber',               value:'Subscriber'},
-  {id:'opportunity', label:'Opportunity',              value:'Opportunity'},
-  {id:'customer',    label:'Customer',                 value:'Customer'},
-  {id:'evangelist',  label:'Evangelist',               value:'Evangelist'},
-  {id:'others',      label:'Others',                   value:'Others'},
+  {id:'not-assigned',  label:'Not Assigned',  value:'Not Assigned'},
+  {id:'assigned',      label:'Assigned',      value:'Assigned'},
+  {id:'contacted',     label:'Contacted',     value:'Contacted'},
+  {id:'opportunity',   label:'Opportunity',   value:'Opportunity'},
+  {id:'not-responded', label:'Not Responded', value:'Not Responded'},
+  {id:'others',        label:'Others',        value:'Others'},
 ];
+const LEAD_STAGE_VALUES = CONTACT_TYPE_STAGES.map(s => s.value);
 
-/* Lead, Marketing Qualified Lead and Sales Qualified Lead were removed (Lead isn't part of the
-   object model). A contact still in one of them moves to the first stage, Subscriber — the record
-   and its other values are untouched. */
-const REMOVED_CONTACT_STAGES = ['Lead', 'Marketing Qualified Lead', 'Sales Qualified Lead'];
-const withoutRemovedStage = (c) => REMOVED_CONTACT_STAGES.includes(c.contactType) ? {...c, contactType:CONTACT_TYPE_STAGES[0].value} : c;
+/* Stages that are gone (Lead, Marketing / Sales Qualified Lead; then, 2026-11-19, Subscriber,
+   Customer, Evangelist). A lead in one of them — or in none — takes a new one: Not Assigned without
+   an owner; with one, it's spread over the others for the prototype (by its id, so it stays put).
+   A lead without an owner is always Not Assigned, and one with an owner never is. */
+const REMOVED_CONTACT_STAGES = ['Lead', 'Marketing Qualified Lead', 'Sales Qualified Lead', 'Subscriber', 'Customer', 'Evangelist'];
+const LEAD_STAGE_SPREAD = ['Assigned', 'Contacted', 'Opportunity', 'Not Responded', 'Others'];
+const leadIdHash = (id) => [...String(id)].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) >>> 0, 7);
+const withoutRemovedStage = (c) => {
+  if(!c.owner) return c.contactType === 'Not Assigned' ? c : {...c, contactType:'Not Assigned'};
+  if(c.contactType === 'Not Assigned') return {...c, contactType:'Assigned'};
+  return LEAD_STAGE_VALUES.includes(c.contactType) ? c : {...c, contactType:LEAD_STAGE_SPREAD[leadIdHash(c.id) % LEAD_STAGE_SPREAD.length]};
+};
 const PIPELINES = [
-  {id:'typesOfContact', object:'contact', label:'Types of Contact',
+  {id:'typesOfContact', object:'contact', label:'Type of Lead',
    source:'property', propertyKey:'contactType', stages:CONTACT_TYPE_STAGES},
 ];
 
@@ -164,7 +176,7 @@ const cardTag = {
 function TemperatureTag({value}){
   const c = value === 'Hot' ? T.hot : value === 'Warm' ? T.warm : null;
   if(!c) return null;
-  return <span title={`Contact temperature: ${value}`} style={{...cardTag, padding:'0 9px', border:`1.5px solid ${c}`, color:c}}>{value}</span>;
+  return <span title={`Lead temperature: ${value}`} style={{...cardTag, padding:'0 9px', border:`1.5px solid ${c}`, color:c}}>{value}</span>;
 }
 function LeadScoreTag({value, title = 'Lead Score'}){
   return <span title={title} style={{...cardTag, width:24, border:`1.5px solid ${T.borderStrong}`, color:T.attioText}}>{value ?? 0}</span>;
@@ -318,7 +330,7 @@ function ContactCard({contact, acts, dragging, onStub, onDragStart, actions, sel
       return (
         <div {...stop} style={{padding:'12px 16px', display:'flex', flexDirection:'column', gap:8, ...rule}}>
           {sf.summary && <div style={activityBox}><SummaryBlock contact={contact} acts={acts} source="From activity"/></div>}
-          {sf.actions && <SmartActionsBox noun="contact"/>}
+          {sf.actions && <SmartActionsBox noun="lead"/>}
         </div>
       );
     },
@@ -363,7 +375,7 @@ function ContactCard({contact, acts, dragging, onStub, onDragStart, actions, sel
         <ContactName name={contact.name} onOpen={()=>onOpen(contact)}/>
         <div style={{flex:1}}/>
         {/* Opens the Contact Detail panel. */}
-        <CardIconButton icon="openRecord" title="Open contact" onClick={()=>onOpen(contact)}/>
+        <CardIconButton icon="openRecord" title="Open lead" onClick={()=>onOpen(contact)}/>
         {/* Same contact actions as the table's row menu. */}
         <ContactActionsMenu contact={contact} {...actions}/>
       </div>
@@ -397,7 +409,7 @@ const COLUMN_BG = '#F3F4F6';
    record type's stage actions (see the header); without it the column menu is Select All alone. */
 function BoardColumn({stage, contacts, activities, isDropTarget, columnRef, onStub, onCardDragStart, draggingId, actions, onAddToStage, cardSettings, cardProperties,
                       selected, selectionOn, onSelectAll, onDeselectAll, onToggleSelect, onOpenContact,
-                      renderCard, searchKeys = ['name', 'email'], noun = 'contact', bulk}){
+                      renderCard, searchKeys = ['name', 'email'], noun = 'lead', bulk}){
   const [menuOpen, setMenuOpen] = React.useState(false);
 
   /* Column search — narrows this column only, on top of the page search and filters. Same
@@ -519,7 +531,7 @@ function BoardColumn({stage, contacts, activities, isDropTarget, columnRef, onSt
 }
 
 function ContactBoard({rows, search, pipelineId, onChangeStage, actions, onAddToStage, activities, onOpenContact, cardSettings, cardProperties,
-                       pipeline: pipelineProp, renderCard, searchKeys = ['name', 'email'], noun = 'contact', bulk}){
+                       pipeline: pipelineProp, renderCard, searchKeys = ['name', 'email'], noun = 'lead', bulk}){
   const pipeline = pipelineProp || pipelineById(pipelineId);
   const [stub, setStub] = React.useState(null);
   /* Selected contact ids across the Board. Select All in a column adds that column's
@@ -679,7 +691,7 @@ function PipelineSelector({pipelineId, onChange, pipelines = CONTACT_PIPELINES})
   );
 }
 
-Object.assign(window, {REMOVED_CONTACT_STAGES, withoutRemovedStage, 
+Object.assign(window, {REMOVED_CONTACT_STAGES, LEAD_STAGE_VALUES, withoutRemovedStage, 
   CONTACT_TYPE_STAGES, PIPELINES, pipelineById, setContactPipelines, stageIdOf, withStage,
   setObjectNames, typePlural, typeSingular, typeNoun, workspaceHasType, profileHolderId,
   setOwnerLabels, ownerLabel, setProfileHolders, STAGE_TYPES, CLOSED_STAGE_TYPES, stageTypeOf, isClosedStage, stageTypeLabel, withStageType, setStagePipelines, recordStageType, StageTypeTag,

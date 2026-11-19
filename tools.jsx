@@ -114,7 +114,7 @@ function ToolActivityPage({pageId}){
     properties:columns.map(c => ({key:c.key, label:c.label, width:c.width})), noun:page.noun, searchKeys:['subject', 'record', 'by'], canCreateProperty:false,
     filterProps:[{key:'object', label:'Record Type', type:'select'}, ...page.columns.filter(c => c.filter).map(c => ({key:c.key, label:c.label, type:c.filter})), ...(page.filterOnly || []),
       {key:'by', label:'By', type:'select'}, {key:'date', label:'Date', type:'date'}],
-    selectValues:{object:['Contact', 'Deal', 'Customer'], by:uniq('by'), ...Object.fromEntries([...page.columns, ...(page.filterOnly || [])].filter(c => (c.filter || c.type) === 'select').map(c => [c.key, uniq(c.key)]))},
+    selectValues:{object:['Lead', 'Deal', 'Customer'], by:uniq('by'), ...Object.fromEntries([...page.columns, ...(page.filterOnly || [])].filter(c => (c.filter || c.type) === 'select').map(c => [c.key, uniq(c.key)]))},
     renderCell:(key, r) => key === page.first.key ? <ContactName name={r[key]} onOpen={()=>setPanel({ref:refOf(r._e)})} style={{fontSize:'inherit', fontWeight:500}}/>
       : key === 'record' ? <HubRecordLink object={r._e.object} id={r._e.recordId} name={r.record}/>
       : (key === 'date' || (key === 'due' && r.due)) && r[key] ? <span>{key === 'due' ? fmtTaskDue(r._e.act) : fmtActStamp(new Date(r._e.act.at))}</span>
@@ -160,6 +160,8 @@ const byRecordFeed = (e, feed) => feed === 'all' || e.object === feed;
 // Emails' and Meetings' second level: by the record each is on.
 const SECOND_LEVEL = (plural) => [{id:'all', name:`All ${plural}`}, ...hubObjects().map(o => ({id:o, name:`${HUB_NOUN[o]} ${plural}`}))];
 const emailFolder = (a) => a.status === 'scheduled' ? 'scheduled' : a.direction === 'received' ? 'inbox' : 'sent';
+// Which emails a folder tab lists: Threads every sent and received email (not one still scheduled); the others their own.
+const emailInFolder = (a, folder) => folder === 'threads' ? emailFolder(a) !== 'scheduled' : emailFolder(a) === folder;
 /* A meeting is Upcoming before it starts, Ongoing from its start to its end (its duration, 30
    minutes when it has none — 2026-11-18), then Past. A logged meeting is always Past. */
 const isOngoing = (a) => { if(a.logged || a.status === 'cancelled' || a.status === 'requested') return false; const t = new Date(a.scheduledFor || a.at).getTime(), now = Date.now();
@@ -173,9 +175,9 @@ const LIST_PAGES = {
       {key:'logged', label:'Call or Call Log', type:'select', ops:['is', 'isNot'], values:['Call', 'Call log']},
       {key:'outcome', label:'Call Outcome', type:'select', ops:['is', 'isNot', 'isAnyOf']}],
     byLabel:'Call By', dateLabel:'Call Date'},
-  // `tabs`: Inbox / Sent / Scheduled as the tab strip, the record types as the pills (as Meetings).
+  // `tabs`: Threads / Sent / Received / Scheduled as the tab strip, the record types as the pills (as Meetings).
   emails: {type:'email', noun:'email', addTab:'email', feeds:EMAIL_FOLDER_TABS, get secondary(){ return SECOND_LEVEL('Emails'); }, tabs:true,
-    inFeed:(e, feed) => emailFolder(e.act) === feed, line:(a) => a.title || '(No subject)',
+    inFeed:(e, feed) => emailInFolder(e.act, feed), line:(a) => a.title || '(No subject)',
     when:(a) => a.status === 'scheduled' ? new Date(a.scheduledFor || a.at) : new Date(a.at),
     added:'Email logged', fields:(a) => ({logged:a.logged ? 'Email log' : 'Email'}),
     filters:[{key:'logged', label:'Email or Email Log', type:'select', ops:['is', 'isNot'], values:['Email', 'Email log']}],
@@ -199,7 +201,7 @@ function listFilterSchema(page, rows){
       ...(page.byRecordType ? [{key:'recordType', label:'Record Type', type:'select', ops:['is', 'isNot', 'isAnyOf']}] : []),
       {key:'by', label:page.byLabel, type:'select', ops:['is', 'isNot', 'isAnyOf']},
       {key:'date', label:page.dateLabel, type:'date', ops:['is', 'isNot', 'isBefore', 'isAfter', 'isBetween']}],
-    selectValues:{...Object.fromEntries(page.filters.map(f => [f.key, f.values || uniq(f.key)])), recordType:['Contact', 'Deal', 'Customer'], by:uniq('by')},
+    selectValues:{...Object.fromEntries(page.filters.map(f => [f.key, f.values || uniq(f.key)])), recordType:['Lead', 'Deal', 'Customer'], by:uniq('by')},
   };
 }
 /* ── Whose activities (Calls, Tasks, Emails, Meetings, Notes) ── a compact selector beside the Add
@@ -354,6 +356,7 @@ function ListToolItem({page, e, selected, onSelect, personLed}){
             {page.showDirection && <CallDirection incoming={isInboundCall(e.act)}/>}
           </span>
         )}
+        {e.act.type === 'note' && e.act.support && <SupportNoteTag/>}
         <span style={{...quiet, flexShrink:0, whiteSpace:'nowrap'}}>{fmtActStamp(at)}</span>
       </div>
       <div style={{display:'flex', alignItems:'center', gap:8, marginTop:4, minWidth:0}}>
@@ -440,7 +443,7 @@ function ListToolPage({pageId}){
     <RecordSchema.Provider value={schema}>
       <div style={{flex:1, minWidth:0, minHeight:0, display:'flex', flexDirection:'column', overflow:'hidden', background:'#fff'}}>
         {page.tabs && <PrimaryTabs items={page.feeds} active={feed} onSelect={(id)=>{ setFeed(id); setSelected(null); }}/>}
-        <RecordToolbar inset="page" views={page.tabs ? page.secondary : page.feeds} activeViewId={page.tabs ? scope : feed}
+        <RecordToolbar inset="page" views={page.tabs ? page.secondary : page.feeds} activeViewId={page.tabs ? scope : feed} searchPlaceholder={`Search ${titleWord(page.noun)}s`}
           onSelectView={(id)=>{ if(page.tabs) setScope(id); else setFeed(id); setSelected(null); }}
           controls={<div style={{display:'flex', alignItems:'center', gap:8}}><VisibilitySelector vis={vis} noun={sentenceCase(page.noun)}/><ActivityAddButton iconOnly tabId={page.addTab} onPick={pick}/></div>}
           search={search} onSearch={setSearch} filters={filters} setFilters={(f)=>setFilters(typeof f === 'function' ? f(filters) : f)}
@@ -633,7 +636,7 @@ function TasksBoardPage(){
   return (
     <RecordSchema.Provider value={schema}>
       <div style={{flex:1, minWidth:0, minHeight:0, display:'flex', flexDirection:'column', overflow:'hidden', background:'#fff', position:'relative'}}>
-        <RecordToolbar inset="page" views={TASK_FEEDS()} activeViewId={feed} onSelectView={setFeed}
+        <RecordToolbar inset="page" views={TASK_FEEDS()} activeViewId={feed} onSelectView={setFeed} searchPlaceholder="Search Tasks"
           controls={<div style={{display:'flex', alignItems:'center', gap:8}}>
             <TableBoardSwitch mode={mode} onChange={setMode}/>
             <VisibilitySelector vis={vis} noun="Task"/><ActivityAddButton iconOnly tabId="tasks" onPick={()=>{ setPanel(null); setAdding(true); }}/></div>}

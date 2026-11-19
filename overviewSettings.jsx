@@ -8,6 +8,7 @@
    template) and Accounting Properties (system-generated, read-only). (Snapshots were removed: the
    Overview shows the record's activity under the Highlights.)
    Settings are per record type and apply to every record of that type (hub.overviewSettings).
+   Highlights collapse and expand from a chevron beside their title (2026-11-18; per browser).
 
    Values: record properties as the side panel shows them, editable in place where the side panel
    allows it (panelEditSpec). Cards show only the property's name (no template); profile answers from the person's Customer Profile (a deal's or
@@ -54,6 +55,15 @@ function arrangeRecordTabs(tabs, saved){
   const off = new Set(saved.filter(s => s.enabled === false).map(s => s.id));
   return [...overview, ...rest.map((t, i) => ({t, i})).sort((x, y) => at(x.t.id) - at(y.t.id) || x.i - y.i).map(x => x.t).filter(t => !off.has(t.id))];
 }
+/* The default tab order of 2026-11-18: Overview, Calls, Notes, Emails, Tasks, Meetings,
+   Customer Profile, Accounting, then the rest. Tab Settings saved before it take that order once
+   (`tabOrderV2`), each tab still shown or hidden as it was. */
+const TAB_ORDER_V2 = ['calls', 'notes', 'email', 'tasks', 'meetings', 'profile', 'accounting', 'quotes', 'files', 'documents'];
+const withTabOrderV2 = (all) => { if(!all || typeof all !== 'object' || all.tabOrderV2) return all;
+  const rank = (id) => { const i = TAB_ORDER_V2.indexOf(id); return i < 0 ? TAB_ORDER_V2.length : i; };
+  const next = {...all, tabOrderV2:true};
+  Object.keys(all).forEach(k => { const o = all[k]; if(o && Array.isArray(o.tabs)) next[k] = {...o, tabs:o.tabs.map((t, i) => ({t, i})).sort((a, b) => rank(a.t.id) - rank(b.t.id) || a.i - b.i).map(x => x.t)}; });
+  return next; };
 // The Tab Settings list: every tab but Overview, in its arranged order, with whether it shows.
 const tabSettingsList = (tabs, saved) => {
   const shown = new Set(arrangeRecordTabs(tabs, saved).map(t => t.id));
@@ -132,19 +142,29 @@ function HighlightCard({id, item, object, ctx}){
     : kpiText(text)}/>;
 }
 
-/* Highlights on a record's Overview: the record type's four pinned properties. */
+/* Highlights on a record's Overview: the record type's four pinned properties. The chevron beside
+   the title collapses and expands them (2026-11-18) — kept per browser, for every record. */
+const HIGHLIGHTS_OPEN_KEY = 'hof-erp-highlights-open';
 function RecordHighlights({object, record, view, acts, contact}){
   const hub = useRecordHub();
   const store = useProfileForms();
   const settings = overviewSettingsOf(hub, object);
   const pool = highlightPool(hub, store.forms, object);
   const ctx = {record, view: view || record, acts: acts || [], contact};
+  const [open, setOpen] = React.useState(() => { try { return localStorage.getItem(HIGHLIGHTS_OPEN_KEY) !== '0'; } catch(e){ return true; } });
+  const toggle = () => setOpen(o => { try { localStorage.setItem(HIGHLIGHTS_OPEN_KEY, o ? '0' : '1'); } catch(e){} return !o; });
   return (
     <section>
-      <SectionHeader title="Highlights"/>
-      <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(min(180px, 100%), 1fr))', gap:12}}>
-        {settings.pinned.map(id => <HighlightCard key={id} id={id} item={poolItem(pool, id)} object={object} ctx={ctx}/>)}
+      <div style={{marginBottom: open ? 0 : -10}}>
+        <SectionHeader title="Highlights" inline={
+          <button onClick={toggle} aria-expanded={open} aria-label={open ? 'Collapse Highlights' : 'Expand Highlights'} title={open ? 'Collapse' : 'Expand'}
+            style={{border:'none', background:'transparent', cursor:'pointer', padding:2, display:'flex', borderRadius:4}}>
+            <Icon name="chevDown" size={T.chevronSize} color={T.attioMuted} style={{transform: open ? 'none' : 'rotate(-90deg)', transition:'transform 150ms ease'}}/>
+          </button>}/>
       </div>
+      {open && <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(min(180px, 100%), 1fr))', gap:12}}>
+        {settings.pinned.map(id => <HighlightCard key={id} id={id} item={poolItem(pool, id)} object={object} ctx={ctx}/>)}
+      </div>}
     </section>
   );
 }
@@ -244,4 +264,4 @@ function OverviewSettingsModal({object, pool, settings, tabs = [], onApply, onCl
   );
 }
 
-Object.assign(window, {RecordHighlights, RecordViewSettings, OverviewSettingsModal, overviewSettingsOf, recordWorkspaceTabs, arrangeRecordTabs, HIGHLIGHT_COUNT});
+Object.assign(window, {withTabOrderV2, RecordHighlights, RecordViewSettings, OverviewSettingsModal, overviewSettingsOf, recordWorkspaceTabs, arrangeRecordTabs, HIGHLIGHT_COUNT});

@@ -1,7 +1,8 @@
 /* HOF Pulse ERP — Data Management: Objects, Associations, Properties (initial infrastructure).
 
    Object      — a CRM business entity (a table with its own CRUD): Contacts, Deals and Customers
-                 for now (Forms and Services were removed; Leads isn't an Object). Settings / system entities (Users, Seats, Teams, Permission
+                 for now (Forms and Services were removed; the `contacts` Object is named Leads in the UI
+                 since 2026-11-19 — withLeadNames). Settings / system entities (Users, Seats, Teams, Permission
                  Presets) are not Objects. Each Object belongs to a navigation GROUP (Marketing,
                  Pre-Sales, Sales, Tools, Administrative), which decides where it appears in the main CRM
                  navigation (navWithObjects, nav.jsx).
@@ -38,7 +39,7 @@ const inverseRelationship = (t) => t === 'One-to-many' ? 'Many-to-one' : t === '
 const OBJECT_GROUPS = ['Marketing', 'Pre-Sales', 'Sales', 'Tools', 'Administrative'];
 
 const DEFAULT_OBJECTS = [
-  {id:'contacts',  name:'Contacts',  group:'Pre-Sales', mergeReporting:true},
+  {id:'contacts',  name:'Leads',     group:'Pre-Sales', mergeReporting:true},
   {id:'deals',     name:'Deals',     group:'Pre-Sales'},
   {id:'customers', name:'Customers', group:'Sales'},
 ];
@@ -70,7 +71,7 @@ const CONTACT_PROPERTY_SETUP = {
   phone:         {type:'Phone Number',     onCreate:true, half:true},
   country:       {type:'Country'},
   city:          {type:'Single-Line Text'},
-  contactType:   {type:'Single Selection', onCreate:true, placeholder:'Select contact type', options:CONTACT_TYPE_STAGES.map(s => s.value)},
+  contactType:   {type:'Single Selection', onCreate:true, placeholder:'Select lead type', options:CONTACT_TYPE_STAGES.map(s => s.value)},
   jobTitle:      {type:'Single-Line Text'},
   company:       {type:'Single-Line Text'},
   industry:      {type:'Single Selection', options:CONTACT_INDUSTRIES},
@@ -106,7 +107,7 @@ const DEAL_PROPERTY_SETUP = [
   {key:'created',   label:'Created Date',  type:'Timestamp',        locked:true, auto:true, width:200},
   {key:'lastActivity', label:'Last Activity Date', type:'Date',     locked:true, auto:true, derived:true, width:170},
   {key:'amount',    label:'Deal Amount',   type:'Number',           onCreate:true, half:true, width:150},
-  {key:'contact',   label:'Associated Contact',  type:'Single-Line Text', locked:true, auto:true, derived:true, width:190},
+  {key:'contact',   label:'Associated Lead',     type:'Single-Line Text', locked:true, auto:true, derived:true, width:190},
   {key:'customers', label:'Associated Customer', type:'Single-Line Text', locked:true, auto:true, derived:true, width:200},
   // Currency on its own beside Deal Amount (a Number): a currency-only Currency property.
   {key:'currency',  label:'Currency',      type:'Currency', currencyOnly:true, locked:true, auto:true, archived:true, width:120},
@@ -116,7 +117,7 @@ const DEAL_PROPERTY_SETUP = [
    Stage, its stage there. Customer Source (how it came in: a Deal, a Contact, Manual, Meta Form)
    and Customer Since (the day it became a customer) are set when the customer is created. */
 const CUSTOMER_STATUSES = ['Active', 'On Hold', 'Closed'];
-const CUSTOMER_SOURCES = ['Deal', 'Contact', 'Manual', 'Meta Form', 'Website Form'];
+const CUSTOMER_SOURCES = ['Deal', 'Lead', 'Manual', 'Meta Form', 'Website Form'];
 /* Form Name and Form Submission Date: the form submission that created the record (Marketing →
    Forms; each submission creates its record) — worked out from that submission, on Contacts,
    Deals and Customers alike. */
@@ -145,7 +146,7 @@ const CUSTOMER_PROPERTY_SETUP = [
   {key:'owner',   label:'Customer Owner', type:'User',             onCreate:true, mandatory:true, locked:true, placeholder:'Select owner', width:190},
   {key:'source',  label:'Customer Source', type:'Single Selection', options:CUSTOMER_SOURCES, locked:true, auto:true, width:160},
   {key:'customerSince', label:'Customer Since', type:'Date',       locked:true, auto:true, width:160},
-  {key:'contact', label:'Associated Contact', type:'Single-Line Text', locked:true, auto:true, derived:true, width:190},
+  {key:'contact', label:'Associated Lead', type:'Single-Line Text', locked:true, auto:true, derived:true, width:190},
   {key:'deals',   label:'Associated Deal', type:'Single-Line Text', locked:true, auto:true, derived:true, width:200},
   {key:'company', label:'Associated Company', type:'Single-Line Text', width:200},
   {key:'created', label:'Created Date',   type:'Timestamp',        locked:true, auto:true, width:200},
@@ -183,7 +184,42 @@ const DEFAULT_PROPERTIES = () => [
    that still exists is removed, and an Object deleted since isn't brought back. */
 // The version of the defined Contact, Deal and Customer properties (migrateDataModel applies it once).
 const PROPERTY_SET_VERSION = 2;
-const migrateDataModel = (d) => {
+/* The `contacts` object is called Lead / Leads (2026-11-19). Once (`leadNames`), settings saved
+   before take the new names wherever they still read as the old defaults: the object's name
+   (Contacts → Leads), the built-in labels below, the Type of Lead pipeline, the Customer Source
+   option and the Fetch Property chips in email templates and sequences ("Contact · Full Name").
+   A name changed in Settings since stays as it is, and a later rename sticks. Code ids stay
+   `contacts`, `contactType`, `typesOfContact`. HOF Partners (no `contacts` object; its Deals are
+   Leads) is left as it is. */
+const LEAD_LABELS = {'Contact Owner':'Lead Owner', 'Contact Type':'Type of Lead', 'Type of Contact':'Type of Lead', 'Types of Contact':'Type of Lead',
+  'Associated Contact':'Associated Lead', 'Contact Temperature':'Lead Temperature'};
+const LEAD_PROPERTY_LABELS = {'contacts:owner':['Contact Owner'], 'contacts:contactType':['Contact Type', 'Type of Contact', 'Types of Contact'],
+  'deals:contact':['Associated Contact'], 'customers:contact':['Associated Contact']};
+// A Fetch Property label as it read before ("Contact · Contact Owner") → as it reads now ("Lead · Lead Owner").
+const leadTokenLabel = (label) => String(label).replace(/^Contact · /, 'Lead · ').replace(/ · ([^·]+)$/, (m, l) => ` · ${LEAD_LABELS[l.trim()] || l}`);
+// The chips in an email's HTML (data-token spans) and the {{…}} labels in a subject or text.
+const withLeadTokens = (s) => String(s).replace(/(<span[^>]*\sdata-token="[^"]*"[^>]*>)([^<]*)(<\/span>)/g, (m, a, label, b) => a + leadTokenLabel(label) + b)
+  .replace(/\{\{(\s*)([^{}]+?)(\s*)\}\}/g, (m, a, label, b) => `{{${a}${leadTokenLabel(label)}${b}}}`);
+const deepLeadTokens = (v) => typeof v === 'string' ? (/Contact · /.test(v) ? withLeadTokens(v) : v) : Array.isArray(v) ? v.map(deepLeadTokens)
+  : v && typeof v === 'object' && Object.getPrototypeOf(v) === Object.prototype ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, deepLeadTokens(x)])) : v;
+const withLeadNames = (d) => {
+  if(d.leadNames) return d;
+  const old = (p) => (LEAD_PROPERTY_LABELS[`${p.objectId}:${p.key}`] || []).includes(p.label);
+  return {...d, leadNames:true,
+    objects:(d.objects || []).map(o => o.id === 'contacts' && o.name === 'Contacts' ? {...o, name:'Leads'} : o),
+    properties:(d.properties || []).map(p => {
+      let q = old(p) ? {...p, label:LEAD_LABELS[p.label]} : p;
+      if(q.objectId === 'contacts' && q.key === 'contactType' && q.placeholder === 'Select contact type') q = {...q, placeholder:'Select lead type'};
+      if(q.objectId === 'customers' && q.key === 'source' && (q.options || []).includes('Contact')) q = {...q, options:q.options.map(x => x === 'Contact' ? 'Lead' : x)};
+      return q;
+    }),
+    pipelines:(d.pipelines || []).map(p => p.id === 'typesOfContact' && p.label === 'Types of Contact' ? {...p, label:'Type of Lead'} : p),
+    ...(d.emailTemplates ? {emailTemplates:deepLeadTokens(d.emailTemplates)} : {}),
+    ...(d.emailSequences ? {emailSequences:deepLeadTokens(d.emailSequences)} : {})};
+};
+const migrateDataModel = (d0) => {
+  // Lead / Leads, once (withLeadNames above).
+  const d = withLeadNames(d0);
   // The Automation navigation group is Administrative.
   const objects = (d.objects || []).filter(o => !REMOVED_DEFAULT_OBJECTS.includes(o.id)).map(o => o.group === 'Automation' ? {...o, group:'Administrative'} : o)
     // Contacts start with Merge Cases Reporting on (2026-11-13); one switch (an earlier build had a second, `merge`).
@@ -201,7 +237,7 @@ const migrateDataModel = (d) => {
   let properties = [...(d.properties || []).filter(p => p.key), ...restored].filter(p => has(p.objectId) || p.objectId === 'users')
     .map(p => p.objectId === 'contacts' && p.key === 'contactType' && p.options ? {...p, options:p.options.filter(o => !REMOVED_CONTACT_STAGES.includes(o))} : p)
     // Placeholders read "Select <thing>" (Types of Contact's was "No stage").
-    .map(p => p.placeholder === 'No stage' ? {...p, placeholder:'Select contact type'} : p)
+    .map(p => p.placeholder === 'No stage' ? {...p, placeholder:'Select lead type'} : p)
     // Owner Assignment Date is one name across Contacts, Deals and Customers (was Contact Owner / Deal / Customer Assignment Date).
     .map(p => p.key === 'ownerAssigned' && ['Contact Owner Assignment Date', 'Deal Assignment Date', 'Customer Assignment Date'].includes(p.label) ? {...p, label:'Owner Assignment Date'} : p)
     // Expected Close Date is a date, no time (2026-11-11), once: saved as Date & Time it becomes a Date.
@@ -1051,6 +1087,9 @@ function PropertiesSettings({data, setData, records = {}, updateRecords, onWorkf
   const objectFilter = (name) => ({nodes:[{id:`f-obj-${name}`, kind:'row', joinOp:'AND', prop:'objectName', op:'is', value:name, value2:'', values:[]}]});
   const [focus] = React.useState(() => fromObject ? {prop:'objectName', op:'is', value:objectName(data, fromObject), nonce:Date.now()} : null);
   const same = (a, b) => a.key === b.key && a.objectId === b.objectId;
+  // Saved before Contact was called Lead (2026-11-19): "Contact Properties" and its Contacts filter take the object's name, once (`leadName`).
+  const leadPropertiesView = (list) => (list || []).map(v => v.id !== 'prv-contacts' || v.leadName ? v : {...v, leadName:true, ...(v.name === 'Contact Properties'
+    ? {name:`${typeSingular('contacts', 'Lead')} Properties`, filters:objectFilter(objectName(data, 'contacts'))} : {})});
   return (
     <div style={{position:'relative', flex:1, minHeight:0, display:'flex', flexDirection:'column', overflow:'hidden'}}>
     <SettingsPage fill>
@@ -1059,9 +1098,9 @@ function PropertiesSettings({data, setData, records = {}, updateRecords, onWorkf
         <RecordViewsModule flushTop storeKey="views:prv-all-v3" schema={schema} rows={rows} columns={PROPERTY_COLS.map(c => c.key)}
           defaultViews={[{id:'prv-all', name:'All Properties'},
             // One per record type the workspace has, by its name (HOF Partners: Lead Properties, Customer Properties).
-            ...[['contacts', 'Contact'], ['deals', 'Deal'], ['customers', 'Customer']].filter(([id]) => data.objects.some(o => o.id === id))
+            ...[['contacts', 'Lead'], ['deals', 'Deal'], ['customers', 'Customer']].filter(([id]) => data.objects.some(o => o.id === id))
               .map(([id, one]) => ({id:`prv-${id}`, name:`${typeSingular(id, one)} Properties`, filters:objectFilter(objectName(data, id))})),
-            {id:'prv-users', name:'User Properties', filters:objectFilter('Users')}]} focus={focus}
+            {id:'prv-users', name:'User Properties', filters:objectFilter('Users')}]} focus={focus} adaptSaved={leadPropertiesView}
           actions={() => addableHolders.length > 0 && <NewButton label="New Property" onClick={()=>setEditing('new')}/>}/>
       </div>
       {editing && <PropertyModal data={data} property={editing === 'new' ? null : editing} holders={editing === 'new' ? addableHolders : null}
@@ -1355,4 +1394,4 @@ function PipelinesSettings({data, setData, records = {}, onWorkflowOpen, target,
 }
 
 Object.assign(window, {LINK_STORE, linkStoreOf, setLinkAssociations, sameId, contactIdsOf, personIdOf, linkRule, linkRuleLimit, isLinked, linkedOf, canLink, withLinkId, withoutLinkId, linkPatch, withContactIds, linkBreaks, NEW_RECORD, mergeReportingOn, propertyShown, StageTypeSelect, CUSTOMER_PIPELINE_FOR_DEAL, REMOVED_PIPELINE_IDS, PipelinesSettings, DEFAULT_PIPELINES, objectPipelines, recordPipelines, recordInPipeline, DEAL_TYPES, PROPERTY_SET_VERSION, SYSTEM_PROPERTY_TYPES, PROPERTY_TYPES, RELATIONSHIP_TYPES, OBJECT_GROUPS, DEFAULT_DATA_MODEL, PropertyInput, storePropertyValue, inputPropertyValue,
-  isEmptyValue, migrateDataModel, propertyFilterMeta, PROPERTY_HOLDERS, userDefaultProperties, customerDefaultProperties, customContactSchema, propertyFilterType, creationAssociations, RECORD_OBJECTS, objectFormProperties, ObjectsSettings, PropertiesSettings, inverseRelationship});
+  isEmptyValue, migrateDataModel, leadTokenLabel, withLeadTokens, propertyFilterMeta, PROPERTY_HOLDERS, userDefaultProperties, customerDefaultProperties, customContactSchema, propertyFilterType, creationAssociations, RECORD_OBJECTS, objectFormProperties, ObjectsSettings, PropertiesSettings, inverseRelationship});

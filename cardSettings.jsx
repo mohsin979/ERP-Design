@@ -27,7 +27,7 @@ const CARD_SECTIONS = {
    with a left and a right value. These relationship fields lead the selector; every other
    contact property is offered after them (relatedFieldOptions). */
 const RELATED_FIELDS = [
-  {key:'owner',         label:'Contact Owner'},
+  {key:'owner',         label:'Lead Owner'},
   {key:'ownerAssigned', label:'Owner Assignment Date'},
   {key:'ownerChanged',  label:'Owner Change Date'},
   {key:'company',       label:'Primary Company'},
@@ -41,7 +41,7 @@ const relatedFieldOptions = (properties) => [
 /* Clickable (relationship) properties — values that open another record. They stay available
    wherever properties are configured (Card Settings, Side Panel View Settings); add more here. */
 const CLICKABLE_PROPERTIES = {
-  owner: {open:(c) => `Contact Owner · ${c.owner}`, show:(c) => !!c.owner},
+  owner: {open:(c) => `Lead Owner · ${c.owner}`, show:(c) => !!c.owner},
   deals: {open:(c) => `Associated Deals · ${c.name}`, show:(c) => c.dealCount > 0, value:(c) => String(c.dealCount)},
 };
 
@@ -86,7 +86,7 @@ function normalizeCardSettings(cs, object, properties, dropdownDefs = CARD_DROPD
   return {...cs, quickActions:normalizeQuickActions(cs.quickActions, object), properties:propList, dropdowns:ddList};
 }
 const CARD_TAGS = [
-  {key:'temperature', label:'Contact Temperature', hint:'Hot · Warm · Normal'},
+  {key:'temperature', label:'Lead Temperature', hint:'Hot · Warm · Normal'},
   {key:'leadScore',   label:'Lead Score'},
 ];
 
@@ -209,7 +209,7 @@ function CardSettingsModal({draft:draftRaw, setDraft:setDraftRaw, properties, sa
       {/* Ordered card properties (Deals): drag to reorder; properties not in the list yet (new
           ones) are offered after it, switched off. While searching, the matches only toggle. */}
       {section === 'properties' && orderedProps && !query.trim() && (
-        <DragCheckList items={orderedProps} labelOf={it => propLabel(it.key)}
+        <DragCheckList tickedFirst items={orderedProps} labelOf={it => propLabel(it.key)}
           onChange={v=>setDraft(d => { const next = typeof v === 'function' ? v(orderedProps) : v;
             return {...d, properties:[...next, ...orderedAll.filter(x => !next.some(y => y.key === x.key))]}; })}/>
       )}

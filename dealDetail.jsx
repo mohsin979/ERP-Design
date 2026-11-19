@@ -31,12 +31,13 @@ const DEAL_TABS = [
   {id:'email',    label:'Emails',            icon:'envelope',    list:true},
   {id:'tasks',    label:'Tasks',            icon:'tasks',       list:true},
   {id:'meetings', label:'Meetings',         icon:'videoCamera', list:true},
-  {id:'quotes',   label:'Quotes',           icon:'quote',       list:true},
-  {id:'accounting', label:'Accounting',     icon:'coins',       list:false},
-  {id:'files',    label:'Files',            icon:'folder',      list:true},
   {id:'profile',  label:'Customer Profile', icon:'profile',     list:false},
+  {id:'accounting', label:'Accounting',     icon:'coins',       list:false},
+  {id:'quotes',   label:'Quotes',           icon:'quote',       list:true},
+  {id:'files',    label:'Files',            icon:'folder',      list:true},
   {id:'documents', label:'Documents',       icon:'files',    list:true},
-  {id:'contacts', label:'Contacts',         icon:'contacts',    list:true},
+  {id:'supportNotes', label:'Support Notes', icon:'notepad', list:true},   // the record's Support Notes (2026-11-19)
+  {id:'contacts', label:'Leads',            icon:'contacts',    list:true},
   {id:'customers', label:'Customers',       icon:'customers',   list:true},
 ];
 
@@ -44,6 +45,7 @@ const DEAL_TABS = [
 
 const DEAL_PANEL_SECTIONS = {
   avatarSubtitle: 'Avatar subtitle',
+  cardStyle: 'Card Style',
   quickActions:   'Quick Actions',
   smartSummary:   'Smart Summary',
   dropdowns:      'Dropdowns',
@@ -64,7 +66,7 @@ const DEAL_PANEL_BASE_PROPERTIES = [
   {key:'closeDate',     label:'Close Date'},
   {key:'created',       label:'Created Date'},
   {key:'lastActivity',  label:'Last Activity Date'},
-  {key:'contact',       label:'Associated Contact'},
+  {key:'contact',       label:'Associated Lead'},
   {key:'customers',     label:'Associated Customers'},
 ];
 // Labels from Settings; every other Deal property follows (Deal Name heads the panel).
@@ -87,8 +89,8 @@ const defaultDealPanelSettings = (props) => ({
   subtitle: 'stage',
   order: ['quickActions', 'smartSummary', 'dropdowns', 'dealProperties'],
   quickActions: defaultQuickActions('deals', [...DEFAULT_QUICK_ON, 'goToContact']),
-  smartSummary: {enabled:true},
-  dropdowns: [{id:'d-all', type:'all', enabled:true, count:10}],
+  smartSummary: {enabled:false},
+  dropdowns: [{id:'d-all', type:'all', enabled:false, count:10}],
   dealProperties: dealPanelProperties(props).map(p => ({key:p.key, enabled:true})),
 });
 // A custom property added since the settings were saved joins the end, shown. (And the panel's primary quick action, where none was ever set: Create Customer.)
@@ -109,16 +111,17 @@ const dealPanelKind = (props, renderPreview) => ({
 /* The Contact name row on a deal: a round avatar with the Deals icon in place of initials, the
    Avatar subtitle under the name. */
 function DealNameRow({deal, subtitle, headerActions}){
+  const c = heroName(React.useContext(PanelHeroCtx));
   return (
     <div style={{display:'flex', alignItems:'center', gap:10, minWidth:0}}>
-      <span style={{width:36, height:36, borderRadius:9999, background:T.attioText, flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center'}}>
-        <Icon name="deals" size={17} color="#fff"/>
+      <span style={{width:36, height:36, borderRadius:9999, background:c.avatar, flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center'}}>
+        <Icon name="deals" size={17} color={c.mark}/>
       </span>
       <div style={{minWidth:0, flex:1}}>
-        <div style={{fontSize:17, fontWeight:600, color:T.attioText, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{deal.name}</div>
-        {subtitle && <div style={{fontSize:12.5, color:T.attioMuted, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{subtitle}</div>}
+        <div style={{fontSize:17, fontWeight:600, color:c.name, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{deal.name}</div>
+        {subtitle && <div style={{fontSize:12.5, color:c.sub, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{subtitle}</div>}
       </div>
-      {headerActions && <div style={{display:'flex', alignItems:'center', gap:2, flexShrink:0}}>{headerActions}</div>}
+      {headerActions && <div style={{display:'flex', alignItems:'center', gap:2, flexShrink:0, ...c.actions}}>{headerActions}</div>}
     </div>
   );
 }
@@ -152,7 +155,7 @@ function DealInfo({deal, view, acts, contacts = [], customers = [], keys, props,
     closeDate:     {value:deal.closeDate},
     created:       {value:deal.created},
     lastActivity:  {value:latestActivityDate(acts)},
-    contact:       {value:contacts.length ? contacts : null, list:true, noun:'contact', open:(c) => onOpenContact(c)},
+    contact:       {value:contacts.length ? contacts : null, list:true, noun:'lead', open:(c) => onOpenContact(c)},
     customers:     {value:customers.length ? customers : null, list:true, noun:'customer', open:(x) => onOpenCustomer && onOpenCustomer(x)},
   };
   const labels = Object.fromEntries(dealPanelProperties(props).map(p => [p.key, p.label]));
@@ -212,13 +215,19 @@ function RecordDetailBody({object, record, view, acts, email, phone, settings, d
     },
     [propertiesKey]: () => info(ps[propertiesKey].filter(p => p.enabled).map(p => p.key)),
   };
+  const nameRow = React.useContext(PanelNameCtx);
   return (
     <div style={{display:'flex', flexDirection:'column', gap:18}}>
-      <div>
-        <ContactLine icon="envelope" label="email" value={email} onOpen={()=>onQuick('email')} onCopied={onCopied}/>
-        <ContactLine icon="call" label="phone number" value={phone} onOpen={()=>onQuick('call')} onCopied={onCopied}/>
-      </div>
-      {ps.order.map(id => { const el = sections[id] && sections[id](); return el ? <React.Fragment key={id}>{el}</React.Fragment> : null; })}
+      {/* The header card (contactDetail.jsx PanelHeroCard): name, email and phone, quick actions. */}
+      <PanelHeroCard variant={ps.cardStyle}>
+        {nameRow}
+        <div>
+          <ContactLine icon="envelope" label="email" value={email} onOpen={()=>onQuick('email')} onCopied={onCopied}/>
+          <ContactLine icon="call" label="phone number" value={phone} onOpen={()=>onQuick('call')} onCopied={onCopied}/>
+        </div>
+        {sections.quickActions()}
+      </PanelHeroCard>
+      {ps.order.filter(id => id !== 'quickActions').map(id => { const el = sections[id] && sections[id](); return el ? <React.Fragment key={id}>{el}</React.Fragment> : null; })}
     </div>
   );
 }
@@ -273,7 +282,7 @@ const ASSOCIATED_DEAL_COLUMNS = [
   {key:'name', label:'Deal Name', width:'1.4fr'}, {key:'stage', label:'Deal Stage'}, {key:'amountText', label:'Total Amount'}, {key:'owner', label:'Deal Owner'},
 ];
 const ASSOCIATED_CONTACT_COLUMNS = [
-  {key:'name', label:'Name', width:'1.2fr'}, {key:'email', label:'Email', width:'1.4fr'}, {key:'phone', label:'Phone Number'}, {key:'owner', label:'Contact Owner'},
+  {key:'name', label:'Name', width:'1.2fr'}, {key:'email', label:'Email', width:'1.4fr'}, {key:'phone', label:'Phone Number'}, {key:'owner', label:'Lead Owner'},
 ];
 
 /* ── Deal Detail ───────────────────────────────────────────────────────────────────────── */
@@ -286,9 +295,9 @@ function DealDetail({mode, deal, view, acts, contact, contacts = contact ? [cont
     if(tab.id === 'profile') return holder
       ? <CustomerProfileTab contact={holder} profiles={profiles} onCall={()=>onStub('Call')}
           onCreate={(templateId)=>onCreateProfile(holder, templateId)} onStub={onStub}/>
-      : <div style={{padding:'40px 24px', textAlign:'center', fontSize:13, color:T.gray400}}>This {typeNoun('deals', 'deal')} has no contact, so it has no Customer Profile.</div>;
+      : <div style={{padding:'40px 24px', textAlign:'center', fontSize:13, color:T.gray400}}>This {typeNoun('deals', 'deal')} has no lead, so it has no Customer Profile.</div>;
     if(tab.id === 'contacts') return <AssociatedRecords columns={ASSOCIATED_CONTACT_COLUMNS} rows={contacts.map(contactView)} q={q}
-      onOpen={(c)=>onOpenContact(c)} empty={`No contacts on this ${typeNoun('deals', 'deal')}`}/>;
+      onOpen={(c)=>onOpenContact(c)} empty={`No leads on this ${typeNoun('deals', 'deal')}`}/>;
     // Deals → Customers: the deal's customers.
     if(tab.id === 'customers') return <AssociatedRecords columns={ASSOCIATED_CUSTOMER_COLUMNS} rows={customers} q={q}
       onOpen={(x)=>onOpenCustomer && onOpenCustomer(x)} empty={`No customers on this ${typeNoun('deals', 'deal')}`}/>;
@@ -348,7 +357,7 @@ function ProfilePromptModal({contact, onCancel, onCreate}){
   return (
     <StModal title="Create Customer Profile" primary="Create Customer Profile" onSubmit={onCreate} onCancel={onCancel}>
       <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>
-        {contact.name} doesn't have a Customer Profile yet. It's shared by the contact and their deals, so the new deal will show it too.
+        {contact.name} doesn't have a Customer Profile yet. It's shared by the lead and their deals, so the new deal will show it too.
       </div>
     </StModal>
   );

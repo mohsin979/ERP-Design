@@ -116,10 +116,12 @@ ${RICH_SIZES.map(n => `.hof-rich span[data-size="${n}"]{font-size:${n}px}`).join
 function RichTextStyles(){ return <style>{RICH_CSS}</style>; }
 
 // The read-only view, wherever rich text is shown (the quote, a service's detail).
-function RichTextView({html, style}){
+// `mentions`: the users whose @tags show in blue (notes — noteTools.jsx).
+function RichTextView({html, style, mentions}){
   const clean = React.useMemo(() => sanitizeRichText(richHtmlOf(html)), [html]);
+  const shown = React.useMemo(() => mentions && mentions.length ? highlightMentionsHtml(clean, mentions) : clean, [clean, mentions]);
   if(richIsEmpty(clean)) return null;
-  return <><RichTextStyles/><div className="hof-rich" style={{fontSize:13, color:T.attioText, lineHeight:1.55, ...style}} dangerouslySetInnerHTML={{__html:clean}}/></>;
+  return <><RichTextStyles/><div className="hof-rich" style={{fontSize:13, color:T.attioText, lineHeight:1.55, ...style}} dangerouslySetInnerHTML={{__html:shown}}/></>;
 }
 
 const RICH_TOOLS = [

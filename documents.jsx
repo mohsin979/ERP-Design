@@ -269,7 +269,7 @@ function SignatureModal({initial, isNew, onCancel, onSave}){
 /* ── Add Record Info ── a record (one search over every record, by name, under its record type)
    and which of its details go in: its properties with a value — name, email, phone and address
    ticked to start with. They go in as text, as they are now (recordInfoText). */
-const DOC_PLURAL = {contacts:'Contacts', deals:'Deals', customers:'Customers'};
+const DOC_PLURAL = {contacts:'Leads', deals:'Deals', customers:'Customers'};
 const recordInfoStarts = (f) => ['name', 'email', 'phone'].includes(f.key) || f.type === 'Location';
 // Each value as the record shows it: an amount with its currency, a pipeline and stage by name, a date with its year.
 const recordInfoFields = (hub, object, rec) => objectProperties(hub.data, object).map(p => {
@@ -501,7 +501,7 @@ function DocumentsPage(){
   const schema = {
     properties:DOCUMENT_COLUMNS, noun:'document', searchKeys:['number', 'title', 'recordName', 'recipientName'], canCreateProperty:false, bulkActions:docBulk.bulkActions,
     filterProps:[{key:'statusLabel', label:'Status', type:'select'}, {key:'objectLabel', label:'Record Type', type:'select'}, {key:'createdBy', label:'Created By', type:'select'}],
-    selectValues:{statusLabel:['Draft', 'Sent', 'Signed'], objectLabel:['Contact', 'Deal', 'Customer'], createdBy:[...new Set(docs.map(d => d.createdBy).filter(Boolean))]},
+    selectValues:{statusLabel:['Draft', 'Sent', 'Signed'], objectLabel:['Lead', 'Deal', 'Customer'], createdBy:[...new Set(docs.map(d => d.createdBy).filter(Boolean))]},
     renderCell:(key, r) => key === 'number' ? <ContactName name={r.number} onOpen={()=>setOpenId(r.id)} style={{fontSize:'inherit', fontWeight:500}}/>
       : key === 'recordName' && r.recordName !== '—' ? <HubRecordLink object={r.object} id={r.recordId} name={r.recordName}/>
       : key === 'statusLabel' ? <DocumentStatusPill status={r.status}/> : undefined,
@@ -548,7 +548,9 @@ function PublicSignPage({route}){
   const [name, setName] = React.useState(sig ? sig.name : '');
   const [done, setDone] = React.useState(null);   // {name, at}: signed here
   const [failed, setFailed] = React.useState(false);
-  const waiting = React.useMemo(() => readSignInbox(route.crmId).find(r => r.docId === route.docId && r.sigId === route.sigId) || null, [done]);
+  const waiting = React.useMemo(() => readSignInbox(route.crmId).find(r => !r.kind && r.docId === route.docId && r.sigId === route.sigId) || null, [done]);
+  // Opening it leaves a view (2026-11-18): "Document viewed" on the record's trail, once per signer.
+  React.useEffect(() => { if(doc && sig) writeSignInbox(route.crmId, [...readSignInbox(route.crmId), {id:docId('vw'), kind:'view', docId:route.docId, sigId:route.sigId, name:sig.name || '', at:new Date().toISOString()}]); }, []);
   const signedBy = done || (sig && sig.signedAt ? {name:sig.signedName, at:sig.signedAt} : waiting);
   const open = !!sig && doc.status === 'sent' && documentSigners(doc).some(s => s.id === route.sigId);
   const shown = doc && sig && signedBy ? {...doc, embeds:{...doc.embeds, [route.sigId]:{...sig, signedAt:signedBy.at, signedName:signedBy.name}}} : doc;
@@ -620,6 +622,13 @@ function DocumentSignInbox(){
       const next = {};
       pending.forEach(r => {
         const d = next[r.docId] || docs.find(x => x.id === r.docId), sig = d && (d.embeds || {})[r.sigId];
+        // A view: "Document viewed" by that signer, the first time they open it.
+        if(r.kind === 'view'){
+          if(!d || !sig || sig.viewedAt) return;
+          next[d.id] = {...d, embeds:{...d.embeds, [r.sigId]:{...sig, viewedAt:r.at}}};
+          if(d.recordId != null && d.object) hub.add(d.object, d.recordId, {type:'document', status:'viewed', title:`${d.number} · ${d.title} viewed by ${r.name || sig.name || 'the signer'}`, documentId:d.id, source:'other', by:r.name || sig.name || '', at:new Date(r.at)});
+          return;
+        }
         if(!d || !sig || sig.signedAt || d.status !== 'sent') return;
         next[d.id] = {...d, embeds:{...d.embeds, [r.sigId]:{...sig, signedAt:r.at, signedName:r.name}}};
         if(d.recordId != null && d.object) hub.add(d.object, d.recordId, {type:'document', status:'signed', title:`${d.number} · ${d.title} signed by ${r.name}`, documentId:d.id, source:'other', by:r.name, at:new Date(r.at)});

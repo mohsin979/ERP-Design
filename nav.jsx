@@ -24,7 +24,7 @@ const CRM_NAV_DEFAULT = () => ([
     {id:'forms',       label:'Forms',        icon:'forms',     hidden:false},
   ]},
   {id:'preSales', label:'Pre-Sales', group:true, hidden:false, items:[
-    {id:'contacts', label:'Contacts', icon:'contacts', hidden:false},
+    {id:'contacts', label:'Leads', icon:'contacts', hidden:false},
     {id:'deals',    label:'Deals',    icon:'deals',    hidden:false},
   ]},
   {id:'sales', label:'Sales', group:true, hidden:false, items:[

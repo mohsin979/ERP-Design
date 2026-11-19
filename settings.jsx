@@ -300,10 +300,11 @@ function StEmpty({title}){
 /* `width` for wider forms; `textAction` {label, onClick, disabled} adds a text-only CTA to the footer. */
 /* `secondary` ({label, icon, onClick}): an outlined action before the primary one; `hideCancel`: no
    Cancel button (the × still closes). */
-function StModal({title, children, primary, canSubmit = true, onSubmit, onCancel, danger, width = 440, textAction, cancelLabel, secondary, hideCancel}){
+// `zIndex`: a modal opened over another modal (Table Settings → Merge Columns) sits above it.
+function StModal({title, children, primary, canSubmit = true, onSubmit, onCancel, danger, width = 440, textAction, cancelLabel, secondary, hideCancel, zIndex = 100}){
   useEscapeClose(onCancel);
   return (
-    <div style={{position:'fixed', inset:0, zIndex:100, display:'flex', alignItems:'center', justifyContent:'center'}} onMouseDown={onCancel}>
+    <div style={{position:'fixed', inset:0, zIndex, display:'flex', alignItems:'center', justifyContent:'center'}} onMouseDown={onCancel}>
       <div style={{position:'absolute', inset:0, background:'rgba(16,24,40,.35)'}}/>
       <div onMouseDown={e=>e.stopPropagation()} style={{position:'relative', width, maxWidth:'calc(100vw - 32px)', background:'#fff',
                                                         borderRadius:12, boxShadow:'0 16px 40px rgba(16,24,40,.2)'}}>

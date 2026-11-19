@@ -16,7 +16,7 @@ const useRecordHub = () => React.useContext(RecordHubCtx);
 const HUB_OBJECTS = ['contacts', 'deals', 'customers'];
 // The open workspace's record types (HOF Partners: Leads and Customers — no Contacts), each by its name there.
 const hubObjects = () => HUB_OBJECTS.filter(workspaceHasType);
-const HUB_NOUN = {get contacts(){ return typeSingular('contacts', 'Contact'); }, get deals(){ return typeSingular('deals', 'Deal'); }, get customers(){ return typeSingular('customers', 'Customer'); }};
+const HUB_NOUN = {get contacts(){ return typeSingular('contacts', 'Lead'); }, get deals(){ return typeSingular('deals', 'Deal'); }, get customers(){ return typeSingular('customers', 'Customer'); }};
 
 const hubRecord = (hub, object, id) => hub && ((hub.records[object] || []).find(r => r.id === id) || null);
 /* Who a record's email and calls reach: the contact itself; a customer's own details, else its
@@ -82,10 +82,12 @@ function RecordPicker({value, onChange, objects: given}){
 
 /* A record's name as a link that opens it on its own page. */
 /* The record whose page (or side panel) is open — {object, id}, given by the record shell
-   (contactDetail.jsx). Inside its own page a record is never a link: its name is plain text. */
+   (contactDetail.jsx). Inside its own page a record is never a link: its name is plain text.
+   `{all:true}` (a record's activity, activityViews.jsx — 2026-11-19): no record is a link there. */
 const OpenRecordCtx = React.createContext(null);
 function useIsOpenRecord(object, id){
   const open = React.useContext(OpenRecordCtx);
+  if(open && open.all) return true;
   return !!(open && object && open.object === object && id != null && String(open.id) === String(id));
 }
 function HubRecordLink({object, id, name}){

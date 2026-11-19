@@ -31,12 +31,15 @@ function useDragReorder(onMove){
 
 const settingsSectionLabel = {fontSize:11.5, fontWeight:600, letterSpacing:.4, color:T.gray400, textTransform:'uppercase'};
 
-function SettingsCheckRow({label, checked, onToggle, hint, right, drag, dragOver}){
+/* `handleSpace`: a row that can't be dragged in a list whose others can — the handle's room kept,
+   so the checkboxes line up. */
+function SettingsCheckRow({label, checked, onToggle, hint, right, drag, dragOver, handleSpace}){
   return (
     <div {...(drag || {})} style={{display:'flex', alignItems:'center', gap:10, padding:'7px 6px', borderRadius:6, fontSize:13, color:T.attioText,
                                    cursor: drag ? 'grab' : 'default', background:'#fff',
                                    outline: dragOver ? `2px solid ${T.attioBlue}` : 'none', outlineOffset:-2}}>
       {drag && <Icon name="dragHandle" size={14} color={T.gray400}/>}
+      {!drag && handleSpace && <span style={{width:14, flexShrink:0}}/>}
       <div onClick={onToggle} style={{display:'flex', alignItems:'center', gap:10, cursor:'pointer', flex:1, minWidth:0}}>
         <RowCheckbox checked={checked} onChange={onToggle}/>
         <span>{label}</span>
