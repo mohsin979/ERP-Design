@@ -12,7 +12,7 @@ const dateKey = (d) => { if(!d) return ''; const z = zonedParts(d), p = (n) => S
 // Who did it: the person who added it (their stamped name), the client (named as the record's person), or the team member.
 const byName = (a, record) => a.source === 'you' ? a.by || CURRENT_USER.name : a.source === 'client' ? (record && record.name) || 'Client' : a.by || '';
 const viewFilter = (id, name, prop, value) => ({id, name, filters:{nodes:[{id:`f-${id}`, kind:'row', joinOp:'AND', prop, op:'is', value, value2:'', values:[]}]}, sort:{key:'date', dir:'desc'}});
-const isUpcoming = (a) => a.status === 'scheduled' && new Date(a.scheduledFor || a.at).getTime() > Date.now();
+const isUpcoming = (a) => (a.status === 'scheduled' || a.status === 'requested') && new Date(a.scheduledFor || a.at).getTime() > Date.now();   // an office meeting awaiting approval too
 
 /* What each page lists: its activity type, columns (after the first, which opens the item, and
    Record / Record Type), filters, default views and what it creates. */
@@ -40,7 +40,7 @@ const TOOL_PAGES = {
     views:[viewFilter('temail-inbox', 'Inbox', 'folder', 'Inbox'), viewFilter('temail-sent', 'Sent', 'folder', 'Sent'), viewFilter('temail-scheduled', 'Scheduled', 'folder', 'Scheduled')],
     create:['Email', 'Log Email']},
   meetings: {type:'meeting', noun:'meeting', label:'Meeting', first:{key:'subject', label:'Meeting', width:240},
-    row:(a) => ({subject:a.title || 'Meeting', meetingType:a.logged ? 'Meeting log' : 'Meeting', platform:a.platform || '', when: isUpcoming(a) ? 'Upcoming' : 'Past',
+    row:(a) => ({subject:a.title || 'Meeting', meetingType:a.logged ? 'Meeting log' : 'Meeting', platform:a.platform || '', when: isOngoing(a) ? 'Ongoing' : isUpcoming(a) ? 'Upcoming' : 'Past',
       organiser:a.organizer || a.by || ''}),
     columns:[{key:'when', label:'When', width:110, filter:'select'}, {key:'meetingType', label:'Meeting Type', width:140, filter:'select'},
       {key:'platform', label:'Platform', width:130, filter:'select'}, {key:'organiser', label:'Organizer', width:160, filter:'select'}],
@@ -129,9 +129,9 @@ function ToolActivityPage({pageId}){
     <div style={{flex:1, minWidth:0, minHeight:0, display:'flex', flexDirection:'column', position:'relative', overflow:'hidden'}}>
       <RecordViewsModule inset="page" schema={schema} rows={rows} columns={columns.map(c => c.key)} defaultViews={page.views} storeKey={`views:tools-${pageId}`}
         actions={() => page.create.length === 1
-          ? <button onClick={()=>create(page.create[0])} title={addLabel[page.create[0]]} style={toolbarIconButton}><Icon name="plus" size={14} color={T.gray800}/></button>
+          ? <NewButton label={`New ${page.label}`} title={addLabel[page.create[0]]} onClick={()=>create(page.create[0])}/>
           : <div style={{position:'relative'}}>
-              <button onClick={()=>setMenu(m => !m)} title={`New ${page.noun}`} style={toolbarIconButton}><Icon name="plus" size={14} color={T.gray800}/></button>
+              <NewButton label={`New ${page.label}`} onClick={()=>setMenu(m => !m)}/>
               <MenuShell open={menu} onClose={()=>setMenu(false)} anchorRight width={190}>
                 {page.create.map(o => <MenuItem key={o} label={addLabel[o]} onClick={()=>create(o)}/>)}
               </MenuShell>
@@ -160,7 +160,11 @@ const byRecordFeed = (e, feed) => feed === 'all' || e.object === feed;
 // Emails' and Meetings' second level: by the record each is on.
 const SECOND_LEVEL = (plural) => [{id:'all', name:`All ${plural}`}, ...hubObjects().map(o => ({id:o, name:`${HUB_NOUN[o]} ${plural}`}))];
 const emailFolder = (a) => a.status === 'scheduled' ? 'scheduled' : a.direction === 'received' ? 'inbox' : 'sent';
-const meetingWhen = (a) => isUpcoming(a) ? 'upcoming' : 'past';
+/* A meeting is Upcoming before it starts, Ongoing from its start to its end (its duration, 30
+   minutes when it has none — 2026-11-18), then Past. A logged meeting is always Past. */
+const isOngoing = (a) => { if(a.logged || a.status === 'cancelled' || a.status === 'requested') return false; const t = new Date(a.scheduledFor || a.at).getTime(), now = Date.now();
+  return t <= now && now < t + (Number(a.durationMin) || 30) * 60000; };
+const meetingWhen = (a) => isOngoing(a) ? 'ongoing' : isUpcoming(a) ? 'upcoming' : 'past';
 const LIST_PAGES = {
   calls: {type:'call', noun:'call', addTab:'calls', get feeds(){ return RECORD_FEEDS('call'); }, inFeed:byRecordFeed, showDirection:true,
     line:(a) => callResult(a), added:'Call logged', search:(a) => [a.outcome, byName(a), a.body],
@@ -471,8 +475,9 @@ function ListToolPage({pageId}){
 }
 const CallsToolPage = () => <ListToolPage pageId="calls"/>;
 
-/* ── Tools → Tasks ── every task (Contacts, Deals, Customers) as a board by status: In Progress,
-   Overdue, Completed. A card shows the task's name, description (two lines), due date and who
+/* ── Tools → Tasks ── every task (Contacts, Deals, Customers) as a board by status — one fixed
+   pipeline (2026-11-17): Not Started, In Progress, On Hold, Overdue, Completed — or as a table
+   (the Table / Board switch, here and on a record's Tasks tab). A card shows the task's name, description (two lines), due date and who
    it's assigned to, and its record, record type, task type, who assigned it and when it was created under Details. Dragging a card to Completed
    completes it; to In Progress reopens it — asking for a new due date when it's past due; nothing
    is dragged into Overdue (it's worked out). Opening a card shows the task's usual detail (Edit,
@@ -549,7 +554,6 @@ function TaskStatusBoard({entries, onUpdate, onOpen, showAssignee}){
             <div style={{display:'flex', alignItems:'center', gap:8, padding:'12px 14px 8px'}}>
               <span style={{fontSize:13, fontWeight:600, color: st.key === 'overdue' ? T.red : T.attioText}}>{st.label}</span>
               <span style={{fontSize:12, color:T.attioMuted, fontVariantNumeric:'tabular-nums'}}>{col.length}</span>
-              {st.key === 'overdue' && <span style={{fontSize:11.5, color:T.attioMuted, marginLeft:'auto'}}>Automatic</span>}
             </div>
             <div style={{flex:1, minHeight:0, overflowY:'auto', padding:'0 10px 12px', display:'flex', flexDirection:'column', gap:8}}>
               {col.map(e => <TaskCard key={e.act.id} e={e} showAssignee={showAssignee} dragging={drag === e.act.id}
@@ -570,6 +574,37 @@ function TaskStatusBoard({entries, onUpdate, onOpen, showAssignee}){
     </div>
   );
 }
+/* The tasks as a table — the board's other view (Tools → Tasks, a record's Tasks tab): the same
+   tasks, one per row — Task (opens it), Record, Record Type, Status (Overdue in red), Due Date,
+   Task Type, Assigned To, Assigned By, Created Date — in the shared grid (column resize, sort,
+   pagination). */
+const TASK_TABLE_COLUMNS = [{key:'title', label:'Task', width:240}, {key:'record', label:'Record', width:190}, {key:'object', label:'Record Type', width:130},
+  {key:'status', label:'Status', width:130}, {key:'due', label:'Due Date', width:150}, {key:'taskType', label:'Task Type', width:120},
+  {key:'assignee', label:'Assigned To', width:170}, {key:'by', label:'Assigned By', width:170}, {key:'created', label:'Created Date', width:150}];
+function TaskTable({entries, onOpen}){
+  const [columnOrder, setColumnOrder] = React.useState(() => TASK_TABLE_COLUMNS.map(c => c.key));
+  const [columnWidths, setColumnWidths] = React.useState({});
+  const [sort, setSort] = React.useState({key:'due', dir:'asc'});
+  const rows = entries.map(e => ({id:e.act.id, _e:e, title:e.act.title || 'Task', record:e.record.name, object:HUB_NOUN[e.object], status:taskStateLabel(e.act),
+    due:e.act.due ? dateKey(e.act.due) : '', taskType:e.act.taskType || '', assignee:e.act.assignee || '', by:byName(e.act, e.record), created:dateKey(e.act.at)}));
+  const schema = {properties:TASK_TABLE_COLUMNS, noun:'task', searchKeys:['title'], selectable:false, boards:false, canCreateProperty:false,
+    renderCell:(key, r) => key === 'title' ? <ContactName name={r.title} onOpen={()=>onOpen(r._e)} style={{fontSize:'inherit', fontWeight:500}}/>
+      : key === 'record' ? <HubRecordLink object={r._e.object} id={r._e.recordId} name={r.record}/>
+      : key === 'status' ? <span style={{color: taskState(r._e.act) === 'overdue' ? T.red : T.attioText}}>{r.status}</span>
+      : key === 'due' ? (r.due ? <span style={{color: isOverdue(r._e.act) ? T.red : T.attioText}}>{fmtTaskDue(r._e.act)}</span> : undefined)
+      : key === 'created' ? <span>{fmtActDate(new Date(r._e.act.at))}</span>
+      : undefined,
+    renderActions:(r) => <RowActionsMenu title="Task Actions" width={MENU_W} items={[{label:'View Task', onClick:()=>onOpen(r._e)}]}/>};
+  return (
+    <RecordSchema.Provider value={schema}>
+      <div style={{flex:1, minWidth:0, minHeight:0, display:'flex', flexDirection:'column'}}>
+        {rows.length ? <ContactsDataGrid rows={rows} columnOrder={columnOrder} setColumnOrder={setColumnOrder} columnWidths={columnWidths} setColumnWidths={setColumnWidths}
+          sort={sort} setSort={setSort} search="" frozenLeft={1} frozenRight={0} actionsFrozen rowsPerPage={25} onOpenContact={()=>{}}/>
+          : <EmptyState title="No tasks yet"/>}
+      </div>
+    </RecordSchema.Provider>
+  );
+}
 function TasksBoardPage(){
   const hub = useRecordHub();
   const team = (hub.data.users || []).filter(u => u.status === 'Activated').map(u => u.name);
@@ -579,11 +614,9 @@ function TasksBoardPage(){
   const [panel, setPanel] = React.useState(null);   // {ref:{object, recordId, actId}}: the open task
   const [adding, setAdding] = React.useState(false); // the creation panel is open
   const vis = useVisibility(hub, 'task');
-  // The pipeline on the board: its stages are the columns (Settings → Tasks).
-  const pipelines = taskPipelinesOf(hub.data);
-  const [pipelineId, setPipelineId] = React.useState(DEFAULT_TASK_PIPELINE_ID);
-  const pipeline = pipelines.find(p => p.id === pipelineId) || pipelines[0];
-  const entries = hubActivities(hub, 'task').filter(vis.keep).filter(e => taskPipelineIdOf(e.act) === pipeline.id);
+  // One fixed pipeline (2026-11-17): every task, in its status; the board or the table.
+  const [mode, setMode] = React.useState('board');
+  const entries = hubActivities(hub, 'task').filter(vis.keep);
   const rows = entries.map(e => ({id:e.act.id, _e:e, taskType:e.act.taskType || '', assignee:e.act.assignee || '', by:byName(e.act, e.record),
     due:e.act.due ? activityDateValue(e.act.due) : '', date:activityDateValue(e.act.at), text:[e.act.title, e.act.description, e.record.name, e.act.assignee].filter(Boolean).join(' ')}));
   const uniq = (k) => [...new Set(rows.map(r => r[k]).filter(Boolean))].sort();
@@ -594,7 +627,7 @@ function TasksBoardPage(){
     selectValues:{taskType:TASK_TYPES, assignee:uniq('assignee'), by:uniq('by')}};
   const q = search.trim().toLowerCase();
   const shown = applyFilters(rows.filter(r => byRecordFeed(r._e, feed) && (!q || r.text.toLowerCase().includes(q))), filters, schema.filterProps).map(r => r._e);
-  // The open task is looked up among all tasks: reassigned or moved to another pipeline, it's still there.
+  // The open task is looked up among all tasks: reassigned, it's still there.
   const openEntry = panel && panel.ref ? hubActivities(hub, 'task').find(e => e.act.id === panel.ref.actId) || null : null;
   const view = (r) => r && {...r, owner:userLabel(r.owner) || r.owner};
   return (
@@ -602,15 +635,16 @@ function TasksBoardPage(){
       <div style={{flex:1, minWidth:0, minHeight:0, display:'flex', flexDirection:'column', overflow:'hidden', background:'#fff', position:'relative'}}>
         <RecordToolbar inset="page" views={TASK_FEEDS()} activeViewId={feed} onSelectView={setFeed}
           controls={<div style={{display:'flex', alignItems:'center', gap:8}}>
-            <PipelineSelector pipelines={pipelines.map(p => ({id:p.id, label:p.name}))} pipelineId={pipeline.id} onChange={setPipelineId}/>
+            <TableBoardSwitch mode={mode} onChange={setMode}/>
             <VisibilitySelector vis={vis} noun="Task"/><ActivityAddButton iconOnly tabId="tasks" onPick={()=>{ setPanel(null); setAdding(true); }}/></div>}
           search={search} onSearch={setSearch} filters={filters} setFilters={(f)=>setFilters(typeof f === 'function' ? f(filters) : f)}
           appliedFilterCount={countAppliedFilters(filters, schema.filterProps)}/>
         <div style={{flex:1, minHeight:0, display:'flex', position:'relative', borderTop:`1px solid ${T.border}`}}>
-        <TaskStatusBoard entries={shown} showAssignee={vis.personLed} onUpdate={(e, patch)=>hub.update(e.object, e.recordId, e.act.id, patch)}
-          onOpen={(e)=>setPanel({ref:{object:e.object, recordId:e.recordId, actId:e.act.id}})}/>
+        {mode === 'table' ? <TaskTable entries={shown} onOpen={(e)=>setPanel({ref:{object:e.object, recordId:e.recordId, actId:e.act.id}})}/>
+          : <TaskStatusBoard entries={shown} showAssignee={vis.personLed} onUpdate={(e, patch)=>hub.update(e.object, e.recordId, e.act.id, patch)}
+          onOpen={(e)=>setPanel({ref:{object:e.object, recordId:e.recordId, actId:e.act.id}})}/>}
         {/* New task: the creation side panel over the board (record first). */}
-        {adding && <NewActivityPanel what="Task" initialObject={hubObjects().includes(feed) ? feed : hubObjects()[0]} team={team} prefill={{pipelineId:pipeline.id}}
+        {adding && <NewActivityPanel what="Task" initialObject={hubObjects().includes(feed) ? feed : hubObjects()[0]} team={team}
           onDone={(id, target)=>{ setAdding(false); if(id){ setPanel({ref:{object:target.object, recordId:target.id, actId:id}}); hub.toast('Task added'); } }}/>}
         </div>
         {panel && (
@@ -632,4 +666,4 @@ function TasksBoardPage(){
 }
 
 const TOOL_PAGE_IDS = Object.keys(TOOL_PAGES);
-Object.assign(window, {TaskStatusBoard, TaskCard, CallsToolPage, ListToolPage, LIST_PAGES, TasksBoardPage, TOOL_PAGES, TOOL_PAGE_IDS, ToolActivityPage});
+Object.assign(window, {TaskStatusBoard, TaskTable, TaskCard, CallsToolPage, ListToolPage, LIST_PAGES, TasksBoardPage, TOOL_PAGES, TOOL_PAGE_IDS, ToolActivityPage});

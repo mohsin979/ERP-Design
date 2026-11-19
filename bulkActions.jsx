@@ -37,7 +37,7 @@
 const recordCan = (object, record, action) => {
   if(!ACCESS.user || !ACCESS.perms) return true;
   const p = ACCESS.perms[object];
-  return !!(p && p.enabled && permissionCovers(p[action], object, record));
+  return !!(p && p.enabled && permissionCovers(p[action], object, record, action));
 };
 const bulkPlural = (n, noun, plural) => `${n} ${n === 1 ? noun : (plural || `${noun}s`)}`;
 

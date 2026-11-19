@@ -294,6 +294,7 @@ function exportViewCsv({schema, rows, columnOrder, search, sort, fileName}){
   a.href = URL.createObjectURL(blob); a.download = `${fileName}.csv`;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  return list.length;   // how many went (Import & Export → History)
 }
 
 const propMeta = (key, props = FILTER_PROPS) => props.find(p=>p.key===key);
@@ -376,6 +377,12 @@ function filterRowMatches(row, c, props){
     const value = op.values === 'multi' ? (row.values || []) : row.value;
     if(op.values === 'multi' ? !value.length : op.values === 1 && (value === '' || value == null)) return true;   // no value yet → not narrowing
     const pt = meta.prop || meta.ptype;
+    // A team (person filters): its members — any of them for a positive operator, none for a negative one.
+    if(Array.isArray(value) && value.some(isTeamValue)){ const v2 = expandTeamValues(value);
+      if(op.legacy === 'isAnyOf') return v2.some(v => propertyValueMatches(pt, 'equals', raw, v));
+      return propertyValueMatches(pt, op.id, raw, v2); }
+    if(isTeamValue(value)){ const members = teamValueMembers(value), neg = /not/i.test(op.id);
+      return neg ? members.every(m => propertyValueMatches(pt, op.id, raw, m)) : members.some(m => propertyValueMatches(pt, op.id, raw, m)); }
     // An old filter: Is any of — any of its values; Is between — after the one, before the other.
     if(op.legacy === 'isAnyOf') return value.some(v => propertyValueMatches(pt, 'equals', raw, v));
     if(op.legacy === 'isBetween') return !row.value2 || (propertyValueMatches(pt, 'gt', raw, row.value) || propertyValueMatches(pt, 'equals', raw, row.value))
@@ -390,10 +397,11 @@ function filterRowMatches(row, c, props){
 
   if(meta.type === 'select'){
     if(row.op === 'isAnyOf'){
-      const set = row.values || [];
-      return set.length ? set.includes(raw) : true;   // nothing picked yet → not narrowing
+      const set = expandTeamValues(row.values || []);   // a team: its members
+      return (row.values || []).length ? set.includes(raw) : true;   // nothing picked yet → not narrowing
     }
     if(!row.value) return true;
+    if(isTeamValue(row.value)){ const has = teamValueMembers(row.value).includes(raw); return row.op === 'is' ? has : !has; }
     return row.op === 'is' ? raw === row.value : raw !== row.value;
   }
 
@@ -684,8 +692,12 @@ function FilterRow({row, autoOpen, onChange, onRemove}){
 
   let valueField = null;
   // A property: its type's value control (options from the property, or the schema's values).
+  // A person filter (a User property, or a list of users' names): the teams first, then the people.
+  const withTeams = (list) => [...teamFilterOptions(), ...list.map(o => typeof o === 'string' ? {value:o, label:o, section:'Users'} : {...o, section:'Users'})];
   if(meta && meta.ptype && op){
-    const opts = (meta.prop && meta.prop.options) || selectValues(row.prop, values);
+    const isUser = propertyTypeId((meta.prop || {}).type || meta.ptype) === 'User';
+    const base = (meta.prop && meta.prop.options) || selectValues(row.prop, values);
+    const opts = isUser ? withTeams(base.length ? base : ((typeof USER_DIRECTORY !== 'undefined' ? USER_DIRECTORY : []).filter(u => !u.deleted).map(u => ({value:u.id, label:u.name})))) : base;
     valueField = op.values === 0 ? null
       : <ConditionValueInput compact prop={meta.prop || meta.ptype} op={{...op, noValue:false}} options={opts.length ? opts : undefined}
           value={op.values === 'multi' ? (row.values || []) : row.value} onChange={(v)=>set(op.values === 'multi' ? {values:v} : {value:v})}/>;
@@ -695,9 +707,10 @@ function FilterRow({row, autoOpen, onChange, onRemove}){
     } else if(meta.type === 'number'){
       valueField = <input type="number" min="0" value={row.value} onChange={e=>set({value:e.target.value})} placeholder="0" style={{...valueInputStyle, width:'100%'}}/>;
     } else if(meta.type === 'select'){
+      const vals = selectValues(row.prop, values), people = isPeopleValues(vals);
       valueField = (
         <FilterSelect value={row.value} placeholder="Select value"
-          options={selectValues(row.prop, values).map(v=>({id:v, label:v}))}
+          options={(people ? withTeams(vals) : vals.map(v => ({value:v, label:v}))).map(o => ({id:o.value, label:o.label}))}
           onPick={(v)=>set({value:v})}/>
       );
     } else {
@@ -714,21 +727,11 @@ function FilterRow({row, autoOpen, onChange, onRemove}){
       </div>
     );
   } else if(op && op.values === 'multi'){
-    valueField = (
-      <div style={{display:'flex', alignItems:'center', gap:4, flexWrap:'wrap'}}>
-        {selectValues(row.prop, values).map(v => {
-          const on = (row.values||[]).includes(v);
-          return (
-            <button key={v} onClick={()=>set({values: on ? row.values.filter(x=>x!==v) : [...(row.values||[]), v]})}
-              style={{
-                border:`1px solid ${on ? T.attioBlue : T.borderStrong}`, borderRadius:9999,
-                background: on ? T.blueLight : '#fff', color: on ? T.attioBlue : T.gray600,
-                fontSize:12, padding:'4px 10px', cursor:'pointer',
-              }}>{v}</button>
-          );
-        })}
-      </div>
-    );
+    /* Is any of: a dropdown of ticks (a search once the list is long) — not a row of every value
+       (2026-11-18); a person filter lists the teams first. */
+    const vals = selectValues(row.prop, values);
+    valueField = <MultiSelectMenu value={row.values || []} options={isPeopleValues(vals) ? withTeams(vals) : vals} placeholder="Select values"
+      onChange={(v)=>set({values:v})}/>;
   }
 
   /* The three fields share the row equally (flex:1 + minWidth:0). The value slot keeps its
@@ -967,9 +970,13 @@ function DeleteConfirmModal({contactName, note, noun = 'Contact', paid, onCancel
 /* `columnWidths` / `setColumnWidths` (2026-11-17): widths set by dragging a column header's right
    border, by column key — kept with the view; a column without one keeps its own width (scaled to fill). */
 function ContactsDataGrid({rows, columnOrder, setColumnOrder, sort, setSort, search, actions, onOpenContact,
-                           frozenLeft=0, frozenRight=0, actionsFrozen=true, rowsPerPage=25, resetKey, columnWidths, setColumnWidths}){
+                           frozenLeft=0, frozenRight=0, actionsFrozen=true, rowsPerPage=25, resetKey, columnWidths, setColumnWidths, loading}){
   const {propByKey, colWidth:baseColWidth, renderCell, renderActions, noun, nounPlural, searchKeys, selectable, fillWidth, onRowReorder,
-         pinGutter = true, paginate = true, ordered = false, bulkActions, actionsWidth} = useRecordSchema();
+         pinGutter = true, paginate = true, ordered = false, bulkActions, actionsWidth, recordObject} = useRecordSchema();
+  /* `recordObject` (Contacts, Deals, Customers — 2026-11-19): the name column starts with the record's
+     avatar (its Avatar property: photo, else first letter); the email and phone are blue links — a
+     new email to the record, a call to it. */
+  const hub = useRecordHub();
   // The Actions column: its usual width, or the schema's own (`actionsWidth`: a list with an action beside the ⋯ menu — Users).
   const ACTIONS_W = actionsWidth || ACTIONS_WIDTH;
   const plural = nounPlural || `${noun}s`;
@@ -1171,7 +1178,9 @@ function ContactsDataGrid({rows, columnOrder, setColumnOrder, sort, setSort, sea
   };
 
   return (
-    <div style={{flex:1, display:'flex', flexDirection:'column', minHeight:0, background:'#fff'}}>
+    <div style={{flex:1, display:'flex', flexDirection:'column', minHeight:0, background:'#fff', position:'relative'}}>
+      {/* `loading` (2026-11-19): what's shown is being replaced — the bar along the top, the rows dimmed until the new ones arrive. */}
+      <LoadingBar on={!!loading}/>
       <div ref={setScrollEl} style={{flex:1, overflow:'auto'}} onScroll={e=>setHScrolled(e.currentTarget.scrollLeft > 0)}>
       {/* `table-layout: fixed` with an explicit total width is what makes frozen columns line
           up. Under the default auto layout a declared width is only a minimum: long values
@@ -1238,7 +1247,7 @@ function ContactsDataGrid({rows, columnOrder, setColumnOrder, sort, setSort, sea
             </th>
           </tr>
         </thead>
-        <tbody>
+        <tbody style={loading ? {opacity:.55, transition:'opacity 120ms'} : undefined}>
           {pagedRows.map((row, rowIdx) => (
             <tr key={row.id} ref={isFocusRow(row) ? focusRowRef : undefined} {...(onRowReorder ? rowDrag.props(rowIdx) : {})}
               style={onRowReorder && rowDrag.over === rowIdx ? {background:T.blueLight} : isFocusRow(row) ? {background:VIOLATION_TONE.bg, outline:`1px solid ${VIOLATION_TONE.color}`, outlineOffset:-1} : undefined}>
@@ -1258,18 +1267,25 @@ function ContactsDataGrid({rows, columnOrder, setColumnOrder, sort, setSort, sea
                   borderBottom:`1px solid ${T.attioLine}`, borderRight:`1px solid ${T.attioLine}`,
                   padding:'0 12px', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis',
                   ...(moneyCol(key) ? {textAlign:'right', fontVariantNumeric:'tabular-nums'} : {}),
-                  color: !row[key] ? T.attioFaint : (key==='email' ? T.attioBlue : T.attioText),
+                  color: !row[key] ? T.attioFaint : (key==='email' || (recordObject && key==='phone') ? T.attioBlue : T.attioText),
                   background: draggingKey === key ? T.blueLight : 'transparent',
                   ...cellFreeze(i, false),
                   ...(draggingKey === key ? {background:T.blueLight} : {}),
                   ...focusBg(row),
                 }}>
-                  {/* Contact keeps Attio's primary-record treatment wherever it sits. */}
-                  {renderCell && renderCell(key, row) !== undefined ? renderCell(key, row) : key === 'name' ? (
-                    /* Same clickable name as the Board cards; opens the Contact Detail panel. */
-                    <ContactName name={row.name} onOpen={()=>onOpenContact(row)}
-                      style={{fontSize:'inherit', fontWeight:500}}/>
-                  ) : isExtendedKey(key) ? (extendedValueText(key, row) || '—') : (dateShown(formatValue(row[key])) || (row[key] === 0 ? 0 : '—'))}
+                  {(() => {
+                    const own = renderCell && renderCell(key, row) !== undefined;
+                    const content = own ? renderCell(key, row) : key === 'name' ? (
+                      /* Contact keeps Attio's primary-record treatment wherever it sits: the same clickable name as the Board cards; opens the Contact Detail panel. */
+                      <ContactName name={row.name} onOpen={()=>onOpenContact(row)} style={{fontSize:'inherit', fontWeight:500}}/>
+                    ) : isExtendedKey(key) ? (extendedValueText(key, row) || '—') : (dateShown(formatValue(row[key])) || (row[key] === 0 ? 0 : '—'));
+                    if(recordObject && key === 'name') return <span style={{display:'inline-flex', alignItems:'center', gap:8, minWidth:0, maxWidth:'100%', verticalAlign:'middle'}}><RecordAvatar name={row.name} photo={row.photo}/>{content}</span>;
+                    if(recordObject && hub && !own && (key === 'email' || key === 'phone') && String(formatValue(row[key]) || '').trim())
+                      return <button type="button" className={REACH_LINK_CLASS} title={key === 'email' ? 'Email' : 'Call'} onMouseDown={e=>e.stopPropagation()}
+                        onClick={e=>{ e.stopPropagation(); key === 'email' ? hub.composeEmail({object:recordObject, id:row.id}) : hub.startCall({object:recordObject, id:row.id}); }}
+                        style={{border:'none', background:'transparent', padding:0, font:'inherit', cursor:'pointer', maxWidth:'100%', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', textAlign:'left'}}>{content}</button>;
+                    return content;
+                  })()}
                 </td>
               ))}
 
@@ -1308,7 +1324,8 @@ function ContactsDataGrid({rows, columnOrder, setColumnOrder, sort, setSort, sea
 }
 
 /* Pagination — Prev, the page as a dropdown (every page, the open one shown; decided 2026-11-16 —
-   it was numbered buttons), Next. */
+   it was numbered buttons), Next. Past 10 pages the dropdown has its search, "Go to page" (No such
+   page when none matches), its list at least 120px wide (2026-11-19). */
 /* `selectedCount` renders at the bottom-left of this bar — the selection readout lives here
    rather than in a banner above the grid, so selecting rows never shifts the table down. */
 function Pagination({page, totalPages, onChange, totalRows, selectedCount=0, noun='contact', nounPlural, bulk}){
@@ -1329,6 +1346,7 @@ function Pagination({page, totalPages, onChange, totalRows, selectedCount=0, nou
         <button disabled={page===1} onClick={()=>onChange(page-1)} style={{...btnStyle(false), opacity: page===1?0.4:1, cursor: page===1?'default':'pointer'}}>← Prev</button>
         <div style={{width:72}}>
           <Dropdown value={page} options={pages} onChange={(p)=>onChange(Number(p))} required ariaLabel="Page" disabled={totalPages < 2}
+            searchPlaceholder="Go to page" noMatches="No such page" minPanelWidth={120}
             controlStyle={{height:28, padding:'0 8px', borderRadius:6, border:`1px solid ${T.borderStrong}`, background:'#fff', fontSize:13, fontFamily:'inherit'}}/>
         </div>
         <button disabled={page===totalPages} onClick={()=>onChange(page+1)} style={{...btnStyle(false), opacity: page===totalPages?0.4:1, cursor: page===totalPages?'default':'pointer'}}>Next →</button>
@@ -1832,6 +1850,7 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
                          profileStore, dealData, deals, dealsFor, onCreateDeal, onLinkDeal, onOpenDeal, openRequest, dealActivitiesFor, updateDealActivity,
                          customers, customersFor, onCreateCustomer, onLinkCustomer, onOpenCustomer, onRecordDeleted}){
   const hub = useRecordHub();   // the composer and quotations (recordHub.jsx)
+  const logExport = useRecordExportLog();   // a table Export, kept in Import & Export → History (and a large one alerts the Super Admins)
   // The Contact object's properties (Settings → Properties): custom ones join the table's columns and filters.
   /* Filter by associated object → Deals: whether a contact has deals, and every Deal filter
      property (a contact matches when any of its deals does). `deals`: the deal records (App). */
@@ -2130,10 +2149,10 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
   const creatable = dealData ? creationAssociations(dealData, 'contacts') : [];
   const association = [
     ...(deals && creatable.includes('deals') ? [{object:'deals', noun:'deal',
-      existing:deals.filter(d => takesContact('deals', d)).map(d => { const r = dealRowOf(dealData, d); return {value:d.id, label:`${d.name} · ${r.pipeline} · ${r.stage}`}; }),
+      existing:deals.filter(d => takesContact('deals', d)).map(d => { const r = dealRowOf(dealData, d); return recordOption(d, {label:`${d.name} · ${r.pipeline} · ${r.stage}`}); }),
       fields:objectFormProperties(dealData, 'deals').filter(p => p.onCreate), optionsFor:dealFormOptions(dealData), adjust:dealFormAdjust(dealData)}] : []),
     ...(customers && creatable.includes('customers') ? [{object:'customers', noun:'customer', existingOnly:true,
-      existing:customers.filter(c => takesContact('customers', c)).map(c => ({value:c.id, label:c.email ? `${c.name} · ${c.email}` : c.name}))}] : []),
+      existing:customers.filter(c => takesContact('customers', c)).map(c => recordOption(c))}] : []),
   ];
 
   const persist = (id, patch) => setViews(vs => vs.map(v => v.id===id ? {...v, ...patch} : v));
@@ -2168,7 +2187,7 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
   const setContactViolationMode = (on) => engineCtx && engineCtx.setViolationMode(on ? 'contacts' : false);
 
   return (
-    <RecordSchema.Provider value={{...objectSchema, bulkActions:contactBulkActions}}>
+    <RecordSchema.Provider value={{...objectSchema, bulkActions:contactBulkActions, recordObject:'contacts'}}>
     <div style={{flex:1, display:'flex', flexDirection:'column', minWidth:0, overflow:'hidden', position:'relative'}}>
       <RecordToolbar inset="page" views={visibleViews} activeViewId={activeViewId} onSelectView={setActiveViewId}
         viewControls={<>
@@ -2179,10 +2198,8 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
           {/* The pipeline a Board is grouped by: only in Board mode, beside the switcher. */}
           {viewMode === 'board' && <PipelineSelector pipelineId={pipelineId} onChange={setPipelineId}/>}
           <TableBoardSwitch mode={viewMode} onChange={setViewMode}/>
-          <button onClick={()=>exportViewCsv({schema:objectSchema, rows:filteredContacts, columnOrder, search, sort, fileName:activeView.name})} style={toolbarButton}><Icon name="export" size={13} color={T.gray600}/> Export</button>
-          <button onClick={()=>setContactForm({mode:'add', initial:null})} title="Add Contact" style={toolbarIconButton}>
-            <Icon name="plus" size={14} color={T.gray800}/>
-          </button>
+          <button onClick={()=>{ const n = exportViewCsv({schema:objectSchema, rows:filteredContacts, columnOrder, search, sort, fileName:activeView.name}); logExport('contacts', n, `${typePlural('contacts', 'Contacts')} → ${activeView.name}`); }} style={toolbarButton}><Icon name="export" size={13} color={T.gray600}/> Export</button>
+          <NewButton label={`New ${typeSingular('contacts', 'Contact')}`} onClick={()=>setContactForm({mode:'add', initial:null})}/>
         </>}
         search={search} onSearch={setSearch} filters={filters} setFilters={setFilters} appliedFilterCount={appliedFilterCount}
         filterControls={<><MergeCasesButton object="contacts"/><ViolationsButton object="contacts" pipelines={[pipelineId]} active={contactViolationMode} onClick={()=>setContactViolationMode(!contactViolationMode)}/></>}/>

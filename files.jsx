@@ -189,7 +189,8 @@ function PdfPages({url}){
     return () => { off = true; };
   }, [url]);
   return <>
-    {state !== 'ready' && <div style={{fontSize:12.5, color:T.attioMuted, padding:'8px 2px'}}>{state === 'error' ? 'This PDF can’t be shown' : 'Opening…'}</div>}
+    {state === 'error' ? <div style={{fontSize:12.5, color:T.attioMuted, padding:'8px 2px'}}>This PDF can’t be shown</div>
+      : state !== 'ready' && <SkeletonLines lines={6} style={{padding:'8px 2px'}}/>}
     <div ref={ref} style={{display:'flex', flexDirection:'column', gap:12}}/>
   </>;
 }
@@ -202,7 +203,7 @@ function DocxPage({url}){
       .then(r => { if(!off) setDoc({html:r.value}); }).catch(() => { if(!off) setDoc({error:true}); });
     return () => { off = true; };
   }, [url]);
-  if(!doc) return <div style={{fontSize:12.5, color:T.attioMuted, padding:'8px 2px'}}>Opening…</div>;
+  if(!doc) return <SkeletonLines lines={6} style={{padding:'8px 2px'}}/>;
   return doc.error ? <div style={{fontSize:12.5, color:T.attioMuted, padding:'8px 2px'}}>This document can’t be shown</div> : <DocHtmlPage html={doc.html}/>;
 }
 // A document's HTML on a page (no scripts run; links open in a new tab).

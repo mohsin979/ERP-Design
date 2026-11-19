@@ -267,13 +267,14 @@ function RecordFields({fields, values, set, optionsFor, tried, autoFocus}){
       // One field per row, its label beside it (as every create and edit panel); a grouped input (a
       // phone's country code and number, a timestamp's date and time, …) keeps its parts on it.
       <div key={p.key} style={{gridColumn:'1 / -1', minWidth:0, display:'flex', alignItems:'flex-start', gap:12}}>
-        <label style={{...actFieldLabel, paddingTop:9}}>{label}{p.required && <span style={{color:T.red}}> *</span>}</label>
+        <label style={{...actFieldLabel, paddingTop: avatarProp(p) ? 21 : 9}}>{label}{p.required && <span style={{color:T.red}}> *</span>}</label>
         <div style={{flex:1, minWidth:0}}>
         {amountCurrencyKey(p)
           // An amount with its currency (Deal Amount): the Currency input, the two kept on their own keys.
           ? <PropertyInput prop={{...p, type:'Currency'}} value={{currency:values[amountCurrencyKey(p)] || defaultCurrency(), amount:values[p.key]}} invalid={err} autoFocus={autoFocus && i === 0}
               onChange={m=>set({[p.key]:m.amount, [amountCurrencyKey(p)]:m.currency})}/>
-          : <div style={toggle ? {paddingTop:7} : undefined}><PropertyInput prop={p} value={values[p.key]} onChange={val=>set({[p.key]:val})} options={optionsFor(p)} invalid={err} autoFocus={autoFocus && i === 0}/></div>}
+          : <div style={toggle ? {paddingTop:7} : undefined}><PropertyInput prop={p} value={values[p.key]} onChange={val=>set({[p.key]:val})} options={optionsFor(p)} invalid={err} autoFocus={autoFocus && i === 0}
+              {...(avatarProp(p) ? {photo:values.photo || null, onPhoto:(url)=>set({photo:url})} : {})}/></div>}
         {err && <div style={{fontSize:12, color:T.red, marginTop:4}}>{err}</div>}
         </div>
       </div>
@@ -281,10 +282,14 @@ function RecordFields({fields, values, set, optionsFor, tried, autoFocus}){
   });
 }
 // An amount's currency (amountCurrencyKey) comes with it: the record's, else the default currency.
+// The Avatar (the record's name) brings its photo (`photo`, kept on the record) with it.
+const avatarProp = (p) => propertyTypeId(p.type) === 'Avatar';
 const emptyValues = (fields, initial) => Object.fromEntries(fields.flatMap(p => [[p.key, inputPropertyValue(p, initial ? initial[p.key] : '')],
-  ...(amountCurrencyKey(p) ? [[amountCurrencyKey(p), (initial && initial[amountCurrencyKey(p)]) || defaultCurrency()]] : [])]));
+  ...(amountCurrencyKey(p) ? [[amountCurrencyKey(p), (initial && initial[amountCurrencyKey(p)]) || defaultCurrency()]] : []),
+  ...(avatarProp(p) ? [['photo', (initial && initial.photo) || null]] : [])]));
 const storedValues = (fields, v) => Object.fromEntries(fields.flatMap(p => [[p.key, storePropertyValue(p, v[p.key])],
-  ...(amountCurrencyKey(p) ? [[amountCurrencyKey(p), v[amountCurrencyKey(p)] || defaultCurrency()]] : [])]));
+  ...(amountCurrencyKey(p) ? [[amountCurrencyKey(p), v[amountCurrencyKey(p)] || defaultCurrency()]] : []),
+  ...(avatarProp(p) ? [['photo', v.photo || null]] : [])]));
 
 /* ── Create through associated object (Add forms) ── one line; it opens the Objects this record
    can be associated with (Settings → Associations; Objects that have records). Each Object can be
@@ -422,7 +427,7 @@ function recordLinkFields(records, object, self, others){
     if(st.holder === object) (records[object] || []).forEach(x => (x[st.field] || []).forEach(id => counts.set(String(id), (counts.get(String(id)) || 0) + 1)));
     const countOf = (r) => st.holder === object ? counts.get(String(r.id)) || 0 : linkedOf(records, o, r, object).length;
     const options = (records[o] || []).filter(r => isLinked(object, self, o, r) || countOf(r) < rule.perY)
-      .map(r => ({value:r.id, label: o === 'contacts' && r.email ? `${r.name} · ${r.email}` : r.name}));
+      .map(r => recordOption(r));
     return {key:o, noun:typeNoun(o, o.replace(/s$/, '')), multiple:rule.perX > 1, options};
   });
 }

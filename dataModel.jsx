@@ -65,7 +65,7 @@ const DEFAULT_ASSOCIATIONS = [
    as the user's ID). Contact Type drives the Types of Contact pipeline (its options are that
    pipeline's stages). Lead Source is set when the contact comes in (Manual, Meta Form). */
 const CONTACT_PROPERTY_SETUP = {
-  name:          {type:'Single-Line Text', onCreate:true, mandatory:true, locked:true, formLabel:'Full Name', placeholder:'Full name'},
+  name:          {type:'Avatar',           onCreate:true, mandatory:true, locked:true, formLabel:'Full Name', placeholder:'Full name'},
   email:         {type:'Email',            onCreate:true, half:true, placeholder:'name@company.com'},
   phone:         {type:'Phone Number',     onCreate:true, half:true},
   country:       {type:'Country'},
@@ -92,7 +92,7 @@ const CONTACT_PROPERTY_SETUP = {
    the default currency. */
 const DEAL_TYPES = ['New Business', 'Existing Business'];
 const DEAL_PROPERTY_SETUP = [
-  {key:'name',      label:'Deal Name',     type:'Single-Line Text', onCreate:true, mandatory:true, locked:true, placeholder:'e.g. Ali Khan', width:220},
+  {key:'name',      label:'Deal Name',     type:'Avatar',           onCreate:true, mandatory:true, locked:true, placeholder:'e.g. Ali Khan', width:220},
   // Email and Phone Number: filled in from the contact a deal is created from (editable).
   {key:'email',     label:'Email',         type:'Email',            onCreate:true, placeholder:'name@company.com', width:240},
   {key:'phone',     label:'Phone Number',  type:'Phone Number',     onCreate:true, width:170},
@@ -138,7 +138,7 @@ const MERGE_STATUSES = ['Unique', 'Duplicate', 'Form Refill', 'Merged'];
 const mergeRecordProperty = (objectId) => ({key:'mergeStatus', label:'Merge Status', type:'Single Selection', options:MERGE_STATUSES, system:true, objectId,
   onCreate:false, mandatory:false, locked:true, auto:true, derived:true, width:150});
 const CUSTOMER_PROPERTY_SETUP = [
-  {key:'name',    label:'Customer Name',  type:'Single-Line Text', onCreate:true, mandatory:true, locked:true, formLabel:'Customer Name', placeholder:'Full name', width:220},
+  {key:'name',    label:'Customer Name',  type:'Avatar',           onCreate:true, mandatory:true, locked:true, formLabel:'Customer Name', placeholder:'Full name', width:220},
   {key:'pipeline', label:'Customer Pipeline', type:'Pipeline',     onCreate:true, mandatory:true, locked:true, half:true, width:190},
   {key:'stage',   label:'Customer Stage', type:'Pipeline stage',   onCreate:true, mandatory:true, locked:true, half:true, width:190},
   {key:'status',  label:'Customer Status', type:'Single Selection', options:CUSTOMER_STATUSES, width:160},
@@ -205,7 +205,9 @@ const migrateDataModel = (d) => {
     // Owner Assignment Date is one name across Contacts, Deals and Customers (was Contact Owner / Deal / Customer Assignment Date).
     .map(p => p.key === 'ownerAssigned' && ['Contact Owner Assignment Date', 'Deal Assignment Date', 'Customer Assignment Date'].includes(p.label) ? {...p, label:'Owner Assignment Date'} : p)
     // Expected Close Date is a date, no time (2026-11-11), once: saved as Date & Time it becomes a Date.
-    .map(p => d.closeDateDay || p.objectId !== 'deals' || p.key !== 'closeDate' || propertyTypeId(p.type) !== 'Timestamp' ? p : {...p, type:'Date'});
+    .map(p => d.closeDateDay || p.objectId !== 'deals' || p.key !== 'closeDate' || propertyTypeId(p.type) !== 'Timestamp' ? p : {...p, type:'Date'})
+    // A Contact's, Deal's and Customer's name is an Avatar property (2026-11-19): the name and its photo.
+    .map(p => p.key === 'name' && ['contacts', 'deals', 'customers'].includes(p.objectId) && p.type !== 'Avatar' ? {...p, type:'Avatar'} : p);
   /* Once, for settings saved before the defined Contact, Deal and Customer properties: each record
      type's defined properties in their order — a saved one keeps its values and settings but takes
      its defined name, and becomes system-generated or archived where defined — then any custom
@@ -703,7 +705,7 @@ function ObjectsSettings({data, setData, navigate, records = {}, updateRecords, 
       <div style={{display:'flex', flexDirection:'column', flex:1, minHeight:0}}>
         {/* Its own store: views saved before the rename were called All Objects, without Total Entries. */}
         <RecordViewsModule flushTop storeKey="views:ov-all-v2" schema={schema} rows={rows} columns={OBJECT_COLS.map(c => c.key)} defaultViews={[{id:'ov-all', name:'All Records'}]}
-          actions={() => adminRecordsCan('create') && <button onClick={()=>setCreating(true)} title="Add Record" style={iconBtn}><Icon name="plus" size={14} color={T.gray800}/></button>}/>
+          actions={() => adminRecordsCan('create') && <NewButton label="New Record" onClick={()=>setCreating(true)}/>}/>
       </div>
       {creating && <CreateObjectPanel data={data} onClose={()=>setCreating(false)}
         onCreate={(obj, assocs, props) => {
@@ -1060,7 +1062,7 @@ function PropertiesSettings({data, setData, records = {}, updateRecords, onWorkf
             ...[['contacts', 'Contact'], ['deals', 'Deal'], ['customers', 'Customer']].filter(([id]) => data.objects.some(o => o.id === id))
               .map(([id, one]) => ({id:`prv-${id}`, name:`${typeSingular(id, one)} Properties`, filters:objectFilter(objectName(data, id))})),
             {id:'prv-users', name:'User Properties', filters:objectFilter('Users')}]} focus={focus}
-          actions={() => addableHolders.length > 0 && <button onClick={()=>setEditing('new')} title="Add Property" style={iconBtn}><Icon name="plus" size={14} color={T.gray800}/></button>}/>
+          actions={() => addableHolders.length > 0 && <NewButton label="New Property" onClick={()=>setEditing('new')}/>}/>
       </div>
       {editing && <PropertyModal data={data} property={editing === 'new' ? null : editing} holders={editing === 'new' ? addableHolders : null}
         defaultObjectId={editing === 'new' && !addableHolders.some(o => o.id === fromObject) ? (addableHolders[0] || {}).id : fromObject} onClose={()=>setEditing(null)}
@@ -1335,7 +1337,7 @@ function PipelinesSettings({data, setData, records = {}, onWorkflowOpen, target,
       <div style={{display:'flex', flexDirection:'column', flex:1, minHeight:0}}>
         {/* Add Pipeline: the "+" after View Settings and Save View, as Add Record on Records. */}
         <RecordViewsModule flushTop storeKey="views:plv-all-v2" schema={schema} rows={rows} columns={PIPELINE_COLS.map(c => c.key)} defaultViews={[{id:'plv-all', name:'All Pipelines'}]}
-          actions={() => RECORD_OBJECTS.some(o => pipelineAdminCan(o, 'create')) && <button onClick={()=>setCreating(true)} title="Add Pipeline" aria-label="Add Pipeline" style={iconBtn}><Icon name="plus" size={14} color={T.gray800}/></button>}/>
+          actions={() => RECORD_OBJECTS.some(o => pipelineAdminCan(o, 'create')) && <NewButton label="New Pipeline" onClick={()=>setCreating(true)}/>}/>
       </div>
     </SettingsPage>
     {open && <PipelinePanel key={`${open.id}-${open.workflow ? 'wf' : 'stages'}`} data={data} setData={setData} pipelineId={open.id} deals={records[((data.pipelines || []).find(p => p.id === open.id) || {}).objectId] || []}

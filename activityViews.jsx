@@ -81,9 +81,9 @@ function PrimaryTabs({items, active, onSelect, inset = 'page'}){
   );
 }
 /* The first level of a record's Email and Meetings tabs (the modules' own): Inbox / Sent /
-   Scheduled; Upcoming / Past. The tab's record feeds (Contact / Deal / Customer) are the second.
+   Scheduled; Upcoming / Ongoing / Past. The tab's record feeds (Contact / Deal / Customer) are the second.
    `tabs`: the first level is a tab strip with the feeds as the toolbar's pills (Email, Meetings). */
-const MEETING_TIME_TABS = [{id:'upcoming', name:'Upcoming', icon:'calendar'}, {id:'past', name:'Past', icon:'clock'}];
+const MEETING_TIME_TABS = [{id:'upcoming', name:'Upcoming', icon:'calendar'}, {id:'ongoing', name:'Ongoing', icon:'videoCamera'}, {id:'past', name:'Past', icon:'clock'}];
 const EMAIL_FOLDER_TABS = [{id:'inbox', name:'Inbox', icon:'envelope'}, {id:'sent', name:'Sent', icon:'forward'}, {id:'scheduled', name:'Scheduled', icon:'clock'}];
 const RECORD_TAB_PRIMARY = {
   email:    {views:EMAIL_FOLDER_TABS, of:(a) => emailFolder(a), tabs:true},

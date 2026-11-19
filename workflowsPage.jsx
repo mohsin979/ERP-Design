@@ -63,7 +63,7 @@ function WorkflowsPage({data, setData}){
   return (
     <div style={{position:'relative', flex:1, minHeight:0, display:'flex', flexDirection:'column', overflow:'hidden'}}>
       <RecordViewsModule inset="page" schema={schema} rows={rows} columns={WORKFLOW_LIST_COLS.map(c => c.key)} defaultViews={[{id:'wfl-all', name:'All Workflows'}]}
-        actions={() => workflowCan('create') && <button onClick={()=>setEditing(newWorkflowDraft({}, {type:'workflows'}))} title="Add Workflow" aria-label="Add Workflow" style={toolbarIconButton}><Icon name="plus" size={14} color={T.gray800}/></button>}/>
+        actions={() => workflowCan('create') && <NewButton label="New Workflow" onClick={()=>setEditing(newWorkflowDraft({}, {type:'workflows'}))}/>}/>
       {/* The builder: a full section over the list, as from a pipeline stage. */}
       {editing && <WorkflowEditorOverlay data={data} setData={setData} workflow={editing} onClose={()=>setEditing(null)} onStub={setStub}/>}
       {renaming && <RenameWorkflowModal name={renaming.raw.name || renaming.name} onCancel={()=>setRenaming(null)}

@@ -126,21 +126,24 @@ const stValidEmail = (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
 const stTextB = {fontSize:13, color:T.gray600, lineHeight:1.4};
 
 // Without a label: the icon-only filled button (Add on the Templates tabs), named by `title`.
-function StCta({icon, label, title, onClick, disabled}){
+// `busy` (2026-11-19): while its action works — the spinner before the label, and disabled.
+function StCta({icon, label, title, onClick, disabled, busy}){
+  const off = disabled || busy;
   return (
-    <button onClick={onClick} disabled={disabled} title={title} aria-label={title} style={{
+    <button onClick={onClick} disabled={off} aria-busy={busy || undefined} title={title} aria-label={title} style={{
       display:'inline-flex', alignItems:'center', justifyContent:'center', gap:6, height:29, padding: label ? '0 12px' : 0, width: label ? undefined : 29,
-      borderRadius:8, border:'none', background: disabled ? T.gray400 : T.black, color:'#fff',
-      fontSize:14, fontWeight:500, fontFamily:'inherit', cursor: disabled ? 'default' : 'pointer', flexShrink:0,
+      borderRadius:8, border:'none', background: disabled && !busy ? T.gray400 : T.black, color:'#fff', opacity: busy ? .85 : 1,
+      fontSize:14, fontWeight:500, fontFamily:'inherit', cursor: off ? 'default' : 'pointer', flexShrink:0,
     }}>
-      {icon && <Icon name={icon} size={16} color="#fff"/>}{label}
+      {busy ? <Spinner size={13} color="#fff"/> : icon && <Icon name={icon} size={16} color="#fff"/>}{label}
     </button>
   );
 }
-function StSecondary({label, onClick, disabled}){
+function StSecondary({label, onClick, disabled, busy}){
+  const off = disabled || busy;
   return (
-    <button onClick={onClick} disabled={disabled} style={{height:29, padding:'0 12px', borderRadius:8, border:`1px solid ${T.borderStrong}`,
-      background:'#fff', color: disabled ? T.gray400 : T.gray800, fontSize:13, fontFamily:'inherit', cursor: disabled ? 'default' : 'pointer', flexShrink:0}}>{label}</button>
+    <button onClick={onClick} disabled={off} aria-busy={busy || undefined} style={{display:'inline-flex', alignItems:'center', gap:6, height:29, padding:'0 12px', borderRadius:8, border:`1px solid ${T.borderStrong}`,
+      background:'#fff', color: off ? T.gray400 : T.gray800, fontSize:13, fontFamily:'inherit', cursor: off ? 'default' : 'pointer', flexShrink:0}}>{busy && <Spinner size={13} color={T.gray600}/>}{label}</button>
   );
 }
 /* Quiet text action, as the Figma table's "Edit". */
@@ -331,53 +334,14 @@ function StModal({title, children, primary, canSubmit = true, onSubmit, onCancel
   );
 }
 
-/* Searchable single-select: a field like FormSelect that opens a list with a search box on top;
-   typing filters the options, picking one selects it and closes. options: [{value, label}]. */
-function SearchableSelect({value, options, onChange, placeholder = 'Select', searchPlaceholder = 'Search'}){
-  const [open, setOpen] = React.useState(false);
-  const [q, setQ] = React.useState('');
-  const ref = React.useRef(null);
-  React.useEffect(()=>{
-    if(!open) return;
-    const h = (e) => { if(ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener('mousedown', h);
-    return () => document.removeEventListener('mousedown', h);
-  }, [open]);
-  const current = options.find(o => o.value === value);
-  const f = q.trim().toLowerCase();
-  const shown = options.filter(o => !f || o.label.toLowerCase().includes(f));
-  return (
-    <div ref={ref} style={{position:'relative'}}>
-      <button type="button" onClick={()=>{ setOpen(o => !o); setQ(''); }} style={{...fieldInput, display:'flex', alignItems:'center', justifyContent:'space-between', gap:8,
-        cursor:'pointer', textAlign:'left', color: current ? T.attioText : T.gray400}}>
-        <span style={{overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{current ? current.label : placeholder}</span>
-        <Icon name="chevDown" size={T.chevronSize} color={T.gray600}/>
-      </button>
-      {open && (
-        <div style={{position:'absolute', top:'calc(100% + 4px)', left:0, right:0, zIndex:60, background:'#fff', border:`1px solid ${T.border}`, borderRadius:10,
-          boxShadow:'0 4px 16px rgba(16,24,40,.12)', padding:6}}>
-          <div style={{position:'relative', marginBottom:4}}>
-            <div style={{position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', display:'flex'}}><Icon name="search" size={13} color={T.gray400}/></div>
-            <input autoFocus value={q} onChange={e=>setQ(e.target.value)} placeholder={searchPlaceholder} style={{...fieldInput, paddingLeft:30}}/>
-          </div>
-          <div style={{maxHeight:220, overflowY:'auto'}}>
-            {/* An option's `section` (e.g. Teams, Users) heads its run of options. */}
-            {shown.map((o, i) => (<React.Fragment key={o.value}>
-              {o.section && (i === 0 || shown[i - 1].section !== o.section) && <div style={{padding:'6px 10px 2px', fontSize:11.5, color:T.gray400}}>{o.section}</div>}
-              <div onClick={()=>{ onChange(o.value); setOpen(false); }}
-                style={{display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, padding:'7px 10px', borderRadius:6, fontSize:13, cursor:'pointer',
-                  color:T.attioText, background: o.value === value ? T.headerBg : 'transparent'}}
-                onMouseEnter={e=>e.currentTarget.style.background = T.headerBg} onMouseLeave={e=>e.currentTarget.style.background = o.value === value ? T.headerBg : 'transparent'}>
-                <span>{o.label}</span>
-                {o.value === value && <Icon name="check" size={11} color={T.blue}/>}
-              </div>
-            </React.Fragment>))}
-            {!shown.length && <div style={{padding:'8px 10px', fontSize:12.5, color:T.gray400}}>No matches</div>}
-          </div>
-        </div>
-      )}
-    </div>
-  );
+/* Searchable single-select: a field like FormSelect whose list always has the search box on top —
+   since 2026-11-19 the one Dropdown (shared.jsx) with `searchable`. options: [{value, label}] — a
+   record's also `sub` (its email and phone, under its name) and `search` (matched too, phone
+   numbers by their digits: recordHub.jsx recordOption), so people with the same name are told
+   apart; an option's `section` (e.g. Teams, Users) heads its run. */
+function SearchableSelect({value, options, onChange, placeholder = 'Select', searchPlaceholder = 'Search', loading}){
+  return <Dropdown value={value} options={options} onChange={onChange} placeholder={placeholder} required searchable searchPlaceholder={searchPlaceholder}
+    loading={loading} controlStyle={fieldInput}/>;
 }
 
 /* Connect an account: choose the provider (when there's a choice), enter the account. */
@@ -409,7 +373,7 @@ const providerOf = (list, key) => list.find(p => p.key === key) || list[0];
 
 // Which Tools Settings permission each page's connections need (Settings & Administration → Tools Settings).
 const TOOL_SETTING_OF = {emails:'email', meetings:'meetings', calendars:'calendar'};
-function ConnectedAccountsPage({title, providers, connectLabel, listKey, noun, emptyTitle, emptyText, data, setData}){
+function ConnectedAccountsPage({title, providers, connectLabel, listKey, noun, emptyTitle, emptyText, data, setData, after}){
   const can = toolSettingCan(TOOL_SETTING_OF[listKey]);
   const [connecting, setConnecting] = React.useState(null);
   const [removing, setRemoving] = React.useState(null);
@@ -431,6 +395,7 @@ function ConnectedAccountsPage({title, providers, connectLabel, listKey, noun, e
         ? <ConnectMenuButton label={connectLabel} providers={providers} onPick={setConnecting}/>
         : providers.map(p => <ProviderButton key={p.key} p={p} onClick={()=>setConnecting(p)}/>)}>
       {rows.length ? <RecordGrid schema={schema} rows={rows}/> : <StEmpty title={emptyTitle} description={emptyText}/>}
+      {after}
       {connecting && <ConnectAccountModal provider={connecting} onCancel={()=>setConnecting(null)}
         onConnect={({provider, email}) => {
           setData(d => ({...d, [listKey]:[...d[listKey], {id:stId(listKey), provider, email, status:'Connected', connected:stToday()}]}));
@@ -447,7 +412,32 @@ function ConnectedAccountsPage({title, providers, connectLabel, listKey, noun, e
 const EmailSettings = (props) => <ConnectedAccountsPage {...props}
   providers={EMAIL_PROVIDERS} connectLabel="Connect Email" listKey="emails" noun="email account" emptyTitle="No email connected" emptyText="Choose your email provider to connect it."/>;
 const MeetingsSettings = (props) => <ConnectedAccountsPage {...props}
-  providers={MEETING_PROVIDERS} connectLabel="Connect Meeting" listKey="meetings" noun="meeting account" emptyTitle="No meeting account connected" emptyText="Choose a meeting provider to connect it."/>;
+  providers={MEETING_PROVIDERS} connectLabel="Connect Meeting" listKey="meetings" noun="meeting account" emptyTitle="No meeting account connected" emptyText="Choose a meeting provider to connect it."
+  after={<OfficeMeetingSettings data={props.data} setData={props.setData}/>}/>;
+/* Office Meetings (2026-11-18) — the company's, under the person's meeting accounts: the office's
+   address (a request to meet a client there carries it, no online link) and who's emailed when a
+   request is approved — users (Waleed to start with) and other addresses (e.g. reception). Changed
+   with Tools Settings → Meetings. */
+const officeMeetingsOf = (data) => ({address:'', notifyUserIds:((data && data.users) || []).some(u => u.id === 'waleed-bin-zaman') ? ['waleed-bin-zaman'] : [], notifyEmails:'',
+  ...((data && data.officeMeetings) || {})});
+function OfficeMeetingSettings({data, setData}){
+  const can = toolSettingCan('meetings');
+  const {draft:d, set, actions} = useSettingsForm(officeMeetingsOf(data), v => setData(x => ({...x, officeMeetings:v})), (v) => emailListValid(v.notifyEmails));
+  const users = (data.users || []).filter(u => u.status === 'Activated');
+  return (
+    <div style={{display:'flex', flexDirection:'column', gap:16, marginTop:28, paddingTop:20, borderTop:`1px solid ${T.border}`, maxWidth:640}}>
+      <span style={{fontSize:15, fontWeight:600, color:T.attioText}}>Office Meetings</span>
+      <ReadOnlySettings on={can}>
+        <div style={{display:'flex', flexDirection:'column', gap:16}}>
+          <StField label="Office Address" width="auto"><textarea value={d.address} onChange={e=>set({address:e.target.value})} rows={3} placeholder="e.g. 1408, Opal Tower, Burj Khalifa Blvd, Business Bay, Dubai" style={{...stInput, height:'auto', padding:'8px 12px', resize:'vertical', lineHeight:1.5}}/></StField>
+          <StField label="Notify on Approval" width="auto"><MultiSelectMenu value={d.notifyUserIds} options={users.map(u => ({value:u.id, label:u.name}))} placeholder="Select users" onChange={(v)=>set({notifyUserIds:v})}/></StField>
+          <StField label="Other Emails" width="auto"><EmailListInput label="Other emails" value={d.notifyEmails} onChange={(v)=>set({notifyEmails:v})}/></StField>
+        </div>
+      </ReadOnlySettings>
+      {can && <div style={{display:'flex', justifyContent:'flex-end', gap:8}}>{actions}</div>}
+    </div>
+  );
+}
 const CalendarSettings = (props) => <ConnectedAccountsPage {...props}
   providers={CALENDAR_PROVIDERS} connectLabel="Connect Calendar" listKey="calendars" noun="calendar" emptyTitle="No calendar connected" emptyText="Choose your calendar provider to connect it."/>;
 
@@ -621,7 +611,8 @@ function TasksSettings({data, setData}){
           </div>
         )}
       </div>
-      <TaskPipelinesSection data={data} setData={setData}/>
+      {/* Task pipelines are fixed for now (2026-11-17: Not Started, In Progress, On Hold, Overdue,
+          Completed) — the pipelines section isn't shown; TaskPipelinesSection is kept for later. */}
       </ReadOnlySettings>
     </SettingsPage>
   );
@@ -697,5 +688,5 @@ function CrmSettingsPage({pageId, data, setData, navigate, records, updateRecord
     target={target && target.page === pageId ? target : null} onTargetDone={onTargetDone}/>;
 }
 
-Object.assign(window, {TIME_ZONES, applyTimeZone, myTimeZone, chooseTimeZone, taskDueDefaults, personalSettingsOf, SearchableSelect, SETTINGS_PAGES, CrmSettingsPage, DEFAULT_SETTINGS_DATA, SettingsPage, StCta, StSecondary, StTextAction,
+Object.assign(window, {officeMeetingsOf, TIME_ZONES, applyTimeZone, myTimeZone, chooseTimeZone, taskDueDefaults, personalSettingsOf, SearchableSelect, SETTINGS_PAGES, CrmSettingsPage, DEFAULT_SETTINGS_DATA, SettingsPage, StCta, StSecondary, StTextAction,
   StField, StSelect, StRadioCard, StModal, stTextB, stControl});

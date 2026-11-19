@@ -238,7 +238,7 @@ function ServicesPage(){
     <div style={{flex:1, minWidth:0, minHeight:0, display:'flex', flexDirection:'column', position:'relative', overflow:'hidden'}}>
       <RecordViewsModule schema={schema} rows={shown.map(serviceRow)} columns={SERVICE_COLUMNS.map(c => c.key)}
         defaultViews={[{id:'svcv-all', name:'All Services', sort:{key:'name', dir:'asc'}}]}
-        actions={() => can('create') && <button onClick={()=>{ setOpenId(null); setForm({}); }} title="Add Service" aria-label="Add Service" style={toolbarIconButton}><Icon name="plus" size={14} color={T.gray800}/></button>}
+        actions={() => can('create') && <NewButton label="New Service" onClick={()=>{ setOpenId(null); setForm({}); }}/>}
         overlay={form ? <ServiceFormPanel key={form.initial ? form.initial.id : 'new'} initial={form.initial} onCancel={()=>setForm(null)} onSave={save}/>
           : open && <DetailPanel title={open.name} onClose={()=>setOpenId(null)}
           menuItems={[...(can('edit', open) ? [{label:'Edit Service', onClick:()=>setForm({initial:open})}] : []), ...(can('delete', open) ? [{label:'Delete Service', danger:true, onClick:()=>setDeleting(open)}] : [])]}>

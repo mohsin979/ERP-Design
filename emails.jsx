@@ -79,6 +79,28 @@ function emailTokenValue(key, ctx){
 const EMAIL_TOKEN_SPAN = /<span[^>]*\sdata-token="([^"]+)"[^>]*>[\s\S]*?<\/span>/g;
 // The email with its fetched properties filled in for the record (nothing where it has no value).
 const fillEmailTokens = (html, ctx) => !ctx || !ctx.record ? html : String(html || '').replace(EMAIL_TOKEN_SPAN, (_, key) => emailEsc(emailTokenValue(key.replace(/&amp;/g, '&'), ctx)));
+/* Fetch Property in a Subject (2026-11-18): the subject is plain text, so the property goes in as
+   its label in braces — "{{Contact · Full Name}}" — and is filled in for the record as the email
+   goes out (fillSubjectTokens; blank where it has no value; a label it doesn't know stays as typed). */
+const EMAIL_TEXT_TOKEN = /\{\{\s*([^{}]+?)\s*\}\}/g;
+function emailTokenLabelKey(data, label){
+  for(const s of emailTokenSources()){ const hit = emailTokenOptions(data, s.value).find(o => `${o.section || s.label} · ${o.label}` === label); if(hit) return hit.value; }
+  return null;
+}
+const fillSubjectTokens = (text, ctx) => !ctx || !ctx.record ? text : String(text || '').replace(EMAIL_TEXT_TOKEN, (m, label) => {
+  const key = emailTokenLabelKey(ctx.data || {}, label); return key ? String(emailTokenValue(key, ctx) ?? '') : m; });
+function SubjectField({value, onChange, autoFocus, inputStyle = fieldText}){
+  const hub = useRecordHub();
+  const ref = React.useRef(null);
+  const [fetching, setFetching] = React.useState(false);
+  const insert = (key, label) => { setFetching(false); const el = ref.current, v = value || '', at = el && el.selectionStart != null ? el.selectionStart : v.length;
+    const token = `{{${label}}}`; onChange(v.slice(0, at) + token + v.slice(at)); };
+  return (<div style={{display:'flex', alignItems:'center', gap:8}}>
+    <input ref={ref} autoFocus={autoFocus} value={value} onChange={e=>onChange(e.target.value)} aria-label="Subject" style={{...inputStyle, flex:1, minWidth:0}}/>
+    <button type="button" onClick={()=>setFetching(true)} style={{...btnSecondarySm, height:26, padding:'0 10px', flexShrink:0}}>Fetch Property</button>
+    {fetching && <FetchPropertyModal data={(hub && hub.data) || {}} onCancel={()=>setFetching(false)} onPick={insert}/>}
+  </div>);
+}
 /* Fetch Property: where the property is from, then the property. */
 function FetchPropertyModal({data, onCancel, onPick}){
   const sources = emailTokenSources();
@@ -508,7 +530,7 @@ function EmailComposer({object, id, replyTo, forward, recipients, onSent, onClos
     const emailOf = (newId, address, p, t) => {
       const named = (v) => filledFor(v, t, p);
       const c = {...content, body:named(content.body), html:named(content.html)};
-      return {id:newId, type:'email', direction:'sent', title:named(subject).trim(), body:emailTextOf(c), html:emailHtmlOf(c), format:content.format,
+      return {id:newId, type:'email', direction:'sent', title:fillSubjectTokens(named(subject), {object:t.object, record:hubRecord(hub, t.object, t.id), records:hub.records, data:hub.data}).trim(), body:emailTextOf(c), html:emailHtmlOf(c), format:content.format,
         ...(attachments.length ? {attachments} : {}), to:[address], ...emailCopiesOf(cc, bcc), source:'you', by:CURRENT_USER.name,
         status: later ? 'scheduled' : 'sent', ...(later ? {at:when, scheduledFor:when} : {}), ...(templateId ? {templateId} : {}),
         ...(replyTo ? {replyToId:replyTo.id} : {}), ...(forward ? {forwardOfId:forward.id} : {})};
@@ -541,7 +563,7 @@ function EmailComposer({object, id, replyTo, forward, recipients, onSent, onClos
         <Field label="Cc"><EmailListInput label="Cc" value={cc} onChange={setCc}/></Field>
         <Field label="Bcc"><EmailListInput label="Bcc" value={bcc} onChange={setBcc}/></Field>
         <Field label="Template"><FormSelect value={templateId} placeholder="Select email template" options={templates.map(t => ({value:t.id, label:t.name}))} onChange={pickTemplate}/></Field>
-        <Field label="Subject"><input value={subject} onChange={e=>setSubject(e.target.value)} aria-label="Subject" style={fieldText}/></Field>
+        <Field label="Subject"><SubjectField value={subject} onChange={setSubject}/></Field>
         <EmailContentFields value={content} setValue={setContent}/>
         {scheduling && <>
           <Field label="Send on"><DateField required value={date} onChange={(v)=>{ setDate(v); setError(''); }}/></Field>
@@ -636,5 +658,5 @@ function EmailThreadView({thread, open: openId, contact}){
   );
 }
 
-Object.assign(window, {withUnsubscribeLink, unsubscribeRecord, useFileView, fillEmailTokens, emailTokenHtml, withSenderSignature, FetchPropertyModal, EmailComposer, emailListValid, emailCopiesOf, EmailListInput, fillFirstName, EMAIL_FORMATS, emailFormatLabel, emailSignatureOf, signatureEmailHtml, emailHtmlOf, emailTextOf, newEmailContent,
+Object.assign(window, {SubjectField, fillSubjectTokens, withUnsubscribeLink, unsubscribeRecord, useFileView, fillEmailTokens, emailTokenHtml, withSenderSignature, FetchPropertyModal, EmailComposer, emailListValid, emailCopiesOf, EmailListInput, fillFirstName, EMAIL_FORMATS, emailFormatLabel, emailSignatureOf, signatureEmailHtml, emailHtmlOf, emailTextOf, newEmailContent,
   switchEmailFormat, emailContentReady, emailContentToSave, templateContentOf, EmailAttachmentList, EmailContentFields, EmailPreview, EmailSplit, EMAIL_PANEL_W, emailFirstName, emailSubjectKey, emailThreadsOf, emailThreadOf, threadedEmailRows, EmailHtmlFrame, EmailBody, EmailThreadView});

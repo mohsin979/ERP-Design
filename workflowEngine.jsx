@@ -1474,7 +1474,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
       const now = !!e.immediate || sendAt.getTime() <= Date.now();
       const to = (e.recipients || []).map(r => r === 'recordEmail' ? String(deal.email || '').trim() : userName(data, resolvePerson(data, deal, r))).filter(Boolean);
       if(!to.length){ skipped++; return; }
-      const subject = fillFirstName((e.email && e.email.subject) || tpl.subject || tpl.name, person);
+      const subject = fillSubjectTokens(fillFirstName((e.email && e.email.subject) || tpl.subject || tpl.name, person), tokens);
       /* The HTML is kept as written (shown in its frame); `body` is its text (lists, search). A
          template (and so a sequence's email) goes as the template is — its format, content and
          signature (emails.jsx emailHtmlOf), with a Simple Text Body's attachments. A sequence
@@ -2635,7 +2635,8 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
       if(!prev) ev.push({type:'taskCreated', attrs:{taskType:a.taskType, assignee:a.assignee}});
       if(a.status === 'completed' && (!prev || prev.status !== 'completed')) ev.push({type:'taskCompleted'});
     }
-    if(a.type === 'meeting' && !prev) ev.push({type:'meetingScheduled', attrs:{at:meetingTime(a), platform:a.platform}});
+    // An office meeting request is booked once it's approved (requested → scheduled).
+    if(a.type === 'meeting' && a.status !== 'requested' && (!prev || prev.status === 'requested')) ev.push({type:'meetingScheduled', attrs:{at:meetingTime(a), platform:a.platform}});
     if(a.type === 'email' && !prev) ev.push({type: a.direction === 'received' ? 'emailReceived' : a.status === 'scheduled' ? 'emailScheduled' : 'emailSent', attrs:{templateId:a.templateId || null}});
     return ev;
   };
@@ -2718,6 +2719,10 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
     /* Exit an email sequence by hand (Settings → Templates → Email Sequences → Enrolled): the
        record's emails still scheduled from it aren't sent — they leave its activity, as the
        workflow action does. → how many were cancelled. */
+    // A bell notification to these users, from outside a workflow (e.g. a large export — importExport.jsx).
+    // `recordId` / `tab`: clicking it opens that record (on that tab).
+    notifyUsers: (userIds, title, text, recordId, tab) => commit(s => ({...s, notifications:[...(userIds || []).map(uid => ({id:wfNewId('nt'), userId:uid, dealId:null, dealName:title, text, at:Date.now(), read:false,
+      ...(recordId != null ? {recordId, tab:tab || null} : {})})), ...s.notifications].slice(0, 300)})),
     exitSequence: (recordId, sequenceId) => {
       const pending = actsOf(recordId).filter(a => a.type === 'email' && a.status === 'scheduled' && a.sequenceId === sequenceId);
       if(pending.length) editActivities(m => ({...m, [recordId]:(m[recordId] || []).filter(a => !pending.some(x => x.id === a.id))}));
@@ -2788,7 +2793,7 @@ const WF_TONES = {
 };
 // Statuses shown as pills across Settings and records (StatusPill), one tone per meaning.
 const STATUS_PILLS = {
-  Activated:{label:'Activated', tone:'success'}, Deactivated:{label:'Deactivated', tone:'neutral'},
+  Activated:{label:'Activated', tone:'success'}, Pending:{label:'Pending', tone:'warn'}, Deactivated:{label:'Deactivated', tone:'neutral'},
   Assigned:{label:'Assigned', tone:'success'}, Unassigned:{label:'Unassigned', tone:'neutral'},
   Connected:{label:'Connected', tone:'info'},
   Active:{label:'Active', tone:'success'}, 'On Hold':{label:'On Hold', tone:'warn'}, Closed:{label:'Closed', tone:'neutral'},
@@ -3826,7 +3831,7 @@ function AssociatedRecordForm({deal, object, link, onClose}){
       stages={CONTACT_TYPE_STAGES.map(s => s.value)} optionsFor={['deals', 'customers'].includes(object) ? pipelineFormOptions(data, object) : undefined}
       adjust={['deals', 'customers'].includes(object) ? pipelineFormAdjust(data, object) : undefined}
       noun={noun.toLowerCase()} zIndex={210} onCancel={onClose} onSave={(vals)=>{ ctx.api.createAssociated(deal.id, object, vals); onClose(); }}/>, document.body);
-  const options = linkableRecords(deal, object, ctx.deals).map(r => ({value:String(r.id), label:r.name || String(r.id)}));
+  const options = linkableRecords(deal, object, ctx.deals).map(r => recordOption(r, {value:String(r.id), label:r.name || String(r.id)}));
   return ReactDOM.createPortal(
     <div style={{position:'relative', zIndex:210}}>
       <StModal title={`Associate ${noun.toLowerCase()}`} primary="Associate" canSubmit={!!pick} onCancel={onClose} onSubmit={()=>{ ctx.api.associateExisting(deal.id, pick); onClose(); }}>
@@ -4454,9 +4459,9 @@ function WorkflowBell(){
               </div>
             </div>
           ) : (
-            <div key={it.n.id} onClick={it.n.event ? ()=>{ setOpen(false); ctx.openEvent(it.n.event); } : undefined}   // an Automatic Action opens its card
-              style={{display:'flex', gap:10, padding:'8px 10px', borderRadius:6, cursor: it.n.event ? 'pointer' : 'default'}}
-              onMouseEnter={e=>{ if(it.n.event) e.currentTarget.style.background = T.headerBg; }} onMouseLeave={e=>e.currentTarget.style.background = 'transparent'}>
+            <div key={it.n.id} onClick={it.n.event ? ()=>{ setOpen(false); ctx.openEvent(it.n.event); } : it.n.recordId != null && ctx.openRecord ? ()=>{ setOpen(false); ctx.openRecord(it.n.recordId, it.n.tab ? {id:it.n.tab} : null, true); } : undefined}   // an Automatic Action opens its card; a record's notice, the record
+              style={{display:'flex', gap:10, padding:'8px 10px', borderRadius:6, cursor: it.n.event || it.n.recordId != null ? 'pointer' : 'default'}}
+              onMouseEnter={e=>{ if(it.n.event || it.n.recordId != null) e.currentTarget.style.background = T.headerBg; }} onMouseLeave={e=>e.currentTarget.style.background = 'transparent'}>
               <Icon name="notification" size={14} color={T.gray600} style={{marginTop:2, flexShrink:0}}/>
               <div style={{minWidth:0, flex:1}}>
                 <div style={{fontSize:13, color:T.attioText, whiteSpace:'pre-line'}}>{it.n.text}</div>

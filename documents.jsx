@@ -288,7 +288,7 @@ function RecordInfoModal({defaultRecord, onCancel, onSave}){
   const fields = React.useMemo(() => record ? recordInfoFields(hub, rec.object, record) : [], [rec && rec.object, rec && rec.id]);
   const chosen = keys || fields.filter(recordInfoStarts).map(f => f.key);
   // Each option keeps its record's own id (a contact's is a number).
-  const options = React.useMemo(() => hubObjects().flatMap(o => ((hub.records || {})[o] || []).map(r => ({value:`${o}~${r.id}`, label:r.name || '—', section:typePlural(o, DOC_PLURAL[o]), rec:{object:o, id:r.id}}))), [hub.records]);
+  const options = React.useMemo(() => hubObjects().flatMap(o => ((hub.records || {})[o] || []).map(r => recordOption(r, {value:`${o}~${r.id}`, section:typePlural(o, DOC_PLURAL[o]), rec:{object:o, id:r.id}}))), [hub.records]);
   const ok = !!record && fields.some(f => chosen.includes(f.key));
   const toggle = (k) => setKeys(chosen.includes(k) ? chosen.filter(x => x !== k) : [...chosen, k]);
   return ReactDOM.createPortal(
@@ -513,7 +513,7 @@ function DocumentsPage(){
         defaultViews={[{id:'docv-all', name:'All Documents', sort:{key:'number', dir:'desc'}},
           {id:'docv-draft', name:'Drafts', filters:{nodes:[{id:'f-docd', kind:'row', joinOp:'AND', prop:'statusLabel', op:'is', value:'Draft', value2:'', values:[]}]}},
           {id:'docv-sent', name:'Sent', filters:{nodes:[{id:'f-docs', kind:'row', joinOp:'AND', prop:'statusLabel', op:'is', value:'Sent', value2:'', values:[]}]}}]}
-        actions={() => <button onClick={()=>{ setOpenId(null); setBuilder({mode:'new'}); }} title="Add Document" aria-label="Add Document" style={toolbarIconButton}><Icon name="plus" size={14} color={T.gray800}/></button>}
+        actions={() => <NewButton label="New Document" onClick={()=>{ setOpenId(null); setBuilder({mode:'new'}); }}/>}
         overlay={builder ? <DocumentBuilder key={builder.id || 'new'} {...builder} onClose={(saved)=>{ setBuilder(null); if(saved) setOpenId(saved.id); }}/>
           : open && <PageSidePanel title={open.number} onClose={()=>setOpenId(null)} menuItems={documentActions(hub, open, {onDelete:setDeleting, onEdit:edit, onSend:setSending})}>
             <div style={{flex:1, overflowY:'auto', padding:'4px 20px 24px'}}><DocumentView doc={open}/></div>

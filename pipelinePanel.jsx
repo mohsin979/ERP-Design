@@ -169,9 +169,7 @@ function PipelinePanel({data, setData, pipelineId, deals = [], onClose, onStub, 
               <span style={{fontSize:15, fontWeight:600, color:T.attioText}}>Stages</span>
               <div style={{flex:1}}/>
               {editable && (
-                <button onClick={()=>setAdding(true)} title="Add Stage" style={{...toolbarIconButton, width:30, height:30}}>
-                  <Icon name="plus" size={14} color={T.gray800}/>
-                </button>
+                <NewButton label="New Stage" onClick={()=>setAdding(true)}/>
               )}
               <button title="Close" onClick={onClose} style={{width:30, height:30, borderRadius:8, border:'none', background:'transparent', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0}}>
                 <Icon name="close" size={13} color={T.gray600}/>

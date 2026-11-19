@@ -357,6 +357,7 @@ function CustomerDetail({mode, customer, view, acts, contact, contacts = [], dea
 function CustomersModule({data, customers, setCustomers, activities, setActivities, deals = [], contacts = [], contactActivities = {}, profileStore, openRequest,
                           onOpenDeal, onOpenContact, onAddCustomer, onCreateDeal, onRecordDeleted, updateContactActivity, addActivity:addActivityProp, updateActivity:updateActivityProp}){
   const props = React.useMemo(()=>objectFormProperties(data, 'customers'), [data.properties]);
+  const logExport = useRecordExportLog();   // a table Export, kept in Import & Export → History
   const pipelines = React.useMemo(()=>objectPipelines(data, 'customers'), [data.pipelines]);
   // Card properties: the Customer's own, then the Customer Profile and Accounting Properties (extendedProps.jsx).
   const cardProps = React.useMemo(()=>[...customerCardProperties(props), ...extendedProps()], [props]);
@@ -454,7 +455,7 @@ function CustomersModule({data, customers, setCustomers, activities, setActiviti
       ids.forEach(id => onRecordDeleted && onRecordDeleted('customers', id));
       if(detail && ids.includes(detail.id)) setDetail(null);
     }});
-  const fullSchema = {...schema, pipelineLabel:(id) => (pipelineOf(id) || pipelines[0] || {}).label || '',
+  const fullSchema = {...schema, recordObject:'customers', pipelineLabel:(id) => (pipelineOf(id) || pipelines[0] || {}).label || '',
     renderCell:(key, r) => key === 'name' ? <span data-customer-id={r.id} style={{display:'inline-flex', alignItems:'center', gap:8, minWidth:0, maxWidth:'100%'}}>
         <ContactName name={r.name} onOpen={()=>openCustomer(r)} style={{fontSize:'inherit', fontWeight:500}}/><DealPromptMarker dealId={r.id}/></span>
       : key === 'status' && r.status ? <StatusPill status={r.status} map={STATUS_PILLS}/> : undefined,
@@ -502,8 +503,8 @@ function CustomersModule({data, customers, setCustomers, activities, setActiviti
               renderCard={(c, ui) => card(c, cardSettings, ui)}/>;
           }} : undefined}
         actions={(btn, view) => <>
-          <button onClick={view.exportCsv} style={btn}><Icon name="export" size={13} color={T.gray600}/> Export</button>
-          <button onClick={()=>setForm({mode:'add', initial:null})} title="Add Customer" style={toolbarIconButton}><Icon name="plus" size={14} color={T.gray800}/></button>
+          <button onClick={()=>{ const r = view.exportCsv(); logExport('customers', r.count, `${typePlural('customers', 'Customers')} → ${r.name}`); }} style={btn}><Icon name="export" size={13} color={T.gray600}/> Export</button>
+          <NewButton label={`New ${typeSingular('customers', 'Customer')}`} onClick={()=>setForm({mode:'add', initial:null})}/>
         </>}
         filterControls={(v) => <><MergeCasesButton object="customers"/><ViolationsButton object="customers" pipelines={viewPipelines(v)} active={violationMode} onClick={()=>setViolationMode(!violationMode)}/></>}
         overlay={(v) => violationMode && <ViolationPanel object="customers" pipelines={viewPipelines(v)} onClose={()=>setViolationMode(false)}/>}/>

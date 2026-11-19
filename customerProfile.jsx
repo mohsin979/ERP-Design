@@ -921,7 +921,7 @@ function ProfileFormsSettings({data, setData}){
         <div style={{display:'flex', flexDirection:'column', flex:1, minHeight:0}}>
           <RecordViewsModule flushTop storeKey="views:profile-forms-v1" schema={schema} rows={rows} columns={PF_COLUMNS.map(c => c.key)} saveView={false}
             defaultViews={[{id:'pfv-all', name:'All Forms', sort:{key:'name', dir:'asc'}}]}
-            actions={() => can('create') && <button onClick={()=>setEditor({})} title="Add Form" aria-label="New form" style={iconBtn}><Icon name="plus" size={14} color={T.gray800}/></button>}/>
+            actions={() => can('create') && <NewButton label="New Form" onClick={()=>setEditor({})}/>}/>
         </div>
       </SettingsPage>
       {editor && <ProfileFormEditor key={editor.id || 'new'} form={editor.id ? byId(editor.id) : null} taken={forms.filter(f => f.id !== editor.id).map(f => f.name.trim().toLowerCase())}

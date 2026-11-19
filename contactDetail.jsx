@@ -73,13 +73,14 @@ function QuickAction({icon, label, onClick}){
    separate top bar. The full-screen view uses it without actions, inside its own column. */
 /* `subtitle`: what View settings puts under the name (Avatar subtitle) — Job Title by default. */
 const contactSubtitle = (contact, settings) => { const k = (settings || DEFAULT_PANEL_SETTINGS()).subtitle; return k ? (contact[k] == null ? '' : String(formatValue(contact[k]))) : ''; };
-function NameRow({contact, subtitle, headerActions}){
+// `user`: a person's profile (not a record) keeps the initials in black.
+function NameRow({contact, subtitle, headerActions, user}){
   return (
     <div style={{display:'flex', alignItems:'center', gap:10, minWidth:0}}>
-      <span style={{
-        width:36, height:36, borderRadius:9999, background:T.attioText, color:'#fff', flexShrink:0,
-        fontSize:13, fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center',
-      }}>{nameInitials(contact.name)}</span>
+      {/* The record's avatar (its Avatar property, 2026-11-19): its photo, else its first letter. */}
+      {user ? <span style={{width:36, height:36, borderRadius:9999, background:T.attioText, color:'#fff', flexShrink:0,
+          fontSize:13, fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center'}}>{nameInitials(contact.name)}</span>
+        : <RecordAvatar name={contact.name} photo={contact.photo} size={36}/>}
       <div style={{minWidth:0, flex:1}}>
         <div style={{fontSize:17, fontWeight:600, color:T.attioText, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{contact.name}</div>
         {subtitle && <div style={{fontSize:12.5, color:T.attioMuted, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{subtitle}</div>}
@@ -464,6 +465,9 @@ function ContactWorkspace({contact, acts, onStub, onCall, onCreateProfile, profi
   // Activity tabs: the item being added (Note, Log Call, Task), if any, and what its form starts with.
   const [adding, setAdding] = React.useState(null);
   const [prefill, setPrefill] = React.useState(null);
+  // Tasks tab: the board or the table (TaskStatusBoard / TaskTable, tools.jsx).
+  const [taskView, setTaskView] = React.useState('board');
+  const [officeRequest, setOfficeRequest] = React.useState(false);   // Request Office Meeting open
   /* Overview: the record's Highlights, then its activity (what the Activity tab held — the full
      history, search, filters, views, Add). A request for the old Activity tab opens Overview. */
   const overview = tab.id === 'overview';
@@ -475,6 +479,7 @@ function ContactWorkspace({contact, acts, onStub, onCall, onCreateProfile, profi
     // Email: the composer as this tab's creation panel (emails.jsx); elsewhere at the CRM's right edge.
     if(o === 'Email' && !isActivityTab) return hub && ra ? hub.composeEmail({object:ra.object, id:ra.record.id}) : onStub('Email');
     if(o === 'Start Meeting') return onStub(o);   // a live meeting from the record: not defined yet
+    if(o === 'Request Office Meeting') return setOfficeRequest(true);   // activityCards.jsx OfficeMeetingRequestModal
     setAdding(o); setPrefill(start || null);
   };
   /* Opening straight to a tab (e.g. Customer Profile right after saving one) — with a form open
@@ -490,6 +495,7 @@ function ContactWorkspace({contact, acts, onStub, onCall, onCreateProfile, profi
   return (
     <div style={{flex:1, minWidth:0, display:'flex', flexDirection:'column'}}>
       <WorkspaceTabBar tabs={barTabs} activeId={tab.id} onPick={setTabId}/>
+      {officeRequest && ra && <OfficeMeetingRequestModal object={ra.object} record={ra.record} onClose={()=>setOfficeRequest(false)}/>}
       {overview && (
         <div style={{padding:'20px 24px 16px', flexShrink:0, borderBottom:`1px solid ${T.border}`}}>
           <RecordHighlights object={ra ? ra.object : 'contacts'} record={ra ? ra.record : contact} view={contact} acts={acts}
@@ -521,10 +527,10 @@ function ContactWorkspace({contact, acts, onStub, onCall, onCreateProfile, profi
         </div>
       ) : isActivityTab && activityViews ? (
         <ActivityViewsArea tabId={actTabId} store={activityViews.store} sources={activityViews.sources} heading={overview ? 'Activity' : null}
-          schema={activityViews.schemaFor(actTabId)} controls={<ActivityAddButton tabId={actTabId} onPick={pickAdd}/>}
+          schema={activityViews.schemaFor(actTabId)} controls={<div style={{display:'flex', alignItems:'center', gap:8}}>{actTabId === 'tasks' && <TableBoardSwitch mode={taskView} onChange={setTaskView}/>}<ActivityAddButton tabId={actTabId} onPick={pickAdd}/></div>}
           render={(shown, emptyText, recordOf) => (
             <div style={{flex:1, minHeight:0, display:'flex', overflow:'hidden'}}>
-              <ActivityTab tabId={actTabId} contact={contact} acts={shown} allActs={acts} emptyText={emptyText} recordOf={recordOf} team={team || []} adding={adding} setAdding={setAdding} prefill={prefill}
+              <ActivityTab tabId={actTabId} taskView={taskView} contact={contact} acts={shown} allActs={acts} emptyText={emptyText} recordOf={recordOf} team={team || []} adding={adding} setAdding={setAdding} prefill={prefill}
                 onUpdate={(id, patch)=>onUpdateActivity && onUpdateActivity(contact.id, id, patch)}
                 onAdd={(act)=>onAddActivity && onAddActivity(contact.id, act)} onStub={onStub}
                 onReassign={(owner)=>onReassignOwner && onReassignOwner(contact.id, owner)}/>
@@ -533,7 +539,7 @@ function ContactWorkspace({contact, acts, onStub, onCall, onCreateProfile, profi
       ) : isActivityTab ? (
         /* The activity tab scrolls its two columns itself, so both run to the bottom. */
         <div style={{flex:1, minHeight:0, display:'flex', overflow:'hidden'}}>
-          <ActivityTab tabId={actTabId} contact={contact} acts={acts} team={team || []} adding={adding} setAdding={setAdding} prefill={prefill}
+          <ActivityTab tabId={actTabId} taskView={taskView} contact={contact} acts={acts} team={team || []} adding={adding} setAdding={setAdding} prefill={prefill}
             onUpdate={(id, patch)=>onUpdateActivity && onUpdateActivity(contact.id, id, patch)}
             onAdd={(act)=>onAddActivity && onAddActivity(contact.id, act)} onStub={onStub}
             onReassign={(owner)=>onReassignOwner && onReassignOwner(contact.id, owner)}/>
@@ -750,7 +756,7 @@ function OwnerProfilePanel({name, onClose, user: userProp, editable, onSaveProfi
       background:'#fff', borderLeft:`1px solid ${T.border}`, boxShadow:'-12px 0 32px rgba(16,24,40,.10)', display:'flex', flexDirection:'column',
     }}>
       <div style={{padding:'16px 14px 12px 20px', flexShrink:0}}>
-        <NameRow contact={{name: user ? user.name : name}}
+        <NameRow user contact={{name: user ? user.name : name}}
           headerActions={<button title="Close" onClick={onClose} style={barIconBtn}><Icon name="close" size={13} color={T.gray600}/></button>}/>
       </div>
       <div style={{flex:1, minHeight:0, overflowY:'auto', padding:'0 20px 24px'}}>
@@ -859,6 +865,12 @@ function ContactDetail({mode, contact, acts, properties, panelProperties, onClos
           <div style={{flex:1, minHeight:0, overflowY:'auto', padding:'0 20px 24px'}}>
             <ViolationNotice/>
             <AutomationNotice recordId={contact && contact.id}/>
+            {/* Collaborators (an approved office meeting's colleague): who else works this record. */}
+            {ra && ra.record && (ra.record.collaborators || []).length > 0 && (
+              <div style={{display:'flex', alignItems:'baseline', gap:8, fontSize:12.5, color:T.attioMuted, padding:'2px 0 10px'}}>
+                <span style={{flexShrink:0}}>Collaborators</span>
+                <span style={{color:T.attioText}}>{ra.record.collaborators.map(id => userLabel(id)).filter(Boolean).join(', ')}</span>
+              </div>)}
             {body || <ContactDetailBody contact={contact} acts={acts} onStub={onStub} onCopied={onCopied}
               onCall={actions && actions.onCall} withName={false} settings={panelSettings} actions={actions} panelProperties={panelProperties}/>}
           </div>

@@ -19,15 +19,19 @@ const hubObjects = () => HUB_OBJECTS.filter(workspaceHasType);
 const HUB_NOUN = {get contacts(){ return typeSingular('contacts', 'Contact'); }, get deals(){ return typeSingular('deals', 'Deal'); }, get customers(){ return typeSingular('customers', 'Customer'); }};
 
 const hubRecord = (hub, object, id) => hub && ((hub.records[object] || []).find(r => r.id === id) || null);
-// Who a record's email and calls reach: the contact itself; a deal's person (its first contact), else its own details; a customer's own details, else its person's.
+/* Who a record's email and calls reach: the contact itself; a customer's own details, else its
+   person's (its first contact); a deal's first contact with an email address, else its first
+   contact — and without one with an email, the deal's own Email (2026-11-19, as the dev build:
+   most deals there have no contact). The To of a quote, an email and a meeting invite. */
 function hubRecordPerson(hub, object, id){
   const r = hubRecord(hub, object, id);
   if(!r) return null;
   const contactOf = (cid) => cid != null ? hubRecord(hub, 'contacts', cid) : null;
   if(object === 'contacts') return {name:r.name, email:r.email || '', phone:r.phone || ''};
-  const c = contactOf(personIdOf(r));
-  if(object === 'customers') return {name:r.name, email:r.email || (c && c.email) || '', phone:r.phone || (c && c.phone) || ''};
-  return {name: c ? c.name : r.name, email:(c && c.email) || r.email || '', phone:(c && c.phone) || r.phone || ''};
+  if(object === 'customers'){ const c = contactOf(personIdOf(r)); return {name:r.name, email:r.email || (c && c.email) || '', phone:r.phone || (c && c.phone) || ''}; }
+  const linked = contactIdsOf(r).map(contactOf).filter(Boolean);
+  const c = linked.find(x => String(x.email || '').trim()) || linked[0] || null;
+  return {name: c ? c.name : r.name, email:(c && String(c.email || '').trim()) || r.email || '', phone:(c && c.phone) || r.phone || ''};
 }
 // Every activity of the workspace (of one type), with the record it's on.
 const hubActivities = (hub, type) => HUB_OBJECTS.flatMap(object => Object.entries((hub && hub.activities[object]) || {}).flatMap(([rid, list]) => {
@@ -47,7 +51,12 @@ const hubFindActivity = (hub, actId) => {
    first, then removes it from its record (DetailMoreMenu). */
 const ActivityDeleteCtx = React.createContext(null);
 const useActivityDelete = () => React.useContext(ActivityDeleteCtx);
-const hubRecordOptions = (hub, object) => ((hub && hub.records[object]) || []).map(r => ({value:r.id, label:r.name}));
+/* A record as a choice in a picker (SearchableSelect): its name, with its email and phone under it
+   and searched too — names repeat, so a record is found by its email or phone as well (2026-11-18,
+   every record picker in the CRM). */
+const recordOption = (r, extra) => { const reach = [r.email, r.phone].map(x => String(x || '').trim()).filter(Boolean);
+  return {value:r.id, label:r.name || '—', ...(reach.length ? {sub:reach.join(' · '), search:reach.join(' ')} : {}), ...(extra || {})}; };
+const hubRecordOptions = (hub, object) => ((hub && hub.records[object]) || []).map(r => recordOption(r));
 
 /* A record to attach something to: the Object (Contact / Deal / Customer — the workspace's), then
    the record. `value`: {object, id}. */
@@ -130,4 +139,4 @@ function RecordHubProvider({value, children}){
   );
 }
 
-Object.assign(window, {hubFindActivity, ActivityDeleteCtx, useActivityDelete, RecordHubCtx, useRecordHub, HUB_OBJECTS, hubObjects, HUB_NOUN, hubRecord, hubRecordPerson, hubActivities, hubRecordOptions, RecordPicker, HubRecordLink, OpenRecordCtx, useIsOpenRecord, RecordHubProvider});
+Object.assign(window, {hubFindActivity, ActivityDeleteCtx, useActivityDelete, RecordHubCtx, useRecordHub, HUB_OBJECTS, hubObjects, HUB_NOUN, hubRecord, hubRecordPerson, hubActivities, hubRecordOptions, recordOption, RecordPicker, HubRecordLink, OpenRecordCtx, useIsOpenRecord, RecordHubProvider});

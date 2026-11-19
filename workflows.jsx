@@ -1363,7 +1363,7 @@ function ViewEmailModal({name, email, onClose, onSave}){
         .hof-email-edit [contenteditable]:focus{outline:1.5px solid ${T.blue}}`}</style>
       <div>
         <label style={fieldLabel}>Subject</label>
-        {editing ? <input value={subject} onChange={e=>setSubject(e.target.value)} style={fieldInput}/>
+        {editing ? <SubjectField value={subject} onChange={setSubject} inputStyle={fieldInput}/>
                  : <div style={{fontSize:14, fontWeight:500, color:T.attioText}}>{subject}</div>}
       </div>
       <div style={{background:T.headerBg, border:`1px solid ${T.border}`, borderRadius:10, padding:'28px 24px', maxHeight:'calc(100vh - 300px)', overflowY:'auto'}}>

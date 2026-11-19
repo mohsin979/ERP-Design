@@ -135,6 +135,12 @@ const textValue = {store:(v) => ptText(v).trim(), load:(v) => ptText(v), empty:p
 const choiceValue = {compare:'choice', ops:CHOICE_OPS, store:(v) => ptText(v), load:(v) => ptText(v), empty:ptBlank};
 const PROPERTY_TYPE_DEFS = [
   PT({id:'Single-Line Text', ...textValue, compare:'text', ops:TEXT_OPS}),
+  /* Avatar (2026-11-19): the name of a Contact, Deal or Customer and its picture together — given
+     to those name properties only (not offered for new properties). The name is the value, kept as
+     text as before; the square photo, optional, is kept on the record (`photo`) beside it. Without
+     a photo, the avatar is the name's first letter (shared.jsx RecordAvatar). On a form: the photo's
+     square placeholder, then the name (AvatarInput). */
+  PT({id:'Avatar', ...textValue, compare:'text', ops:TEXT_OPS, creatable:false}),
   PT({id:'Multi-Line Text', ...textValue, compare:'text', ops:TEXT_OPS}),
   PT({id:'Number', compare:'number', ops:NUMBER_OPS, empty:(v) => ptNumber(v) === null,
     store:(v) => ptNumber(v) ?? '', load:(v) => ptBlank(v) ? '' : String(v), format:(v) => ptNumber(v) === null ? ptText(v) : ptNumber(v).toLocaleString('en-US'),
@@ -324,25 +330,36 @@ function propertyValueMatches(p, opId, actual, value){
 /* ── Inputs ── */
 const ptInputStyle = (invalid) => ({...fieldInput, borderColor: invalid ? T.red : T.borderStrong});
 // Multi-Selection: a menu of the options, each ticked on or off; the chosen ones show on the control.
+/* A long list (more than eight) gets a search on top; an option's `section` (Teams, Users) heads its run. */
 function MultiSelectMenu({value, options, onChange, invalid, placeholder = 'Select options'}){
   const [open, setOpen] = React.useState(false);
-  const chosen = ptList(value), opts = (options || []).map(o => typeof o === 'string' ? {value:o, label:o} : o);
+  const [q, setQ] = React.useState('');
+  const chosen = ptList(value), all = (options || []).map(o => typeof o === 'string' ? {value:o, label:o} : o);
+  const long = all.length > 8, f = q.trim().toLowerCase();
+  const opts = f ? all.filter(o => String(o.label).toLowerCase().includes(f)) : all;
   const toggle = (v) => onChange(chosen.includes(v) ? chosen.filter(x => x !== v) : [...chosen, v]);
   return (
     <div style={{position:'relative'}}>
       <button type="button" onMouseDown={e=>e.stopPropagation()} onClick={()=>setOpen(o => !o)}
         style={{...ptInputStyle(invalid), display:'flex', alignItems:'center', gap:6, textAlign:'left', cursor:'pointer', minHeight:36, flexWrap:'wrap'}}>
-        {chosen.length ? chosen.map(v => <span key={v} style={{fontSize:12.5, padding:'1px 8px', borderRadius:9999, background:T.headerBg, color:T.attioText}}>{(opts.find(o => o.value === v) || {}).label || v}</span>)
+        {chosen.length ? chosen.map(v => <span key={v} style={{fontSize:12.5, padding:'1px 8px', borderRadius:9999, background:T.headerBg, color:T.attioText}}>{(all.find(o => o.value === v) || {}).label || v}</span>)
           : <span style={{color:T.gray400}}>{placeholder}</span>}
         <span style={{flex:1}}/><Icon name="chevDown" size={T.chevronSize || 12} color={T.gray600}/>
       </button>
       <MenuShell open={open} onClose={()=>setOpen(false)} width={260}>
-        {!opts.length && <div style={{padding:'8px 10px', fontSize:12.5, color:T.gray400}}>No options</div>}
-        {opts.map(o => (
-          <label key={o.value} onClick={()=>toggle(o.value)} style={{display:'flex', alignItems:'center', gap:8, padding:'7px 10px', borderRadius:6, fontSize:13, color:T.attioText, cursor:'pointer'}}>
+        {long && <div style={{position:'relative', marginBottom:4}}>
+          <div style={{position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', display:'flex'}}><Icon name="search" size={13} color={T.gray400}/></div>
+          <input autoFocus value={q} onChange={e=>setQ(e.target.value)} placeholder="Search" aria-label="Search options" style={{...fieldInput, paddingLeft:30}}/>
+        </div>}
+        <div style={{maxHeight:260, overflowY:'auto'}}>
+        {!opts.length && <div style={{padding:'8px 10px', fontSize:12.5, color:T.gray400}}>{f ? 'No matches' : 'No options'}</div>}
+        {opts.map((o, i) => (<React.Fragment key={o.value}>
+          {o.section && (i === 0 || opts[i - 1].section !== o.section) && <div style={{padding:'6px 10px 2px', fontSize:11.5, color:T.gray400}}>{o.section}</div>}
+          <label onClick={()=>toggle(o.value)} style={{display:'flex', alignItems:'center', gap:8, padding:'7px 10px', borderRadius:6, fontSize:13, color:T.attioText, cursor:'pointer'}}>
             <RowCheckbox checked={chosen.includes(o.value)} onChange={()=>toggle(o.value)}/>{o.label}
           </label>
-        ))}
+        </React.Fragment>))}
+        </div>
       </MenuShell>
     </div>
   );
@@ -362,13 +379,47 @@ function PhoneNumberInput({prop, value, onChange, invalid, base, stacked}){
     </div>
   );
 }
+/* The Avatar property's input: a square placeholder to upload the person's (or company's) photo —
+   kept small, a 240px square from its middle — then the name. `photo` / `onPhoto`: the record's photo. */
+const AVATAR_PHOTO_PX = 240;
+const readAvatarPhoto = (file) => readImageFile(file, 5 * 1024 * 1024).then(url => new Promise((resolve, reject) => {
+  const img = new Image();
+  img.onload = () => { const side = Math.min(img.naturalWidth, img.naturalHeight), c = document.createElement('canvas'); c.width = c.height = AVATAR_PHOTO_PX;
+    c.getContext('2d').drawImage(img, (img.naturalWidth - side) / 2, (img.naturalHeight - side) / 2, side, side, 0, 0, AVATAR_PHOTO_PX, AVATAR_PHOTO_PX);
+    resolve(c.toDataURL('image/jpeg', .86)); };
+  img.onerror = () => reject(new Error('That file could not be read.'));
+  img.src = url;
+}));
+function AvatarInput({prop, value, onChange, photo, onPhoto, invalid, autoFocus, base}){
+  const input = React.useRef(null);
+  const [error, setError] = React.useState('');
+  const pick = (e) => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if(!f) return;
+    readAvatarPhoto(f).then(url => { setError(''); onPhoto(url); }).catch(err => setError(err.message)); };
+  return (
+    <div style={{display:'flex', alignItems:'flex-start', gap:10}}>
+      <input ref={input} type="file" accept="image/*" onChange={pick} style={{display:'none'}}/>
+      <div style={{display:'flex', flexDirection:'column', alignItems:'center', gap:4, flexShrink:0}}>
+        <button type="button" title={photo ? 'Replace photo' : 'Upload photo'} aria-label={photo ? 'Replace photo' : 'Upload photo'} onClick={()=>input.current && input.current.click()}
+          style={{width:56, height:56, borderRadius:10, border: photo ? `1px solid ${T.borderStrong}` : `1px dashed ${T.borderStrong}`, background:T.headerBg, padding:0, overflow:'hidden',
+            display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer'}}>
+          {photo ? <img src={photo} alt="" style={{width:'100%', height:'100%', objectFit:'cover', display:'block'}}/> : <Icon name="user" size={20} color={T.gray400}/>}
+        </button>
+        {photo && <button type="button" onClick={()=>onPhoto(null)} className={LINK_CLASS} style={{border:'none', background:'transparent', padding:0, fontSize:11.5, color:T.attioText, cursor:'pointer', fontFamily:'inherit'}}>Remove</button>}
+      </div>
+      <div style={{flex:1, minWidth:0, paddingTop:12}}>
+        <input autoFocus={autoFocus} value={ptText(value)} onChange={e=>onChange(e.target.value)} placeholder={prop.placeholder} style={base}/>
+        {error && <div style={{fontSize:12, color:T.red, marginTop:4}}>{error}</div>}
+      </div>
+    </div>
+  );
+}
 /* The control a property's type generates. `value` is in the type's input shape (load);
    `options`: a choice property's options when they come from elsewhere (users, pipelines). */
 /* `label`: a Boolean shows its toggle, then this label (as the creation-form toggles do); no True / False text.
    `stacked` (a side panel's inline edit): each part of a two-part input (code and number, currency
    and amount, date and time, a range's ends, an address) on its own full-width row, and radio
    options one per row. */
-function TypedPropertyInput({prop, value, onChange, options, invalid, autoFocus, label, stacked}){
+function TypedPropertyInput({prop, value, onChange, options, invalid, autoFocus, label, stacked, photo, onPhoto}){
   const type = propertyTypeId(prop.type), base = ptInputStyle(invalid), d = defOf(prop);
   const opts = options && options.length ? options : d.options ? d.options(prop) : (prop.options || []);
   const dash = !stacked && <span style={{color:T.gray400}}>–</span>, pair = {display:'flex', flexDirection: stacked ? 'column' : 'row', alignItems: stacked ? 'stretch' : 'center', gap:6};
@@ -379,6 +430,9 @@ function TypedPropertyInput({prop, value, onChange, options, invalid, autoFocus,
   );
   const select = (v, set, placeholder) => <FormSelect value={v || ''} placeholder={placeholder} options={opts} onChange={set} invalid={invalid}/>;
   switch(type){
+    // The Avatar: with its photo where the form holds it (`onPhoto`: create and edit forms); elsewhere just the name.
+    case 'Avatar': return onPhoto ? <AvatarInput prop={prop} value={value} onChange={onChange} photo={photo} onPhoto={onPhoto} invalid={invalid} autoFocus={autoFocus} base={base}/>
+      : <input autoFocus={autoFocus} value={ptText(value)} onChange={e=>onChange(e.target.value)} placeholder={prop.placeholder} style={base}/>;
     case 'Multi-Line Text': return <textarea value={ptText(value)} onChange={e=>onChange(e.target.value)} rows={3} style={{...base, resize:'vertical', lineHeight:1.5}}/>;
     case 'Number': return <input type="number" value={ptText(value)} onChange={e=>onChange(e.target.value)} style={base}/>;
     case 'Email': return <input type="email" autoFocus={autoFocus} value={ptText(value)} onChange={e=>onChange(e.target.value)} placeholder={prop.placeholder || 'name@company.com'} style={base}/>;

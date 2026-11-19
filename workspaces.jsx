@@ -415,7 +415,7 @@ function ErpUsersPage({data, setData, focus}){
     <SettingsPage fill>
       <RecordViewsModule flushTop savedViews={false} storeKey="views:erp-users-v1" schema={schema} rows={rows} columns={ERP_USER_COLUMNS.map(c => c.key)}
         defaultViews={[{id:'erp-users-all', name:'All Users', sort:{key:'name', dir:'asc'}}]} focus={focus}
-        actions={() => <button onClick={()=>setPanel({userId:null})} title="Add User" style={iconBtn}><Icon name="plus" size={14} color={T.gray800}/></button>}/>
+        actions={() => <NewButton label="New User" onClick={()=>setPanel({userId:null})}/>}/>
       {panel && <UserAccessPanel userId={panel.userId} onClose={()=>setPanel(null)} onSaved={saved} crmUsers={data.users}/>}
     </SettingsPage>
   );
@@ -536,7 +536,7 @@ function BranchesPage({module, onMembers}){
   };
   return (<>
     <SettingsPage
-      actions={<button onClick={()=>setPanel({})} title={`Add ${label} Branch`} aria-label={`Add ${label} Branch`} style={toolbarIconButton}><Icon name="plus" size={14} color={T.gray800}/></button>}>
+      actions={<NewButton label={`New ${label} Branch`} onClick={()=>setPanel({})}/>}>
       {list.length ? (
         <div style={mtTable}>
           <div style={mtHeadRow}><span style={{...mtHead, flex:1}}>Name</span><span style={{...mtHead, width:96}}>Users</span><span style={{...mtHead, width:120}}>Created</span><span style={{width:28}}/></div>
@@ -872,25 +872,37 @@ function BrandSignatureSection({brand, toast, setActions, data, setData}){
 /* Digital Letterhead: the company information on the letterhead, with the company logo (Logo);
    the preview is a page with that header and footer. "Additional info" reads under the address.
    Every quotation is on it (quotes.jsx): new and draft quotes the saved one, sent quotes the one
-   they went out with. */
+   they went out with. Bank Details (2026-11-19, from the dev build): under the letterhead's fields,
+   all optional — Account Name, Bank, Account Number, IBAN, SWIFT / BIC, Branch Address — shown
+   after the terms on a quotation that has Show bank details on (its Terms & Conditions step). */
 const LETTERHEAD_FIELDS = [
   {key:'companyName', label:'Company Name', placeholder:'e.g. HOF Migration', required:true}, {key:'address', label:'Address', multiline:true},
   {key:'additional', label:'Additional Info', multiline:true},
   {key:'phone', label:'Phone', placeholder:'+971 4 000 0000'}, {key:'email', label:'Email', placeholder:'info@hofmigration.com'},
   {key:'website', label:'Website', placeholder:'https://hofmigration.com'}, {key:'footer', label:'Footer Note', placeholder:'e.g. Licensed immigration consultants'},
 ];
+const LETTERHEAD_BANK_FIELDS = [
+  {key:'bankAccountName', label:'Account Name'}, {key:'bankName', label:'Bank'}, {key:'bankAccountNumber', label:'Account Number'},
+  {key:'bankIban', label:'IBAN'}, {key:'bankSwift', label:'SWIFT / BIC'}, {key:'bankBranchAddress', label:'Branch Address', multiline:true},
+];
 function BrandLetterheadSection(props){
   const {brand, admin} = props;
-  const [lh, set] = useBrandDraft({...props, key:'letterhead', blank:{companyName:brand.name, address:'', additional:'', phone:'', email:'', website:'', footer:''}, label:'Letterhead',
+  const [lh, set] = useBrandDraft({...props, key:'letterhead', blank:{companyName:brand.name, address:'', additional:'', phone:'', email:'', website:'', footer:'',
+    ...Object.fromEntries(LETTERHEAD_BANK_FIELDS.map(f => [f.key, '']))}, label:'Letterhead',
     valid:(d) => !!d.companyName.trim() && brandEmailOk(d.email)});
   const accent = colorsFromPalette(brandPalette(brand)).primary;
   const small = {fontSize:10.5, color:T.gray600, lineHeight:1.5};
   const contact = [lh.phone, lh.email, lh.website].filter(Boolean);
   return (
     <BrandSplit
-      form={LETTERHEAD_FIELDS.map(f => (
-        <Field key={f.key} label={f.label} required={f.required}>{brandTextField(lh[f.key], (v)=>set(f.key, v), f.placeholder, {multiline:f.multiline, disabled:!admin, invalid: f.key === 'email' && !brandEmailOk(lh.email)})}</Field>
-      ))}
+      form={<>
+        {LETTERHEAD_FIELDS.map(f => (
+          <Field key={f.key} label={f.label} required={f.required}>{brandTextField(lh[f.key], (v)=>set(f.key, v), f.placeholder, {multiline:f.multiline, disabled:!admin, invalid: f.key === 'email' && !brandEmailOk(lh.email)})}</Field>
+        ))}
+        <div style={{borderTop:`1px solid ${T.border}`, margin:'8px 0 2px'}}/>
+        <span style={{fontSize:11, fontWeight:600, color:T.attioFaint, textTransform:'uppercase', letterSpacing:.4}}>Bank Details</span>
+        {LETTERHEAD_BANK_FIELDS.map(f => <Field key={f.key} label={f.label}>{brandTextField(lh[f.key] || '', (v)=>set(f.key, v), '', {multiline:f.multiline, disabled:!admin})}</Field>)}
+      </>}
       preview={
         <div style={{background:'#fff', border:`1px solid ${T.attioLine}`, borderRadius:4, width:'100%', maxWidth:460, aspectRatio:'1 / 1.414', alignSelf:'center',
           boxShadow:'0 4px 16px rgba(16,24,40,.08)', display:'flex', flexDirection:'column', padding:'26px 28px'}}>

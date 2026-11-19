@@ -668,20 +668,13 @@ function ContactBoard({rows, search, pipelineId, onChangeStage, actions, onAddTo
 /* The toolbar dropdown button (pipeline, whose activities, people): one size wherever they sit together. */
 const toolbarDropdownBtn = (open) => ({display:'inline-flex', alignItems:'center', gap:6, height:32, boxSizing:'border-box', border:`1px solid ${T.borderStrong}`,
   background: open ? T.headerBg : '#fff', borderRadius:8, padding:'0 10px 0 12px', fontSize:13, fontFamily:'inherit', color:T.gray800, cursor:'pointer', maxWidth:220, whiteSpace:'nowrap'});
+// The shared Dropdown (2026-11-19), looking as before; a search box once there are more than 10 pipelines.
 function PipelineSelector({pipelineId, onChange, pipelines = CONTACT_PIPELINES}){
-  const [open, setOpen] = React.useState(false);
   const current = pipelines.find(p => p.id === pipelineId) || pipelines[0];
   return (
-    <div style={{position:'relative', flexShrink:0}}>
-      <button onClick={()=>setOpen(o=>!o)} title="Pipeline" style={toolbarDropdownBtn(open)}>
-        <span style={{minWidth:0, overflow:'hidden', textOverflow:'ellipsis'}}>{current.label}</span>
-        <Icon name="chevDown" size={T.chevronSize} color={T.gray600} style={{transform: open ? 'rotate(180deg)' : 'none'}}/>
-      </button>
-      <MenuShell open={open} onClose={()=>setOpen(false)} width={220}>
-        {pipelines.map(p => (
-          <MenuItem key={p.id} label={p.label} onClick={()=>{ onChange(p.id); setOpen(false); }}/>
-        ))}
-      </MenuShell>
+    <div title="Pipeline" style={{flexShrink:0}}>
+      <Dropdown value={current && current.id} options={pipelines.map(p => ({value:p.id, label:p.label}))} onChange={onChange} required ariaLabel="Pipeline"
+        searchPlaceholder="Search pipelines" minPanelWidth={220} controlStyle={{...toolbarDropdownBtn(false), width:'auto', paddingRight:30}}/>
     </div>
   );
 }

@@ -326,8 +326,19 @@ let USER_DIRECTORY = [];
 const setUserDirectory = (users) => { USER_DIRECTORY = users || []; };
 // The name for a stored user reference (an ID; older data may hold a name — shown as it is).
 const userLabel = (v) => { if(!v) return ''; const u = USER_DIRECTORY.find(x => x.id === v); return u ? u.name : String(v); };
+/* ── Team directory ── App registers Teams alongside Users. Filtering by a person can be by a team
+   too (2026-11-18): a person filter lists the teams above the people, as values "team:<id>"; a team
+   stands for its members — their IDs and names, as person values are held either way. */
+let TEAM_DIRECTORY = [];
+const setTeamDirectory = (teams) => { TEAM_DIRECTORY = teams || []; };
+const TEAM_VALUE = 'team:';
+const isTeamValue = (v) => typeof v === 'string' && v.startsWith(TEAM_VALUE);
+const teamValueMembers = (v) => { const id = String(v).slice(TEAM_VALUE.length); return USER_DIRECTORY.filter(u => !u.deleted && u.teamId === id).flatMap(u => [u.id, u.name]); };
+const expandTeamValues = (list) => (list || []).flatMap(v => isTeamValue(v) ? teamValueMembers(v) : [v]);
+const teamFilterOptions = () => TEAM_DIRECTORY.map(t => ({value:TEAM_VALUE + t.id, label:t.name, section:'Teams'}));
+const isPeopleValues = (values) => (values || []).some(v => USER_DIRECTORY.some(u => u.name === (v && v.value !== undefined ? v.value : v) || u.id === (v && v.value !== undefined ? v.value : v)));
 // A user reference as an ID: an ID stays, a name is looked up, anything else is no user.
 const userIdOf = (v, users = USER_DIRECTORY) => { if(!v) return ''; if(users.some(u => u.id === v)) return v; const u = users.find(x => x.name === v); return u ? u.id : ''; };
 
 Object.assign(window, {DB, crmStoreKey, peopleStoreKey, readStore, writeStore, APP_STORE_KEY, freezeAppStore, CRM_TEMPLATE, ORG_REGISTRY, ACTIVE_CRM, ORG_ROLES, CRM_MIGRATION, CRM_PARTNERS, CRM_PACK, PEOPLE_PAKISTAN, PEOPLE_DUBAI, LEGACY_CRM_OF,
-  DEFAULT_BRAND, HOF_BRAND, saveOrgRegistry, reloadInto, orgBrand, APP_SAVED, persistSlice, usePersistedState, savedSlice, resetAppStore, newRecordId, peekRecordId, ensureIdFloor, idFloorOf, setUserDirectory, userLabel, userIdOf, writeAppStore});
+  DEFAULT_BRAND, HOF_BRAND, saveOrgRegistry, reloadInto, orgBrand, APP_SAVED, persistSlice, usePersistedState, savedSlice, resetAppStore, newRecordId, peekRecordId, ensureIdFloor, idFloorOf, setUserDirectory, setTeamDirectory, isTeamValue, teamValueMembers, expandTeamValues, teamFilterOptions, isPeopleValues, userLabel, userIdOf, writeAppStore});

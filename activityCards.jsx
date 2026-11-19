@@ -288,7 +288,84 @@ const firstStageOf = (pipelineId) => { const pl = TASK_PIPELINES.find(p => p.id 
 
 /* ── Details (right pane) ────────────────────────────────────────────────────────────────── */
 
+/* A note's edit history and replies (2026-11-18). Each edit keeps the text it replaced — with who
+   wrote that text and when (`history`) — and the note shows "Edited by … · when" with View History,
+   every version newest first. Replies (`replies`): a thread under the note, each its text, any
+   attachments, who and when; adding one follows the record's Notes permissions (Add), removing
+   one its Delete. A note under a call, meeting or task keeps its history the same way. */
+const noteAuthor = (n, contact) => { const p = activityActor(n, contact); return p ? p.name : (n.by || ''); };
+const noteEditPatch = (n, body, contact) => ({body, editedBy:CURRENT_USER.name, editedAt:new Date().toISOString(),
+  history:[...(n.history || []), {body:n.body || '', by:n.editedBy || noteAuthor(n, contact), at:n.editedAt || n.at}]});
+function NoteEdited({n, contact}){
+  const [open, setOpen] = React.useState(false);
+  if(!n.editedAt) return null;
+  const versions = [{body:n.body, by:n.editedBy, at:n.editedAt, current:true}, ...[...(n.history || [])].reverse()];
+  return (<>
+    <div style={{fontSize:12, color:T.attioMuted, display:'flex', alignItems:'center', gap:6, flexWrap:'wrap'}}>
+      <span>Edited by {n.editedBy} · {fmtActStamp(new Date(n.editedAt))}</span>
+      <button type="button" onClick={()=>setOpen(true)} className={LINK_CLASS} style={{border:'none', background:'transparent', padding:0, cursor:'pointer', fontFamily:'inherit', fontSize:12, color:T.attioText}}>View History</button>
+    </div>
+    {open && <StModal title="Note History" primary={null} onCancel={()=>setOpen(false)} width={560}>
+      <div style={{display:'flex', flexDirection:'column', gap:14, maxHeight:'60vh', overflowY:'auto'}}>
+        {versions.map((v, i) => (
+          <div key={i} style={{display:'flex', flexDirection:'column', gap:6, paddingBottom:12, borderBottom: i < versions.length - 1 ? `1px solid ${T.border}` : 'none'}}>
+            <div style={{fontSize:12, color:T.attioMuted}}>{v.current ? 'Current · ' : ''}{v.by || noteAuthor(n, contact)} · {fmtActStamp(new Date(v.at))}</div>
+            <RichTextView html={v.body} style={{fontSize:13, lineHeight:1.55, color:T.attioText}}/>
+          </div>
+        ))}
+      </div>
+    </StModal>}
+  </>);
+}
+function NoteReplies({a, onUpdate, canReply, canRemove}){
+  const [text, setText] = React.useState('');
+  const [files, setFiles] = React.useState([]);
+  const [writing, setWriting] = React.useState(false);
+  const [removing, setRemoving] = React.useState(null);
+  const replies = a.replies || [];
+  const ok = !!text.trim() || files.length > 0;
+  const add = () => { if(!ok) return;
+    onUpdate(a.id, {replies:[...replies, {id:`rp-${Date.now().toString(36)}`, body:text.trim(), by:CURRENT_USER.name, at:new Date().toISOString(), ...(files.length ? {attachments:files} : {})}]});
+    setText(''); setFiles([]); setWriting(false); };
+  return (
+    <div style={{marginTop:8, paddingTop:16, borderTop:`1px solid ${T.border}`, display:'flex', flexDirection:'column', gap:12}}>
+      <div style={{display:'flex', alignItems:'center', gap:8}}>
+        <span style={{fontSize:14, fontWeight:600, color:T.attioText}}>Replies ({replies.length})</span>
+        {canReply && !writing && <button title="Reply" aria-label="Reply" onClick={()=>setWriting(true)} style={{...btnSecondarySm, padding:'5px 7px'}}><Icon name="plus" size={13} color={T.attioText}/></button>}
+      </div>
+      {writing && <div style={{display:'flex', flexDirection:'column', gap:8}}>
+        <textarea autoFocus value={text} onChange={e=>setText(e.target.value)} rows={3} placeholder="Write a reply" aria-label="Reply" style={{...fieldText, resize:'vertical', lineHeight:1.5}}/>
+        <EmailAttachmentsField list={files} update={setFiles}/>
+        <div style={{display:'flex', justifyContent:'flex-end', gap:8}}>
+          <button onClick={()=>{ setText(''); setFiles([]); setWriting(false); }} style={btnSecondarySm}>Cancel</button>
+          <button onClick={add} disabled={!ok} style={btnPrimarySm(ok)}>Reply</button>
+        </div>
+      </div>}
+      {replies.map(r => (
+        <div key={r.id} style={{display:'flex', flexDirection:'column', gap:6}}>
+          <div style={{display:'flex', alignItems:'center', gap:8, minHeight:28}}>
+            <div style={{flex:1, minWidth:0, display:'flex', alignItems:'center', gap:6, fontSize:13, color:T.attioMuted}}>
+              <PersonAvatar kind="team" name={r.by}/><PersonName kind="team" name={r.by}/>
+              <span style={{fontSize:11.5, whiteSpace:'nowrap'}}>{fmtActStamp(new Date(r.at))}</span>
+            </div>
+            {canRemove && <DetailMoreMenu items={[{label:'Delete Reply', icon:'trash', danger:true, onClick:()=>setRemoving(r)}]}/>}
+          </div>
+          {r.body && <div style={{fontSize:13, lineHeight:1.55, color:T.attioText, whiteSpace:'pre-wrap'}}>{r.body}</div>}
+          {(r.attachments || []).length > 0 && <EmailAttachmentList list={r.attachments}/>}
+        </div>
+      ))}
+      {!replies.length && !writing && <div style={{fontSize:13, color:T.attioMuted}}>No replies yet</div>}
+      {removing && <StModal title="Delete Reply" primary="Delete Reply" danger onCancel={()=>setRemoving(null)}
+        onSubmit={()=>{ onUpdate(a.id, {replies:replies.filter(x => x.id !== removing.id)}); setRemoving(null); }}>
+        <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>This removes the reply and its attachments. It can't be undone.</div>
+      </StModal>}
+    </div>
+  );
+}
+
 function NoteDetail({a, contact, calls, onUpdate, onStub, across}){
+  const ra = useRecordAccess();
+  const canNote = (action) => !ra || activityCan(ra.object, ra.record, a, action);
   const [editing, setEditing] = React.useState(false);
   // Edited in the rich text editor (a plain note saved before opens as paragraphs).
   const [text, setText] = React.useState(richHtmlOf(a.body || ''));
@@ -296,7 +373,7 @@ function NoteDetail({a, contact, calls, onUpdate, onStub, across}){
   const meeting = a.meetingId && calls.find(c => c.id === a.meetingId);
   const task = a.taskId && calls.find(c => c.id === a.taskId);
   const cancel = () => { setText(richHtmlOf(a.body || '')); setEditing(false); };
-  const save = () => { onUpdate(a.id, {body:sanitizeRichText(text)}); setEditing(false); };
+  const save = () => { onUpdate(a.id, noteEditPatch(a, sanitizeRichText(text), contact)); setEditing(false); };
   return (
     <DetailFrame head={detailHead(a, contact, across)} actions={editing ? saveBar(cancel, save, !richIsEmpty(text) && sanitizeRichText(text) !== sanitizeRichText(richHtmlOf(a.body || '')))
       : activityEditBar(a, ()=>setEditing(true), detailMenu({a, onUpdate, onStub, own:[stubItem('Copy Note', onStub, 'copy')], runProfile:true, deleteLabel:'Delete Note'}))}>
@@ -309,8 +386,10 @@ function NoteDetail({a, contact, calls, onUpdate, onStub, across}){
         {editing
           ? <RichTextEditor value={text} onChange={setText} minHeight={180} ariaLabel="Note"/>
           : <RichTextView html={a.body} style={{fontSize:13.5, lineHeight:1.65}}/>}
+        {!editing && <NoteEdited n={a} contact={contact}/>}
         {!editing && personLed(across) && stack(recordFields(across))}
         {!editing && across && timeStampField(a.at)}
+        {!editing && <NoteReplies a={a} onUpdate={onUpdate} canReply={!ra || canAdd(ra.object, ra.record, 'Note')} canRemove={canNote('delete')}/>}
       </div>
     </DetailFrame>
   );
@@ -354,7 +433,7 @@ function ActivityNoteItem({n, contact, canEdit, canDelete, onSave, onDelete}){
               {saveBar(()=>setEditing(false), ()=>{ onSave(sanitizeRichText(text)); setEditing(false); }, !richIsEmpty(text) && text !== (n.body || ''))}
             </div>
           </div>
-        : <RichTextView html={n.body} style={{fontSize:13, lineHeight:1.55, color:T.attioText}}/>}
+        : <><RichTextView html={n.body} style={{fontSize:13, lineHeight:1.55, color:T.attioText}}/><NoteEdited n={n} contact={contact}/></>}
     </div>
   );
 }
@@ -385,7 +464,7 @@ function ActivityNotes({a, contact, notes, link, onUpdate, onAdd, own}){
         ? <ActivityNoteItem key="own" n={{...a, body:a.body}} contact={contact} canEdit={can(a, 'edit')} canDelete={can(a, 'delete')}
             onSave={body=>onUpdate(a.id, {body})} onDelete={()=>onUpdate(a.id, {body:''})}/>
         : <ActivityNoteItem key={n.id} n={n} contact={contact} canEdit={can(n, 'edit')} canDelete={can(n, 'delete')}
-            onSave={body=>onUpdate(n.id, {body})} onDelete={()=>del && del(n)}/>)}
+            onSave={body=>onUpdate(n.id, noteEditPatch(n, body, contact))} onDelete={()=>del && del(n)}/>)}
       {!list.length && !adding && <div style={{fontSize:13, color:T.attioMuted}}>No notes yet</div>}
     </div>
   );
@@ -545,8 +624,6 @@ function TaskDetail({a, contact, team, comments = [], onUpdate, onAdd, onStub, a
         <Field label="Description">{editing
           ? <textarea value={d.description} onChange={e=>set({description:e.target.value})} rows={3} style={{...fieldText, resize:'vertical', lineHeight:1.5}}/>
           : <ReadValue>{a.description}</ReadValue>}</Field>
-        <Field label="Pipeline">{editing ? <Select value={d.pipelineId} options={taskPipelineOptions()} onChange={v=>v && set({pipelineId:v, status:firstStageOf(v)})}/>
-          : <ReadValue>{(taskPipelineOf(a) || {}).name}</ReadValue>}</Field>
         <Field label="Status">{editing ? <TaskStatusRadios name={`status-${a.id}`} pipelineId={d.pipelineId} value={d.status} overdue={d.status !== 'completed' && isPastDue(taskDueValue(d.dueDate, d.dueTimeOfDay))} onChange={v=>set({status:v})}/>
           : <span style={{fontSize:13, paddingTop:7, display:'block', color: taskState(a) === 'overdue' ? T.red : T.attioText}}>{taskStateLabel(a)}</span>}</Field>
         <Field label="Task Type">{editing ? <Select value={d.taskType} options={TASK_TYPES} onChange={v=>v && set({taskType:v})}/> : <ReadValue>{a.taskType}</ReadValue>}</Field>
@@ -633,8 +710,10 @@ function MeetingDetail({a, contact, team, comments, onUpdate, onAdd, onStub, acr
   return (
     <DetailFrame head={detailHead(a, contact, across)} actions={editing ? saveBar(cancel, save, dirty)
       : activityEditBar(a, ()=>{ setD(blank()); setEditing(true); }, detailMenu({a, onUpdate, onStub, deleteLabel: a.logged ? 'Delete Meeting Log' : 'Delete Meeting'}))}>
+      {!editing && a.officeRequest && <OfficeRequestBlock a={a} onUpdate={onUpdate}/>}
       {stack(<>
         {!editing && recordFirst(across)}
+        {!editing && a.location && <Field label="Location"><ReadValue>{a.location}</ReadValue></Field>}
         {/* Read-only: Title, Platform, Transcript, Time Stamp, Link — the organiser is in the
             header; Notes follow. Edit: organiser, platform, title (logs only) and link. */}
         {!editing && <Field label="Title"><ReadValue>{a.title}</ReadValue></Field>}
@@ -656,6 +735,104 @@ function MeetingDetail({a, contact, team, comments, onUpdate, onAdd, onStub, acr
       </>)}
       {!editing && <ActivityNotes a={a} contact={contact} notes={comments} link="meetingId" onUpdate={onUpdate} onAdd={onAdd}/>}
     </DetailFrame>
+  );
+}
+
+/* ── Office meeting requests (2026-11-18) ── a consultant asks a colleague to meet a client at the
+   office: Request Office Meeting (a record's Add Meeting) — the colleague (any user), the date,
+   time and length, a note. It's a meeting on the record, awaiting approval (`status:'requested'`,
+   `officeRequest`), with the office's address (Settings → Meetings → Office Meetings) and no online
+   link; the colleague is notified in their bell, which opens it. They Approve or Decline here.
+   Approved: the meeting is scheduled; they become a collaborator on the record (view and edit, not
+   delete or reassign — usersTeams.jsx permissionCovers); the client is sent an invite with the
+   address; the "client is coming" email goes to the people Office Meetings names; the requester is
+   notified. Declined: the meeting is cancelled and the requester notified. */
+const OFFICE_DURATIONS = [{value:'30', label:'30 min'}, {value:'60', label:'1 hour'}, {value:'90', label:'1 hour 30 min'}, {value:'120', label:'2 hours'}];
+const officeWhen = (a) => `${fmtActStamp(new Date(a.scheduledFor || a.at))} (${a.durationMin || 30} min)`;
+function OfficeMeetingRequestModal({object, record, onClose}){
+  const hub = useRecordHub(), engineCtx = useWorkflowEngineCtx();
+  const office = officeMeetingsOf(hub.data);
+  const users = (hub.data.users || []).filter(u => u.status === 'Activated' && u.name !== CURRENT_USER.name);
+  const [approver, setApprover] = React.useState('');
+  const [date, setDate] = React.useState('');
+  const [time, setTime] = React.useState('11:00');
+  const [duration, setDuration] = React.useState('60');
+  const [note, setNote] = React.useState('');
+  const at = date ? new Date(`${date}T${time || '09:00'}:00`) : null;
+  const ok = !!approver && !!at && at.getTime() > Date.now() && !!office.address.trim();
+  const send = () => {
+    if(!ok) return;
+    const who = users.find(u => u.id === approver);
+    const a = hub.add(object, record.id, {type:'meeting', title:`Office meeting · ${record.name}`, at, scheduledFor:at, durationMin:Number(duration), platform:'Office', location:office.address.trim(),
+      status:'requested', source:'you', by:CURRENT_USER.name, officeRequest:{approverId:approver, approverName:who ? who.name : '', requestedBy:CURRENT_USER.name, requestedAt:new Date().toISOString(), note:note.trim(), status:'pending'}});
+    if(engineCtx && engineCtx.api.notifyUsers) engineCtx.api.notifyUsers([approver], record.name, `${CURRENT_USER.name} asks you to meet ${record.name} at the office on ${fmtActStamp(at)}.${note.trim() ? `\n${note.trim()}` : ''}`, record.id, 'meetings');
+    hub.toast(`Request sent to ${who ? who.name : 'the approver'}`);
+    onClose(a && a.id);
+  };
+  return ReactDOM.createPortal(
+    <StModal title="Request Office Meeting" primary="Send Request" canSubmit={ok} onCancel={()=>onClose()} onSubmit={send} width={520}>
+      <div style={{display:'flex', flexDirection:'column', gap:14}}>
+        <div><label style={fieldLabel}>Meets the Client</label>
+          <SearchableSelect value={approver} options={users.map(u => ({value:u.id, label:u.name, sub:u.email, search:u.email}))} placeholder="Select a colleague" searchPlaceholder="Search users" onChange={setApprover}/></div>
+        <div style={{display:'flex', gap:12}}>
+          <div style={{flex:1}}><label style={fieldLabel}>Date</label><DateField required value={date} onChange={setDate} ariaLabel="Meeting date"/></div>
+          <div style={{flex:1}}><label style={fieldLabel}>Time</label><TimeField required value={time} onChange={setTime} ariaLabel="Meeting time"/></div>
+          <div style={{flex:1}}><label style={fieldLabel}>Duration</label><FormSelect value={duration} options={OFFICE_DURATIONS} onChange={(v)=>v && setDuration(v)}/></div>
+        </div>
+        <div><label style={fieldLabel}>Office</label>
+          <div style={{fontSize:13, color: office.address.trim() ? T.attioText : T.red, lineHeight:1.5}}>{office.address.trim() || 'No office address yet: set it in Settings → Meetings.'}</div></div>
+        <div><label style={fieldLabel}>Note</label>
+          <textarea value={note} onChange={e=>setNote(e.target.value)} rows={3} placeholder="Anything they should know" style={{...fieldText, resize:'vertical', lineHeight:1.5}}/></div>
+        {at && at.getTime() <= Date.now() && <div style={{fontSize:12, color:T.red}}>Choose a date and time that haven't passed.</div>}
+      </div>
+    </StModal>, document.body);
+}
+function OfficeRequestBlock({a, onUpdate}){
+  const hub = useRecordHub(), engineCtx = useWorkflowEngineCtx(), ra = useRecordAccess();
+  const r = a.officeRequest, me = (hub.data.users || []).find(u => u.name === CURRENT_USER.name);
+  const mine = !!me && me.id === r.approverId && r.status === 'pending';
+  const notify = (ids, text) => engineCtx && engineCtx.api.notifyUsers && engineCtx.api.notifyUsers(ids, ra ? ra.record.name : 'Office meeting', text, ra ? ra.record.id : null, 'meetings');
+  const requesterId = ((hub.data.users || []).find(u => u.name === r.requestedBy) || {}).id;
+  const approve = () => {
+    if(!ra) return;
+    const {object, record} = ra, now = new Date().toISOString(), office = officeMeetingsOf(hub.data);
+    onUpdate(a.id, {status:'scheduled', officeRequest:{...r, status:'approved', decidedAt:now}});
+    // The colleague works the record from now on: a collaborator (view and edit).
+    hub.updateRecord(object, record.id, {collaborators:[...new Set([...(record.collaborators || []), r.approverId])]});
+    const when = officeWhen(a), esc = (t) => String(t).replace(/[&<>]/g, c => ({'&':'&amp;', '<':'&lt;', '>':'&gt;'})[c]);
+    // The client's invite: the office's address, no online link.
+    if(String(record.email || '').trim()){
+      const body = `Dear ${emailFirstName(record.name) || record.name},\n\nWe look forward to meeting you at our office on ${when}.\n\nAddress: ${a.location}\n\n${r.approverName} will meet you there.`;
+      hub.add(object, record.id, {type:'email', direction:'sent', status:'sent', title:'Your meeting at our office', body, html:body.split('\n\n').map(p => `<p>${esc(p)}</p>`).join(''),
+        to:[String(record.email).trim()], source:'team', by:r.requestedBy, officeMeetingId:a.id});
+    }
+    // "The client is coming": the people Office Meetings names, by email (and the users in their bell).
+    const to = [...(office.notifyUserIds || []).map(id => ((hub.data.users || []).find(u => u.id === id) || {}).email).filter(Boolean),
+      ...String(office.notifyEmails || '').split(',').map(x => x.trim()).filter(Boolean)];
+    if(to.length){
+      const body = `${record.name} is coming to the office on ${when} to meet ${r.approverName}, requested by ${r.requestedBy}.\n\nAddress: ${a.location}${r.note ? `\n\nNote: ${r.note}` : ''}`;
+      hub.add(object, record.id, {type:'email', direction:'sent', status:'sent', title:`Client visit: ${record.name} · ${when}`, body, html:body.split('\n\n').map(p => `<p>${esc(p)}</p>`).join(''),
+        to, source:'team', by:'System', officeMeetingId:a.id});
+      notify(office.notifyUserIds || [], `${record.name} is coming to the office on ${when} to meet ${r.approverName}.`);
+    }
+    if(requesterId) notify([requesterId], `${r.approverName} approved the office meeting with ${record.name} on ${when}.`);
+    hub.toast('Office meeting approved');
+  };
+  const decline = () => {
+    onUpdate(a.id, {status:'cancelled', officeRequest:{...r, status:'declined', decidedAt:new Date().toISOString()}});
+    if(requesterId) notify([requesterId], `${r.approverName} declined the office meeting with ${ra ? ra.record.name : 'the client'} on ${officeWhen(a)}.`);
+    hub.toast('Office meeting declined');
+  };
+  const label = r.status === 'pending' ? `Awaiting approval by ${r.approverName}` : r.status === 'approved' ? `Approved by ${r.approverName}` : `Declined by ${r.approverName}`;
+  const tone = r.status === 'pending' ? T.attioText : r.status === 'approved' ? T.good : T.red;
+  return (
+    <div style={{display:'flex', alignItems:'center', gap:10, flexWrap:'wrap', padding:'10px 12px', marginBottom:14, border:`1px solid ${T.border}`, borderRadius:10, background:T.headerBg}}>
+      <div style={{flex:1, minWidth:0, display:'flex', flexDirection:'column', gap:2}}>
+        <span style={{fontSize:13, fontWeight:500, color:tone}}>Office meeting request · {label}</span>
+        <span style={{fontSize:12, color:T.attioMuted}}>Requested by {r.requestedBy}{r.note ? ` · ${r.note}` : ''}</span>
+      </div>
+      {mine && <><button onClick={decline} style={btnSecondarySm}>Decline</button><button onClick={approve} style={btnPrimarySm(true)}>Approve</button></>}
+    </div>
   );
 }
 
@@ -916,7 +1093,6 @@ function NewTask({team, contact, onAdd, onDone, initial}){
       <Field label="Description">
         <textarea value={t.description} onChange={e=>set({description:e.target.value})} rows={3} style={{...fieldText, resize:'vertical', lineHeight:1.5}}/>
       </Field>
-      <Field label="Pipeline"><Select value={t.pipelineId} options={taskPipelineOptions()} onChange={v=>v && set({pipelineId:v, status:firstStageOf(v)})}/></Field>
       <Field label="Status"><TaskStatusRadios name="status-new" pipelineId={t.pipelineId} value={t.status} onChange={v=>set({status:v})}/></Field>
       <Field label="Task Type"><Select value={t.taskType} options={TASK_TYPES} onChange={v=>v && set({taskType:v})}/></Field>
       <Field label="Assigned to"><PersonPicker value={assignee} team={team} contact={contact} onChange={setAssignee}/></Field>
@@ -937,7 +1113,7 @@ const ACTIVITY_ADD = {
   notes:    {label:'Add Note',  pick:'Note'},
   email:    {label:'Add Email', menu:['Email', 'Log Email']},
   tasks:    {label:'Add Task',  pick:'Task'},
-  meetings: {label:'Add Meeting', menu:['Start Meeting', 'Schedule Meeting', 'Log Meeting']},
+  meetings: {label:'Add Meeting', menu:['Start Meeting', 'Schedule Meeting', 'Log Meeting', 'Request Office Meeting']},
 };
 /* `iconOnly`: just the + (the toolbar icon button, its name as the tooltip) — the Tools pages. */
 function ActivityAddButton({tabId, onPick, iconOnly}){
@@ -946,17 +1122,19 @@ function ActivityAddButton({tabId, onPick, iconOnly}){
   const cfg0 = ACTIVITY_ADD[tabId];
   if(!cfg0) return null;
   // Only what the acting user may create on this record (its Object's Tools permissions).
-  const allowed = (o) => !ra || canAdd(ra.object, ra.record, o);
+  // Request Office Meeting is a record's (it's about that client) — not on the Tools pages.
+  const allowed = (o) => (o !== 'Request Office Meeting' || !!ra) && (!ra || canAdd(ra.object, ra.record, o));
   const cfg = cfg0.pick ? (allowed(cfg0.pick) ? cfg0 : null) : {...cfg0, menu:cfg0.menu.filter(allowed)};
   if(!cfg || (cfg.menu && !cfg.menu.length)) return null;
   const style = {...btnPrimarySm(), display:'inline-flex', alignItems:'center', gap:6};
-  const face = iconOnly ? <Icon name="plus" size={14} color={T.gray800}/> : <><Icon name="plus" size={13} color="#fff"/> {cfg.label}</>;
-  const btnProps = iconOnly ? {style:toolbarIconButton, title:cfg.label, 'aria-label':cfg.label} : {style};
-  if(cfg.pick) return <button onClick={()=>onPick(cfg.pick)} {...btnProps}>{face}</button>;
+  const face = <><Icon name="plus" size={13} color="#fff"/> {cfg.label}</>;
+  // `iconOnly` (the Tools pages): the list's "+ New <thing>" (NewButton, 2026-11-18).
+  const newLabel = cfg.label.replace(/^Add /, 'New ');
+  if(cfg.pick) return iconOnly ? <NewButton label={newLabel} onClick={()=>onPick(cfg.pick)}/> : <button onClick={()=>onPick(cfg.pick)} style={style}>{face}</button>;
   return (
     <div style={{position:'relative'}}>
-      <button onClick={()=>setOpen(o=>!o)} {...btnProps}>{face}</button>
-      <MenuShell open={open} onClose={()=>setOpen(false)} anchorRight width={170}>
+      {iconOnly ? <NewButton label={newLabel} onClick={()=>setOpen(o=>!o)}/> : <button onClick={()=>setOpen(o=>!o)} style={style}>{face}</button>}
+      <MenuShell open={open} onClose={()=>setOpen(false)} anchorRight width={210}>
         {cfg.menu.map(o => <MenuItem key={o} label={o} onClick={()=>{ setOpen(false); onPick(o); }}/>)}
       </MenuShell>
     </div>
@@ -984,7 +1162,7 @@ function ActivityNavItem({a, contact, context, selected, onSelect, record, count
    and opens on that record (its details, edits and comments go to it). */
 /* `acts`: what the tab lists (its filters and search applied); `allActs`: the record's whole activity —
    what an opened item reads (a call's notes, an email's thread), so a filter can't hide them. */
-function ActivityTab({tabId, contact, acts, allActs, team, adding, setAdding, prefill, onUpdate, onAdd, onStub, onReassign, emptyText, recordOf}){
+function ActivityTab({tabId, taskView = 'board', contact, acts, allActs, team, adding, setAdding, prefill, onUpdate, onAdd, onStub, onReassign, emptyText, recordOf}){
   const hub = useRecordHub();
   const type = ACTIVITY_TAB_TYPES[tabId];
   const all = type ? acts.filter(a => a.type === type) : listedActivities(acts);
@@ -1018,7 +1196,8 @@ function ActivityTab({tabId, contact, acts, allActs, team, adding, setAdding, pr
         const update = (e, patch) => own(e) ? onUpdate(e.act.id, patch) : hub.update(e.object, e.recordId, e.act.id, patch);
         const view = (r) => r && {...r, owner:userLabel(r.owner) || r.owner};
         return <>
-          <TaskStatusBoard entries={entries} onUpdate={update} onOpen={(e)=>setSelectedId(e.act.id)} showAssignee/>
+          {taskView === 'table' ? <TaskTable entries={entries} onOpen={(e)=>setSelectedId(e.act.id)}/>
+            : <TaskStatusBoard entries={entries} onUpdate={update} onOpen={(e)=>setSelectedId(e.act.id)} showAssignee/>}
           {open && <PageSidePanel title={open.act.title || 'Task'} onClose={()=>setSelectedId(null)}>
             <div style={{flex:1, minHeight:0, display:'flex', flexDirection:'column'}}>
               {own(open) ? <ActivityDetail key={open.act.id} a={open.act} contact={contact} team={team} acts={allActs || acts} onUpdate={onUpdate} onAdd={onAdd} onStub={onStub} onReassign={onReassign}/>
@@ -1075,4 +1254,4 @@ function ActivityTab({tabId, contact, acts, allActs, team, adding, setAdding, pr
   );
 }
 
-Object.assign(window, {CreatePanelFrame, ContentSidePanel, APP_HEADER_H, PageVisibleCtx, CreatePanelCtx, CreateRecordField, ComposeHostCtx, ActivityDetail, NewNote, NewLogCall, NewLogEmail, NewLogMeeting, NewScheduleMeeting, NewTask, SCHEDULE_DURATIONS, ActivityTab, ActivityAddButton, ACTIVITY_TAB_TYPES});
+Object.assign(window, {OfficeMeetingRequestModal, CreatePanelFrame, ContentSidePanel, APP_HEADER_H, PageVisibleCtx, CreatePanelCtx, CreateRecordField, ComposeHostCtx, ActivityDetail, NewNote, NewLogCall, NewLogEmail, NewLogMeeting, NewScheduleMeeting, NewTask, SCHEDULE_DURATIONS, ActivityTab, ActivityAddButton, ACTIVITY_TAB_TYPES});

@@ -17,7 +17,9 @@
         One-Time, Installment or Recurring, Quote Signed or a fixed date), then the discount on
         the services subtotal (a percentage or an amount) and 5% VAT on the discounted subtotal,
         down to the total;
-     4. Terms & Conditions — rich text;
+     4. Terms & Conditions — rich text, and Show bank details (2026-11-19: on to start with once the
+        Digital Letterhead has bank details; with none saved it's off and can't be turned on; a
+        template never carries it — each quote decides);
      5. E-Signature — Require e-signature adds a signature section for the customer;
      6. Preview — the quotation as the customer sees it, in the workspace's brand (Settings →
         Brand: its full logo and the saved Digital Letterhead, used on every quote without
@@ -42,7 +44,13 @@
 
    Shown on the record's Quotes tab (RecordQuotesTab) and on Tools → Quotes (QuotesPage), both
    with the same quotation view (QuoteDocument). Documents (documents.jsx) share its letterhead
-   frame (BrandedDocument) and the brand a sent one keeps (keepQuoteBrand / quoteBrand). */
+   frame (BrandedDocument) and the brand a sent one keeps (keepQuoteBrand / quoteBrand).
+
+   From the dev build (2026-11-19): a One-Time payment shows no Payment plan section (the view, the
+   PDF, the email) — only Installments and Recurring do; Bank details after the terms (only the
+   filled fields); Download PDF in a quote's ⋯ menu — the quotation exactly as the view shows it, on
+   A4 pages (quotePdfBlob: html2pdf.js from cdnjs, loaded when first needed); Send Quote attaches
+   that PDF to the quote's email. */
 
 const QUOTE_STATUS = {draft:{label:'Draft', tone:'neutral'}, sent:{label:'Sent', tone:'info'}, signed:{label:'Signed', tone:'success'}, expired:{label:'Expired', tone:'danger'}};
 /* Expired: a draft or sent quote past its Valid Until date — it can't be sent, signed or pulled into
@@ -64,6 +72,12 @@ function keepQuoteBrand(){
 const quoteBrand = (q) => (q && q.brandId && quoteBrandsOf()[q.brandId]) || orgBrand();
 // The brand's saved Digital Letterhead (Settings → Brand), or null while none is saved.
 const quoteLetterhead = (b) => b && b.letterhead && !b.letterhead.dataUrl && b.letterhead.companyName ? b.letterhead : null;
+// The letterhead's bank details, as label / value rows — only the filled ones (Settings → Brand → Digital Letterhead).
+const QUOTE_BANK_ROWS = [['bankAccountName', 'Account name'], ['bankName', 'Bank'], ['bankAccountNumber', 'Account number'], ['bankIban', 'IBAN'], ['bankSwift', 'SWIFT / BIC'], ['bankBranchAddress', 'Branch address']];
+const quoteBankRows = (b) => { const lh = quoteLetterhead(b); return lh ? QUOTE_BANK_ROWS.map(([k, l]) => [l, String(lh[k] || '').trim()]).filter(([, v]) => v) : []; };
+const hasBankDetails = (b) => quoteBankRows(b).length > 0;
+// A One-Time payment has no Payment plan section on the quotation (only Installments and Recurring).
+const quoteShowsPlan = (q) => q.payment ? quotePlanOf(q).paymentType !== 'one-time' : (q.installments || []).length > 0;
 // The brand's logo, whole (uncropped); without one uploaded, the HOF logo the Brand page shows.
 const BrandLogo = ({brand, height = 28}) => brand.logo
   ? <img src={brand.logo} alt="" style={{display:'block', maxHeight:height, maxWidth:220, objectFit:'contain'}}/> : <Logo variant="main" height={height}/>;
@@ -180,7 +194,8 @@ function QuoteStatusPill({status}){ return <StatusPill status={status} map={QUOT
    terms, the terms and conditions, and — when an e-signature is required — the customer's
    signature section. A quote template's preview (templates.jsx) is the same page with sample
    details: `quote.sampleRecord` stands in for its record. */
-function QuoteDocument({quote}){
+// `flat`: no card border (the PDF's page).
+function QuoteDocument({quote, flat}){
   const hub = useRecordHub();
   const brand = quoteBrand(quote);
   const record = quote.sampleRecord || hubRecord(hub, quote.object, quote.recordId);
@@ -195,7 +210,7 @@ function QuoteDocument({quote}){
   );
   const installments = quote.installments || [];
   return (
-    <BrandedDocument brand={brand} label="Quotation" number={quote.number}>
+    <BrandedDocument brand={brand} label="Quotation" number={quote.number} flat={flat}>
       <div style={{padding:'18px 24px', display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(150px, 1fr))', gap:16, borderBottom:`1px solid ${T.attioLine}`}}>
         <div><div style={muted}>Prepared for</div><div style={{fontSize:13.5, fontWeight:500, color:T.attioText}}>{quote.recipient.name || '—'}</div>
           <div style={{fontSize:12.5, color:T.attioMuted, overflowWrap:'anywhere'}}>{quote.recipient.email}</div></div>
@@ -214,7 +229,7 @@ function QuoteDocument({quote}){
         <div>
           <div style={section}>Services</div>
           {(quote.items || []).map(raw => { const it = withItemMilestonePrices(raw); return (
-            <div key={it.id} style={{borderTop:`1px solid ${T.attioLine}`, padding:'14px 0', display:'flex', flexDirection:'column', gap:10}}>
+            <div key={it.id} className="pdf-keep" style={{borderTop:`1px solid ${T.attioLine}`, padding:'14px 0', display:'flex', flexDirection:'column', gap:10}}>
               <div style={{display:'flex', gap:12, alignItems:'baseline'}}>
                 <div style={{flex:1, minWidth:0}}>
                   <div style={{fontSize:14, fontWeight:600, color:T.attioText}}>{it.name}</div>
@@ -237,7 +252,7 @@ function QuoteDocument({quote}){
         </div>
 
         {/* The money: subtotal, discount, discounted subtotal, VAT, total. */}
-        <div style={{marginLeft:'auto', width:'100%', maxWidth:340}}>
+        <div className="pdf-keep" style={{marginLeft:'auto', width:'100%', maxWidth:340}}>
           {sumRow('Services subtotal', fmtMoney(t.subtotal, cur))}
           {t.discount > 0 && <>
             {sumRow(`Discount${quote.discount && quote.discount.type === 'percent' ? ` (${Number(quote.discount.value)}%)` : ''}`, `− ${fmtMoney(t.discount, cur)}`)}
@@ -248,7 +263,7 @@ function QuoteDocument({quote}){
         </div>
 
         {/* Payment terms: the plan's payments (saved before plans: the installments as they were). */}
-        {(quote.payment || installments.length > 0) && (
+        {quoteShowsPlan(quote) && (
           <div>
             <div style={{...section, display:'flex', justifyContent:'space-between', gap:12}}>Payment plan
               {quote.payment && <span style={{color:T.attioMuted, fontWeight:500, letterSpacing:0, textTransform:'none', fontSize:12}}>{PAYMENT_TYPE_LABEL[quotePlanOf(quote).paymentType]}</span>}</div>
@@ -264,8 +279,21 @@ function QuoteDocument({quote}){
           </div>
         )}
 
+        {/* Bank details (the letterhead's), when the quote shows them: only the filled fields. */}
+        {quote.showBankDetails && quoteBankRows(brand).length > 0 && (
+          <div className="pdf-keep">
+            <div style={section}>Bank details</div>
+            {quoteBankRows(brand).map(([label, value]) => (
+              <div key={label} style={{display:'flex', gap:12, padding:'3px 0', fontSize:12.5, lineHeight:1.5}}>
+                <span style={{width:140, flexShrink:0, color:T.attioMuted}}>{label}</span>
+                <span style={{flex:1, minWidth:0, color:T.attioText, whiteSpace:'pre-line', overflowWrap:'anywhere'}}>{value}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* E-signature: the customer signs here. */}
-        {quote.eSignature && <QuoteSignaturePreview name={quote.recipient.name} brand={brand}/>}
+        {quote.eSignature && <div className="pdf-keep"><QuoteSignaturePreview name={quote.recipient.name} brand={brand}/></div>}
       </div>
     </BrandedDocument>
   );
@@ -276,7 +304,7 @@ function QuoteDocument({quote}){
    note (else its company name and website), as on Settings → Brand. `noNumber` (Documents): no
    label and number at the top; `beneathLogo`: what goes under the logo instead (a document's
    number and date). */
-function BrandedDocument({brand, label, number, children, noNumber, beneathLogo}){
+function BrandedDocument({brand, label, number, children, noNumber, beneathLogo, flat}){
   const lh = quoteLetterhead(brand);
   const head = (
     <div style={{textAlign: lh ? 'left' : 'right'}}>
@@ -285,7 +313,7 @@ function BrandedDocument({brand, label, number, children, noNumber, beneathLogo}
     </div>
   );
   return (
-    <div style={{border:`1px solid ${T.border}`, borderRadius:12, overflow:'hidden', background:'#fff'}}>
+    <div style={{border: flat ? 'none' : `1px solid ${T.border}`, borderRadius: flat ? 0 : 12, overflow:'hidden', background:'#fff'}}>
       <div style={{height:4, background:brand.colors.primary}}/>
       <div style={{padding:'22px 24px', display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:16, borderBottom:`1px solid ${T.attioLine}`, flexWrap:'wrap'}}>
         <div style={{display:'flex', flexDirection:'column', alignItems:'flex-start', gap:14, minWidth:0}}><BrandLogo brand={brand}/>{beneathLogo}</div>
@@ -333,20 +361,53 @@ function QuoteLetterheadBlock({lh}){
   );
 }
 
-/* Sending a quote: Sent, and the quote and its email on the record's activity. */
-function sendQuoteVia(hub, q){
+/* The quotation as a PDF: the quote view (QuoteDocument, without its card border) drawn on A4
+   pages, page breaks kept off a service, the totals, bank details and signature. → a Blob. */
+const HTML2PDF_JS = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+const QUOTE_PDF_W = 794;   // an A4 page's width in CSS pixels
+async function quotePdfBlob(hub, q){
+  await loadFileScript(HTML2PDF_JS);
+  const host = document.createElement('div');
+  host.style.cssText = `position:fixed;left:-${QUOTE_PDF_W + 200}px;top:0;width:${QUOTE_PDF_W}px;background:#fff;font-family:'DM Sans',sans-serif`;
+  document.body.appendChild(host);
+  const root = ReactDOM.createRoot(host);
+  try {
+    // Drawn apart from the page: its record is passed in (no hub there).
+    root.render(<QuoteDocument quote={{...q, sampleRecord:q.sampleRecord || hubRecord(hub, q.object, q.recordId)}} flat/>);
+    await new Promise(r => setTimeout(r, 250));
+    await Promise.all([...host.querySelectorAll('img')].map(img => img.complete ? null : new Promise(r => { img.onload = img.onerror = r; })));
+    return await window.html2pdf().set({margin:[20, 0, 20, 0], image:{type:'jpeg', quality:.92}, html2canvas:{scale:1.6, useCORS:true, backgroundColor:'#ffffff'},
+      jsPDF:{unit:'pt', format:'a4', orientation:'portrait'}, pagebreak:{mode:['css', 'legacy'], avoid:'.pdf-keep'}}).from(host.firstChild).outputPdf('blob');
+  } finally { root.unmount(); host.remove(); }
+}
+const blobDataUrl = (blob) => new Promise((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(r.result); r.onerror = reject; r.readAsDataURL(blob); });
+// Download PDF: the quotation's PDF, saved as "<number>.pdf".
+async function downloadQuotePdf(hub, q){
+  try {
+    const blob = await quotePdfBlob(hub, q), a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = `${q.number}.pdf`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  } catch(e){ hub.toast('The PDF could not be made'); }
+}
+
+/* Sending a quote: Sent, and the quote and its email on the record's activity — the email with the
+   quotation's PDF attached (made first; without it if it can't be). → a promise, done once sent. */
+async function sendQuoteVia(hub, q){
+  let pdf = null;
+  try { const blob = await quotePdfBlob(hub, q); pdf = {id:`att-${Date.now().toString(36)}`, name:`${q.number}.pdf`, size:blob.size, mime:'application/pdf', dataUrl:await blobDataUrl(blob)}; } catch(e){}
   const sentAt = new Date();
   const t = quoteTotals(q), cur = quoteCurrency(q);
   const brandId = keepQuoteBrand();
   hub.setQuotes(qs => qs.map(x => x.id === q.id ? {...x, status:'sent', sentAt, brandId} : x));
   hub.add(q.object, q.recordId, {type:'quote', status:'sent', title:`${q.number} · ${q.title}`, quoteId:q.id, total:t.total, source:'you', by:null});
-  hub.add(q.object, q.recordId, {type:'email', direction:'sent', status:'sent', to:[q.recipient.email].filter(Boolean), source:'you', by:null, quoteId:q.id,
+  hub.add(q.object, q.recordId, {type:'email', direction:'sent', status:'sent', to:[q.recipient.email].filter(Boolean), source:'you', by:null, quoteId:q.id, ...(pdf ? {attachments:[pdf]} : {}),
     title:`Quotation ${q.number}: ${q.title}`,
     body:`Hi ${emailFirstName(q.recipient.name) || 'there'},\n\nPlease find your quotation ${q.number} for ${q.title} below.\n\n`
       + (q.items || []).map(it => `${it.name} — ${fmtMoney(quoteItemTotal(it), cur)}`).join('\n')
       + `\n\nSubtotal: ${fmtMoney(t.subtotal, cur)}` + (t.discount ? `\nDiscount: − ${fmtMoney(t.discount, cur)}` : '') + (q.vatRate != null ? `\nVAT (${t.vatRate}%): ${fmtMoney(t.vat, cur)}` : '')
       + `\nTotal: ${fmtMoney(t.total, cur)}` + (q.validUntil ? `\nValid until ${fmtQuoteDate(q.validUntil)}.` : '')
-      + (q.payment ? `\n\nPayment plan (${PAYMENT_TYPE_LABEL[quotePlanOf(q).paymentType]}):\n` + quoteSchedule(q).map((x, i) => `${i + 1}. ${x.description} — ${fmtMoney(x.amount, cur)} — due ${fmtQuoteDate(x.dueDate) || x.tentative}`).join('\n') + (planOngoing(quotePlanOf(q)) ? '\nUntil cancelled' : '')
+      + (!quoteShowsPlan(q) ? '' : q.payment ? `\n\nPayment plan (${PAYMENT_TYPE_LABEL[quotePlanOf(q).paymentType]}):\n` + quoteSchedule(q).map((x, i) => `${i + 1}. ${x.description} — ${fmtMoney(x.amount, cur)} — due ${fmtQuoteDate(x.dueDate) || x.tentative}`).join('\n') + (planOngoing(quotePlanOf(q)) ? '\nUntil cancelled' : '')
         : (q.installments || []).length ? `\n\nPayment plan:\n` + q.installments.map((x, i) => `${i + 1}. ${x.description} — ${round2(x.percent)}% — ${fmtMoney(installmentAmount(q, x), cur)}${fmtTentative(x.due) ? ` — ${fmtTentative(x.due)}` : ''}`).join('\n') : '')
       + (q.eSignature ? `\n\nPlease review and sign the quotation.` : '') + `\n\nKind regards,\n${CURRENT_USER.name}`});
   hub.toast(`Quote ${q.number} sent`);
@@ -525,13 +586,15 @@ function QuoteBuilder({mode, id, object, onClose, placement = 'fixed', template}
   const person0 = target.id != null ? hubRecordPerson(hub, target.object, target.id) : null;
   const [q, setQ] = React.useState(() => existing ? {...JSON.parse(JSON.stringify(existing)), description:existing.description || richHtmlOf(existing.notes || ''), notes:undefined,
       items:(existing.items || []).map(withItemMilestonePrices), payment:quotePlanOf(existing), installments:undefined, discount:existing.discount || {type:'percent', value:''},
-      vatRate:existing.vatRate ?? QUOTE_VAT_RATE, terms:existing.terms || '', eSignature:!!existing.eSignature, currency:quoteCurrency(existing)}
+      vatRate:existing.vatRate ?? QUOTE_VAT_RATE, terms:existing.terms || '', eSignature:!!existing.eSignature, currency:quoteCurrency(existing), showBankDetails:!!existing.showBankDetails}
     : tpl0 ? {name:tpl0.name || '', title:tpl0.title || '', recipient:{name:'', email:''}, description:tpl0.description || '', items:copyItems(tpl0.items), payment:quotePlanOf(tpl0),
       discount:tpl0.discount || {type:'percent', value:''}, vatRate:tpl0.vatRate ?? QUOTE_VAT_RATE, terms:tpl0.terms || '', eSignature:!!tpl0.eSignature, templateId:null, currency:quoteCurrency(tpl0), validUntil:''}
     : {name:'',
     title:'', recipient:{name:(person0 && person0.name) || '', email:(person0 && person0.email) || ''}, description:'', items:[], payment:newPaymentPlan(),
     discount:{type:'percent', value:''}, vatRate:QUOTE_VAT_RATE, terms:'', eSignature:false, templateId:null, currency:defaultCurrency(),
-    validUntil:ymdOf(new Date(Date.now() + 30 * 86400000))});
+    validUntil:ymdOf(new Date(Date.now() + 30 * 86400000)), showBankDetails:hasBankDetails(orgBrand())});
+  const bankSaved = hasBankDetails(orgBrand());
+  const [sending, setSending] = React.useState(false);
   const set = (p) => setQ(x => ({...x, ...p}));
   // A record picked here fills in its person.
   React.useEffect(() => { if(fixedRecord || isTpl) return; const p = target.id != null ? hubRecordPerson(hub, target.object, target.id) : null; set({recipient:{name:(p && p.name) || '', email:(p && p.email) || ''}}); }, [target.object, target.id]);
@@ -552,7 +615,8 @@ function QuoteBuilder({mode, id, object, onClose, placement = 'fixed', template}
       hub.setQuotes(qs => [...qs, saved]);
       hub.add(saved.object, saved.recordId, {type:'quote', status:'draft', title:`${saved.number} · ${saved.title}`, quoteId:saved.id, total:quoteTotal(saved), source:'you', by:null});
     }
-    if(andSend) sendQuoteVia(hub, saved); else hub.toast(existing ? 'Quote saved' : `Quote ${saved.number} saved as draft`);
+    if(andSend){ setSending(true); return sendQuoteVia(hub, saved).then(() => onClose(saved)); }
+    hub.toast(existing ? 'Quote saved' : `Quote ${saved.number} saved as draft`);
     onClose(saved);
   };
   // A template, saved from the steps: its name, the quote's title and description, and what the steps set.
@@ -588,7 +652,7 @@ function QuoteBuilder({mode, id, object, onClose, placement = 'fixed', template}
         {step < last ? <StCta label="Next" disabled={!stepOk[step]} onClick={()=>setStep(s => s + 1)}/>
           : isTpl ? <StCta label={tpl0 ? 'Save Changes' : 'Add Quote Template'} disabled={!stepOk.every(Boolean)} onClick={saveAsTemplate}/>
           : <>{templateCan('quoteTemplates', 'create') && <StSecondary label="Save as Template" onClick={()=>setTemplating(q.title.trim() || (q.items[0] && q.items[0].name) || '')}/>}
-              <StSecondary label={existing ? 'Save Changes' : 'Save as Draft'} onClick={()=>save(false)}/><StCta label="Send Quote" disabled={!!q.validUntil && q.validUntil < ymdOf(new Date())} onClick={()=>save(true)}/></>}
+              <StSecondary label={existing ? 'Save Changes' : 'Save as Draft'} onClick={()=>save(false)}/><StCta label="Send Quote" busy={sending} disabled={!!q.validUntil && q.validUntil < ymdOf(new Date())} onClick={()=>save(true)}/></>}
       </>}>
       {/* The steps, in their own column on the left. A template already made (`filled`): every step reads as done — no progress to show — and the open one is the light grey row. */}
       <div style={{width:QUOTE_STEPPER_W, flexShrink:0, borderRight:`1px solid ${T.border}`, padding:'16px 12px', display:'flex', flexDirection:'column', gap:2}}>
@@ -637,6 +701,13 @@ function QuoteBuilder({mode, id, object, onClose, placement = 'fixed', template}
           {step === 3 && <>
             <span style={section}>Terms & conditions</span>
             <RichTextEditor value={q.terms} onChange={(v)=>set({terms:v})} minHeight={260} ariaLabel="Terms and conditions"/>
+            {/* A quote (never a template) decides whether the letterhead's bank details follow the terms. */}
+            {!isTpl && <div style={{display:'flex', flexDirection:'column', gap:6}}>
+              <label style={{display:'flex', alignItems:'center', gap:10, fontSize:13.5, color: bankSaved ? T.attioText : T.gray400, cursor: bankSaved ? 'pointer' : 'default', alignSelf:'flex-start'}}>
+                <UtToggle on={bankSaved && !!q.showBankDetails} disabled={!bankSaved} onChange={(v)=>set({showBankDetails:v})}/> Show bank details
+              </label>
+              {!bankSaved && <span style={{fontSize:12, color:T.attioMuted}}>No bank details saved. Add them in Settings → Brand → Digital Letterhead.</span>}
+            </div>}
           </>}
 
           {/* 5 · E-Signature */}
@@ -723,13 +794,14 @@ function QuoteSignaturePreview({name, brand = orgBrand()}){
 }
 
 /* A quote's actions, wherever it's shown: Edit (drafts), Send (drafts not expired), Mark as signed
-   (sent, not expired), Delete (anything not signed — a signed quote is kept). */
+   (sent, not expired), Download PDF (any — 2026-11-19), Delete (anything not signed — a signed quote is kept). */
 function quoteActions(hub, q, {onDelete, onEdit, onSign} = {}){
   const expired = quoteExpired(q);
   return [
     ...(q.status === 'sent' && !expired && onSign ? [{label:'Mark as Signed', onClick:()=>onSign(q)}] : []),
     ...(q.status === 'draft' ? [{label:'Edit Quote', onClick:()=>onEdit ? onEdit(q.id) : hub.editQuote(q.id)}] : []),
     ...(q.status === 'draft' && !expired ? [{label:'Send Quote', onClick:()=>sendQuoteVia(hub, q)}] : []),
+    {label:'Download PDF', onClick:()=>{ hub.toast('Preparing the PDF'); downloadQuotePdf(hub, q); }},
     ...(q.status !== 'signed' ? [{label:'Delete Quote', danger:true, onClick:()=>onDelete && onDelete(q)}] : []),
   ];
 }
@@ -829,6 +901,8 @@ function RecordQuotesTab({contact}){
   const [deleting, setDeleting] = React.useState(null);
   const [builder, setBuilder] = React.useState(null);   // {mode:'new'} | {mode:'edit', id}: the creation panel over this tab
   const [signing, setSigning] = React.useState(null);   // the sent quote being marked as signed
+  const [sendingId, setSendingId] = React.useState(null);   // the quote being sent (its PDF made first)
+  const send = (q) => { setSendingId(q.id); sendQuoteVia(hub, q).finally(() => setSendingId(null)); };
   const selected = list.find(q => q.id === selectedId) || list[0] || null;
   const actions = selected ? quoteActions(hub, selected, {onDelete:setDeleting, onEdit:(qid)=>setBuilder({mode:'edit', id:qid}), onSign:setSigning}).filter(it => /^Delete/.test(it.label) ? can('delete') : /^Edit/.test(it.label) ? can('edit') : true) : [];
   return (
@@ -847,7 +921,8 @@ function RecordQuotesTab({contact}){
           {selected && (
             <DetailFrame head={<span style={{fontSize:13, color:T.attioMuted}}>{selected.number} · created by {selected.createdBy}{selected.status === 'signed' ? ` · signed ${fmtQuoteDate(selected.signedAt)}` : ''}</span>}
               actions={<>{selected.status === 'draft' && can('edit') && headerBtn('Edit', ()=>setBuilder({mode:'edit', id:selected.id}))}
-                {selected.status === 'draft' && !quoteExpired(selected) && <button onClick={()=>sendQuoteVia(hub, selected)} style={btnPrimarySm()}>Send</button>}
+                {selected.status === 'draft' && !quoteExpired(selected) && <button onClick={()=>send(selected)} disabled={sendingId === selected.id}
+                  style={{...btnPrimarySm(), display:'inline-flex', alignItems:'center', gap:6, cursor: sendingId === selected.id ? 'default' : 'pointer'}}>{sendingId === selected.id && <Spinner size={13} color="#fff"/>}Send</button>}
                 {selected.status === 'sent' && !quoteExpired(selected) && can('edit') && <button onClick={()=>setSigning(selected)} style={btnPrimarySm()}>Mark as signed</button>}
                 {selected.signedCopy && <a href={selected.signedCopy.dataUrl} download={selected.signedCopy.name} style={{...btnSecondarySm, textDecoration:'none'}}><Icon name="paperclip" size={13} color={T.gray600}/> Signed copy</a>}
                 {actions.some(it => !/^(Edit|Send|Mark)/.test(it.label)) && <DetailMoreMenu items={actions.filter(it => !/^(Edit|Send|Mark)/.test(it.label))}/>}</>}>
@@ -911,10 +986,11 @@ function QuotesPage(){
       <RecordViewsModule inset="page" schema={schema} rows={rows} columns={QUOTE_COLUMNS.map(c => c.key)}
         defaultViews={[{id:'qv-all', name:'All Quotes', sort:{key:'number', dir:'desc'}},
           {id:'qv-draft', name:'Drafts', filters:{nodes:[{id:'f-qd', kind:'row', joinOp:'AND', prop:'statusLabel', op:'is', value:'Draft', value2:'', values:[]}]}},
-          {id:'qv-sent', name:'Sent', filters:{nodes:[{id:'f-qs', kind:'row', joinOp:'AND', prop:'statusLabel', op:'is', value:'Sent', value2:'', values:[]}]}}]}
+          {id:'qv-sent', name:'Sent', filters:{nodes:[{id:'f-qs', kind:'row', joinOp:'AND', prop:'statusLabel', op:'is', value:'Sent', value2:'', values:[]}]}},
+          {id:'qv-signed', name:'Signed', addOnce:true, filters:{nodes:[{id:'f-qsg', kind:'row', joinOp:'AND', prop:'statusLabel', op:'is', value:'Signed', value2:'', values:[]}]}}]}
         actions={() => <>
           {templateCan('services', 'create') && <button onClick={()=>setNewService(true)} style={toolbarButton}><Icon name="services" size={13} color={T.gray600}/> New service</button>}
-          <button onClick={()=>{ setOpenId(null); setBuilder({mode:'new'}); }} title="Add Quote" style={toolbarIconButton}><Icon name="plus" size={14} color={T.gray800}/></button>
+          <NewButton label="New Quote" onClick={()=>{ setOpenId(null); setBuilder({mode:'new'}); }}/>
         </>}
         overlay={newService ? <ServiceFormPanel onCancel={()=>setNewService(false)} onSave={(vals)=>{ hub.setServices(ss => [...ss, newServiceRecord(vals)]); setNewService(false); hub.toast('Service created'); }}/>
           : builder ? <QuoteBuilder key={builder.id || 'new'} {...builder} onClose={(saved)=>{ setBuilder(null); if(saved) setOpenId(saved.id); }}/>
@@ -929,5 +1005,5 @@ function QuotesPage(){
   );
 }
 
-Object.assign(window, {quotePlanOf, quoteSchedule, BrandedDocument, InstallmentsTable, MarkSignedModal, QuoteSignaturePreview, keepQuoteBrand, quoteBrand, quoteNumber, DeleteQuoteModal, PercentAmountField, quoteSeqFloor, splitAmounts, quoteExpired, quoteStatusOf, tentativeOk, normalizeDue, readUpload, EvidenceFile, fmtTentative, tentativeDate, installmentAmount, SAMPLE_QUOTES, SAMPLE_QUOTE_TEMPLATES, quoteTemplatesOf, quoteTotals, quoteItemTotal, nextTemplateCode, copyItems, QuoteBuilder, QuoteDocument, RecordQuotesTab, QuoteActivityDetail, QuotesPage, quoteTotal, QUOTE_STATUS, sendQuoteVia,
+Object.assign(window, {quotePdfBlob, downloadQuotePdf, hasBankDetails, quoteShowsPlan, quotePlanOf, quoteSchedule, BrandedDocument, InstallmentsTable, MarkSignedModal, QuoteSignaturePreview, keepQuoteBrand, quoteBrand, quoteNumber, DeleteQuoteModal, PercentAmountField, quoteSeqFloor, splitAmounts, quoteExpired, quoteStatusOf, tentativeOk, normalizeDue, readUpload, EvidenceFile, fmtTentative, tentativeDate, installmentAmount, SAMPLE_QUOTES, SAMPLE_QUOTE_TEMPLATES, quoteTemplatesOf, quoteTotals, quoteItemTotal, nextTemplateCode, copyItems, QuoteBuilder, QuoteDocument, RecordQuotesTab, QuoteActivityDetail, QuotesPage, quoteTotal, QUOTE_STATUS, sendQuoteVia,
   sampleQuoteOf, QuoteServicesFields, QuotePaymentFields, quoteConfigChecks, normalizeQuoteConfig, QUOTE_SECTION, QUOTE_PANEL_W, QUOTE_VAT_RATE});

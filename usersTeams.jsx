@@ -34,9 +34,13 @@
 
 /* User status (a select property) and the default views built on it — the Contacts view
    system: each view is a saved filter on Status, managed like any Contacts view. */
-const USER_STATUSES = ['Activated', 'Deactivated'];
+/* Pending (2026-11-18): Add User sends the person an invite; they're Pending — the Pending Invites
+   view, with Resend Invite and Cancel Invite — until they first sign in, which activates them
+   (withSessionMember). */
+const USER_STATUSES = ['Activated', 'Pending', 'Deactivated'];
 const USER_DEFAULT_VIEWS = [
   {id:'uv-activated',   name:'Activated Users',   status:'Activated'},
+  {id:'uv-pending',     name:'Pending Invites',   status:'Pending', addOnce:true},
   {id:'uv-deactivated', name:'Deactivated Users', status:'Deactivated'},
 ];
 /* Seat types (product definition, for now): Full Seat and View Seat. The seat is the first
@@ -339,10 +343,13 @@ function recordOwners(object, record, withHistory){
   const past = (ACCESS.history(object, record.id) || []).filter(a => a.type === 'ownerChange').flatMap(a => [a.from, a.to]).map(v => userIdOf(v, ACCESS.users));
   return [...new Set([owner, ...past].filter(Boolean))];
 }
-function permissionCovers(p, object, record){
+/* `action`: a record's collaborators (an approved office meeting's colleague — activityCards.jsx)
+   may view and edit it, and its tools, like its owner — not delete or reassign it (2026-11-18). */
+function permissionCovers(p, object, record, action){
   const u = ACCESS.user;
   if(!p || !p.on) return false;
   if(p.scope === 'all') return true;
+  if((action === 'view' || action === 'edit') && record && (record.collaborators || []).includes(u.id)) return true;
   const owners = recordOwners(object, record, p.life === 'removed');
   if(p.scope === 'own') return owners.includes(u.id);
   const team = (id) => (ACCESS.users.find(x => x.id === id) || {}).teamId;
@@ -354,7 +361,7 @@ function toolCan(object, record, tool, action){
   if(!o || !o.enabled || !o.tools || !o.tools.enabled) return false;
   const p = (o.tools[tool] || {})[action];
   if(!p) return false;
-  return action === 'create' ? !!p.on : permissionCovers(p, object, record);
+  return action === 'create' ? !!p.on : permissionCovers(p, object, record, action);
 }
 /* ── Access beyond tools ── each check: no acting user (nothing registered) → allowed. Create needs
    only to be on; a check without the item ("may they view any?") needs only the permission on;
@@ -379,6 +386,8 @@ const stageMoveCan = (object, record) => !ACCESS_ON() || (recordEditable(object,
 const propValueCan = (object, record, key) => {
   if(!ACCESS_ON()) return true;
   if(!recordEditable(object, record)) return false;
+  // A collaborator edits the record but doesn't reassign it: its owner only with their own Edit.
+  if(key === 'owner'){ const p = ACCESS.perms[object]; if(!(p && p.enabled && permissionCovers(p.edit, object, record))) return false; }
   const list = (ACCESS.perms[object] || {}).editProps;
   return !Array.isArray(list) || list.includes(key);
 };
@@ -395,7 +404,7 @@ const paymentTermsCan = (action, object, record) => {
   const o = ACCESS.perms[object];
   const p = o && o.enabled && o.accounting && o.accounting[action];
   if(!p) return false;
-  return action === 'create' || !record ? !!p.on : permissionCovers(p, object, record);
+  return action === 'create' || !record ? !!p.on : permissionCovers(p, object, record, action);
 };
 // May see accounting figures at all (any record): cash KPIs and statistics show only then.
 const accountingViewAny = () => !ACCESS_ON() || ADMIN_RECORD_OBJECTS.filter(workspaceHasType).some(o => paymentTermsCan('view', o));
@@ -453,7 +462,7 @@ const activityVisible = (object, record, a) => { const t = ACTIVITY_TOOL[a.type]
 const visibleActivities = (object, record, acts) => ACCESS.user ? (acts || []).filter(a => activityVisible(object, record, a)) : (acts || []);
 const activityCan = (object, record, a, action) => { const t = ACTIVITY_TOOL[a.type]; return !t || toolCan(object, record, t, action); };
 // Adding from an activity tab / quick action: the tool each creates.
-const ADD_TOOL = {'Note':'notes', 'Call':'calls', 'Log Call':'callLogs', 'Start Meeting':'meetings', 'Schedule Meeting':'meetings', 'Log Meeting':'meetings', 'Task':'tasks',
+const ADD_TOOL = {'Note':'notes', 'Call':'calls', 'Log Call':'callLogs', 'Start Meeting':'meetings', 'Schedule Meeting':'meetings', 'Log Meeting':'meetings', 'Request Office Meeting':'meetings', 'Task':'tasks',
   call:'calls', task:'tasks', note:'notes', meeting:'meetings', 'Meeting':'meetings', 'Create task':'tasks', 'Add note':'notes', file:'files', quote:'quotes', document:'documents'};
 const canAdd = (object, record, what) => { const t = ADD_TOOL[what]; return !t || toolCan(object, record, t, 'create'); };
 
@@ -598,7 +607,10 @@ function withSessionMember(people, session, preset = SUPER_ADMIN){
   const fullSeat = (seats, uid, extra) => { const free = seats.findIndex(st => st.type === 'Full Seat' && !st.assigneeId);
     return free >= 0 ? seats.map((st, i) => i === free ? {...st, assigneeId:uid} : st)
       : extra ? [...seats, {id:`${SEAT_PREFIX['Full Seat']}${seats.filter(st => st.type === 'Full Seat').length + 1}`, type:'Full Seat', assigneeId:uid}] : seats; };
-  const me = people.users.find(u => String(u.email || '').toLowerCase() === email);
+  let me = people.users.find(u => String(u.email || '').toLowerCase() === email);
+  // An invited user signing in for the first time accepts the invite: Activated.
+  if(me && me.status === 'Pending'){ const joined = {...me, status:'Activated', acceptedAt:new Date().toISOString()};
+    people = {...people, users:people.users.map(u => u === me ? joined : u)}; me = joined; }
   if(me){
     if(!everyone || me.preset || me.status === 'Deactivated' || seatOfUser(people.seats, me.id)) return people;
     const full = memberFromSession(session, people.presets, SUPER_ADMIN);
@@ -672,10 +684,11 @@ function UtTab({icon, label, active, onClick}){
   );
 }
 
-function UtToggle({on, onChange}){
+// `disabled` (2026-11-19, the quote's Show bank details with none saved): greyed, not switchable.
+function UtToggle({on, onChange, disabled}){
   return (
-    <span role="switch" aria-checked={on} onClick={()=>onChange(!on)} style={{width:24, height:14, borderRadius:14, padding:1.75, boxSizing:'border-box', flexShrink:0,
-      background: on ? '#0A77FF' : T.borderStrong, display:'flex', justifyContent: on ? 'flex-end' : 'flex-start', cursor:'pointer', transition:'background 120ms'}}>
+    <span role="switch" aria-checked={on} aria-disabled={disabled || undefined} onClick={disabled ? undefined : ()=>onChange(!on)} style={{width:24, height:14, borderRadius:14, padding:1.75, boxSizing:'border-box', flexShrink:0,
+      background: on ? '#0A77FF' : T.borderStrong, display:'flex', justifyContent: on ? 'flex-end' : 'flex-start', cursor: disabled ? 'default' : 'pointer', opacity: disabled ? .5 : 1, transition:'background 120ms'}}>
       <span style={{width:10.5, height:10.5, borderRadius:112, background:'#fff', boxShadow:'0 0.7px 2.1px rgba(16,24,40,.1)'}}/>
     </span>
   );
@@ -768,8 +781,17 @@ function UsersTeamsSettings({data, setData}){
 /* `flushTop`: the page's top padding is cancelled too (a table that opens the page, with nothing
    above it), so the views row has the same space above and below. */
 function RecordViewsModule({schema, rows, defaultViews, columns, savedViews = true, saveView = true, viewCounts, actions, filterControls, overlay, initialFilters, initialViewId, focus, board, inset = 'settings', storeKey, flushTop, children}){
-  const [views, setViews] = usePersistedState(storeKey || `views:${defaultViews[0].id}`, ()=>defaultViews.map((v, i) => makeRecordView(v.id, v.name, columns, {filters:v.filters || {nodes:[]}, sort:v.sort || null, isDefault:i === 0,
-    ...(board ? {pipelineId:v.pipelineId || board.defaultPipelineId, ...(board.cardSettings ? {cardSettings:board.cardSettings.defaults()} : {})} : {})})));
+  const makeDefault = (v, i) => makeRecordView(v.id, v.name, columns, {filters:v.filters || {nodes:[]}, sort:v.sort || null, isDefault:i === 0,
+    ...(board ? {pipelineId:v.pipelineId || board.defaultPipelineId, ...(board.cardSettings ? {cardSettings:board.cardSettings.defaults()} : {})} : {})});
+  /* A default view added later (`addOnce`, e.g. Quotes → Signed): views saved before it get it once
+     — noted on the first view (`addedViews`), so one deleted afterwards doesn't come back. */
+  const addLaterViews = (list) => {
+    const once = defaultViews.filter(v => v.addOnce);
+    if(!once.length || !Array.isArray(list) || !list.length) return list;
+    const seen = new Set([...list.map(v => v.id), ...((list[0] || {}).addedViews || [])]), add = once.filter(v => !seen.has(v.id));
+    return add.length ? [...list.map((x, i) => i === 0 ? {...x, addedViews:[...(x.addedViews || []), ...add.map(v => v.id)]} : x), ...add.map(v => makeDefault(v, 1))] : list;
+  };
+  const [views, setViews] = usePersistedState(storeKey || `views:${defaultViews[0].id}`, ()=>defaultViews.map(makeDefault), addLaterViews);
   const [activeViewId, setActiveViewId] = React.useState(initialViewId || defaultViews[0].id);
   const [deletingView, setDeletingView] = React.useState(null);   // a saved view asked to be deleted
   const activeView = views.find(v => v.id === activeViewId) || views[0];
@@ -814,7 +836,7 @@ function RecordViewsModule({schema, rows, defaultViews, columns, savedViews = tr
      (Table) the listed rows. */
   const viewInfo = {mode: board && st.viewMode === 'board' ? 'board' : 'table', pipelineId: board ? st.pipelineId || board.defaultPipelineId : null, rows:filtered};
   // Export (the second argument to `actions`): this view's rows and columns as CSV, named after the view.
-  const exportCsv = () => exportViewCsv({schema, rows:filtered, columnOrder:st.columnOrder, search:st.search, sort:st.sort, fileName:activeView.name});
+  const exportCsv = () => ({count:exportViewCsv({schema, rows:filtered, columnOrder:st.columnOrder, search:st.search, sort:st.sort, fileName:activeView.name}), name:activeView.name});
 
   return (
     <RecordSchema.Provider value={{boards:!!board, selectable:true, ...schema}}>
@@ -978,6 +1000,7 @@ function UsersModule({data, setData, onStub, focus}){
   const hub = useRecordHub();
   const [editing, setEditing] = React.useState(null);
   const [deactivating, setDeactivating] = React.useState(null);
+  const [cancelling, setCancelling] = React.useState(null);   // a pending invite being cancelled
   const [deleting, setDeleting] = React.useState(null);
   const [editingUser, setEditingUser] = React.useState(null);   // the user open in Edit User (id)
   const [addingUser, setAddingUser] = React.useState(false);
@@ -1039,7 +1062,10 @@ function UsersModule({data, setData, onStub, focus}){
         // Seats and permissions are for activated users (a deactivated user holds none); Reactivate brings one back, with no seat until given one.
         ...(canPerms ? [{label:'Edit Permissions', onClick:()=>setEditing(u)}] : []),
         ...(can('edit') ? [{label:'Edit User', onClick:()=>setEditingUser(u.id)}, ...(u.status === 'Activated' ? [{label:'Change Seat', onClick:()=>setChangingSeat(u)}] : []), {label:'Change Team', onClick:()=>setChangingTeam(u)}] : []),
-        ...(can('deactivate') && u.status !== 'Activated' ? [{label:'Reactivate User', onClick:()=>setData(d => ({...d, users:d.users.map(x => x.id === u.id ? {...x, status:'Activated'} : x)}))}] : []),
+        // A pending invite: send it again, or take it back (the person is removed before ever joining).
+        ...(u.status === 'Pending' && userAdminCan('users', 'add') ? [{label:'Resend Invite', onClick:()=>{ setData(d => ({...d, users:d.users.map(x => x.id === u.id ? {...x, invitedAt:new Date().toISOString()} : x)})); hub && hub.toast(`Invite sent again to ${u.email}`); }},
+          {label:'Cancel Invite', danger:true, onClick:()=>setCancelling(u)}] : []),
+        ...(can('deactivate') && u.status === 'Deactivated' ? [{label:'Reactivate User', onClick:()=>setData(d => ({...d, users:d.users.map(x => x.id === u.id ? {...x, status:'Activated'} : x)}))}] : []),
         // Not yourself, and not the last Super Admin: someone must be able to run the CRM.
         ...(can('deactivate') && u.status === 'Activated' ? [{label:'Deactivate User', disabled:protectedUser(u), onClick:()=>!protectedUser(u) && setDeactivating(u)}] : []),
         ...(can('delete') ? [{label:'Delete User', danger:!protectedUser(u), disabled:protectedUser(u), onClick:()=>!protectedUser(u) && setDeleting(u)}] : []),
@@ -1050,11 +1076,11 @@ function UsersModule({data, setData, onStub, focus}){
   const protectedUser = (u) => sameEmail(u.email, CURRENT_USER.email) || (u.preset === SUPER_ADMIN && u.status === 'Activated' && activeSuperAdmins.length <= 1);
   return (
     <RecordViewsModule schema={schema} rows={rows} columns={USER_COLUMNS} focus={focus}
-      defaultViews={USER_DEFAULT_VIEWS.map(v => ({id:v.id, name:v.name, filters:isFilter('status', v.status), sort:{key:'name', dir:'asc'}}))}
+      defaultViews={USER_DEFAULT_VIEWS.map(v => ({id:v.id, name:v.name, filters:isFilter('status', v.status), sort:{key:'name', dir:'asc'}, ...(v.addOnce ? {addOnce:true} : {})}))}
       actions={(btn) => <>
         <button onClick={()=>onStub('Export')} style={btn}><Icon name="export" size={13} color={T.gray600}/> Export</button>
         {/* Add user — the Contacts toolbar's icon-only + after Export (Users & Teams → Add users). */}
-        {userAdminCan('users', 'add') && <button onClick={()=>setAddingUser(true)} title="Add User" style={iconBtn}><Icon name="plus" size={14} color={T.gray800}/></button>}
+        {userAdminCan('users', 'add') && <NewButton label="New User" onClick={()=>setAddingUser(true)}/>}
       </>}>
       {viewing && <OwnerProfilePanel key={viewing.id} name={viewing.id} user={viewing} editable fixed properties={data.properties.filter(p => p.objectId === 'users' && !p.archived)} onClose={()=>setViewingId(null)} onSaveProfile={(patch)=>saveProfile(viewing.id, patch)}/>}
       {editingUser && data.users.some(u => u.id === editingUser) && <UserEditPanel data={data} setData={setData} user={data.users.find(u => u.id === editingUser)}
@@ -1071,10 +1097,15 @@ function UsersModule({data, setData, onStub, focus}){
           // A CRM user is one of the Organization's users, with this CRM instance (workspaces.jsx).
           joinOrganization(u);
           setAddingUser(false);
-          hub && hub.toast('User added');
+          hub && hub.toast(`Invite sent to ${u.email}`);
           // Save and Set Permission: straight into Edit Permissions for the new user.
           if(setPermissions) setEditing({...u, seat:'', team:teamName(data.teams, u.teamId)});
         }}/>}
+      {cancelling && <StModal title="Cancel Invite" primary="Cancel Invite" danger onCancel={()=>setCancelling(null)}
+        onSubmit={()=>{ const id = cancelling.id; setData(d => ({...d, users:d.users.filter(u => u.id !== id), seats:d.seats.map(st => st.assigneeId === id ? {...st, assigneeId:null} : st)}));
+          leaveCrm(cancelling); hub && hub.toast(`Invite to ${cancelling.email} cancelled`); setCancelling(null); }}>
+        <div style={{fontSize:13, color:T.gray600}}>{cancelling.name} won't be able to join with this invite.</div>
+      </StModal>}
       {deactivating && <DeactivateUserModal user={deactivating} onCancel={()=>setDeactivating(null)}
         onConfirm={() => { const id = deactivating.id;
           setData(d => ({...d, users:d.users.map(u => u.id === id ? {...u, status:'Deactivated'} : u), seats:d.seats.map(st => st.assigneeId === id ? {...st, assigneeId:null} : st)}));
@@ -1101,14 +1132,13 @@ function UsersModule({data, setData, onStub, focus}){
 }
 
 /* Add User — users come only from HRMS: search an employee and pick them (their name and email
-   carry over), set the initial status. An employee who isn't in HRMS yet has to be added there
+   carry over); Send Invite emails them an invite and they're Pending until they sign in. An employee who isn't in HRMS yet has to be added there
    first ("Add employee first" — not defined yet). The new user starts with no seat, team or
    preset. The Employee ↔ User relationship beyond this is not defined yet. */
-const USER_INITIAL_STATUSES = ['Activated'];   // a new user starts active (Deactivate is a later step)
 function AddUserModal({data, onClose, onAdd, onStub}){
   const [query, setQuery] = React.useState('');
   const [picked, setPicked] = React.useState(null);
-  const [status, setStatus] = React.useState('Activated');
+  const status = 'Pending';   // invited: Pending until they sign in
   const [teamId, setTeamId] = React.useState('');
   const isUser = (em) => data.users.some(u => u.email.toLowerCase() === em.trim().toLowerCase());
   const q = query.trim().toLowerCase();
@@ -1116,10 +1146,10 @@ function AddUserModal({data, onClose, onAdd, onStub}){
   const ok = !!status && !!picked && !isUser(picked.email);
   const add = (setPermissions) => onAdd({
     id:`u-${Date.now()}`, name:picked.name, email:picked.email, personId:picked.id, peopleId:picked.peopleId,
-    status, teamId:teamId || null, preset:'', access:'manual', lastActive:null, created:stToday(), permissions:DEFAULT_CONTACT_PERMISSIONS(),
+    status, invitedAt:new Date().toISOString(), teamId:teamId || null, preset:'', access:'manual', lastActive:null, created:stToday(), permissions:DEFAULT_CONTACT_PERMISSIONS(),
   }, setPermissions);
   return (
-    <StModal title="Add User" primary="Add User" canSubmit={ok} onCancel={onClose} onSubmit={()=>add(false)} width={820}
+    <StModal title="Add User" primary="Send Invite" canSubmit={ok} onCancel={onClose} onSubmit={()=>add(false)} width={820}
       textAction={{label:'Save and Set Permission', disabled:!ok, onClick:()=>add(true)}}>
       {/* The Add Property structure: two columns, one vertical separator, no boxes. */}
       <div style={{display:'grid', gridTemplateColumns:'minmax(0, 1fr) minmax(0, 1fr)', alignItems:'stretch'}}>
@@ -1150,10 +1180,6 @@ function AddUserModal({data, onClose, onAdd, onStub}){
                 {!results.length && <div style={{padding:'10px 0', fontSize:12.5, color:T.gray400}}>No employee matches "{query.trim()}".</div>}
               </div>
             )}
-          </div>
-          <div>
-            <label style={fieldLabel}>Status</label>
-            <FormSelect value={status} placeholder="Select status" options={USER_INITIAL_STATUSES} onChange={setStatus}/>
           </div>
           {/* The login / create-account prompt pattern. */}
           <div style={{fontSize:13, color:T.gray600, paddingTop:2}}>
@@ -1294,7 +1320,7 @@ function TeamsModule({data, setData, onStub, openUsers}){
   return (
     <RecordViewsModule schema={schema} rows={rows} columns={TEAM_PROPERTIES.map(p => p.key)}
       defaultViews={[{id:'tv-all', name:'All Teams', sort:{key:'name', dir:'asc'}}]}
-      actions={() => <button onClick={()=>setAdding(true)} title="Add Team" style={iconBtn}><Icon name="plus" size={14} color={T.gray800}/></button>}>
+      actions={() => <NewButton label="New Team" onClick={()=>setAdding(true)}/>}>
       {adding && <AddTeamModal data={data} onClose={()=>setAdding(false)}
         onAdd={(team, memberIds) => {
           setData(d => ({...d, teams:[...d.teams, team], users:d.users.map(u => memberIds.includes(u.id) ? {...u, teamId:team.id} : u)}));
@@ -1384,7 +1410,7 @@ function PresetsModule({data, setData, onStub, openUsers}){
   };
   return <RecordViewsModule schema={schema} rows={rows} columns={PRESET_PROPERTIES.map(p => p.key)}
     defaultViews={[{id:'pv-all', name:'All Presets'}]}
-    actions={() => userAdminCan('permissions', 'edit') && <button onClick={()=>onStub('Add Permission Preset')} title="Add Permission Preset" style={iconBtn}><Icon name="plus" size={14} color={T.gray800}/></button>}>
+    actions={() => userAdminCan('permissions', 'edit') && <NewButton label="New Permission Preset" onClick={()=>onStub('Add Permission Preset')}/>}>
     {editingPreset && <EditPresetDrawer preset={editingPreset} onClose={()=>setEditingPreset(null)}
       onSave={(permissions) => { setData(d => ({...d, presets:d.presets.map(p => p.id === editingPreset.id ? {...p, permissions} : p)})); setEditingPreset(null); }}/>}
   </RecordViewsModule>;

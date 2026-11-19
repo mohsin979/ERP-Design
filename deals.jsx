@@ -328,6 +328,7 @@ function DealCard({deal, ...rest}){ return <RecordCard kind={DEAL_RECORD_KIND} r
 function DealsModule({data, deals, setDeals, activities, setActivities, contacts = [], contactActivities = {}, profileStore, openRequest, onOpenContact, updateContactActivity, onCreateContact,
                      customers = [], onCreateCustomer, onLinkCustomer, onOpenCustomer, onRecordDeleted}){
   const props = React.useMemo(()=>objectFormProperties(data, 'deals'), [data.properties]);
+  const logExport = useRecordExportLog();   // a table Export, kept in Import & Export → History
   const pipelines = React.useMemo(()=>objectPipelines(data, 'deals'), [data.pipelines]);
   // Card properties: the Deal's own, then the Customer Profile and Accounting Properties (extendedProps.jsx).
   const cardProps = React.useMemo(()=>[...dealCardProperties(props), ...extendedProps()], [props]);
@@ -425,7 +426,7 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
       ids.forEach(id => onRecordDeleted && onRecordDeleted('deals', id));
       if(detail && ids.includes(detail.id)) setDetail(null);
     }});
-  const fullSchema = {...schema, pipelineLabel:(id) => (pipelineOf(id) || pipelines[0] || {}).label || '',
+  const fullSchema = {...schema, recordObject:'deals', pipelineLabel:(id) => (pipelineOf(id) || pipelines[0] || {}).label || '',
     // The name with the deal's workflow violations beside it.
     renderCell: (key, r) => key === 'name' ? <span data-deal-id={r.id} style={{display:'inline-flex', alignItems:'center', gap:8, minWidth:0, maxWidth:'100%'}}>
         <ContactName name={r.name} onOpen={()=>openDeal(r)} style={{fontSize:'inherit', fontWeight:500}}/><DealPromptMarker dealId={r.id}/></span>
@@ -475,12 +476,12 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
   const editLinks = React.useMemo(() => form && form.mode === 'edit' && form.initial ? recordLinkFields(linkRecs, 'deals', form.initial, ['contacts']) : [], [form]);
   const association = [
     ...(creatable.includes('contacts') ? [{object:'contacts', noun:'contact',
-      existing:contacts.filter(c => takesDeal('contacts', c)).map(c => ({value:c.id, label: c.email ? `${c.name} · ${c.email}` : c.name})),
+      existing:contacts.filter(c => takesDeal('contacts', c)).map(c => recordOption(c)),
       pull:(id) => { const c = contacts.find(x => x.id === id) || {}; return {name:c.name || '', email:c.email || '', phone:c.phone || ''}; },
       fields:objectFormProperties(data, 'contacts').filter(p => p.onCreate),
       optionsFor:(p) => ({owner:ownerUserOptions(data.users), contactType:CONTACT_TYPE_STAGES.map(s => s.value)})[p.key] || p.options || []}] : []),
     ...(creatable.includes('customers') ? [{object:'customers', noun:'customer', existingOnly:true,
-      existing:customers.filter(c => takesDeal('customers', c)).map(c => ({value:c.id, label:c.email ? `${c.name} · ${c.email}` : c.name}))}] : []),
+      existing:customers.filter(c => takesDeal('customers', c)).map(c => recordOption(c))}] : []),
   ];
 
   // A deal's activity as the acting user may see it (tool permissions on the deal).
@@ -517,8 +518,8 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
               renderCard={(d, ui) => card(d, cardSettings, ui)}/>;
           }}}
         actions={(btn, view) => <>
-          <button onClick={view.exportCsv} style={btn}><Icon name="export" size={13} color={T.gray600}/> Export</button>
-          <button onClick={()=>setForm({mode:'add', initial:null})} title={`Add ${typeNoun('deals', 'deal')}`} style={toolbarIconButton}><Icon name="plus" size={14} color={T.gray800}/></button>
+          <button onClick={()=>{ const r = view.exportCsv(); logExport('deals', r.count, `${typePlural('deals', 'Deals')} → ${r.name}`); }} style={btn}><Icon name="export" size={13} color={T.gray600}/> Export</button>
+          <NewButton label={`New ${typeSingular('deals', 'Deal')}`} onClick={()=>setForm({mode:'add', initial:null})}/>
         </>}
         filterControls={(v) => <><MergeCasesButton object="deals"/><ViolationsButton object="deals" pipelines={viewPipelines(v)} active={violationMode} onClick={()=>setViolationMode(!violationMode)}/></>}
         overlay={(v) => violationMode && <ViolationPanel object="deals" pipelines={viewPipelines(v)} onClose={()=>setViolationMode(false)}/>}/>

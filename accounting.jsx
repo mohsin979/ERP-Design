@@ -96,7 +96,7 @@ function scheduleTotals(schedule){
 function recordEditable(object, record){
   if(!ACCESS.user || !ACCESS.perms) return true;
   const p = ACCESS.perms[object];
-  return !!(p && p.enabled && permissionCovers(p.edit, object, record));
+  return !!(p && p.enabled && permissionCovers(p.edit, object, record, 'edit'));
 }
 const hasPayments = (s) => (s.installments || []).some(x => (x.payments || []).length);
 /* The payment type (see the header): set when the terms are saved; before that, untouched default

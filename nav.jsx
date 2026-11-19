@@ -75,6 +75,9 @@ const CRM_SETTINGS_NAV = [
     {id:'settings.pipelines',       label:'Pipelines',        icon:'kanbanView'},
     {id:'settings.customerProfile', label:'Customer Profile', icon:'profile'},
     {id:'settings.templates',       label:'Templates',        icon:'files'},
+    {id:'settings.emailSequences',  label:'Email Sequences',  icon:'listBullets'},
+    {id:'settings.playbooks',       label:'Playbooks',        icon:'playbook'},
+    {id:'settings.services',        label:'Services',         icon:'services'},
     {id:'settings.importExport',    label:'Import & Export',  icon:'arrowsDownUp'},
   ]},
 ];

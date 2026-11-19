@@ -39,9 +39,14 @@ const LINK_CLASS = 'hof-link';
   if(typeof document === 'undefined' || document.getElementById('hof-link-style')) return;
   const el = document.createElement('style'); el.id = 'hof-link-style';
   el.textContent = `.hof-link{text-decoration-line:underline;text-decoration-color:${T.attioText};text-underline-offset:2px;transition:text-decoration-color 120ms ease}`
-    + `.hof-link:hover,button:hover>.hof-link{text-decoration-color:${T.attioBlue};color:${T.attioBlue}!important}`;
+    + `.hof-link:hover,button:hover>.hof-link{text-decoration-color:${T.attioBlue};color:${T.attioBlue}!important}`
+    + `.hof-reach{color:${T.attioBlue};text-decoration:none;text-underline-offset:2px}.hof-reach:hover{text-decoration-line:underline}`;
   document.head.appendChild(el);
 })();
+/* A record's email and phone in its table (Contacts, Deals, Customers — 2026-11-19): blue, with an
+   underline while the pointer is on it; clicked, the email opens a new email to the record and the
+   phone starts a call (ContactsDataGrid). */
+const REACH_LINK_CLASS = 'hof-reach';
 
 
 /* One consistent icon library used across the whole UI — Phosphor Icons (regular weight),
@@ -197,6 +202,19 @@ const Icon = ({name, size=18, color='currentColor', strokeWidth, style={}}) => {
   );
 };
 
+/* A record's avatar (2026-11-19) — the Avatar property (propertyTypes.jsx), the name of a Contact,
+   Deal or Customer: its uploaded square photo, in a circle; without one, the first letter of the
+   name, white on pinkish red. In the name column, the record header and the creation form. */
+const AVATAR_RED = '#E5486A';
+function RecordAvatar({name, photo, size = 22}){
+  if(photo) return <img src={photo} alt="" style={{width:size, height:size, borderRadius:9999, objectFit:'cover', flexShrink:0, display:'block'}}/>;
+  const letter = (String(name || '').trim()[0] || '?').toUpperCase();
+  return (
+    <span aria-hidden="true" style={{width:size, height:size, borderRadius:9999, background:AVATAR_RED, color:'#fff', flexShrink:0, display:'inline-flex', alignItems:'center', justifyContent:'center',
+      fontSize:Math.round(size * .46), fontWeight:600, lineHeight:1}}>{letter}</span>
+  );
+}
+
 /* Avatar — initials circle, matches the Users & Teams "User" cell pattern in Figma. */
 function Avatar({name, size=27}){
   const initials = (name||'').split(' ').filter(Boolean).slice(0,2).map(p=>p[0].toUpperCase()).join('');
@@ -349,6 +367,12 @@ function ActionsMenu({title = 'Actions', width = 196, height = 200, visible = tr
 }
 const menuDivider = <div style={{height:1, background:T.border, margin:'4px 2px'}}/>;
 
+/* "+ New <thing>" — every list's create button (2026-11-18: named, not a bare +): filled, the
+   toolbar's height. `children`: a menu under it (several things to create). */
+function NewButton({label, onClick, title}){
+  return <button onClick={onClick} title={title || label} aria-label={title || label} style={{display:'inline-flex', alignItems:'center', gap:6, height:32, padding:'0 12px', border:'none', borderRadius:8,
+    background:T.black, color:'#fff', fontSize:13, fontWeight:500, fontFamily:'inherit', cursor:'pointer', flexShrink:0, whiteSpace:'nowrap'}}><Icon name="plus" size={13} color="#fff"/>{label}</button>;
+}
 /* View Settings entry point — the one button pattern for it (Table / Board toolbar, Contact
    Overview). */
 function ViewSettingsButton({onClick}){
@@ -470,33 +494,63 @@ function TimeField({value, onChange, placeholder = 'Select time', inputStyle, re
 /* Dropdown — the one select control (a native <select> popup ignores the design system and
    mis-positions in scrolling panels). The trigger takes the host's control style (`controlStyle`);
    the list opens under it (above it when there's no room), portalled and fixed with
-   data-hof-floating, like TimeField. `options`: strings, {value, label, disabled}, or {group,
-   options, disabled} — a labelled run (a disabled group shows but can't be picked).
+   data-hof-floating, like TimeField. `options`: strings, {value, label, disabled, sub, search,
+   section}, or {group, options, disabled} — a labelled run (a disabled group shows but can't be
+   picked); an option's `section` heads its run too, `sub` is a second line (a record's email and
+   phone) and `search` is matched as well (phone numbers by their digits).
    `placeholder`: shown while nothing is picked, and offered first so a choice can be cleared
    ('' — `required` leaves it out). Keyboard: Enter, Space or ↓ opens; ↑ ↓ move; Enter picks;
-   Escape closes; a letter jumps to the next option starting with it. */
-function Dropdown({value, options, onChange, placeholder, controlStyle, invalid, ariaLabel, required, disabled}){
+   Escape closes; a letter jumps to the next option starting with it.
+   Since 2026-11-19 (the dev build's one dropdown): a search box once there are more than 10
+   options (`searchable` always — record pickers; `searchPlaceholder`, `noMatches`), best matches
+   first; the selected option's blue check; the first 100 rows, then "1,234 more: type to find
+   them"; `loading`: a spinner in place of the chevron. */
+const DROPDOWN_SEARCH_FROM = 10, DROPDOWN_ROW_CAP = 100;
+// How well an option matches a search: its label starting with it, a word in it starting with it, containing it, its `search` text (and digits) — or not at all.
+const dropdownScore = (r, q) => {
+  const label = String(r.label || '').toLowerCase();
+  if(label.startsWith(q)) return 0;
+  if(label.split(/[\s·,()\-/]+/).some(w => w.startsWith(q))) return 1;
+  if(label.includes(q)) return 2;
+  const extra = String(r.search || '').toLowerCase(), digits = q.replace(/\D/g, '');
+  if(extra && (extra.includes(q) || (digits.length >= 3 && extra.replace(/\D/g, '').includes(digits)))) return 3;
+  return -1;
+};
+function Dropdown({value, options, onChange, placeholder, controlStyle, invalid, ariaLabel, required, disabled, searchable, searchPlaceholder = 'Search', noMatches = 'No matches', loading, minPanelWidth = 160}){
   const [pos, setPos] = React.useState(null);
   const [active, setActive] = React.useState(-1);
+  const [query, setQuery] = React.useState('');
   const z = useFloatZ(!!pos);
-  const btnRef = React.useRef(null), panelRef = React.useRef(null);
-  const rows = [];
-  if(placeholder && !required) rows.push({value:'', label:placeholder, muted:true});
+  const btnRef = React.useRef(null), panelRef = React.useRef(null), searchRef = React.useRef(null);
+  const all = [];
+  if(placeholder && !required) all.push({value:'', label:placeholder, muted:true});
+  let lastSection = null;
   (options || []).forEach(o => {
-    if(typeof o === 'string') rows.push({value:o, label:o});
-    else if(o.group){ rows.push({header:o.group}); (o.options || []).forEach(x => rows.push(typeof x === 'string' ? {value:x, label:x, disabled:!!o.disabled} : {...x, disabled:!!(o.disabled || x.disabled)})); }
-    else rows.push(o);
+    if(typeof o === 'string') all.push({value:o, label:o});
+    else if(o.group){ all.push({header:o.group}); (o.options || []).forEach(x => all.push(typeof x === 'string' ? {value:x, label:x, disabled:!!o.disabled} : {...x, disabled:!!(o.disabled || x.disabled)})); }
+    else { if(o.section && o.section !== lastSection) all.push({header:o.section}); lastSection = o.section || null; all.push(o); }
   });
+  const optionCount = all.filter(r => !r.header && !r.muted).length;
+  const withSearch = !!searchable || optionCount > DROPDOWN_SEARCH_FROM;
+  const q = query.trim().toLowerCase();
+  // Searching: the matching options, best first (headers and the clearing row left out); then at most 100 shown.
+  const matched = !q ? all : all.filter(r => !r.header && !r.muted).map((r, i) => ({r, i, s:dropdownScore(r, q)})).filter(x => x.s >= 0).sort((a, b) => a.s - b.s || a.i - b.i).map(x => x.r);
+  let shownOptions = 0;
+  const rows = [];
+  for(const r of matched){ if(!r.header && !r.muted){ if(shownOptions >= DROPDOWN_ROW_CAP) continue; shownOptions++; } rows.push(r); }
+  const hidden = matched.filter(r => !r.header && !r.muted).length - shownOptions;
   const pickable = (i) => rows[i] && !rows[i].header && !rows[i].disabled;
   const same = (v) => value != null && value !== '' && String(v) === String(value);   // as a native select compares
-  const current = rows.find(r => !r.header && !r.muted && same(r.value));
-  const PANEL_MAX = 264;
+  const current = all.find(r => !r.header && !r.muted && same(r.value));
+  const PANEL_MAX = withSearch ? 320 : 264;
   const open = () => {
     if(disabled || !btnRef.current) return;
-    const r = btnRef.current.getBoundingClientRect(), h = Math.min(PANEL_MAX, rows.length * 32 + 12);
-    const width = Math.max(r.width, 160);   // kept inside the window: a control near the right edge (the page dropdown) opens leftwards
-    setPos({top: window.innerHeight - r.bottom < h + 8 && r.top > h + 8 ? r.top - h - 4 : r.bottom + 4, left:Math.max(8, Math.min(r.left, window.innerWidth - width - 8)), width});
-    setActive(Math.max(0, rows.findIndex(x => !x.header && same(x.value))));
+    const r = btnRef.current.getBoundingClientRect(), h = Math.min(PANEL_MAX, all.length * 32 + 12 + (withSearch ? 44 : 0));
+    const width = Math.max(r.width, minPanelWidth);   // kept inside the window: a control near the right edge (the page dropdown) opens leftwards
+    const above = window.innerHeight - r.bottom < h + 8 && r.top > h + 8;
+    setQuery('');
+    setPos({...(above ? {bottom:window.innerHeight - r.top + 4} : {top:r.bottom + 4}), left:Math.max(8, Math.min(r.left, window.innerWidth - width - 8)), width});
+    setActive(Math.max(0, all.findIndex(x => !x.header && same(x.value))));
   };
   const close = () => setPos(null);
   const pick = (i) => { if(!pickable(i)) return; close(); if(!same(rows[i].value) && !(rows[i].muted && !value)) onChange(rows[i].value); btnRef.current && btnRef.current.focus(); };
@@ -507,17 +561,21 @@ function Dropdown({value, options, onChange, placeholder, controlStyle, invalid,
     document.addEventListener('mousedown', out, true); window.addEventListener('scroll', onScroll, true); window.addEventListener('resize', close);
     return () => { document.removeEventListener('mousedown', out, true); window.removeEventListener('scroll', onScroll, true); window.removeEventListener('resize', close); };
   }, [pos]);
+  // The search box takes the typing as the list opens.
+  React.useEffect(() => { if(pos && withSearch && searchRef.current) searchRef.current.focus(); }, [!!pos]);
+  // A new search starts at its best match.
+  React.useEffect(() => { if(pos && q) setActive(rows.findIndex((r, i) => pickable(i))); }, [q]);
   // The active option stays in view.
   React.useEffect(() => { if(!pos || !panelRef.current) return; const el = panelRef.current.querySelector(`[data-i="${active}"]`); el && el.scrollIntoView({block:'nearest'}); }, [active, !!pos]);
   const move = (d) => setActive(a => { let i = a; for(let n = 0; n < rows.length; n++){ i = (i + d + rows.length) % rows.length; if(pickable(i)) return i; } return a; });
   const onKey = (e) => {
     if(!pos){ if(['Enter', ' ', 'ArrowDown', 'ArrowUp'].includes(e.key)){ e.preventDefault(); open(); } return; }
-    if(e.key === 'Escape'){ e.preventDefault(); e.stopPropagation(); close(); }
+    if(e.key === 'Escape'){ e.preventDefault(); e.stopPropagation(); close(); btnRef.current && btnRef.current.focus(); }
     else if(e.key === 'ArrowDown'){ e.preventDefault(); move(1); }
     else if(e.key === 'ArrowUp'){ e.preventDefault(); move(-1); }
-    else if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); pick(active); }
+    else if(e.key === 'Enter' || (e.key === ' ' && !withSearch)){ e.preventDefault(); pick(active); }
     else if(e.key === 'Tab') close();
-    else if(e.key.length === 1){ const k = e.key.toLowerCase(); const start = active < 0 ? 0 : active + 1;
+    else if(!withSearch && e.key.length === 1){ const k = e.key.toLowerCase(); const start = active < 0 ? 0 : active + 1;
       for(let n = 0; n < rows.length; n++){ const i = (start + n) % rows.length; if(pickable(i) && !rows[i].muted && String(rows[i].label).toLowerCase().startsWith(k)){ setActive(i); break; } } }
   };
   const base = controlStyle || {};
@@ -525,29 +583,82 @@ function Dropdown({value, options, onChange, placeholder, controlStyle, invalid,
     <div style={{position:'relative', minWidth:0}}>
       <button ref={btnRef} type="button" aria-haspopup="listbox" aria-expanded={!!pos} aria-label={ariaLabel} disabled={disabled}
         onClick={()=>pos ? close() : open()} onKeyDown={onKey}
-        style={{...base, appearance:'none', WebkitAppearance:'none', display:'flex', alignItems:'center', gap:8, width:'100%', boxSizing:'border-box', textAlign:'left',
-          paddingRight:32, position:'relative', cursor: disabled ? 'default' : 'pointer', color: current ? T.attioText : T.gray400,
+        style={{...base, appearance:'none', WebkitAppearance:'none', display:'flex', alignItems:'center', gap:8, width:base.width || '100%', boxSizing:'border-box', textAlign:'left',
+          paddingRight:32, position:'relative', cursor: disabled ? 'default' : 'pointer', color: current ? (base.color || T.attioText) : T.gray400,
           borderColor: invalid ? T.red : pos ? T.blue : (base.borderColor || T.borderStrong), opacity: disabled ? .6 : 1}}>
         <span style={{flex:1, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{current ? current.label : (placeholder || '')}</span>
-        <span style={{position:'absolute', right:10, top:'50%', transform:'translateY(-50%)', display:'flex'}}><Icon name="chevDown" size={T.chevronSize} color={T.gray600}/></span>
+        <span style={{position:'absolute', right:10, top:'50%', transform:'translateY(-50%)', display:'flex'}}>
+          {loading ? <Spinner size={12} color={T.gray600}/> : <Icon name="chevDown" size={T.chevronSize} color={T.gray600}/>}</span>
       </button>
       {pos && ReactDOM.createPortal(
-        <div ref={panelRef} data-hof-floating="" role="listbox" onMouseDown={e=>{ e.preventDefault(); e.stopPropagation(); }}
-          style={{position:'fixed', top:pos.top, left:pos.left, width:pos.width, maxHeight:PANEL_MAX, overflowY:'auto', zIndex:z, boxSizing:'border-box',
+        <div ref={panelRef} data-hof-floating="" role="listbox" onMouseDown={e=>{ if(e.target !== searchRef.current) e.preventDefault(); e.stopPropagation(); }}
+          style={{position:'fixed', top:pos.top, bottom:pos.bottom, left:pos.left, width:pos.width, maxHeight:PANEL_MAX, zIndex:z, boxSizing:'border-box', display:'flex', flexDirection:'column',
             background:'#fff', border:`1px solid ${T.border}`, borderRadius:10, padding:6, boxShadow:'0 4px 16px rgba(16,24,40,.12)', fontFamily:"'DM Sans', sans-serif"}}>
-          {rows.map((r, i) => r.header
-            ? <div key={`h-${i}`} style={{padding:'6px 10px 2px', fontSize:11.5, color:T.gray400}}>{r.header}</div>
-            : <div key={`${i}-${r.value}`} data-i={i} role="option" aria-selected={same(r.value) && !r.muted} aria-disabled={r.disabled || undefined}
-                onClick={()=>pick(i)} onMouseEnter={()=>pickable(i) && setActive(i)}
-                style={{display:'flex', alignItems:'center', gap:8, padding:'7px 10px', borderRadius:6, fontSize:13, cursor: r.disabled ? 'default' : 'pointer',
-                  color: r.disabled || r.muted ? T.gray400 : T.attioText, background: i === active && !r.disabled ? T.headerBg : 'transparent'}}>
-                <span style={{flex:1, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}} title={String(r.label)}>{r.label}</span>
-                {!r.muted && same(r.value) && <Icon name="check" size={11} color={T.blue}/>}
-              </div>)}
+          {withSearch && <div style={{position:'relative', marginBottom:4, flexShrink:0}}>
+            <div style={{position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', display:'flex'}}><Icon name="search" size={13} color={T.gray400}/></div>
+            <input ref={searchRef} value={query} onChange={e=>setQuery(e.target.value)} onKeyDown={onKey} placeholder={searchPlaceholder} aria-label={searchPlaceholder}
+              style={{width:'100%', boxSizing:'border-box', height:32, padding:'0 10px 0 30px', fontSize:13, fontFamily:'inherit', color:T.attioText, border:`1px solid ${T.borderStrong}`, borderRadius:8, outline:'none'}}/>
+          </div>}
+          <div style={{flex:1, minHeight:0, overflowY:'auto'}}>
+            {loading && !optionCount ? <div style={{padding:'6px 10px'}}><SkeletonLines lines={3}/></div> : rows.map((r, i) => r.header
+              ? <div key={`h-${i}`} style={{padding:'6px 10px 2px', fontSize:11.5, color:T.gray400}}>{r.header}</div>
+              : <div key={`${i}-${r.value}`} data-i={i} role="option" aria-selected={same(r.value) && !r.muted} aria-disabled={r.disabled || undefined}
+                  onClick={()=>pick(i)} onMouseEnter={()=>pickable(i) && setActive(i)}
+                  style={{display:'flex', alignItems:'center', gap:8, padding:'7px 10px', borderRadius:6, fontSize:13, cursor: r.disabled ? 'default' : 'pointer',
+                    color: r.disabled || r.muted ? T.gray400 : T.attioText, background: i === active && !r.disabled ? T.headerBg : 'transparent'}}>
+                  <span style={{flex:1, minWidth:0, display:'flex', flexDirection:'column'}}>
+                    <span style={{overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}} title={String(r.label)}>{r.label}</span>
+                    {r.sub && <span style={{fontSize:12, color:T.attioMuted, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{r.sub}</span>}
+                  </span>
+                  {!r.muted && same(r.value) && <Icon name="check" size={11} color={T.blue}/>}
+                </div>)}
+            {!loading && q && !shownOptions && <div style={{padding:'8px 10px', fontSize:12.5, color:T.gray400}}>{noMatches}</div>}
+            {hidden > 0 && <div style={{padding:'8px 10px', fontSize:12, color:T.gray400}}>{hidden.toLocaleString('en-US')} more: type to find them</div>}
+          </div>
         </div>, document.body)}
     </div>
   );
 }
+
+/* ── Loading (2026-11-19, from the dev build; shown only where something really loads) ──
+   Spinner: the CircleNotch, turning — in a button while it works (StCta / StSecondary `busy`), in
+   place of a dropdown's chevron, a pager arrow. SkeletonLines: grey rounded lines 12px tall, 10px
+   apart, of uneven widths, softly pulsing — in place of every "Loading…". LoadingBar: a 2px blue
+   bar along the top of a list, a 40%-wide segment sweeping across every 1.1s, shown after 150ms.
+   For anyone who prefers reduced motion, they keep still. */
+if(!document.getElementById('hof-loading-css')){
+  const st = document.createElement('style'); st.id = 'hof-loading-css';
+  st.textContent = '@keyframes hof-spin{to{transform:rotate(360deg)}}@keyframes hof-pulse{0%,100%{opacity:1}50%{opacity:.5}}'
+    + '@keyframes hof-sweep{from{transform:translateX(-100%)}to{transform:translateX(250%)}}@keyframes hof-show{to{opacity:1}}'
+    + '.hof-spin{animation:hof-spin .8s linear infinite}.hof-pulse{animation:hof-pulse 1.4s ease-in-out infinite}.hof-sweep{animation:hof-sweep 1.1s ease-in-out infinite}'
+    + '.hof-bar{opacity:0;animation:hof-show 0s linear .15s forwards}'
+    + '@media (prefers-reduced-motion: reduce){.hof-spin,.hof-pulse,.hof-sweep{animation:none}.hof-sweep{transform:translateX(75%)}}';
+  document.head.appendChild(st);
+}
+function Spinner({size = 13, color = 'currentColor'}){
+  return (
+    <svg className="hof-spin" width={size} height={size} viewBox="0 0 256 256" aria-hidden="true" style={{flexShrink:0, display:'block'}}>
+      <path d="M232,128a104,104,0,0,1-208,0c0-41,23.81-78.36,60.66-95.27a8,8,0,0,1,6.68,14.54C60.15,61.59,40,93.27,40,128a88,88,0,0,0,176,0c0-34.73-20.15-66.41-51.34-80.73a8,8,0,0,1,6.68-14.54C208.19,49.64,232,87,232,128Z" fill={color}/>
+    </svg>
+  );
+}
+const SKELETON_WIDTHS = [92, 78, 86, 64, 88, 72];
+function SkeletonLines({lines = 3, style}){
+  return (
+    <div role="status" aria-label="Loading" style={{display:'flex', flexDirection:'column', gap:10, ...style}}>
+      {Array.from({length:lines}, (_, i) => <div key={i} className="hof-pulse" style={{height:12, borderRadius:6, background:'#EEEEF0', width:`${SKELETON_WIDTHS[i % SKELETON_WIDTHS.length]}%`}}/>)}
+    </div>
+  );
+}
+function LoadingBar({on}){
+  if(!on) return null;
+  return (
+    <div className="hof-bar" role="progressbar" aria-label="Loading" style={{position:'absolute', top:0, left:0, right:0, height:2, overflow:'hidden', zIndex:8, pointerEvents:'none'}}>
+      <div className="hof-sweep" style={{width:'40%', height:'100%', background:T.blue}}/>
+    </div>
+  );
+}
+
 /* One value in a time column — the menu item: hover headerBg; selected blueLight with blue text. */
 function TimeOption({label, on, onPick}){
   const [h, setH] = React.useState(false);
@@ -760,4 +871,4 @@ function StubPanel({title, onClose, zIndex=90}){
   );
 }
 
-Object.assign(window, {useEscapeClose, Dropdown, LOCAL_TZ, setAppTimeZone, zonedParts, zonedDate, useFloatZ, DateField, DateTimeField, parseDate, dateLabel, TimeField, parseTime, timeLabel, ActionsMenu, menuDivider, ViewSettingsButton, T, Icon, Avatar, RowCheckbox, MenuShell, MenuItem, StubPanel});
+Object.assign(window, {RecordAvatar, AVATAR_RED, REACH_LINK_CLASS, NewButton, useEscapeClose, Dropdown, Spinner, SkeletonLines, LoadingBar, LOCAL_TZ, setAppTimeZone, zonedParts, zonedDate, useFloatZ, DateField, DateTimeField, parseDate, dateLabel, TimeField, parseTime, timeLabel, ActionsMenu, menuDivider, ViewSettingsButton, T, Icon, Avatar, RowCheckbox, MenuShell, MenuItem, StubPanel});

@@ -144,7 +144,7 @@ function PlaybooksTab({data, setData, say}){
     <div style={{display:'flex', flexDirection:'column', flex:1, minHeight:0}}>
       <RecordViewsModule schema={schema} rows={rows} columns={cols.map(c => c.key)} storeKey="views:templates-playbooks"
         defaultViews={[{id:'tv-playbooks', name:'All Playbooks', sort:{key:'name', dir:'asc'}}]}
-        actions={() => can('create') && <button onClick={()=>{ setOpenId(null); setEditing({}); }} title="Add Playbook" aria-label="Add Playbook" style={toolbarIconButton}><Icon name="plus" size={14} color={T.gray800}/></button>}
+        actions={() => can('create') && <NewButton label="New Playbook" onClick={()=>{ setOpenId(null); setEditing({}); }}/>}
         overlay={open && <DetailPanel title={open.name} onClose={()=>setOpenId(null)} menuItems={actions(open).filter(it => !/^View/.test(it.label))}
           fields={[['Sections', String(open.sections.length)], ['Created', open.createdAt ? fmtQuoteDate(open.createdAt) : ''], ['Created by', creatorOf(open)]]}>
           <PlaybookSections playbook={open}/>

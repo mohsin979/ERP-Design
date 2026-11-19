@@ -1,6 +1,6 @@
-/* HOF Pulse ERP — Settings → Templates: Email Templates, Email Sequences, Quote Templates,
-   Playbooks (playbooks.jsx) and Services (services.jsx — the service catalog, moved here from the
-   CRM navigation).
+/* HOF Pulse ERP — Settings → Templates: Email Templates and Quote Templates; and, each a Settings
+   page of its own since 2026-11-18 (same component, `only`): Email Sequences, Playbooks
+   (playbooks.jsx) and Services (services.jsx — the service catalog).
 
    Foundational for now (to be refined later):
      Email Templates — reusable emails: Email Template Name, Subject and Email Format — Simple
@@ -357,7 +357,7 @@ function saveInstanceOf(hub, instance, {removed, edits}){
     const content = templateContentOf(e);
     due.forEach(({person, email}) => { const who = {name:person.record.name || ''};
       const html = fillEmailTokens(fillFirstName(emailHtmlOf(content, undefined, userLabel(person.record.owner)), who), {object:person.object, record:person.record, records:hub.records, data:hub.data});
-      hub.update(person.object, person.record.id, email.id, {title:fillFirstName(e.subject, who), html, body:emailTextOf({format:'custom', html}),
+      hub.update(person.object, person.record.id, email.id, {title:fillSubjectTokens(fillFirstName(e.subject, who), {object:person.object, record:person.record, records:hub.records, data:hub.data}), html, body:emailTextOf({format:'custom', html}),
         attachments: content.format === 'simple' && (content.attachments || []).length ? content.attachments : undefined});
     });
   });
@@ -481,7 +481,7 @@ function TemplateFormPanel({initial, onCancel, onSave}){
       actions={panelActions(onCancel, initial ? 'Save Changes' : 'Add Email Template', ok, save)}>
       <EmailSplit fileView={fileView} form={<>
         <Field label="Email Template Name"><input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Document request" style={fieldText}/></Field>
-        <Field label="Subject"><input value={subject} onChange={e=>setSubject(e.target.value)} style={fieldText}/></Field>
+        <Field label="Subject"><SubjectField value={subject} onChange={setSubject}/></Field>
         <EmailContentFields value={content} setValue={setContent}/>
       </>} preview={<EmailPreview content={content} subject={subject}/>}/>
     </CreatePanelFrame>
@@ -500,7 +500,7 @@ function SequenceEmailPanel({initial, onCancel, onSave}){
     <CreatePanelFrame title="Edit Email" onClose={onCancel} width={EMAIL_PANEL_W + fileView.extra} flush zIndex={90}
       actions={panelActions(onCancel, 'Save Changes', ok, ()=>onSave({subject:subject.trim(), ...emailContentToSave(content)}))}>
       <EmailSplit fileView={fileView} form={<>
-        <Field label="Subject"><input autoFocus value={subject} onChange={e=>setSubject(e.target.value)} style={fieldText}/></Field>
+        <Field label="Subject"><SubjectField autoFocus value={subject} onChange={setSubject}/></Field>
         <EmailContentFields value={content} setValue={setContent}/>
       </>} preview={<EmailPreview content={content} subject={subject}/>}/>
     </CreatePanelFrame>
@@ -643,7 +643,7 @@ function QuoteTemplatesTab({data, setData, say}){
     <div style={{display:'flex', flexDirection:'column', flex:1, minHeight:0}}>
       <RecordViewsModule schema={schema} rows={rows} columns={cols.map(c => c.key)} storeKey="views:templates-quoteTemplates"
         defaultViews={[{id:'tv-quoteTemplates', name:'All Quote Templates', sort:{key:'code', dir:'asc'}}]}
-        actions={() => can('create') && <button onClick={()=>{ setOpenId(null); setCreating(true); }} title="Add Quote Template" aria-label="Add Quote Template" style={toolbarIconButton}><Icon name="plus" size={14} color={T.gray800}/></button>}
+        actions={() => can('create') && <NewButton label="New Quote Template" onClick={()=>{ setOpenId(null); setCreating(true); }}/>}
         overlay={creating ? <QuoteBuilder template={{templates:all, onSave:create}} onClose={()=>setCreating(false)}/>
           : edited ? <QuoteBuilder key={edited.id} onClose={()=>setEditing(null)} template={{initial:edited, templates:all,
               onSave:(vals)=>{ setList(ts => ts.map(t => t.id === edited.id ? {...t, ...vals, installments:undefined} : t)); setEditing(null); say('Template saved'); }}}/>
@@ -664,9 +664,11 @@ function QuoteTemplatesTab({data, setData, say}){
   );
 }
 
-function TemplatesSettings({data, setData}){
-  const tabs = TEMPLATE_TABS.filter(t => templateCan(t.kind, 'view'));
-  const [tabPicked, setTab] = React.useState('templates');
+/* `only`: the tabs this Settings page holds (2026-11-18) — Templates: Email Templates and Quote
+   Templates; Email Sequences, Playbooks and Services are Settings pages of their own (one tab, no tab row). */
+function TemplatesSettings({data, setData, only = ['templates', 'quoteTemplates']}){
+  const tabs = TEMPLATE_TABS.filter(t => only.includes(t.id) && templateCan(t.kind, 'view'));
+  const [tabPicked, setTab] = React.useState(only[0]);
   const tab = tabs.some(t => t.id === tabPicked) ? tabPicked : (tabs[0] || {}).id;
   const kind = (TEMPLATE_TABS.find(t => t.id === tab) || {}).kind;
   const can = (action, item) => templateCan(kind, action, item);
@@ -752,17 +754,17 @@ function TemplatesSettings({data, setData}){
     <div style={{position:'relative', flex:1, minHeight:0, display:'flex', flexDirection:'column', overflow:'hidden'}}>
       <SettingsPage fill>
         {/* The tabs row as Users & Teams: no gap under it — the view row's own padding sets the space. */}
-        <div style={{display:'flex', gap:8, borderBottom:`1px solid ${T.borderStrong}`, flexShrink:0}}>
+        {only.length > 1 && <div style={{display:'flex', gap:8, borderBottom:`1px solid ${T.borderStrong}`, flexShrink:0}}>
           {tabs.map(t => <UtTab key={t.id} icon={t.icon} label={t.label} active={tab === t.id} onClick={()=>{ setTab(t.id); setOpenId(null); }}/>)}
-        </div>
-        {!tab ? <div style={{...stTextB, padding:'24px 0'}}>You don't have access to any templates.</div> :
+        </div>}
+        {!tab ? <div style={{...stTextB, padding:'24px 0'}}>You don't have access to {only.length > 1 ? 'any templates' : `${(TEMPLATE_TABS.find(t => t.id === only[0]) || {}).label || 'this page'}`}.</div> :
         tab === 'quoteTemplates' ? <QuoteTemplatesTab data={data} setData={setData} say={say}/> :
         tab === 'playbooks' ? <PlaybooksTab data={data} setData={setData} say={say}/> :
         tab === 'services' ? <ServicesPage/> :
         <div style={{display:'flex', flexDirection:'column', flex:1, minHeight:0}}>
           <RecordViewsModule key={tab} schema={schema} rows={rows} columns={cols.map(c => c.key)} storeKey={isT ? 'views:templates-templates-v2' : 'views:templates-sequences-v2' /* v2: Subject back (templates), Enrolled in place of Emails and Templates */}
             defaultViews={[{id:`tv-${tab}`, name: isT ? 'All Templates' : 'All Sequences', sort:{key:'name', dir:'asc'}}]}
-            actions={() => can('create') && <button onClick={()=>{ setOpenId(null); setForm({kind:tab}); }} title={isT ? 'Add Email Template' : 'Add Email Sequence'} aria-label={isT ? 'Add Email Template' : 'Add Email Sequence'} style={toolbarIconButton}><Icon name="plus" size={14} color={T.gray800}/></button>}
+            actions={() => can('create') && <NewButton label={isT ? 'New Email Template' : 'New Email Sequence'} onClick={()=>{ setOpenId(null); setForm({kind:tab}); }}/>}
             overlay={form ? (form.kind === 'templates'
                 ? <TemplateFormPanel key={form.initial ? form.initial.id : 'new'} initial={form.initial} onCancel={()=>setForm(null)} onSave={save}/>
                 : <SequenceFormPanel key={form.initial ? form.initial.id : 'new'} initial={form.initial} templates={templates} onCancel={()=>setForm(null)} onSave={save}/>)
@@ -804,5 +806,8 @@ function TemplatesSettings({data, setData}){
   );
 }
 SETTINGS_PAGES['settings.templates'] = TemplatesSettings;
+SETTINGS_PAGES['settings.emailSequences'] = (p) => <TemplatesSettings {...p} only={['sequences']}/>;
+SETTINGS_PAGES['settings.playbooks'] = (p) => <TemplatesSettings {...p} only={['playbooks']}/>;
+SETTINGS_PAGES['settings.services'] = (p) => <TemplatesSettings {...p} only={['services']}/>;
 
 Object.assign(window, {TemplatesSettings, SequenceEnrollmentsSettings, templateUsable, sequenceEnrollments, sequenceInstances, sampleSequenceEnrollments, sampleGroupEnrollment});

@@ -663,6 +663,7 @@ function App(){
   // The employees go back to their People instances' stores (workspaces.jsx).
   useOrg();   // ERP Settings changes apply at once
   React.useEffect(() => { try { saveEmployees(settingsData.people || []); } catch(e){ console.warn('HOF ERP: could not save People', e); } }, [settingsData.people]);
+  setTeamDirectory(settingsData.teams || []);
   setUserDirectory([...settingsData.users, ...(settingsData.deletedUsers || []).filter(x => !settingsData.users.some(u => u.id === x.id)).map(x => ({...x, deleted:true}))]);   // user IDs on records read as names — a deleted user's too, in their history
   // Who's signed in: the user with the session's email in this CRM instance.
   const sessionUser = SESSION && settingsData.users.find(u => String(u.email || '').toLowerCase() === String(SESSION.email).toLowerCase());

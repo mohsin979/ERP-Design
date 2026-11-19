@@ -576,7 +576,7 @@ function FormsPage(){
     <div style={{flex:1, minWidth:0, minHeight:0, display:'flex', flexDirection:'column', position:'relative', overflow:'hidden'}}>
       <RecordViewsModule inset="page" schema={schema} rows={rows} columns={FORM_COLUMNS.map(c => c.key)} storeKey="views:marketing-forms"
         defaultViews={[{id:'fv-all', name:'All Forms', sort:{key:'name', dir:'asc'}}]}
-        actions={() => <button onClick={()=>setEditor({})} title="Add Form" style={toolbarIconButton}><Icon name="plus" size={14} color={T.gray800}/></button>}
+        actions={() => <NewButton label="New Form" onClick={()=>setEditor({})}/>}
         overlay={open && <FormDetailPanel key={open.id} form={open} menuItems={actionsFor(open).filter(it => it.label !== 'View form')} onClose={()=>setOpenId(null)}
             onEdit={()=>setEditor({id:open.id})} onConnections={()=>setConnectId(open.id)} onPreview={()=>setPreviewId(open.id)} onPublish={(on)=>setPublished(open, on)}/>}/>
       {previewId && byId(previewId) && <FormPreviewModal form={byId(previewId)} onClose={()=>setPreviewId(null)}/>}
