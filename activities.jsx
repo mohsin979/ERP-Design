@@ -532,7 +532,7 @@ function ActivityLead({a, lead, style}){
   return (
     /* One visible line. Only the name truncates — avatar, "(Owner)" and the call arrow never
        do; CC'd names are all-or-nothing (they wrap onto the hidden second line). */
-    <div title={leadText(lead)} style={{...style, display:'flex', flexWrap:'wrap', columnGap:6, height:18, lineHeight:'18px', overflow:'hidden', minWidth:0, flex:1}}>
+    <div title={leadText(lead)} style={{...style, display:'flex', flexWrap:'wrap', columnGap:6, height:18, lineHeight:'18px', overflow:'hidden', minWidth:0, flex:(style && style.flex) || 1}}>
       <span style={{display:'flex', alignItems:'center', gap:6, minWidth:0, maxWidth:'100%', flex:'0 1 auto', whiteSpace:'nowrap', height:18}}>
         {lead.prefix && <span style={{...cut, flexShrink: lead.owner ? 1 : 0, whiteSpace:'pre'}}>{lead.prefix.trimEnd()}</span>}
         {lead.name && (
@@ -573,8 +573,13 @@ function ActivityRow({a, contact, first, context = 'all', compact = false, recor
               <HubRecordLink object={record.object} id={record.id} name={record.name}/>
             </span>
           </span>
+        ) : a.type === 'note' && a.support ? (
+          /* A Support Note: its tag right after who wrote it, a short line between (2026-11-19). */
+          <span style={{flex:1, minWidth:0, display:'flex', alignItems:'center', gap:8}}>
+            <ActivityLead a={a} lead={lead} style={{...quiet, flex:'0 1 auto'}}/>
+            <SupportNoteDivider/><SupportNoteTag/>
+          </span>
         ) : <ActivityLead a={a} lead={lead} style={quiet}/>}
-        {a.type === 'note' && a.support && <SupportNoteTag/>}
         {compact && !hideWhen && <span style={{...quiet, flexShrink:0, whiteSpace:'nowrap'}}>{l.when}</span>}
         </div>
         {l.detail && <div title={l.detail} style={{...one, fontSize:13, fontWeight:500, color:T.attioText, marginTop:4}}>{l.detail}</div>}

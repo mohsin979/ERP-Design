@@ -345,6 +345,7 @@ function ListToolItem({page, e, selected, onSelect, personLed}){
               <HubRecordLink object={e.object} id={e.recordId} name={e.record.name}/>
             </span>
             <span style={{flexShrink:0}}>· {HUB_NOUN[e.object]}</span>
+            {e.act.type === 'note' && e.act.support && <><SupportNoteDivider/><SupportNoteTag/></>}
           </span>
         ) : (
           <span style={{...quiet, flex:1, minWidth:0, display:'flex', alignItems:'center', gap:6, whiteSpace:'nowrap'}}>
@@ -354,9 +355,9 @@ function ListToolItem({page, e, selected, onSelect, personLed}){
             </span>
             <span style={{flexShrink:0}}>· {HUB_NOUN[e.object]}</span>
             {page.showDirection && <CallDirection incoming={isInboundCall(e.act)}/>}
+            {e.act.type === 'note' && e.act.support && <><SupportNoteDivider/><SupportNoteTag/></>}
           </span>
         )}
-        {e.act.type === 'note' && e.act.support && <SupportNoteTag/>}
         <span style={{...quiet, flexShrink:0, whiteSpace:'nowrap'}}>{fmtActStamp(at)}</span>
       </div>
       <div style={{display:'flex', alignItems:'center', gap:8, marginTop:4, minWidth:0}}>

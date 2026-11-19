@@ -12,8 +12,8 @@
    while the record is open.
 
    On a record (2026-11-19, Mohsin) the feeds aren't pills: they're the record's journey —
-   Lead → Deal → Customer (RecordJourney), each step its label only, folded to the record's own
-   step with "History" and "Next" to open each side; a step picked shows its activity below, in place. Under it one row: Search and Filters on the left;
+   Lead → Deal → Customer (RecordJourney), each step its label only, folded to one text action,
+   "Show Full Journey", that opens every step; a step picked shows its activity below, in place. Under it one row: Search and Filters on the left;
    on the right "Go to <Deal>" (JourneyGoTo, on another record's step only) and Add — always there,
    adding to the record that's open, whichever step is shown. The activity of another record's
    step names and links no record. A step the record
@@ -40,42 +40,42 @@ function associatedRecords(hub, object, record){
 }
 /* The journey's steps: each record type with the records at it — the record itself at its own.
    A step is its label only — Lead, Deal, "Deals (2)" — no names or dates; the records' names are
-   its tooltip. It starts small (Mohsin, 2026-11-19): only the record's own step, with "History"
-   on its left when there are records before it (a deal's lead; a customer's lead and deal) and
-   "Next" on its right when there are records after it (a lead's deals and customers; a deal's
-   customers) — neither when there are none. Each opens only its side, with arrows between the
-   steps, and a close icon folds it again (back to the record's own activity if a step it hid was
-   picked). Every record starts folded. */
+   its tooltip. Folded, it's the record's own step and a text action, "Show Full Journey" (Mohsin,
+   2026-11-19 — his "lifetime activity", worded by us), shown only when the record has related records; it opens
+   every step the record has, Lead → Deal → Customer, with an × at the right that folds it back
+   (to the record's own activity if another step was picked). Every record starts folded. */
 function RecordJourney({hub, object, record, active, onSelect}){
   const assoc = associatedRecords(hub, object, record);
   const steps = ACTIVITY_FEED_OBJECTS.filter(workspaceHasType).map(o => {
     const recs = o === object ? [record] : (assoc[o] || []);
     return {o, recs, label: recs.length > 1 ? `${typePlural(o, o.charAt(0).toUpperCase() + o.slice(1))} (${recs.length})` : HUB_NOUN[o]};
-  });
-  const at = Math.max(0, steps.findIndex(x => x.o === object));
-  const before = steps.slice(0, at).filter(x => x.recs.length), after = steps.slice(at + 1).filter(x => x.recs.length);
-  const [open, setOpen] = React.useState({before:false, after:false});
-  React.useEffect(() => { setOpen({before:false, after:false}); }, [object, record && record.id]);
-  const fold = (side) => { setOpen(o => ({...o, [side]:false}));
-    if((side === 'before' ? before : after).some(x => x.o === active)) onSelect(object); };
+  }).filter(x => x.recs.length);
+  const [open, setOpen] = React.useState(false);
+  React.useEffect(() => { setOpen(false); }, [object, record && record.id]);
+  if(steps.length < 2) return null;
+  const fold = () => { setOpen(false); if(active !== object) onSelect(object); };
+  const textBtn = {display:'inline-flex', alignItems:'center', gap:6, border:'none', background:'transparent', padding:'6px 2px', cursor:'pointer',
+    fontFamily:'inherit', fontSize:13, color:T.attioText, whiteSpace:'nowrap', flexShrink:0};
   const chip = (x) => { const on = x.o === active;
-    return <button key={x.o} type="button" role="tab" aria-selected={on} onClick={()=>onSelect(x.o)} title={x.recs.map(r => r.name).join(', ')}
+    return <button type="button" role="tab" aria-selected={on} onClick={()=>onSelect(x.o)} title={x.recs.map(r => r.name).join(', ')}
       style={{height:34, padding:'0 14px', borderRadius:10, fontFamily:'inherit', fontSize:13, fontWeight:600, color:T.attioText, cursor:'pointer', whiteSpace:'nowrap',
         border:`1px solid ${on ? T.black : T.borderStrong}`, background: on ? '#F4F5F7' : '#fff', flexShrink:0}}>{x.label}</button>; };
-  const arrow = (k) => <span key={`a-${k}`} aria-hidden="true" style={{display:'flex', flexShrink:0}}><Icon name="arrowRight" size={14} color={T.gray600}/></span>;
-  const textBtn = {display:'inline-flex', alignItems:'center', gap:6, border:'none', background:'transparent', padding:'6px 2px', cursor:'pointer',
-    fontFamily:'inherit', fontSize:13, color:T.gray600, whiteSpace:'nowrap', flexShrink:0};
-  const closer = (side) => <button key={`x-${side}`} type="button" onClick={()=>fold(side)} title={side === 'before' ? 'Hide History' : 'Hide Next'}
-    aria-label={side === 'before' ? 'Hide history' : 'Hide next'} style={{...textBtn, padding:4}}><Icon name="close" size={12} color={T.gray600}/></button>;
+  // Folded: the record's own step, then "Show Full Journey".
+  if(!open) return (
+    <div role="tablist" aria-label="Record journey" style={{display:'flex', alignItems:'center', flexWrap:'wrap', gap:12, padding:'12px 16px 0'}}>
+      {chip(steps.find(x => x.o === object) || steps[0])}
+      <button type="button" onClick={()=>setOpen(true)} className={LINK_CLASS} style={textBtn}><Icon name="clock" size={13} color={T.attioText}/>Show Full Journey</button>
+    </div>
+  );
   return (
     <div role="tablist" aria-label="Record journey" style={{display:'flex', alignItems:'center', flexWrap:'wrap', gap:8, padding:'12px 16px 0'}}>
-      {before.length > 0 && (open.before
-        ? <>{closer('before')}{before.map(x => <React.Fragment key={x.o}>{chip(x)}{arrow(x.o)}</React.Fragment>)}</>
-        : <button type="button" onClick={()=>setOpen(o => ({...o, before:true}))} className={LINK_CLASS} style={textBtn}><Icon name="clock" size={13} color={T.gray600}/>History</button>)}
-      {chip(steps[at])}
-      {after.length > 0 && (open.after
-        ? <>{after.map(x => <React.Fragment key={x.o}>{arrow(x.o)}{chip(x)}</React.Fragment>)}{closer('after')}</>
-        : <button type="button" onClick={()=>setOpen(o => ({...o, after:true}))} className={LINK_CLASS} style={textBtn}>Next<Icon name="arrowRight" size={13} color={T.gray600}/></button>)}
+      {steps.map((x, i) => (
+        <React.Fragment key={x.o}>
+          {i > 0 && <span aria-hidden="true" style={{display:'flex', flexShrink:0}}><Icon name="arrowRight" size={14} color={T.gray600}/></span>}
+          {chip(x)}
+        </React.Fragment>
+      ))}
+      <button type="button" onClick={fold} title="Hide Journey" aria-label="Hide journey" style={{...textBtn, padding:4, marginLeft:4}}><Icon name="close" size={12} color={T.gray600}/></button>
     </div>
   );
 }

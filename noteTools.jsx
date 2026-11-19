@@ -211,6 +211,8 @@ function SupportNoteTag(){
   return <span style={{display:'inline-flex', alignItems:'center', alignSelf:'flex-start', height:18, padding:'0 7px', borderRadius:9999, flexShrink:0,
     background:'#FEF3F2', border:`1px solid #FECDCA`, color:T.red, fontSize:11, fontWeight:600, whiteSpace:'nowrap'}}>Support Note</span>;
 }
+// The short line between a note's author and its Support Note tag.
+const SupportNoteDivider = () => <span aria-hidden="true" style={{width:1, height:12, background:T.borderStrong, flexShrink:0}}/>;
 // The note form's switch: Support Note (off to start with).
 function SupportNoteSwitch({on, onChange}){
   return (
@@ -220,4 +222,4 @@ function SupportNoteSwitch({on, onChange}){
   );
 }
 
-Object.assign(window, {mentionUsers, mentionedIn, highlightMentionsHtml, MentionText, useMentionNotify, withMentions, MentionsHost, DictationHost, SupportNoteTag, SupportNoteSwitch});
+Object.assign(window, {mentionUsers, mentionedIn, highlightMentionsHtml, MentionText, useMentionNotify, withMentions, MentionsHost, DictationHost, SupportNoteTag, SupportNoteDivider, SupportNoteSwitch});
