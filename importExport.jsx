@@ -30,7 +30,7 @@ function useRecordExportLog(){
       const subject = `Large export: ${count.toLocaleString('en-US')} ${ieNoun(object, count)}`;
       const body = `${CURRENT_USER.name} exported ${count.toLocaleString('en-US')} ${ieNoun(object, count)} from ${from} on ${fmtActStamp(new Date(at))}.`;
       alert = {to:admins.map(u => ({name:u.name, email:u.email})), subject, body};
-      if(engineCtx && engineCtx.api && engineCtx.api.notifyUsers) engineCtx.api.notifyUsers(admins.map(u => u.id), subject, body);
+      if(engineCtx && engineCtx.api && engineCtx.api.notifyUsers) engineCtx.api.notifyUsers(admins.map(u => u.id), subject, body, null, null, 'largeExport');
     }
     const entry = {id:`ie-${Date.now().toString(36)}`, kind:'Export', object, count, from, by:CURRENT_USER.name, at, ...(alert ? {alert} : {})};
     hub.setData(d => ({...d, importExportLog:[entry, ...importExportLogOf(d)].slice(0, 500)}));
@@ -123,11 +123,11 @@ function ImportTab({hub, onDone}){
   return (
     <div style={{display:'flex', flexDirection:'column', gap:16, maxWidth:880}}>
       <div style={{display:'flex', alignItems:'center', gap:12}}>
-        <span style={label}>Record Type</span>
+        <span style={label}>Record Type<Req/></span>
         <div style={{width:240}}><FormSelect value={object} options={objects.map(o => ({value:o, label:typePlural(o, o)}))} onChange={(v)=>{ if(v){ setObject(v); setFile(null); setResult(null); } }}/></div>
       </div>
       <div style={{display:'flex', alignItems:'center', gap:12}}>
-        <span style={label}>File</span>
+        <span style={label}>File<Req/></span>
         <input ref={input} type="file" accept=".csv,text/csv" onChange={pick} style={{display:'none'}}/>
         <StSecondary label={<span style={{display:'inline-flex', alignItems:'center', gap:6}}><Icon name="paperclip" size={13} color={T.gray800}/>{file ? file.name : 'Choose CSV File'}</span>} onClick={()=>input.current.click()}/>
         {file && <span style={{fontSize:12.5, color:T.attioMuted}}>{bulkPlural(file.rows.length, 'row')}</span>}
@@ -178,12 +178,12 @@ function ExportTab({hub}){
   return (
     <div style={{display:'flex', flexDirection:'column', gap:16, maxWidth:640}}>
       <div style={{display:'flex', alignItems:'center', gap:12}}>
-        <span style={{fontSize:12.5, color:T.gray600, width:140, flexShrink:0}}>Record Type</span>
+        <span style={{fontSize:12.5, color:T.gray600, width:140, flexShrink:0}}>Record Type<Req/></span>
         <div style={{width:240}}><FormSelect value={object} options={objects.map(o => ({value:o, label:typePlural(o, o)}))} onChange={(v)=>{ if(v){ setObject(v); setPicked(null); } }}/></div>
       </div>
       <div style={{display:'flex', flexDirection:'column', gap:2}}>
         <div style={{display:'flex', alignItems:'center', gap:8, paddingBottom:4}}>
-          <span style={{fontSize:12.5, color:T.gray600, flex:1}}>Properties ({chosen.length} of {all.length})</span>
+          <span style={{fontSize:12.5, color:T.gray600, flex:1}}>Properties ({chosen.length} of {all.length})<Req/></span>
           <button type="button" onClick={()=>setPicked(chosen.length === all.length ? [] : all.map(p => p.key))} className={LINK_CLASS}
             style={{border:'none', background:'transparent', padding:0, cursor:'pointer', fontFamily:'inherit', fontSize:12.5, color:T.attioText}}>{chosen.length === all.length ? 'Clear All' : 'Select All'}</button>
         </div>

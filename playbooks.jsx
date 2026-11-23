@@ -67,7 +67,7 @@ function PlaybookEditorPanel({playbook, onCancel, onSave}){
       {/* Left — the playbook's name, then its sections. */}
       <div style={{flex:1, minWidth:0, overflowY:'auto', padding:20, display:'flex', flexDirection:'column', gap:16}}>
         <span style={sectionLabel}>Playbook details</span>
-        <Field label="Playbook Name" wide><input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Discovery Call" style={fieldText}/></Field>
+        <Field label="Playbook Name" wide required><input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Discovery Call" style={fieldText}/></Field>
         <div style={{borderTop:`1px solid ${T.border}`, margin:'4px -20px 0'}}/>
         <span style={sectionLabel}>Sections · {sections.length} of {PLAYBOOK_MAX_SECTIONS}</span>
         {sections.map((s, i) => (
@@ -79,11 +79,11 @@ function PlaybookEditorPanel({playbook, onCancel, onSave}){
               {iconBtn('trash', 'Remove section', ()=>setSections(ss => ss.filter(x => x.id !== s.id)))}
             </div>
             <div style={{display:'flex', flexDirection:'column', gap:6}}>
-              <span style={label}>Section Header</span>
+              <span style={label}>Section Header<Req/></span>
               <input value={s.header} onChange={e=>setSection(s.id, {header:e.target.value})} placeholder="e.g. Open the call" aria-label={`Section ${i + 1} header`} style={fieldText}/>
             </div>
             <div style={{display:'flex', flexDirection:'column', gap:6}}>
-              <span style={label}>Text Description</span>
+              <span style={label}>Text Description<Req/></span>
               <textarea value={s.text} onChange={e=>setSection(s.id, {text:e.target.value})} rows={5} aria-label={`Section ${i + 1} text`}
                 placeholder="What to say or ask in this part of the call" style={{...fieldText, resize:'vertical', lineHeight:1.5}}/>
             </div>

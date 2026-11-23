@@ -716,7 +716,7 @@ function ProfileByHand({contact, startForm, onCancel, onSave, editing}){
   const {parts, form} = pfWithAlways(store, profile);
   return <ProfileFormFillPanel key={profile.id} contact={contact} form={form} current={pfCurrentOf(store, contact.id, parts)} onCancel={onCancel}
     title={editing ? 'Edit Customer Profile' : 'Add Customer Profile'} primary={editing ? 'Save Changes' : 'Add Customer Profile'} search={editing}
-    top={!editing && !startForm && profiles.length > 1 ? <Field label="Profile"><Select value={profile.id} options={profiles.map(f => ({value:f.id, label:f.name}))} onChange={(v)=>v && setProfileId(v)}/></Field> : null}
+    top={!editing && !startForm && profiles.length > 1 ? <Field label="Profile" required><Select value={profile.id} options={profiles.map(f => ({value:f.id, label:f.name}))} onChange={(v)=>v && setProfileId(v)}/></Field> : null}
     onSave={(out)=>{ pfSaveParts(store, contact.id, parts, out); store.setType(contact.id, profile.id); onSave && onSave(); }}/>;
 }
 
@@ -994,7 +994,7 @@ function ProfileFormEditor({form, taken = [], onCancel, onSave}){
       <div style={{flex:1, minWidth:0, overflowY:'auto', padding:20, display:'flex', flexDirection:'column', gap:16}}>
         <span style={section}>Form details</span>
         {stack(<>
-          <Field label="Form Name" wide><input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Canada CRS Assessment" style={fieldText}/></Field>
+          <Field label="Form Name" wide required><input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Canada CRS Assessment" style={fieldText}/></Field>
           <Field label="Description" wide><textarea value={description} onChange={e=>setDescription(e.target.value)} rows={3} style={{...fieldText, resize:'vertical', lineHeight:1.5}}/></Field>
         </>)}
         <div style={{borderTop:`1px solid ${T.border}`, margin:'4px -20px 0'}}/>

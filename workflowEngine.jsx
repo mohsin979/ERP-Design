@@ -39,7 +39,10 @@
    A deleted record's open prompts end, Not applicable. A record created straight into a stage Block
    Stage Entry guards is created there, with a violation for its owner. Everything here — workflows,
    pipelines, deals, their activities, events, runs, prompts, notifications — is saved in this
-   browser. */
+   browser.
+
+   Log Call (2026-11-20): the prompt asks a Not Qualified Reason under the outcome Connected, not
+   qualified — kept on the call and set on the lead (the record, or its person): logCallOn. */
 
 const WF_DAY = 86400000;
 const WF_UNIT_MS = {Hours:WF_DAY / 24, Days:WF_DAY, Weeks:7 * WF_DAY, Months:30 * WF_DAY, Years:365 * WF_DAY};
@@ -263,6 +266,18 @@ const formRecordValue = (key, rec) => {
 /* Property history (2026-11-16): a changed property is kept on its record as a Property change —
    what it was and what it is now, by a person or a workflow (named). Not a merge's own changes
    (Records merged keeps those): it writes inside withoutPropertyHistory. */
+/* Owner handover (2026-11-23). A record that has an owner isn't given to someone else at once: the
+   change a person makes is held (setDealsTracked) — the record stays with its owner — and a handover
+   is kept for the new owner to accept (engine state `handovers`, their bell; notifications.jsx
+   HandoverPanel). Not held: a record with no owner yet, a person making themself the owner, a
+   workflow's change, a merge, and a change allowed straight through for one record and owner
+   (`allowDirectOwner` — accepting a handover, a leaving user's hand-over, an Undo). The Handover
+   Note written on Edit Owner waits here for the handover it belongs to (`stageHandoverNote`). */
+const WF_OWNER_DIRECT = new Map(), WF_HANDOVER_NOTES = new Map();   // '<record id>|<new owner id>' → until / {note, until}
+const allowDirectOwner = (recordId, to) => WF_OWNER_DIRECT.set(`${recordId}|${to || ''}`, Date.now() + 5000);
+const stageHandoverNote = (recordId, to, note) => { if(String(note || '').trim()) WF_HANDOVER_NOTES.set(`${recordId}|${to}`, {note:String(note).trim(), until:Date.now() + 5000}); };
+const pendingHandover = (ctx, object, id) => (((ctx && ctx.state.handovers) || []).find(h => h.status === 'pending' && h.object === object && String(h.recordId) === String(id))) || null;
+let WF_HANDOVER_BY = null;   // an accepted handover's owner change is kept as made by whoever handed it over
 let WF_QUIET_HISTORY = false;
 const withoutPropertyHistory = (fn) => { const was = WF_QUIET_HISTORY; WF_QUIET_HISTORY = true; try { return fn(); } finally { WF_QUIET_HISTORY = was; } };
 // A property's value as the record shows it: an amount with its currency, a user by name; '' when blank.
@@ -513,7 +528,7 @@ function WhenField({config, context, onChange}){
   return (
     <div style={{display:'flex', flexDirection:'column', gap:10}}>
       {cfgField('When', <FormSelect value={when} placeholder="Select when" options={options}
-        onChange={(v)=>onChange({when:v, inStage:v === 'stage', ...(v === 'period' ? {changeUnit:c.changeUnit || 'Days'} : {})})}/>)}
+        onChange={(v)=>onChange({when:v, inStage:v === 'stage', ...(v === 'period' ? {changeUnit:c.changeUnit || 'Days'} : {})})}/>, true)}
       {when === 'period' && <DurationInput units={PROPERTY_CHANGE_UNITS} value={{amount:c.changeAmount || '', unit:c.changeUnit || 'Days'}} onChange={(d)=>onChange({changeAmount:d.amount, changeUnit:d.unit})}/>}
     </div>
   );
@@ -748,6 +763,8 @@ const withStageEntry = (deals) => deals.map(d => d.stageEnteredAt ? d : {...d, s
 /* `triggerProgress`: for All workflows, which triggers have fired per record ("<workflow>:<deal>"
    → trigger ids), until every one has and the run starts. */
 const EMPTY_ENGINE = () => ({events:[], runs:[], prompts:[], notifications:[], triggerProgress:{}});
+// The bell keeps each person's latest 100 notifications (it was the latest 300 of everyone's).
+const capNotifications = (list) => { const n = {}; return list.filter(x => (n[x.userId] = (n[x.userId] || 0) + 1) <= 100); };
 /* Suggestive is no longer a Behavior: Suggestive Actions still open from before are closed —
    Dismissed, kept in run history — and steps waiting only on them settle the same way. */
 const SUGGESTIVE_REMOVED = 'Dismissed — Suggestive mode removed';
@@ -981,7 +998,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
   }
   const setDealsTracked = (upd, chain) => {
     const prev = dealsRef.current;
-    const blocks = [];
+    const blocks = [], holds = [];
     const raw = (typeof upd === 'function' ? upd(prev) : upd).map(dIn => {
       const p = prev.find(x => x.id === dIn.id);
       /* A contact: its stage and its Types of Contact value are one — a move sets the value; a
@@ -990,6 +1007,13 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
       if(recordObjectOf(dIn.id) === 'contacts' && contactPipe){
         if(p && dIn.stage !== p.stage){ const v = contactValueFor(contactPipe, dIn.stage); if(v !== undefined && v !== dIn.contactType) d0 = {...dIn, contactType:v}; }
         else { const st = contactStageFor(contactPipe, dIn); if(st !== dIn.stage) d0 = {...dIn, stage:st, pipeline:contactPipe.id}; }
+      }
+      /* Owner handover: an owned record given by a person to someone else stays with its owner
+         until the new owner accepts (see WF_OWNER_DIRECT, above). */
+      if(p && p.owner !== d0.owner && !WF_QUIET_HISTORY && !(chain && (chain.workflowId || chain.revert))){
+        const us = dataRef.current.users || [], from = userIdOf(p.owner, us), to = userIdOf(d0.owner, us), key = `${d0.id}|${to}`;
+        if((WF_OWNER_DIRECT.get(key) || 0) > Date.now()) WF_OWNER_DIRECT.delete(key);
+        else if(from && to && from !== to && to !== currentUserId(dataRef.current)){ holds.push({record:p, from, to}); d0 = {...d0, owner:p.owner}; }
       }
       if(!p || !d0.stage || (p.stage === d0.stage && p.pipeline === d0.pipeline)) return d0;
       const by = chain && chain.revert ? [] : entryBlockers(p, d0, chain);   // a revert puts a record back where it was
@@ -1002,7 +1026,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
     const now = Date.now(), changes = [], propChanges = [];
     // Who made this change, for its history: the workflow (named) or the person signed in.
     const changedBy = () => { const wf = chain && chain.workflowId && getWorkflow(chain.workflowId);
-      return wf ? {source:'team', by:`${wf.name || workflowTitle(dataRef.current, wf)} (workflow)`, viaWorkflow:wf.id} : {source:'you', by:CURRENT_USER.name}; };
+      return wf ? {source:'team', by:`${wf.name || workflowTitle(dataRef.current, wf)} (workflow)`, viaWorkflow:wf.id} : WF_HANDOVER_BY ? {source:'team', by:WF_HANDOVER_BY, handover:true} : {source:'you', by:CURRENT_USER.name}; };
     // Each record's own Object's properties.
     const propsCache = {}, allPropsOf = (d) => propsCache[recordObjectOf(d.id)] || (propsCache[recordObjectOf(d.id)] = objectProperties(dataRef.current, recordObjectOf(d.id)));
     const created = [], updated = [];
@@ -1033,6 +1057,19 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
     });
     dealsRef.current = next;
     writeRecords(prev, next);
+    /* The handovers this change started: one per record, for its new owner — in their bell until
+       they accept or decline. Another one for the same record takes the place of one still pending.
+       The Handover Note is kept on the record as a note. */
+    if(holds.length){
+      const made = holds.map(h => { const k = `${h.record.id}|${h.to}`, staged = WF_HANDOVER_NOTES.get(k); WF_HANDOVER_NOTES.delete(k);
+        return {id:wfNewId('ho'), recordId:h.record.id, object:recordObjectOf(h.record.id), recordName:h.record.name || '', from:h.from, to:h.to, by:CURRENT_USER.name, byId:currentUserId(dataRef.current) || '',
+          note: staged && staged.until > now ? staged.note : '', at:now, status:'pending'}; });
+      commit(st => ({...st,
+        handovers:[...made, ...(st.handovers || []).map(x => x.status === 'pending' && made.some(m => m.recordId === x.recordId) ? {...x, status:'cancelled', decidedAt:now} : x)].slice(0, 400),
+        notifications:capNotifications([...made.map(m => ({id:wfNewId('nt'), userId:m.to, kind:'handover', object:'direct', handoverId:m.id, recordId:m.recordId, dealName:m.recordName, by:m.by,
+          text:`${m.by} is handing ${m.recordName || 'a record'} over to you.`, at:now, read:false, channels:{inApp:true}})), ...st.notifications])}));
+      made.filter(m => m.note).forEach(m => addActivity(m.recordId, {id:wfNewId('hon'), ...recordKey(m.recordId), type:'note', at:new Date(now), body:m.note, handoverNote:true, source:'you', by:CURRENT_USER.name}));
+    }
     // Every event from this one change carries its batch (so a workflow starts once per change).
     const outerBatch = batchRef.current;
     batchRef.current = wfNewId('b');
@@ -1062,7 +1099,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
       if(!pr || pr.auto || pr.derived) return;
       const before = prev.find(x => x.id === c.deal.id) || c.deal;
       addActivity(c.deal.id, {id:wfNewId('prp'), ...recordKey(c.deal.id), type:'propertyChange', at:new Date(now), property:pr.key, label:pr.label,
-        from:propertyValueText(pr, before, c.from), to:propertyValueText(pr, c.deal, c.to), ...changedBy()});
+        from:propertyValueText(pr, before, c.from), to:propertyValueText(pr, c.deal, c.to), raw:{from:c.from ?? null, to:c.to ?? null}, ...changedBy()});   // `raw`: the values themselves — what a notification's Undo puts back (notifications.jsx)
     });
     /* Stage history: every move of an existing record (a person's, or a workflow's — named), with
        the stages' names as they were. */
@@ -1374,7 +1411,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
     }
     const me = currentUserId(data);
     const text = `${rule} · ${res.result}`;
-    if(me) commit(s => ({...s, notifications:[{id:wfNewId('nt'), userId:me, dealId:deal.id, dealName:deal.name, text, at:Date.now(), read:false, event}, ...s.notifications].slice(0, 300)}));
+    if(me) commit(s => ({...s, notifications:capNotifications([{id:wfNewId('nt'), userId:me, dealId:deal.id, dealName:deal.name, text, at:Date.now(), read:false, event}, ...s.notifications])}));
     setNotices(ns => [...ns.filter(n => n.kind !== 'auto'), {id:wfNewId('no'), kind:'auto', rule, dealName:deal.name, result:res.result, event}]);
   }
   const childChain = (run) => ({...run.chain, depth:run.chain.depth + 1});
@@ -1557,9 +1594,21 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
     const data = dataRef.current, owner = userName(data, rec.owner), at = new Date();
     const inbound = call.callType === 'Inbound';
     const act = {id:wfNewId('wc'), ...recordKey(rec.id), type:'call', at, logged:true, outcome:call.outcome, durationMin:0, body:'', direction: inbound ? 'inbound' : 'outbound',
-      source: inbound ? 'client' : 'team', by: inbound ? null : owner, pointOfContact:owner, viaWorkflow:workflowId};
+      source: inbound ? 'client' : 'team', by: inbound ? null : owner, pointOfContact:owner, viaWorkflow:workflowId,
+      // Connected, not qualified with its reason (given on the prompt): kept on the call.
+      ...(call.outcome === CALL_NOT_QUALIFIED_OUTCOME && call.notQualifiedReason ? {notQualifiedReason:call.notQualifiedReason} : {})};
     addActivity(rec.id, act);
     if((call.comment || '').trim()) addActivity(rec.id, {id:wfNewId('wn'), ...recordKey(rec.id), type:'note', at, body:call.comment.trim(), source:'team', by:owner, callId:act.id, viaWorkflow:workflowId});
+    // A Call back request with its date and time (given on the prompt): its task (activities.jsx callBackTask).
+    if(call.outcome === CALL_BACK_OUTCOME && callBackReady(call.callBack)) addActivity(rec.id, {id:wfNewId('wt'), ...recordKey(rec.id), at, source:'team', by:owner, viaWorkflow:workflowId,
+      ...callBackTask(rec.name, owner, call.callBack, act.id)});
+    /* …and its Not Qualified Reason goes on the lead: the record itself, or a deal's or customer's
+       person (its first lead); none: nothing. */
+    if(act.notQualifiedReason){
+      const leadId = recordObjectOf(rec.id) === 'contacts' ? rec.id : personIdOf(rec);
+      const lead = leadId == null ? null : dealsRef.current.find(r => recordObjectOf(r.id) === 'contacts' && String(r.id) === String(leadId));
+      if(lead && lead.notQualifiedReason !== act.notQualifiedReason) applyPatch(lead, {notQualifiedReason:act.notQualifiedReason}, run);
+    }
     emit({type:'callLogged', recordId:rec.id, pipelineId:rec.pipeline, attrs:{activityId:act.id, outcome:act.outcome, logged:true}}, childChain(run));
     return act;
   }
@@ -1799,7 +1848,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
         if(!ids.length) return {status:'skipped', result:'No recipients'};
         const text = (c.message || '').trim() || workflowTitle(data, w);
         const notes = ids.map(u => ({id:wfNewId('nt'), userId:u, dealId:deal.id, dealName:deal.name, text, at:Date.now(), read:false}));
-        commit(s => ({...s, notifications:[...notes, ...s.notifications].slice(0, 300)}));
+        commit(s => ({...s, notifications:capNotifications([...notes, ...s.notifications])}));
         recordEffect({kind:'notification', ids:notes.map(n => n.id), users:ids});
         return {status:'done', result:`Notified ${ids.map(u => userName(data, u)).join(', ')}`};
       }
@@ -2129,7 +2178,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
         outcome = `Meeting logged: ${(p.payload.meeting || {}).title || 'Meeting'}`; break;
       }
       case 'logCall': {
-        logCallOn(deal, {...(p.payload.call || {}), outcome:input.outcome || (p.payload.call || {}).outcome, comment:input.comment ?? (p.payload.call || {}).comment}, run, run.workflowId);
+        logCallOn(deal, {...(p.payload.call || {}), outcome:input.outcome || (p.payload.call || {}).outcome, comment:input.comment ?? (p.payload.call || {}).comment, callBack:input.callBack || null, notQualifiedReason:input.notQualifiedReason || null}, run, run.workflowId);
         outcome = `Call logged · ${input.outcome || (p.payload.call || {}).outcome}`; break;
       }
       // Initiate Call ends with a call through the dialer (emit), not here.
@@ -2340,7 +2389,7 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
           const c = a.config || {}, ids = [...new Set([...(c.recipients || []).map(r => resolvePerson(data, subject, r)), ...(c.users || [])].filter(Boolean))];
           if(!ids.length) return {...base, status:'skipped', result:'No recipients'};
           const text = `${(c.message || '').trim() || (w.name || workflowTitle(data, w))} · ${u.name}`;
-          commit(s => ({...s, notifications:[...ids.map(uid => ({id:wfNewId('nt'), userId:uid, dealId:null, dealName:u.name, text, at:Date.now(), read:false})), ...s.notifications].slice(0, 300)}));
+          commit(s => ({...s, notifications:capNotifications([...ids.map(uid => ({id:wfNewId('nt'), userId:uid, dealId:null, dealName:u.name, text, at:Date.now(), read:false})), ...s.notifications])}));
           return {...base, status:'done', result:`Notified ${ids.map(x => userName(data, x)).join(', ')}`};
         });
         addRun({id:wfNewId('run'), workflowId:w.id, version:w.version || 1, trigger:views[0].trigger, triggerId:views[0].triggerId, dealId:null, dealName:u.name, subject:'user',
@@ -2754,8 +2803,21 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
        workflow action does. → how many were cancelled. */
     // A bell notification to these users, from outside a workflow (e.g. a large export — importExport.jsx).
     // `recordId` / `tab`: clicking it opens that record (on that tab).
-    notifyUsers: (userIds, title, text, recordId, tab) => commit(s => ({...s, notifications:[...(userIds || []).map(uid => ({id:wfNewId('nt'), userId:uid, dealId:null, dealName:title, text, at:Date.now(), read:false,
-      ...(recordId != null ? {recordId, tab:tab || null} : {})})), ...s.notifications].slice(0, 300)})),
+    /* `event` (2026-11-23): a Direct notification (notifications.jsx NOTIF_DIRECT — tagged, office
+       meeting, report shared, large export): each person's Notification Preset and own settings
+       decide whether it goes to them and on which channels; one about a record they may not view
+       isn't sent. Without `event` it goes to everyone named, in the bell. */
+    notifyUsers: (userIds, title, text, recordId, tab, event) => {
+      const rec = recordId != null ? dealsRef.current.find(r => String(r.id) === String(recordId)) : null;
+      const to = event ? notifDirectRecipients(dataRef.current, userIds || [], event, rec) : (userIds || []).map(userId => ({userId}));
+      commit(s => ({...s, notifications:capNotifications([...to.map(r => ({id:wfNewId('nt'), userId:r.userId, dealId:null, dealName:title, text, at:Date.now(), read:false,
+        ...(event ? {kind:event, object:'direct', channels:r.channels, by:CURRENT_USER.name} : {}),
+        ...(recordId != null ? {recordId, tab:tab || null} : {})})), ...s.notifications])}));
+    },
+    // Notifications made by the Notification Presets (notifications.jsx NotificationHost): complete, as they're kept.
+    addNotifications: (list) => commit(s => ({...s, notifications:capNotifications([...(list || []).map(n => ({id:wfNewId('nt'), at:Date.now(), read:false, ...n})), ...s.notifications])})),
+    patchNotification: (id, patch) => commit(s => ({...s, notifications:s.notifications.map(n => n.id === id ? {...n, ...patch} : n)})),
+    removeNotifications: (ids) => commit(s => ({...s, notifications:s.notifications.filter(n => !(ids || []).includes(n.id))})),
     exitSequence: (recordId, sequenceId) => {
       const pending = actsOf(recordId).filter(a => a.type === 'email' && a.status === 'scheduled' && a.sequenceId === sequenceId);
       if(pending.length) editActivities(m => ({...m, [recordId]:(m[recordId] || []).filter(a => !pending.some(x => x.id === a.id))}));
@@ -2809,7 +2871,34 @@ function useWorkflowEngine({data, setData, deals, setDealsRaw, dealActivities, s
       batchRef.current = outer;
       addActivity(recordId, {id:wfNewId('cf'), ...recordKey(recordId), type:'workflow', at:new Date(now), title:`${label} confirmed unchanged by client · ${CURRENT_USER.name}`, body:'', by:CURRENT_USER.name, source:'you'});
     },
-    markRead: (userId) => commit(s => ({...s, notifications:s.notifications.map(n => n.userId === userId ? {...n, read:true} : n)})),
+    /* A handover's answer (2026-11-23). Accept: the record is theirs — if it's still with the owner
+       it was handed over by (else the handover is gone); kept in its history as an owner change made
+       by whoever handed it over. Decline (with a reason) and Cancel leave the record where it is.
+       Whoever handed it over, and the owner it was with, hear the answer in their bell. */
+    answerHandover: (id, answer, reason) => {
+      const h = (esRef.current.handovers || []).find(x => x.id === id && x.status === 'pending');
+      if(!h) return false;
+      const rec = getDeal(h.recordId), us = dataRef.current.users || [], me = CURRENT_USER.name;
+      const close = (status) => commit(st => ({...st, handovers:(st.handovers || []).map(x => x.id === id ? {...x, status, decidedAt:Date.now(), ...(reason ? {reason} : {})} : x)}));
+      const tell = (ids, text) => { const to = [...new Set(ids)].filter(u => u && u !== currentUserId(dataRef.current));
+        if(to.length) commit(st => ({...st, notifications:capNotifications([...to.map(userId => ({id:wfNewId('nt'), userId, kind:'handoverAnswer', object:'direct', handoverId:id, recordId:h.recordId, dealName:h.recordName,
+          by:me, text, at:Date.now(), read:false, channels:{inApp:true}})), ...st.notifications])})); };
+      if(answer === 'cancel'){ close('cancelled'); tell([h.to], `${me} cancelled the handover of ${h.recordName}.`); return true; }
+      if(answer === 'decline'){ close('declined'); tell([h.byId, h.from], `${me} declined the handover of ${h.recordName}${reason ? `: ${reason}` : '.'}`); return true; }
+      if(!rec || userIdOf(rec.owner, us) !== h.from){ close('cancelled'); return false; }
+      allowDirectOwner(h.recordId, h.to);
+      WF_HANDOVER_BY = h.by;
+      try { setDealsTracked(all => all.map(r => r.id === h.recordId ? {...r, owner:h.to} : r)); } finally { WF_HANDOVER_BY = null; }
+      close('accepted');
+      tell([h.byId, h.from], `${me} accepted the handover of ${h.recordName}.`);
+      return true;
+    },
+    // Handovers kept as given, each in its new owner's bell (the sample CRM's sample handovers — notifications.jsx).
+    addHandovers: (list) => commit(st => ({...st, handovers:[...list, ...(st.handovers || [])].slice(0, 400),
+      notifications:capNotifications([...list.map(m => ({id:wfNewId('nt'), userId:m.to, kind:'handover', object:'direct', handoverId:m.id, recordId:m.recordId, dealName:m.recordName, by:m.by,
+        text:`${m.by} is handing ${m.recordName || 'a record'} over to you.`, at:m.at, read:false, channels:{inApp:true}})), ...st.notifications])})),
+    // One notification (`id`), or all of the person's (Mark All as Read).
+    markRead: (userId, id) => commit(s => ({...s, notifications:s.notifications.map(n => n.userId === userId && (id == null || n.id === id) && !n.read ? {...n, read:true} : n)})),
   };
   // `openEvent`: an Automatic Action card to show (a blocked move, or one opened from its toast / the bell).
   const [openEvent, setOpenEvent] = React.useState(null);
@@ -3871,7 +3960,7 @@ function AssociatedRecordForm({deal, object, link, onClose}){
     <div style={{position:'relative', zIndex:210}}>
       <StModal title={`Associate ${noun.toLowerCase()}`} primary="Associate" canSubmit={!!pick} onCancel={onClose} onSubmit={()=>{ ctx.api.associateExisting(deal.id, pick); onClose(); }}>
         {promptDealName(deal.name)}
-        <div><label style={fieldLabel}>{noun}</label>
+        <div><label style={fieldLabel}>{noun}<Req/></label>
           <SearchableSelect value={pick} options={options} onChange={setPick} placeholder={`Select ${noun.toLowerCase()}`} searchPlaceholder={`Search ${objectName(data, object).toLowerCase()}`}/></div>
         {!options.length && <div style={{fontSize:12.5, color:T.attioMuted}}>No {objectName(data, object).toLowerCase()} are free to associate — each already has its own.</div>}
       </StModal>
@@ -4343,6 +4432,8 @@ function WorkflowPromptModal({promptId, onClose, hidden, direct}){
   const [creating, setCreating] = React.useState(false);   // Create <Object>: its form, over the modal
   const [notes, setNotes] = React.useState(() => (p && p.kind === 'logMeeting' && (p.payload.meeting || {}).notes) || (p && p.kind === 'logCall' && (p.payload.call || {}).comment) || '');
   const [callOutcome, setCallOutcome] = React.useState(() => (p && p.kind === 'logCall' && (p.payload.call || {}).outcome) || '');
+  const [callBack, setCallBack] = React.useState({date:'', time:''});   // Call back request: when
+  const [notQualifiedReason, setNotQualifiedReason] = React.useState(null);   // Connected, not qualified: why
   const [deleting, setDeleting] = React.useState(false);   // Delete <record>: its confirmation, over the modal
   if(!p || !deal || p.status !== 'pending') return null;
   if(editingProp) return <EditPropertyModal deal={deal} prop={editingProp} violation={p} onClose={onClose}/>;
@@ -4414,8 +4505,8 @@ function WorkflowPromptModal({promptId, onClose, hidden, direct}){
     primary = 'Schedule'; can = !!date && !!time;
     content = (<>
       <div style={{display:'flex', gap:8}}>
-        <div style={{flex:'1 1 0', minWidth:0}}><label style={fieldLabel}>Date</label><DateField required value={date} onChange={setDate}/></div>
-        <div style={{flex:'1 1 0', minWidth:0}}><label style={fieldLabel}>Time</label><TimeField value={time} onChange={setTime}/></div>
+        <div style={{flex:'1 1 0', minWidth:0}}><label style={fieldLabel}>Date<Req/></label><DateField required value={date} onChange={setDate}/></div>
+        <div style={{flex:'1 1 0', minWidth:0}}><label style={fieldLabel}>Time<Req/></label><TimeField value={time} onChange={setTime}/></div>
       </div>
       <div style={stTextB}>{[m.platform, m.duration, m.organizer && `Organizer: ${userName(data, resolvePerson(data, deal, m.organizer)) || assigneeLabel(data, m.organizer)}`].filter(Boolean).join(' · ')}</div>
     </>);
@@ -4428,9 +4519,11 @@ function WorkflowPromptModal({promptId, onClose, hidden, direct}){
       <div><label style={fieldLabel}>Notes</label><textarea rows={4} value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Optional — saved as a note linked to this meeting" style={{...fieldInput, resize:'vertical', lineHeight:1.5}}/></div>
     </>);
   } else if(p.kind === 'logCall'){
-    primary = 'Log Call'; can = !!callOutcome;
+    primary = 'Log Call'; can = !!callOutcome && (callOutcome !== CALL_BACK_OUTCOME || callBackReady(callBack)) && (callOutcome !== CALL_NOT_QUALIFIED_OUTCOME || !!notQualifiedReason);
     content = (<>
-      <div><label style={fieldLabel}>Call Outcome</label><FormSelect value={callOutcome} placeholder="Select outcome" options={LOG_CALL_OUTCOMES} onChange={setCallOutcome}/></div>
+      <div><label style={fieldLabel}>Call Outcome<Req/></label><FormSelect value={callOutcome} placeholder="Select outcome" options={LOG_CALL_OUTCOMES} onChange={setCallOutcome}/></div>
+      {callOutcome === CALL_BACK_OUTCOME && <CallBackFields value={callBack} onChange={setCallBack}/>}
+      {callOutcome === CALL_NOT_QUALIFIED_OUTCOME && <NotQualifiedReasonField value={notQualifiedReason} onChange={setNotQualifiedReason} data={data}/>}
       <div><label style={fieldLabel}>Note</label><textarea rows={3} value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Optional — saved as a note linked to this call" style={{...fieldInput, resize:'vertical', lineHeight:1.5}}/></div>
     </>);
   } else if(p.kind === 'deleteRecord' && !deletable){
@@ -4438,7 +4531,7 @@ function WorkflowPromptModal({promptId, onClose, hidden, direct}){
     content = <div style={{fontSize:13, color:T.attioMuted, lineHeight:1.5}}>{paid ? `This ${recordNoun(deal.id)} has payments recorded, so it can't be deleted.` : `You don’t have permission to delete this ${recordNoun(deal.id)}. Ask someone who can delete it.`}</div>;
   }
   const submit = () => done(p.kind === 'setProperty' ? (sameValue ? {sameValue:true} : {values}) : p.kind === 'addNote' ? {body} : p.kind === 'scheduleMeeting' ? {date, time}
-    : p.kind === 'logMeeting' ? {notes} : p.kind === 'logCall' ? {outcome:callOutcome, comment:notes} : {});
+    : p.kind === 'logMeeting' ? {notes} : p.kind === 'logCall' ? {outcome:callOutcome, comment:notes, ...(callOutcome === CALL_BACK_OUTCOME ? {callBack} : {}), ...(callOutcome === CALL_NOT_QUALIFIED_OUTCOME ? {notQualifiedReason} : {})} : {});
   const actionBtn = (label) => <button onClick={can ? submit : undefined} disabled={!can} style={{...eventBtn(true), ...(can ? {} : eventBtnDisabled)}}>{label}</button>;
   /* A Violation: Action Required — the Violation Card's actions; one that needs input shows its inputs
      and Resolve. */
@@ -4462,53 +4555,59 @@ function WorkflowPromptModal({promptId, onClose, hidden, direct}){
   );
 }
 
-/* The header bell: the signed-in user's violations and notifications. */
+/* The header bell — the notification centre: the signed-in user's violations and notifications.
+   Since 2026-11-23 (notifications.jsx) each notification is unread until it's clicked (a blue dot),
+   Mark All as Read reads them all, and Notification Settings opens the person's own settings; a
+   notification's row, its actions (Open, Undo) and the panel it opens are NotificationRow and
+   NotificationPanel. One a preset sent on push or email only isn't listed here. */
 function WorkflowBell(){
-  const ctx = useWorkflowEngineCtx();
+  const ctx = useWorkflowEngineCtx(), hub = useRecordHub();
   const [open, setOpen] = React.useState(false);
+  const [detail, setDetail] = React.useState(null);   // the notification open in its panel (id)
   const me = ctx && ctx.currentUserId;
   const prompts = pendingPrompts(ctx, p => p.userId === me);
-  const notes = ctx ? ctx.state.notifications.filter(n => n.userId === me) : [];
+  const notes = ctx ? ctx.state.notifications.filter(n => n.userId === me && (!n.channels || n.channels.inApp)) : [];
   const unread = prompts.length + notes.filter(n => !n.read).length;
-  const toggle = () => { if(!open && ctx) ctx.api.markRead(me); setOpen(o => !o); };
   const items = [...prompts.map(p => ({kind:'prompt', at:p.createdAt, p})), ...notes.map(n => ({kind:'note', at:n.at, n}))].sort((a, b) => b.at - a.at).slice(0, 30);
+  /* A sale (2026-11-23 — notifications.jsx, "<name> made a sale"): the bell sits on an orange ground,
+     the Time Clock's on-break orange, until the panel is opened. */
+  const saleNew = notes.filter(n => n.kind === 'sale' && !n.saleSeen);
+  const toggle = () => { if(!open) saleNew.forEach(n => ctx.api.patchNotification(n.id, {saleSeen:true})); setOpen(o => !o); };
   return (
     <div style={{position:'relative', display:'flex'}}>
       <button title="Notifications" aria-label="Notifications" onMouseDown={e=>e.stopPropagation()} onClick={toggle}
         style={{position:'relative', display:'flex', border:'none', background:'transparent', padding:0, cursor:'pointer'}}>
-        <Icon name="notification" size={15} color={T.gray600}/>
+        {saleNew.length > 0 && <span aria-hidden="true" style={{position:'absolute', inset:-5, borderRadius:8, background:'#FFE8D4'}}/>}
+        <Icon name="notification" size={15} color={saleNew.length ? '#000' : T.gray600} style={{position:'relative'}}/>
         {unread > 0 && <div style={{position:'absolute', top:-5, right:-6, minWidth:13, height:13, padding:'0 3px', boxSizing:'border-box', borderRadius:9999, background:T.red, color:'#fff',
           fontSize:8, fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center'}}>{unread}</div>}
       </button>
-      <MenuShell open={open} onClose={()=>setOpen(false)} anchorRight width={340}>
-        <div style={{padding:'6px 10px 8px', fontSize:13, fontWeight:600, color:T.attioText}}>Notifications</div>
-        {!items.length && <div style={{padding:'14px 10px 16px', fontSize:12.5, color:T.gray400}}>No notifications yet</div>}
-        <div style={{maxHeight:380, overflowY:'auto'}}>
-          {items.map(it => it.kind === 'prompt' ? (
-            <div key={it.p.id} onClick={()=>{ setOpen(false); ctx.openPrompt(it.p.id); }} style={{display:'flex', gap:10, padding:'8px 10px', borderRadius:6, cursor:'pointer'}}
-              onMouseEnter={e=>e.currentTarget.style.background = T.headerBg} onMouseLeave={e=>e.currentTarget.style.background = 'transparent'}>
-              <Icon name="warning" size={14} color={T.red} style={{marginTop:2, flexShrink:0}}/>
-              <div style={{minWidth:0, flex:1}}>
-                <div style={{fontSize:13, color:T.attioText}}>Workflow violation: {it.p.title}</div>
-                <div style={{fontSize:12, color:T.gray600}}>{it.p.dealName} · {fmtWhen(it.at)}</div>
-              </div>
-            </div>
-          ) : (
-            <div key={it.n.id} onClick={it.n.event ? ()=>{ setOpen(false); ctx.openEvent(it.n.event); } : it.n.recordId != null && ctx.openRecord ? ()=>{ setOpen(false); ctx.openRecord(it.n.recordId, it.n.tab ? {id:it.n.tab} : null, true); } : undefined}   // an Automatic Action opens its card; a record's notice, the record
-              style={{display:'flex', gap:10, padding:'8px 10px', borderRadius:6, cursor: it.n.event || it.n.recordId != null ? 'pointer' : 'default'}}
-              onMouseEnter={e=>{ if(it.n.event || it.n.recordId != null) e.currentTarget.style.background = T.headerBg; }} onMouseLeave={e=>e.currentTarget.style.background = 'transparent'}>
-              <Icon name="notification" size={14} color={T.gray600} style={{marginTop:2, flexShrink:0}}/>
-              <div style={{minWidth:0, flex:1}}>
-                <div style={{fontSize:13, color:T.attioText, whiteSpace:'pre-line'}}>{it.n.text}</div>
-                <div style={{fontSize:12, color:T.gray600}}>{it.n.dealName} · {fmtWhen(it.at)}</div>
-              </div>
-            </div>
-          ))}
+      <MenuShell open={open} onClose={()=>setOpen(false)} anchorRight width={380}>
+        <div style={{display:'flex', alignItems:'center', gap:12, padding:'6px 10px 8px'}}>
+          <span style={{flex:1, fontSize:13, fontWeight:600, color:T.attioText}}>Notifications</span>
+          {notes.some(n => !n.read) && <button className={LINK_CLASS} onClick={()=>ctx.api.markRead(me)} style={{border:'none', background:'transparent', padding:0, fontSize:12.5, fontFamily:'inherit', cursor:'pointer'}}>Mark All as Read</button>}
         </div>
+        {!items.length && <div style={{padding:'14px 10px 16px', fontSize:12.5, color:T.gray400}}>No notifications yet</div>}
+        <div style={{maxHeight:440, overflowY:'auto', display:'flex', flexDirection:'column', gap:2}}>
+          {items.map(it => it.kind === 'prompt' ? (
+            <div key={it.p.id} onClick={()=>{ setOpen(false); ctx.openPrompt(it.p.id); }} style={{display:'flex', alignItems:'flex-start', gap:12, padding:'12px 10px', borderRadius:10, cursor:'pointer'}}
+              onMouseEnter={e=>e.currentTarget.style.background = T.headerBg} onMouseLeave={e=>e.currentTarget.style.background = 'transparent'}>
+              <span aria-hidden="true" style={{width:30, height:30, borderRadius:10, flexShrink:0, display:'inline-flex', alignItems:'center', justifyContent:'center', background:'linear-gradient(140deg, #E5484D26, #E5484D12)', boxShadow:'inset 0 0 0 1px #E5484D1F'}}><Icon name="warning" size={15} color="#E5484D"/></span>
+              <div style={{minWidth:0, flex:1, display:'flex', flexDirection:'column', gap:6}}>
+                <div style={{fontSize:13, lineHeight:1.45, color:T.attioText, fontWeight:500}}>Workflow violation on {it.p.dealName}: {it.p.title}</div>
+                <div style={{fontSize:12.5, color:T.gray600}}>{fmtWhen(it.at)}</div>
+              </div>
+            </div>
+          ) : <NotificationRow key={it.n.id} n={it.n} close={()=>setOpen(false)} onDetail={()=>{ setOpen(false); setDetail(it.n.id); }}/>)}
+        </div>
+        {hub && hub.openPage && <div style={{borderTop:`1px solid ${T.border}`, margin:'4px 2px 0', padding:'8px 8px 4px'}}>
+          <button className={LINK_CLASS} onClick={()=>{ setOpen(false); hub.openPage('settings.notifications'); }} style={{border:'none', background:'transparent', padding:0, fontSize:12.5, fontFamily:'inherit', cursor:'pointer'}}>Notification Settings</button>
+        </div>}
       </MenuShell>
+      {detail && <NotificationPanel id={detail} onClose={()=>setDetail(null)}/>}
     </div>
   );
 }
 
-Object.assign(window, {sequenceSendTimes, sequenceSkipsWeekends, withoutPropertyHistory, STATUS_PILLS, sequenceSchedules, violationTargets, RecordViolationsProvider, useRecordViolations, ViolationMark, ViolationNotice, AutomationNotice, recordAutomations, recordObjectOf, recordKey, recordNoun, ACTIVITY_RECORD_OBJECTS, withSeeded, PROPERTY_CHANGE_OPERATORS, PROPERTY_CHANGE_UNITS, triggerPropertyOperators, isChangeOp, conditionsValid, triggerConditionComplete, TriggerPropertyCondition, CONDITION_OPERATORS, conditionKind, useWorkflowEngine, WorkflowEngineCtx, useWorkflowEngineCtx, WF_SAVED, reviveActivities, withStageEntry, ConditionsEditor, WorkflowRuns,
+Object.assign(window, {allowDirectOwner, stageHandoverNote, pendingHandover, sequenceSendTimes, sequenceSkipsWeekends, withoutPropertyHistory, STATUS_PILLS, sequenceSchedules, violationTargets, RecordViolationsProvider, useRecordViolations, ViolationMark, ViolationNotice, AutomationNotice, recordAutomations, recordObjectOf, recordKey, recordNoun, ACTIVITY_RECORD_OBJECTS, withSeeded, PROPERTY_CHANGE_OPERATORS, PROPERTY_CHANGE_UNITS, triggerPropertyOperators, isChangeOp, conditionsValid, triggerConditionComplete, TriggerPropertyCondition, CONDITION_OPERATORS, conditionKind, useWorkflowEngine, WorkflowEngineCtx, useWorkflowEngineCtx, WF_SAVED, reviveActivities, withStageEntry, ConditionsEditor, WorkflowRuns,
   DealPromptMarker, WorkflowPromptModal, WorkflowBell, ViolationsButton, ViolationPanel, WorkflowNotices, AutomaticActionModal, workflowExpectations, workflowContextPath, orderedStages, stageMoveDirection, workflowTitle, conditionFields, evalConditions});

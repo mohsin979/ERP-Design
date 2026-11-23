@@ -1,4 +1,4 @@
-/* HOF Pulse ERP — Contact Side Panel View Settings.
+/* HOF Pulse ERP — Contact Side Panel Settings.
 
    Same pattern as Board Card Settings (shared SettingsModalShell, settingsKit.jsx): four
    sections whose left-nav order IS their order in the panel, each configured in the middle,
@@ -16,14 +16,13 @@
    matches only tick on or off) and Select All / Deselect All.
 
    One setting for every contact, in both the side panel and the full page's left column —
-   they are the same component, so they never differ. Opened from View Settings in the
+   they are the same component, so they never differ. Opened from Layout Settings in the
    contact's ⋯ menu; applies on Apply. */
 
 const PANEL_SECTIONS = {
   avatarSubtitle:    'Avatar subtitle',   // fixed: what shows under the name (not a place in the layout)
   cardStyle:         'Card Style',        // fixed: the header card's look — Dark or Light (2026-11-18)
   quickActions:      'Quick Actions',
-  smartSummary:      'Smart Summary',
   dropdowns:         'Dropdowns',
   contactProperties: 'Lead Properties',
 };
@@ -51,6 +50,7 @@ const PANEL_PROPERTIES = [
   {key:'country',       label:'Country'},
   {key:'deals',         label:'Associated Deals'},
   {key:'customers',     label:'Associated Customers'},
+  {key:'referrer',      label:'Referred By'},   // the record a referral lead was created from (2026-11-23): shown to start with, a link
 ];
 
 /* The panel's Contact Properties from Settings: the list above (labels from Settings; the worked-out
@@ -84,7 +84,7 @@ const withContactPanelProperties = (saved, props) => {
 /* `subtitle`: the property shown under the contact's name ('' = none); Job Title by default. */
 const DEFAULT_PANEL_SETTINGS = () => withPrimaryAction({
   subtitle: 'jobTitle',
-  order: ['quickActions', 'smartSummary', 'dropdowns', 'contactProperties'],
+  order: ['quickActions', 'dropdowns', 'contactProperties'],   // Smart Summary moved to the Overview (2026-11-23 — overviewSettings.jsx RecordSmartSummary)
   quickActions: defaultQuickActions('contacts'),
   smartSummary: {enabled:false},
   dropdowns: [{id:'d-all', type:'all', enabled:false, count:10}],
@@ -166,7 +166,7 @@ function PanelSettingsModal({draft, setDraft, sample, onApply, onClose, kind = C
     : {...d, primaryAction:key, quickActions:quickOf(d).map(x => x.key === key ? {...x, enabled:true} : x)});
 
   return (
-    <SettingsModalShell title="Side Panel Settings" sections={kind.sections} order={draft.order}
+    <SettingsModalShell title="Side Panel Settings" sections={kind.sections} order={draft.order.filter(id => id !== 'smartSummary')}
       onReorder={(from, to)=>set('order', o => moveItem(o, from, to))}
       section={section} onSection={(id)=>{ setSection(id); setQuery(''); }} onApply={onApply} onClose={onClose}
       toolbar={section === kind.propertiesKey && (
@@ -211,10 +211,7 @@ function PanelSettingsModal({draft, setDraft, sample, onApply, onClose, kind = C
             </label>; }}/>
       )}
 
-      {section === 'smartSummary' && (
-        <SettingsCheckRow label="Show Smart Summary" hint="AI-generated" checked={draft.smartSummary.enabled}
-          onToggle={()=>set('smartSummary', s => ({...s, enabled:!s.enabled}))}/>
-      )}
+
 
       {section === 'dropdowns' && (<>
         <DragCheckList items={draft.dropdowns} labelOf={it => dropdownOf(it.type).setting} onChange={v=>set('dropdowns', v)}

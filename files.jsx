@@ -88,7 +88,7 @@ function FileDetail({a, contact, canEdit, canDelete, onUpdate, onDelete, onStub}
           </div>
         )}
         {stack(<>
-          <Field label="File Name">{editing ? <input autoFocus value={d.name} onChange={e=>setD(x => ({...x, name:e.target.value}))} style={fieldText}/> : <ReadValue>{a.name}</ReadValue>}</Field>
+          <Field label="File Name" required={editing}>{editing ? <input autoFocus value={d.name} onChange={e=>setD(x => ({...x, name:e.target.value}))} style={fieldText}/> : <ReadValue>{a.name}</ReadValue>}</Field>
           <Field label="Description">{editing
             ? <textarea value={d.description} onChange={e=>setD(x => ({...x, description:e.target.value}))} rows={3} placeholder="What this file is" style={{...fieldText, resize:'vertical', lineHeight:1.5}}/>
             : <ReadValue>{a.description}</ReadValue>}</Field>

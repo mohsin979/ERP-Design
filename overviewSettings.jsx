@@ -1,6 +1,6 @@
-/* HOF Pulse ERP — a record's View Settings (Contacts, Deals, Customers).
+/* HOF Pulse ERP — a record's Layout Settings (Contacts, Deals, Customers).
 
-   View Settings sits in a record's full-page top bar, beside Back to side panel. Tab Settings: the
+   Layout Settings sits in a record's full-page top bar, beside Back to side panel. Tab Settings: the
    workspace tabs' order and which show (drag, untick); Overview is always first and always shown.
    Highlight Settings: exactly
    four properties pinned to Highlights, picked from a grouped, searchable pool — Record Properties
@@ -32,9 +32,10 @@ const HIGHLIGHT_RENAMED = {'acc:nextInstallment':'acc:nextInstallmentDueDate'};
 function overviewSettingsOf(hub, object){
   const saved = ((hub && hub.overviewSettings) || {})[object] || {};
   const tabs = saved.tabs || null;
-  if(saved.pinned) return {pinned:saved.pinned.map(id => HIGHLIGHT_RENAMED[id] || id), tabs};
+  const smartSummary = saved.smartSummary !== false;   // Smart Summary on the Overview: on unless switched off (2026-11-23)
+  if(saved.pinned) return {pinned:saved.pinned.map(id => HIGHLIGHT_RENAMED[id] || id), tabs, smartSummary};
   const have = new Set(highlightPool(hub, null, object).flatMap(c => c.groups.flatMap(g => g.items.map(it => it.id))));
-  return {pinned:(OVERVIEW_DEFAULT_PINNED[object] || []).filter(id => have.has(id)), tabs};
+  return {pinned:(OVERVIEW_DEFAULT_PINNED[object] || []).filter(id => have.has(id)), tabs, smartSummary};
 }
 
 /* A record type's workspace tabs (contactDetail.jsx CONTACT_TABS, dealDetail.jsx DEAL_TABS,
@@ -169,7 +170,102 @@ function RecordHighlights({object, record, view, acts, contact}){
   );
 }
 
-/* A record's full page, top bar (beside Back to side panel): View Settings — Highlight Settings
+/* ── Smart Summary on a record's Overview (2026-11-23) ── it was a side panel section; now it's
+   here, under Highlights, switched off in Layout Settings → Smart Summary (per record type). In
+   the product it is written entirely by AI; here a stand-in reads the record and its activity
+   (`smartSummaryOf`), so the design can be judged. The title, then "Refreshed 2 minutes ago" and
+   a refresh icon button; the summary in a sentence or two, always shown; under it Insights — the
+   Insight Type / Insight Detail / Source table — an accordion, closed to start with (kept per browser). */
+const SUMMARY_OPEN_KEY = 'hof-erp-summary-open';
+/* Insights (2026-11-23, Mohsin): what is known about the person but is no property of the CRM —
+   said in a note, an email or on a call, unstructured — given a structure by AI: an Insight Type
+   and an Insight Detail, each with the activity it comes from. So nothing here repeats a record
+   property, and every detail opens its activity. The stand-in below reads the notes, received
+   emails and call notes and types each by its words; the product's AI does this properly. */
+const INSIGHT_TYPES = [
+  ['Objection',  /\b(concern|worried|confus|unsure|not sure|doubt|hesitat|too long|too expensive|delay|refus|not interested)\w*/i],
+  ['Budget',     /\b(budget|fees?|price|cost|afford|instal?lments?|payment plan|discount|funds)\b/i],
+  ['Timeline',   /\b(deadline|next (week|month|year)|by the end|intake|urgent|asap|timeline|before (january|february|march|april|may|june|july|august|september|october|november|december))\b/i],
+  ['Target',     /\b(canada|australia|uk|usa|germany|express entry|study-to-pr|visa|route|program|province|nomination)\b/i],
+  ['Profession', /\b(job|works?|working|experience|employer|profession|occupation|business|salary)\b/i],
+  ['Education',  /\b(degree|bachelor|master|ielts|pte|education|university|study|studies|transcripts?)\b/i],
+  ['Family',     /\b(spouse|wife|husband|child|children|kids|family|parents|dependents?)\b/i],
+  ['Preference', /\b(prefers?|whatsapp|call (after|before)|best time|language|email only)\b/i],
+];
+const INSIGHT_ORDER = ['Needs attention', 'Last promise', ...INSIGHT_TYPES.map(t => t[0]), 'Asked about', 'Discussed', 'Context'];
+const insightType = (text, fallback) => (INSIGHT_TYPES.find(([, re]) => re.test(text)) || [fallback])[0];
+const firstSentence = (text) => { const t = String(text || '').replace(/\s+/g, ' ').trim(), cut = t.search(/[.!?](\s|$)/);
+  const one = cut > 20 ? t.slice(0, cut + 1) : t; return one.length > 150 ? `${one.slice(0, 150)}…` : one; };
+function smartSummaryOf(hub, object, record, view, acts){
+  const list = acts || [], when = (a) => new Date(a.at).getTime() || 0, day = (d) => fmtActDate(d), newest = (l) => [...l].sort((x, y) => when(y) - when(x));
+  const rows = [], seen = new Set();
+  const add = (type, detail, a, label) => { if(!detail || !a || seen.has(a.id)) return; seen.add(a.id); rows.push({type, detail, actId:a.id, source:`${label} · ${day(a.at)}`}); };
+  const open = list.filter(a => a.type === 'task' && isTaskOpen(a));
+  open.filter(isOverdue).slice(0, 2).forEach(t => add('Needs attention', `Overdue: ${t.title || 'Task'}`, t, 'Task'));
+  const emails = newest(list.filter(a => a.type === 'email' && a.status !== 'scheduled')), lastEmail = emails[0];
+  if(lastEmail && lastEmail.direction === 'received') add('Needs attention', `Waiting for a reply: ${lastEmail.title || lastEmail.subject || 'Email'}`, lastEmail, 'Email');
+  const lastQuote = newest(list.filter(a => a.type === 'quote'))[0];
+  if(lastQuote && lastQuote.status === 'viewed') add('Needs attention', 'Viewed the quote, not signed yet', lastQuote, 'Quote');
+  const next = [...open.filter(t => !isOverdue(t))].sort((x, y) => (x.due ? new Date(x.due).getTime() : Infinity) - (y.due ? new Date(y.due).getTime() : Infinity))[0];
+  if(next) add('Last promise', `${next.title || 'Task'}${next.due ? ` · due ${day(next.due)}` : ''}`, next, 'Task');
+  // What was said: notes, the emails they sent, the notes of calls.
+  newest(list.filter(a => a.type === 'note')).slice(0, 4).forEach(a => { const t = richTextPlain(a.body || ''); add(insightType(t, 'Context'), firstSentence(t), a, 'Note'); });
+  emails.filter(a => a.direction === 'received').slice(0, 3).forEach(a => { const subject = String(a.title || a.subject || '').replace(/^(re|fw|fwd):\s*/i, ''), t = `${subject} ${richTextPlain(a.body || '')}`;
+    add(insightType(t, 'Asked about'), subject || firstSentence(richTextPlain(a.body || '')), a, 'Email'); });
+  newest(list.filter(a => a.type === 'call' && richTextPlain(a.notes || '').trim())).slice(0, 2).forEach(a => { const t = richTextPlain(a.notes || ''); add(insightType(t, 'Discussed'), firstSentence(t), a, 'Call'); });
+  const rank = (r) => { const i = INSIGHT_ORDER.indexOf(r.type); return i < 0 ? INSIGHT_ORDER.length : i; };
+  const sorted = rows.map((r, i) => ({r, i})).sort((x, y) => rank(x.r) - rank(y.r) || x.i - y.i).map(x => x.r).slice(0, 10);
+  // It opens with where the record stands: a lead's Type of Lead (the summary's own start); a deal's or customer's stage and pipeline.
+  const stage = object !== 'contacts' && record.stage ? stageLabelIn(hub.data, record.pipeline, record.stage) : '';
+  return {sentence:buildActivitySummary(view || record, list, stage ? `${stage}${record.pipeline ? ` in ${pipelineLabelIn(hub.data, record.pipeline)}` : ''}.` : undefined), rows:sorted};
+}
+// An insight's detail opens the activity it comes from, in the Overview's own side panel (activityCards.jsx ActivityTab listens).
+const openActivityFromInsight = (actId) => window.dispatchEvent(new CustomEvent('hof-open-activity', {detail:{id:actId}}));
+const agoText = (ms) => { const s = Math.max(1, Math.round(ms / 1000)), n = s < 60 ? [s, 'second'] : s < 3600 ? [Math.round(s / 60), 'minute'] : s < 86400 ? [Math.round(s / 3600), 'hour'] : [Math.round(s / 86400), 'day'];
+  return `${n[0]} ${n[1]}${n[0] === 1 ? '' : 's'} ago`; };
+const SUMMARY_COLS = '170px minmax(0, 1fr) 150px';
+function RecordSmartSummary({object, record, view, acts}){
+  const hub = useRecordHub();
+  const on = overviewSettingsOf(hub, object).smartSummary;
+  const [at, setAt] = React.useState(() => Date.now()), [, tick] = React.useState(0);
+  const [open, setOpen] = React.useState(() => { try { return localStorage.getItem(SUMMARY_OPEN_KEY) === '1'; } catch(e){ return false; } });
+  React.useEffect(() => { const t = setInterval(() => tick(n => n + 1), 10000); return () => clearInterval(t); }, []);
+  // The summary as it was when last refreshed.
+  const summary = React.useMemo(() => on ? smartSummaryOf(hub, object, record, view, acts) : null, [on, at, record && record.id]);
+  if(!on || !summary) return null;
+  const toggle = () => setOpen(o => { try { localStorage.setItem(SUMMARY_OPEN_KEY, o ? '0' : '1'); } catch(e){} return !o; });
+  const cell = {padding:'9px 0', fontSize:13, lineHeight:1.45, minWidth:0};
+  return (
+    /* A Spring feature (2026-11-23): Spring's mark before the title; a white card (Mohsin, the same day: no orange ground here). */
+    <section style={{marginTop:20, padding:'14px 16px 16px', borderRadius:12, background:'#fff', border:`1px solid ${T.border}`}}>
+      <SectionHeader title={<span style={{display:'inline-flex', alignItems:'center', gap:8}}><SpringMark w={20}/>Smart Summary</span>} right={<span style={{display:'flex', alignItems:'center', gap:8}}>
+        <span style={{fontSize:12.5, color:T.attioMuted}}>Refreshed {agoText(Date.now() - at)}</span>
+        <button onClick={()=>setAt(Date.now())} title="Refresh" aria-label="Refresh" style={{...iconBtn, width:26, height:26, background:'#fff'}}><Icon name="refresh" size={13} color={T.gray600}/></button>
+      </span>}/>
+      <div style={{fontSize:14, lineHeight:1.55, color:T.attioText}}>{summary.sentence}</div>
+      {summary.rows.length > 0 && <>
+        <button onClick={toggle} aria-expanded={open} style={{display:'flex', alignItems:'center', gap:6, marginTop:12, padding:0, border:'none', background:'transparent', cursor:'pointer', fontFamily:'inherit', fontSize:13, fontWeight:500, color:T.attioText}}>
+          Insights<Icon name="chevDown" size={T.chevronSize} color={T.attioMuted} style={{transform: open ? 'none' : 'rotate(-90deg)', transition:'transform 150ms ease'}}/>
+        </button>
+        {open && <div role="table" aria-label="Insights" style={{marginTop:6, maxHeight:280, overflowY:'auto'}}>
+          <div role="row" style={{display:'grid', gridTemplateColumns:SUMMARY_COLS, columnGap:16, borderBottom:`1px solid ${T.attioLine}`}}>
+            {['Insight Type', 'Insight Detail', 'Source'].map(h => <div key={h} role="columnheader" style={{...cell, padding:'6px 0', fontSize:12.5, color:T.attioMuted}}>{h}</div>)}
+          </div>
+          {summary.rows.map((r, i) => (
+            <div key={i} role="row" style={{display:'grid', gridTemplateColumns:SUMMARY_COLS, columnGap:16, borderBottom: i === summary.rows.length - 1 ? 'none' : `1px solid ${T.attioLine}`}}>
+              <div role="cell" style={{...cell, color:T.attioMuted}}>{i && summary.rows[i - 1].type === r.type ? '' : r.type}</div>
+              <div role="cell" style={cell}><button className={LINK_CLASS} onClick={()=>openActivityFromInsight(r.actId)}
+                style={{border:'none', background:'transparent', padding:0, font:'inherit', color:T.attioText, cursor:'pointer', textAlign:'left'}}>{r.detail}</button></div>
+              <div role="cell" style={{...cell, color:T.attioMuted, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{r.source}</div>
+            </div>
+          ))}
+        </div>}
+      </>}
+    </section>
+  );
+}
+
+/* A record's full page, top bar (beside Back to side panel): Layout Settings — Highlight Settings
    and Tab Settings, per record type. */
 function RecordViewSettings({object}){
   const hub = useRecordHub();
@@ -183,7 +279,7 @@ function RecordViewSettings({object}){
   </>;
 }
 
-const OVERVIEW_SETTINGS_SECTIONS = {highlights:'Highlight Settings', tabs:'Tab Settings'};
+const OVERVIEW_SETTINGS_SECTIONS = {highlights:'Highlight Settings', summary:'Smart Summary', tabs:'Tab Settings'};
 const poolGroupLabel = {fontSize:11, fontWeight:600, letterSpacing:.4, color:T.gray400, textTransform:'uppercase', padding:'14px 6px 4px'};
 
 function OverviewSettingsModal({object, pool, settings, tabs = [], onApply, onClose}){
@@ -208,7 +304,7 @@ function OverviewSettingsModal({object, pool, settings, tabs = [], onApply, onCl
       <SettingsCheckRow label={it.label} checked={on} onToggle={()=>!off && toggle(it.key)}/></div>; };
 
   return (
-    <SettingsModalShell title="View Settings" sections={OVERVIEW_SETTINGS_SECTIONS} order={[]} onReorder={()=>{}} fixed={['highlights', 'tabs']}
+    <SettingsModalShell title="Layout Settings" sections={OVERVIEW_SETTINGS_SECTIONS} order={[]} onReorder={()=>{}} fixed={['highlights', 'summary', 'tabs']}
       section={section} onSection={(id)=>{ setSection(id); setQuery(''); }} onClose={onClose}
       onApply={()=>ready && onApply(draft)} applyDisabled={!ready}
       footerNote={section === 'highlights' || !ready ? `${pinned.length} of ${HIGHLIGHT_COUNT} pinned${ready ? '' : ` · pin exactly ${HIGHLIGHT_COUNT} to apply`}` : null}
@@ -254,6 +350,9 @@ function OverviewSettingsModal({object, pool, settings, tabs = [], onApply, onCl
         {!shown.length && !extMatches && <div style={{fontSize:12.5, color:T.gray400, padding:'8px 6px'}}>No properties match "{query}"</div>}
       </>)}
 
+      {section === 'summary' && <SettingsCheckRow label="Show Smart Summary" hint="AI-generated" checked={draft.smartSummary !== false}
+        onToggle={()=>setDraft(d => ({...d, smartSummary:d.smartSummary === false}))}/>}
+
       {section === 'tabs' && (<>
         <div style={{opacity:.55, paddingLeft:24}}><SettingsCheckRow label={tabLabel('overview')} checked onToggle={()=>{}}/></div>
         <DragCheckList items={tabList(draft)} labelOf={it => tabLabel(it.id)}
@@ -264,4 +363,4 @@ function OverviewSettingsModal({object, pool, settings, tabs = [], onApply, onCl
   );
 }
 
-Object.assign(window, {withTabOrderV2, RecordHighlights, RecordViewSettings, OverviewSettingsModal, overviewSettingsOf, recordWorkspaceTabs, arrangeRecordTabs, HIGHLIGHT_COUNT});
+Object.assign(window, {RecordSmartSummary, smartSummaryOf, withTabOrderV2, RecordHighlights, RecordViewSettings, OverviewSettingsModal, overviewSettingsOf, recordWorkspaceTabs, arrangeRecordTabs, HIGHLIGHT_COUNT});

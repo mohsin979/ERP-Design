@@ -36,7 +36,12 @@
    Enroll in Email Sequence, Move to Pipeline, Move to Stage, Edit Properties, Delete — on
    exactly the cards ticked, and Deselect All, which also leaves selection. A
    finished bulk action clears the selection. Without `bulk` (Customers) a stage's menu is
-   Select All alone. */
+   Select All alone.
+
+   ── Lost Reason ───────────────────────────────────────────────────────────────────────────
+   A deal a person moves into a Lost stage is asked for its Lost Reason first (withLostReason,
+   below StageTypeTag) — the Deals board's drag, the record's Deal Stage, the Edit form, Bulk
+   Actions / Move to Stage. */
 
 /* Type of Lead — the leads' pipeline (Mohsin, 2026-11-19): Not Assigned, Assigned, Contacted,
    Opportunity, Not Responded, Others. A lead without an owner is Not Assigned; giving it an owner
@@ -113,6 +118,49 @@ function StageTypeTag({stage, type}){
   const t = type || stageTypeOf(stage), tone = STAGE_TYPE_TONE[t];
   if(!tone) return null;
   return <span role="img" aria-label={stageTypeLabel(t)} title={stageTypeLabel(t)} style={{width:8, height:8, borderRadius:9999, background:tone, flexShrink:0, display:'inline-block'}}/>;
+}
+
+/* Lost Reason (2026-11-20): a deal a person moves into a Lost stage (Stage Type Lost) is asked for
+   its Lost Reason — a built-in Deal property (dataModel.jsx `lostReason`, its options editable in
+   Settings → Properties) — before the move is written: dragging a card on the Deals board, Deal
+   Stage (or Pipeline) on the deal's side panel, full page and Highlights, the Edit form, and Bulk
+   Actions / a stage's ⋯ → Move to Stage (asked once, the same reason for all). Cancel: the move
+   doesn't happen. A workflow's move doesn't ask and leaves the reason as it is; moving out of a Lost
+   stage keeps it. The reason is written with the move, so it's logged as a Property change. */
+// The Lost stage a deal moves into (`after`: {pipeline?, stage}), or null — none when it stays in its stage.
+function lostStageMove(data, before, after){
+  const pipeline = after.pipeline || (before || {}).pipeline, stage = after.stage;
+  if(!stage || (before && before.stage === stage && before.pipeline === pipeline)) return null;
+  const pl = recordPipelines(data, 'deals').find(p => p.id === pipeline), st = pl && pl.stages.find(s => s.id === stage);
+  return st && stageTypeOf(st) === 'lost' ? st : null;
+}
+function LostReasonModal({stage, options, initial, onSubmit, onCancel}){
+  const [reason, setReason] = React.useState(initial && options.includes(initial) ? initial : '');
+  return (
+    <StModal title="Lost Reason" primary={`Move to ${stage.label}`} canSubmit={!!reason} onCancel={onCancel} onSubmit={()=>reason && onSubmit(reason)}>
+      <div><label style={fieldLabel}>Lost Reason<Req/></label>
+        <FormSelect value={reason} placeholder="Select reason" options={options} onChange={setReason} ariaLabel="Lost Reason"/></div>
+    </StModal>
+  );
+}
+/* Asks for the Lost Reason over the page (its own root, so any page, panel or bulk window can ask):
+   `onMove(reason)` once one is chosen; Cancel or Esc, nothing. `initial`: a reason to start with. */
+function askLostReason(data, stage, onMove, initial){
+  const prop = (data.properties || []).find(p => p.objectId === 'deals' && p.key === 'lostReason');
+  const options = prop && (prop.options || []).length ? prop.options : LOST_REASONS;
+  const el = document.createElement('div');
+  document.body.appendChild(el);
+  const root = ReactDOM.createRoot(el);
+  let closed = false;
+  const close = () => { if(closed) return; closed = true; setTimeout(() => { root.unmount(); el.remove(); }); };
+  root.render(<LostReasonModal stage={stage} options={options} initial={initial} onCancel={close} onSubmit={(reason)=>{ close(); onMove(reason); }}/>);
+}
+/* A deal's move by a person: straight through, or — into a Lost stage — once its Lost Reason is
+   chosen (`write(patch)`: the move's own write, with {lostReason} to add to it). */
+function withLostReason(data, before, after, write, initial){
+  const lost = lostStageMove(data, before, after);
+  if(!lost) return write({});
+  askLostReason(data, lost, (lostReason) => write({lostReason}), initial);
 }
 
 /* The record types' names in the open workspace (Settings → Records; app.jsx sets them), for the
@@ -695,5 +743,6 @@ Object.assign(window, {REMOVED_CONTACT_STAGES, LEAD_STAGE_VALUES, withoutRemoved
   CONTACT_TYPE_STAGES, PIPELINES, pipelineById, setContactPipelines, stageIdOf, withStage,
   setObjectNames, typePlural, typeSingular, typeNoun, workspaceHasType, profileHolderId,
   setOwnerLabels, ownerLabel, setProfileHolders, STAGE_TYPES, CLOSED_STAGE_TYPES, stageTypeOf, isClosedStage, stageTypeLabel, withStageType, setStagePipelines, recordStageType, StageTypeTag,
+  lostStageMove, LostReasonModal, askLostReason, withLostReason,
   ContactBoard, PipelineSelector, toolbarDropdownBtn, ContactName, ContactCard, COLUMN_BG,
 });

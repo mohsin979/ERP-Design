@@ -8,7 +8,10 @@
 
    `hub` (App): {data, records:{contacts, deals, customers}, activities:{…}, add, update, remove,
    openRecord, quotes, setQuotes, documents, setDocuments, services, setServices}. The provider adds the overlays every
-   page shares: the email composer, the call window and the quotation builder. */
+   page shares: the email composer, the call window and the quotation builder.
+   `hub.leadCreation` (App): how a new lead is saved from a form outside the Leads page — Create
+   Referral Lead on a customer (contacts.jsx ReferralLeadForm). `hasReferralLink`: whether a record
+   has a referral link on either side. */
 
 const RecordHubCtx = React.createContext(null);
 const useRecordHub = () => React.useContext(RecordHubCtx);
@@ -32,6 +35,17 @@ function hubRecordPerson(hub, object, id){
   const linked = contactIdsOf(r).map(contactOf).filter(Boolean);
   const c = linked.find(x => String(x.email || '').trim()) || linked[0] || null;
   return {name: c ? c.name : r.name, email:(c && String(c.email || '').trim()) || r.email || '', phone:(c && c.phone) || r.phone || ''};
+}
+/* Does a record have a referral link, on either side (2026-11-23 — what a quote's Referral Discount
+   is offered on, quotes.jsx)? The record itself, or its person — a deal's or customer's first lead —
+   was referred by a record that still exists (`referredBy`, dataModel.jsx referrerOf), or is the
+   referrer of some record (referralsOf). Pure: read from `hub.records` only. */
+function hasReferralLink(hub, object, record){
+  const records = hub && hub.records;
+  if(!records || !record) return false;
+  const pid = object === 'contacts' ? null : personIdOf(record);
+  const person = pid == null ? null : (records.contacts || []).find(c => sameId(c.id, pid)) || null;
+  return [[object, record], ...(person ? [['contacts', person]] : [])].some(([o, r]) => !!referrerOf(records, r) || referralsOf(records, o, r.id).length > 0);
 }
 // Every activity of the workspace (of one type), with the record it's on.
 const hubActivities = (hub, type) => HUB_OBJECTS.flatMap(object => Object.entries((hub && hub.activities[object]) || {}).flatMap(([rid, list]) => {
@@ -114,6 +128,7 @@ function RecordHubProvider({value, children}){
     newQuote:(target) => setQuote({mode:'new', ...(target || {})}),
     editQuote:(id) => setQuote({mode:'edit', id}),
     toast:showToast,
+    onCall:!!call,   // the call window is open (the sale moment isn't shown over it — notifications.jsx)
     /* A deleted call, meeting or task keeps its notes: they stay on the record, no longer linked to it. */
     removeActivity:(actId) => { const f = hubFindActivity(value, actId); if(!f) return;
       ((value.activities[f.object] || {})[f.recordId] || []).filter(n => n.type === 'note' && (n.callId === actId || n.meetingId === actId || n.taskId === actId))
@@ -141,4 +156,4 @@ function RecordHubProvider({value, children}){
   );
 }
 
-Object.assign(window, {hubFindActivity, ActivityDeleteCtx, useActivityDelete, RecordHubCtx, useRecordHub, HUB_OBJECTS, hubObjects, HUB_NOUN, hubRecord, hubRecordPerson, hubActivities, hubRecordOptions, recordOption, RecordPicker, HubRecordLink, OpenRecordCtx, useIsOpenRecord, RecordHubProvider});
+Object.assign(window, {hasReferralLink, hubFindActivity, ActivityDeleteCtx, useActivityDelete, RecordHubCtx, useRecordHub, HUB_OBJECTS, hubObjects, HUB_NOUN, hubRecord, hubRecordPerson, hubActivities, hubRecordOptions, recordOption, RecordPicker, HubRecordLink, OpenRecordCtx, useIsOpenRecord, RecordHubProvider});

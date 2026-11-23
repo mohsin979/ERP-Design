@@ -7,7 +7,7 @@
    a deal's contact and customers; a customer's contact and deals), each row naming the record
    it's on. The record's own feed opens first. Each feed has search and two filters, Activity Type (on the
    Activity tab — the others are one type) and Activity Date, in the record lists' toolbar and
-   filter popover. No saved views, View settings or associated-object filters: simple over
+   filter popover. No saved views, Layout Settings or associated-object filters: simple over
    systematic. The chosen feed is kept per tab for the session; search and filters are per feed
    while the record is open.
 
@@ -22,7 +22,7 @@
    Deal step is that deal alone, the Contact step its contact and the Customer step its customers;
    on a customer, its contact, its deals, and itself. The Tools pages keep the pills. */
 
-const ACTIVITY_TAB_NOUNS = {activity:'activity', calls:'calls', email:'emails', notes:'notes', supportNotes:'support notes', tasks:'tasks', meetings:'meetings'};
+const ACTIVITY_TAB_NOUNS = {activity:'activity', calls:'calls', email:'emails', notes:'notes', tasks:'tasks', meetings:'meetings'};
 const ACTIVITY_FEED_OBJECTS = ['contacts', 'deals', 'customers'];
 // The feeds of a tab, one per record type of the workspace (HOF Partners: Lead and Customer).
 // Title Case: "Contact Calls", "Deal Activity".
@@ -144,10 +144,12 @@ function SubPills({items, active, onSelect}){
 }
 /* The first level as tabs — Settings → Templates' tab strip (UtTab: icon, label, underline) —
    over the toolbar, whose pills are then the second level (Meetings). */
-function PrimaryTabs({items, active, onSelect, inset = 'page'}){
+// `right`: what sits at the right end of the strip (the Tools pages' "+ New …" — 2026-11-23).
+function PrimaryTabs({items, active, onSelect, inset = 'page', right}){
   return (
     <div role="tablist" style={{display:'flex', alignItems:'center', gap:4, padding: inset === 'settings' ? '8px 16px 0' : '12px 20px 0', borderBottom:`1px solid ${T.border}`}}>
       {items.map(it => <UtTab key={it.id} icon={it.icon} label={it.name} active={it.id === active} onClick={()=>onSelect(it.id)}/>)}
+      {right && <><div style={{flex:1}}/><div style={{display:'flex', alignItems:'center', gap:8, flexShrink:0, paddingBottom:9}}>{right}</div></>}
     </div>
   );
 }
@@ -158,9 +160,23 @@ function PrimaryTabs({items, active, onSelect, inset = 'page'}){
 const MEETING_TIME_TABS = [{id:'upcoming', name:'Upcoming', icon:'calendar'}, {id:'ongoing', name:'Ongoing', icon:'videoCamera'}, {id:'past', name:'Past', icon:'clock'}];
 const EMAIL_FOLDER_TABS = [{id:'threads', name:'Threads', icon:'envelope'}, {id:'sent', name:'Sent', icon:'forward'}, {id:'inbox', name:'Received', icon:'reply'}, {id:'scheduled', name:'Scheduled', icon:'clock'}];
 const RECORD_TAB_PRIMARY = {
-  email:    {views:EMAIL_FOLDER_TABS, in:(a, level) => emailInFolder(a, level), tabs:true},
-  meetings: {views:MEETING_TIME_TABS, in:(a, level) => meetingWhen(a) === level, soonestFirst:'upcoming', tabs:true},
+  /* On a record these sit under its own tab bar, so they're its secondary tabs — the filled pills
+     (as Accounting's Active / Paid / Frozen), not a second strip of underlined tabs (2026-11-23). */
+  email:    {views:EMAIL_FOLDER_TABS, in:(a, level) => emailInFolder(a, level), tabs:false},
+  meetings: {views:MEETING_TIME_TABS, in:(a, level) => meetingWhen(a) === level, soonestFirst:'upcoming', tabs:false},
+  // Calls (2026-11-23): All Calls, and Call Reviews — Spring AI's, a placeholder until the dev team defines it.
+  // Notes (2026-11-23): by note type — All, Client Request, Support, General (noteTools.jsx).
+  notes:    {views:NOTE_TYPE_TABS, in:(a, level) => noteInTab(a, level), tabs:false},
+  calls:    {views:[{id:'all', name:'All Calls'}, {id:'reviews', name:'Call Reviews'}], in:() => true, tabs:false, placeholder:{reviews:'Call Reviews'}},
 };
+// A record tab's secondary tabs: filled pills on their own row, under the search and Filters (2026-11-23).
+// `inset` 'page': the Tools pages' wider side padding.
+function SecondaryPills({items, active, onSelect, inset}){
+  // Clear of the toolbar's line above them (Mohsin 2026-11-23: they stuck to it).
+  return <div role="tablist" style={{display:'flex', flexWrap:'wrap', gap:8, padding: inset === 'page' ? '12px 20px 12px' : '12px 16px 4px'}}>
+    {items.map(it => <button key={it.id} role="tab" aria-selected={it.id === active} onClick={()=>onSelect(it.id)} style={viewPillStyle(it.id === active)}>{it.name}</button>)}
+  </div>;
+}
 /* ── Feeds area ─────────────────────────────────────────────────────────────────────────── */
 
 /* The toolbar (the three feed pills, the tab's add button; search, Filters) over the tab's list.
@@ -190,7 +206,7 @@ function ActivityViewsArea({tabId, store, sources, schema, controls, viewSwitch,
   const primary = RECORD_TAB_PRIMARY[tabId];
   const level = primary ? ((store.state[tabId] || {}).level || primary.views[0].id) : null;
   const setLevel = (id) => store.setState(s => ({...s, [tabId]:{...(s[tabId] || {}), level:id}}));
-  const base = ((own ? sources.own : related) || []).filter(r => (!tabType || r._act.type === tabType) && (tabId !== 'supportNotes' || r._act.support) && (!primary || primary.in(r._act, level)));
+  const base = ((own ? sources.own : related) || []).filter(r => (!tabType || r._act.type === tabType) && (!primary || primary.in(r._act, level)));
   const q = st.search.trim().toLowerCase();
   const rows = base.filter(r => !q || r.text.toLowerCase().includes(q) || String(r.type).toLowerCase().includes(q));
   const filtered = applyFilters(rows, st.filters, schema.filterProps);
@@ -209,19 +225,21 @@ function ActivityViewsArea({tabId, store, sources, schema, controls, viewSwitch,
         {primary && primary.tabs && <PrimaryTabs inset="settings" items={primary.views} active={level} onSelect={setLevel}/>}
         {/* On a record: its journey in place of the feed pills (2026-11-19). */}
         {ra && <RecordJourney hub={hub} object={ownObject} record={ra.record} active={feedId} onSelect={setFeed}/>}
-        <RecordToolbar inset="settings" views={primary && !primary.tabs ? primary.views : ra ? [] : feeds} activeViewId={primary && !primary.tabs ? level : feedId}
-          onSelectView={primary && !primary.tabs ? setLevel : setFeed} oneRow={!!heading || !!ra} searchInRow={!!ra} searchPlaceholder={searchLabel}
+        <RecordToolbar inset="settings" views={primary && !primary.tabs && !ra ? primary.views : ra ? [] : feeds} activeViewId={primary && !primary.tabs && !ra ? level : feedId}
+          onSelectView={primary && !primary.tabs && !ra ? setLevel : setFeed} oneRow={!!heading || !!ra} searchInRow={!!ra} searchPlaceholder={searchLabel}
           controls={<div style={{display:'flex', alignItems:'center', gap:12}}>{viewSwitch}{ra && !own && <JourneyGoTo hub={hub} object={feedId} records={associatedRecords(hub, ownObject, ra.record)[feedId] || []}/>}{controls}</div>}
           search={st.search} onSearch={(v)=>patch({search:v})}
           filters={st.filters} setFilters={(f)=>patch({filters:typeof f === 'function' ? f(st.filters) : f})}
           appliedFilterCount={countAppliedFilters(st.filters, schema.filterProps)}/>
         {primary && !primary.tabs && !ra && <SubPills items={feeds} active={feedId} onSelect={setFeed}/>}
+        {primary && !primary.tabs && ra && <SecondaryPills items={primary.views} active={level} onSelect={setLevel}/>}
         {/* On a record, its activity names no record and links to none (`all`: every record name plain). */}
-        {ra ? <OpenRecordCtx.Provider value={{all:true}}>{render(shown, base.length && !shown.length ? 'No activity matches these filters' : null, own ? null : (a) => recOf.get(a.id) || null)}</OpenRecordCtx.Provider>
+        {primary && primary.placeholder && primary.placeholder[level] ? <SpringPlaceholder title={primary.placeholder[level]}/>
+          : ra ? <OpenRecordCtx.Provider value={{all:true}}>{render(shown, base.length && !shown.length ? 'No activity matches these filters' : null, own ? null : (a) => recOf.get(a.id) || null)}</OpenRecordCtx.Provider>
           : render(shown, base.length && !shown.length ? 'No activity matches these filters' : null, own ? null : (a) => recOf.get(a.id) || null)}
       </div>
     </RecordSchema.Provider>
   );
 }
 
-Object.assign(window, {RecordJourney, JourneyGoTo, SubPills, PrimaryTabs, MEETING_TIME_TABS, EMAIL_FOLDER_TABS, ActivityViewsArea, activityFilterSchema, activityFilterRows, activityFeeds, associatedRecords});
+Object.assign(window, {RecordJourney, JourneyGoTo, SubPills, SecondaryPills, PrimaryTabs, MEETING_TIME_TABS, EMAIL_FOLDER_TABS, ActivityViewsArea, activityFilterSchema, activityFilterRows, activityFeeds, associatedRecords});

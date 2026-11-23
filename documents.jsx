@@ -260,8 +260,8 @@ function SignatureModal({initial, isNew, onCancel, onSave}){
   return ReactDOM.createPortal(
     <StModal title={isNew ? 'Add Signature' : 'Edit Signature'} primary={isNew ? 'Add Signature' : 'Save Changes'} canSubmit={ok} onCancel={onCancel}
       onSubmit={()=>ok && onSave({name:name.trim(), email:email.trim()})}>
-      <div><label style={fieldLabel}>Signer Name</label><input autoFocus value={name} onChange={e=>setName(e.target.value)} style={fieldInput}/></div>
-      <div><label style={fieldLabel}>Signer Email</label><input value={email} onChange={e=>setEmail(e.target.value)}
+      <div><label style={fieldLabel}>Signer Name<Req/></label><input autoFocus value={name} onChange={e=>setName(e.target.value)} style={fieldInput}/></div>
+      <div><label style={fieldLabel}>Signer Email<Req/></label><input value={email} onChange={e=>setEmail(e.target.value)}
         style={{...fieldInput, borderColor: email && !docEmailOk(email) ? T.red : T.borderStrong}}/></div>
     </StModal>, document.body);
 }
@@ -294,10 +294,10 @@ function RecordInfoModal({defaultRecord, onCancel, onSave}){
   return ReactDOM.createPortal(
     <StModal title="Add Record Info" primary="Add Record Info" canSubmit={ok} width={560} onCancel={onCancel}
       onSubmit={()=>ok && onSave({object:rec.object, recordId:rec.id, recordName:record.name, fields:fields.filter(f => chosen.includes(f.key))})}>
-      <div><label style={fieldLabel}>Record</label>
+      <div><label style={fieldLabel}>Record<Req/></label>
         <SearchableSelect value={rec && rec.id != null ? `${rec.object}~${rec.id}` : ''} options={options} placeholder="Select record" searchPlaceholder="Search records"
           onChange={(v)=>{ const o = options.find(x => x.value === v); if(o){ setRec(o.rec); setKeys(null); } }}/></div>
-      {record && <div><label style={fieldLabel}>Details</label>
+      {record && <div><label style={fieldLabel}>Details<Req/></label>
         <div style={{border:`1px solid ${T.attioLine}`, borderRadius:8, maxHeight:300, overflowY:'auto'}}>
           {fields.map(f => (
             <div key={f.key} onClick={()=>toggle(f.key)} style={{display:'flex', alignItems:'center', gap:10, padding:'8px 12px', borderBottom:`1px solid ${T.attioLine}`, cursor:'pointer', fontSize:13}}>

@@ -1145,7 +1145,8 @@ const nodeTrash = (label, onDelete) => (
 );
 
 /* ── Configuration area pieces ── */
-const cfgField = (label, control) => <div><label style={fieldLabel}>{label}</label>{control}</div>;
+// `required`: the red asterisk after the label (shared.jsx Req) — what the workflow can't be saved without.
+const cfgField = (label, control, required) => <div><label style={fieldLabel}>{label}{required && <Req/>}</label>{control}</div>;
 const cfgStep = (n, title, children, disabled) => (
   <div style={{display:'flex', flexDirection:'column', gap:10, padding:'16px 20px', borderTop:`1px solid ${T.border}`, opacity: disabled ? .5 : 1, pointerEvents: disabled ? 'none' : 'auto'}}>
     <span style={{fontSize:14, fontWeight:500, color:T.black}}>{n ? `${n}. ` : ''}{title}</span>
@@ -1432,8 +1433,8 @@ function ScheduleEmailConfig({config, setConfig, data, onStub}){
               Send Immediately<UtToggle on={!!e.immediate} onChange={(v)=>set({...e, immediate:v})}/>
             </label>
           ))}
-          {cfgPart('Recipients', <><CheckList options={EMAIL_RECIPIENTS} value={e.recipients} onChange={(r)=>set({...e, recipients:r})}/>{emailCopyFields(e, set)}</>)}
-          {cfgPart('Email', <EmailChoice entry={e} setEntry={set} data={data} onStub={onStub}/>)}
+          {cfgPart(<>Recipients<Req/></>, <><CheckList options={EMAIL_RECIPIENTS} value={e.recipients} onChange={(r)=>set({...e, recipients:r})}/>{emailCopyFields(e, set)}</>)}
+          {cfgPart(<>Email<Req/></>, <EmailChoice entry={e} setEntry={set} data={data} onStub={onStub}/>)}
         </>)}/>
       {behaviorField('scheduleEmail', config, setConfig)}
       {choosing && <EmailPickerModal title="Choose Email Sequence Template" empty="No email sequences yet" searchPlaceholder="Search email sequences"
@@ -1452,9 +1453,9 @@ function CreateTaskConfig({config, setConfig, data}){
       <EntryStack config={config} setConfig={setConfig} listKey="tasks" make={newWorkflowTask} noun="task" title="Task"
         render={(t, set) => (<>
           {cfgSection('Details', (<>
-            {cfgField('Task Name', <input value={t.name} onChange={e=>set({...t, name:e.target.value})} placeholder="What needs doing" style={fieldInput}/>)}
+            {cfgField('Task Name', <input value={t.name} onChange={e=>set({...t, name:e.target.value})} placeholder="What needs doing" style={fieldInput}/>, true)}
             {cfgField('Description', <textarea rows={3} value={t.description} onChange={e=>set({...t, description:e.target.value})} style={{...fieldInput, resize:'vertical', lineHeight:1.5}}/>)}
-            {cfgField('Task Type', <FormSelect value={t.taskType} placeholder="Select task type" options={TASK_TYPES} onChange={(v)=>set({...t, taskType:v || 'To-do'})}/>)}
+            {cfgField('Task Type', <FormSelect value={t.taskType} placeholder="Select task type" options={TASK_TYPES} onChange={(v)=>set({...t, taskType:v || 'To-do'})}/>, true)}
             {cfgField('Assign To', <FormSelect value={t.assignee} placeholder="Select person" options={assigneeOptions(data)} onChange={(v)=>set({...t, assignee:v})}/>)}
           </>))}
           {cfgSection('Due', <ScheduleRows value={t.due} onChange={(d)=>set({...t, due:d})}/>)}
@@ -1515,7 +1516,7 @@ function NotifyConfig({config, setConfig, data}){
   const users = workflowUsers(data);
   return (
     <div style={{padding:'4px 20px 20px', display:'flex', flexDirection:'column', gap:20}}>
-      {cfgPart('Recipients', (<>
+      {cfgPart(<>Recipients<Req/></>, (<>
         <CheckList options={RECORD_PEOPLE} value={c.recipients} onChange={(r)=>setConfig({...c, recipients:r})}/>
         {c.users.map(id => (
           <div key={id} style={{display:'flex', alignItems:'center', gap:10, fontSize:13, color:T.attioText}}>
@@ -1566,7 +1567,7 @@ function PropertyEntries({config, setConfig, data, context, withValue}){
         return (<>
           {cfgField('Property', <FormSelect value={it.property} placeholder="Select property"
             options={props.filter(p => !taken.includes(p.key)).map(p => ({value:p.key, label:p.label}))}
-            onChange={(v)=>{ const p = props.find(x => x.key === v); set({...it, property:v, value: p ? inputPropertyValue(p.type, '') : ''}); }}/>)}
+            onChange={(v)=>{ const p = props.find(x => x.key === v); set({...it, property:v, value: p ? inputPropertyValue(p.type, '') : ''}); }}/>, true)}
           {withValue && prop && cfgField('Value', <PropertyInput prop={prop} value={it.value} onChange={(v)=>set({...it, value:v})}
             options={propertyOptions(data, objectId, prop, {pipeline:context.pipeline})}/>)}
         </>);
@@ -1602,7 +1603,7 @@ function MoveStageConfig({config, setConfig, data, context, type}){
     <div style={{padding:'4px 20px 20px', display:'flex', flexDirection:'column', gap:20}}>
       {!pipeline ? cfgHelp('Add a Pipeline to the context first.')
         : type === 'moveToStage'
-          ? cfgPart('Stage', <FormSelect value={(config || {}).stage || ''} placeholder="Select stage" options={pipeline.stages.map(s => ({value:s.id, label:s.label}))}
+          ? cfgPart(<>Stage<Req/></>, <FormSelect value={(config || {}).stage || ''} placeholder="Select stage" options={pipeline.stages.map(s => ({value:s.id, label:s.label}))}
               onChange={(v)=>setConfig({...config, stage:v})}/>)
           : null}
       {pipeline && behaviorField(type, config, setConfig)}
@@ -1627,7 +1628,7 @@ function CreateAssociatedConfig({config, setConfig, data, context}){
   const toggle = (id, v) => setConfig({...(config || {}), objects:undefined, create:Object.fromEntries([...new Set([...on, id])].map(k => [k, k === id ? v : true]))});
   return (
     <div style={{padding:'4px 20px 20px', display:'flex', flexDirection:'column', gap:12}}>
-      {cfgPart('Records', (
+      {cfgPart(<>Records<Req/></>, (
         <div style={{display:'flex', flexDirection:'column'}}>
           {associated.map(id => (
             <div key={id} style={{display:'flex', alignItems:'center', gap:10, minHeight:40, borderBottom:`1px solid ${T.attioLine}`}}>
@@ -1687,7 +1688,7 @@ function MoveToPipelineConfig({config, setConfig, data, context}){
   if(!ctx.object) return needsRecord(ctx);
   const pipelines = objectPipelines(data, ctx.object).filter(p => p.source !== 'property'), pl = pipelines.find(p => p.id === c.pipeline);
   return cfgPad(<>
-    {cfgField('Pipeline', <FormSelect value={c.pipeline || ''} placeholder="Select pipeline" options={pipelines.map(p => ({value:p.id, label:p.label}))} onChange={(v)=>setConfig({...c, pipeline:v, stage:''})}/>)}
+    {cfgField('Pipeline', <FormSelect value={c.pipeline || ''} placeholder="Select pipeline" options={pipelines.map(p => ({value:p.id, label:p.label}))} onChange={(v)=>setConfig({...c, pipeline:v, stage:''})}/>, true)}
     {pl && cfgField('Destination Stage', <FormSelect value={c.stage || ''} placeholder={`First stage (${(pl.stages.find(s => !isClosedStage(s)) || pl.stages[0] || {}).label || '—'})`}
       options={pl.stages.map(s => ({value:s.id, label:s.label}))} onChange={(v)=>setConfig({...c, stage:v})}/>)}
     {behaviorField('moveToPipeline', c, setConfig)}
@@ -1698,8 +1699,8 @@ function CreateEmailActivityConfig({config, setConfig, data, onStub}){
   const c = config || {}, e = c.email || {recipients:['recordEmail'], templateId:'', email:null};
   const set = (x) => setConfig({...c, email:x});
   return cfgPad(<>
-    {cfgPart('Recipients', <><CheckList options={EMAIL_RECIPIENTS} value={e.recipients || []} onChange={(r)=>set({...e, recipients:r})}/>{emailCopyFields(e, set)}</>)}
-    {cfgPart('Email', <EmailChoice entry={e} setEntry={set} data={data} onStub={onStub}/>)}
+    {cfgPart(<>Recipients<Req/></>, <><CheckList options={EMAIL_RECIPIENTS} value={e.recipients || []} onChange={(r)=>set({...e, recipients:r})}/>{emailCopyFields(e, set)}</>)}
+    {cfgPart(<>Email<Req/></>, <EmailChoice entry={e} setEntry={set} data={data} onStub={onStub}/>)}
     {behaviorField('createEmailActivity', c, setConfig)}
   </>);
 }
@@ -1707,7 +1708,7 @@ function CreateEmailActivityConfig({config, setConfig, data, onStub}){
 function ExitSequenceConfig({config, setConfig, data}){
   const c = config || {};
   return cfgPad(<>
-    {cfgField('Email Sequence', <FormSelect value={c.sequenceId || ''} placeholder="Select sequence" options={emailSequencesOf(data).map(q => ({value:q.id, label:q.name}))} onChange={(v)=>setConfig({...c, sequenceId:v})}/>)}
+    {cfgField('Email Sequence', <FormSelect value={c.sequenceId || ''} placeholder="Select sequence" options={emailSequencesOf(data).map(q => ({value:q.id, label:q.name}))} onChange={(v)=>setConfig({...c, sequenceId:v})}/>, true)}
     {behaviorField('exitEmailSequence', c, setConfig)}
   </>);
 }
@@ -1728,8 +1729,8 @@ function AddCallLogConfig({config, setConfig}){
   const c = {outcome:'', callType:'Outbound', comment:'', ...config};
   const set = (patch) => setConfig({...c, ...patch});
   return cfgPad(<>
-    {cfgField('Call Type', <FormSelect value={c.callType} placeholder="Select call type" options={CALL_TYPES} onChange={(v)=>set({callType:v || 'Outbound'})}/>)}
-    {cfgField('Call Outcome', <FormSelect value={c.outcome} placeholder="Select outcome" options={LOG_CALL_OUTCOMES} onChange={(v)=>set({outcome:v})}/>)}
+    {cfgField('Call Type', <FormSelect value={c.callType} placeholder="Select call type" options={CALL_TYPES} onChange={(v)=>set({callType:v || 'Outbound'})}/>, true)}
+    {cfgField('Call Outcome', <FormSelect value={c.outcome} placeholder="Select outcome" options={LOG_CALL_OUTCOMES} onChange={(v)=>set({outcome:v})}/>, actionBehavior({type:'addCallLog', config:c}) === 'automatic')}
     {cfgField('Note', <textarea rows={3} value={c.comment} onChange={e=>set({comment:e.target.value})} style={{...fieldInput, resize:'vertical', lineHeight:1.5}}/>)}
     {behaviorField('addCallLog', c, setConfig)}
   </>);
@@ -1745,7 +1746,7 @@ function UpdateAssociatedConfig({config, setConfig, data, context}){
   const targets = (ASSOCIATED_OBJECTS[ctx.object] || []).filter(workspaceHasType);
   return cfgPad(<>
     {cfgField('Associated Record', <FormSelect value={c.object || ''} placeholder="Select record" options={targets.map(o => ({value:o, label:objectName(data, o).replace(/s$/, '')}))}
-      onChange={(v)=>setConfig({...c, object:v, properties:[]})}/>)}
+      onChange={(v)=>setConfig({...c, object:v, properties:[]})}/>, true)}
     {c.object && <PropertyEntries config={c} setConfig={setConfig} data={data} context={{object:c.object}} withValue/>}
     {behaviorField('updateAssociatedRecord', c, setConfig)}
   </>);
@@ -1757,7 +1758,7 @@ function ClassifyConfig({config, setConfig, data, context}){
   const props = objectProperties(data, ctx.object).filter(p => propertyTypeId(p.type) === 'Single Selection' && (p.options || []).length);
   const prop = props.find(p => p.key === c.property);
   return cfgPad(<>
-    {cfgField('Property', <FormSelect value={c.property || ''} placeholder="Select property" options={props.map(p => ({value:p.key, label:p.label}))} onChange={(v)=>setConfig({...c, property:v})}/>)}
+    {cfgField('Property', <FormSelect value={c.property || ''} placeholder="Select property" options={props.map(p => ({value:p.key, label:p.label}))} onChange={(v)=>setConfig({...c, property:v})}/>, true)}
     {prop && cfgPart('Possible values', cfgHelp((prop.options || []).join(' · ')))}
     {behaviorField('classifyRecord', c, setConfig)}
   </>);
@@ -1784,8 +1785,8 @@ function AssignOwnerConfig({config, setConfig, data, context}){
     style={{border:'none', background:'transparent', cursor: disabled ? 'default' : 'pointer', display:'flex', padding:4, opacity: disabled ? .35 : 1}}><Icon name={icon} size={12} color={T.gray600}/></button>;
   const userFields = userPropertyFields(data), fieldOf = (key) => userFields.find(f => f.key === key);
   const opsFor = (f) => fieldOperators(f, {withChange:false}).map(o => ({value:o.id, label:o.label}));
-  const teamField = cfgField('Team', <FormSelect value={c.team || ''} placeholder="Select team" options={(data.teams || []).map(t => ({value:t.id, label:t.name}))} onChange={(v)=>set({team:v})}/>);
-  const orderList = cfgPart('Order', <div style={{display:'flex', flexDirection:'column', gap:6}}>
+  const teamField = cfgField('Team', <FormSelect value={c.team || ''} placeholder="Select team" options={(data.teams || []).map(t => ({value:t.id, label:t.name}))} onChange={(v)=>set({team:v})}/>, true);
+  const orderList = cfgPart(<>Order<Req/></>, <div style={{display:'flex', flexDirection:'column', gap:6}}>
     {c.users.map((id, i) => (
       <div key={id} style={{display:'flex', alignItems:'center', gap:8, fontSize:13, color:T.attioText}}>
         <span style={{width:16, fontSize:12, color:T.gray400, fontVariantNumeric:'tabular-nums'}}>{i + 1}</span>
@@ -1799,14 +1800,14 @@ function AssignOwnerConfig({config, setConfig, data, context}){
       onChange={(id)=>id && set({users:[...c.users, id]})}/>
   </div>);
   return cfgPad(<>
-    {cfgPart('Method', <div role="radiogroup" aria-label="Assignment method" style={{display:'flex', flexDirection:'column', gap:8}}>
+    {cfgPart(<>Method<Req/></>, <div role="radiogroup" aria-label="Assignment method" style={{display:'flex', flexDirection:'column', gap:8}}>
       {ASSIGN_METHODS.map(m => <StRadioCard key={m.key} selected={c.method === m.key} title={m.label} onSelect={()=>set({method:m.key})}/>)}
     </div>)}
-    {c.method === 'person' && cfgField('Owner', <FormSelect value={c.user || ''} placeholder="Select person" options={users.map(u => ({value:u.id, label:u.name}))} onChange={(v)=>set({user:v})}/>)}
+    {c.method === 'person' && cfgField('Owner', <FormSelect value={c.user || ''} placeholder="Select person" options={users.map(u => ({value:u.id, label:u.name}))} onChange={(v)=>set({user:v})}/>, true)}
     {c.method === 'team' && teamField}
     {c.method === 'roundRobin' && orderList}
     {c.method === 'properties' && <>
-      {cfgPart('Conditions', <div style={{display:'flex', flexDirection:'column', gap:8}}>
+      {cfgPart(<>Conditions<Req/></>, <div style={{display:'flex', flexDirection:'column', gap:8}}>
         {c.rules.map(r => { const f = fieldOf(r.property); const setR = (patch) => set({rules:c.rules.map(x => x.id === r.id ? {...x, ...patch} : x)}); return (
           <div key={r.id} style={{display:'flex', flexDirection:'column', gap:6, padding:10, border:`1px solid ${T.attioLine}`, borderRadius:8}}>
             <div style={{display:'flex', gap:6, alignItems:'center'}}>
@@ -1821,7 +1822,7 @@ function AssignOwnerConfig({config, setConfig, data, context}){
         ); })}
         <div><UnderlineAction label="+ Add condition" onClick={()=>set({rules:[...c.rules, {id:newEntryId('ar'), property:'', op:'', value:''}]})}/></div>
       </div>)}
-      {cfgField('Among', <FormSelect value={c.pool || 'all'} options={ASSIGN_POOLS} onChange={(v)=>set({pool:v || 'all'})}/>)}
+      {cfgField('Among', <FormSelect value={c.pool || 'all'} options={ASSIGN_POOLS} onChange={(v)=>set({pool:v || 'all'})}/>, true)}
       {c.pool === 'team' && teamField}
       {c.pool === 'roundRobin' && orderList}
     </>}
@@ -1999,28 +2000,29 @@ function TriggerSettings({data, trig, context, config, onChange}){
         </React.Fragment>;
       }
       case 'pipeline': return <React.Fragment key={f}>{cfgField('Pipeline', <FormSelect value={c.pipeline || ''} placeholder="Select pipeline"
-        options={objectPipelines(data, ctx.object).map(p => ({value:p.id, label:p.label}))} onChange={(v)=>set({pipeline:v, stage:''})}/>)}</React.Fragment>;
+        options={objectPipelines(data, ctx.object).map(p => ({value:p.id, label:p.label}))} onChange={(v)=>set({pipeline:v, stage:''})}/>, trig.group !== 'pipeline')}</React.Fragment>;
       case 'stage': return <React.Fragment key={f}>{cfgField('Stage', <FormSelect value={c.stage || ''} placeholder="Select stage"
-        options={WORKFLOW_CONTEXT_FIELDS.stage.options(data, {pipeline:pipelineId})} onChange={(v)=>set({stage:v})}/>)}</React.Fragment>;
-      case 'duration': return <React.Fragment key={f}>{cfgField(trig.key === 'recordNotChanged' ? 'For' : 'After', <DurationInput value={{amount:c.amount || '', unit:c.unit || 'Days'}} onChange={(d)=>set({amount:d.amount, unit:d.unit})}/>)}</React.Fragment>;
+        options={WORKFLOW_CONTEXT_FIELDS.stage.options(data, {pipeline:pipelineId})} onChange={(v)=>set({stage:v})}/>, true)}</React.Fragment>;
+      case 'duration': return <React.Fragment key={f}>{cfgField(trig.key === 'recordNotChanged' ? 'For' : 'After', <DurationInput value={{amount:c.amount || '', unit:c.unit || 'Days'}} onChange={(d)=>set({amount:d.amount, unit:d.unit})}/>, true)}</React.Fragment>;
       // What to watch: a specific email (then its template) or a count (then Repeat and the condition).
       case 'activityProperty': return <React.Fragment key={f}>{cfgField(at.label, <FormSelect value={c.activityProperty || ''} placeholder={at.placeholder}
-        options={at.properties.filter(p => !p.unavailable || p.value === c.activityProperty).map(p => ({value:p.value, label:p.label}))} onChange={(v)=>set({activityProperty:v})}/>)}</React.Fragment>;
+        options={at.properties.filter(p => !p.unavailable || p.value === c.activityProperty).map(p => ({value:p.value, label:p.label}))} onChange={(v)=>set({activityProperty:v})}/>, true)}</React.Fragment>;
       case 'template': return <React.Fragment key={f}>{cfgField('Email Template', <FormSelect value={c.template || ''} placeholder="Any email"
         options={[{value:'', label:'Any email'}, ...emailTemplatesOf(data).map(t => ({value:t.id, label:t.name}))]} onChange={(v)=>set({template:v})}/>)}</React.Fragment>;
-      case 'agoDuration': return <React.Fragment key={f}>{cfgField('Sent', <DurationInput value={{amount:c.agoAmount || '', unit:c.agoUnit || 'Days'}} onChange={(d)=>set({agoAmount:d.amount, agoUnit:d.unit})}/>)}</React.Fragment>;
+      case 'agoDuration': return <React.Fragment key={f}>{cfgField('Sent', <DurationInput value={{amount:c.agoAmount || '', unit:c.agoUnit || 'Days'}} onChange={(d)=>set({agoAmount:d.amount, agoUnit:d.unit})}/>, true)}</React.Fragment>;
+      // Call Made's outcome: any, or one — Connected, qualified / not qualified among them (2026-11-20).
       case 'callOutcome': return <React.Fragment key={f}>{cfgField('Call Outcome', <FormSelect value={c.outcome || ''} placeholder="Any outcome"
-        options={[{value:'', label:'Any outcome'}, ...['Connected', 'No answer', 'Left voicemail', 'Wrong number', 'Cancelled', 'Disconnected'].map(o => ({value:o, label:o}))]} onChange={(v)=>set({outcome:v})}/>)}</React.Fragment>;
+        options={[{value:'', label:'Any outcome'}, ...['Connected', CALL_QUALIFIED_OUTCOME, CALL_NOT_QUALIFIED_OUTCOME, CALL_BACK_OUTCOME, 'No answer', 'Left voicemail', 'Wrong number', 'Cancelled', 'Disconnected'].map(o => ({value:o, label:o}))]} onChange={(v)=>set({outcome:v})}/>)}</React.Fragment>;
       case 'form': return <TriggerFormField key={f} value={c.form || ''} onChange={(id, name)=>set({form:id, formName:name})}/>;
-      case 'duplicateType': return <React.Fragment key={f}>{cfgField('Duplication Type', <FormSelect value={c.duplicateType || ''} placeholder="Select type" options={DUPLICATE_TYPES} onChange={(v)=>set({duplicateType:v})}/>)}</React.Fragment>;
+      case 'duplicateType': return <React.Fragment key={f}>{cfgField('Duplication Type', <FormSelect value={c.duplicateType || ''} placeholder="Select type" options={DUPLICATE_TYPES} onChange={(v)=>set({duplicateType:v})}/>, true)}</React.Fragment>;
       // The associated Object, then its parameter — one row.
       case 'associatedObject': return <React.Fragment key={f}>
         <div style={{display:'flex', gap:8}}>
           <div style={{flex:'1 1 0', minWidth:0}}>{cfgField('Associated Object', <FormSelect value={c.associatedObject || ''} placeholder="Select object"
-            options={associatedObjectsOf(ctx.object).map(o => ({value:o, label:objectSingular(data, o)}))} onChange={(v)=>set({associatedObject:v})}/>)}</div>
+            options={associatedObjectsOf(ctx.object).map(o => ({value:o, label:objectSingular(data, o)}))} onChange={(v)=>set({associatedObject:v})}/>, true)}</div>
           <div style={{flex:'1 1 0', minWidth:0}}>{cfgField('Parameter', <FormSelect value={c.assocParam || ''} placeholder="Select parameter"
             options={ASSOCIATED_RECORD_PARAMS.map(x => ({value:x.value, label:x.label}))}
-            onChange={(v)=>set({assocParam:v})}/>)}</div>
+            onChange={(v)=>set({assocParam:v})}/>, true)}</div>
         </div>
 </React.Fragment>;
       case 'assocParam': return null;
@@ -2034,7 +2036,7 @@ function TriggerSettings({data, trig, context, config, onChange}){
           <input type="number" min="0" value={c.value ?? ''} onChange={e=>set({value:e.target.value})} placeholder="0" aria-label="Count"
             style={{...fieldInput, flex:'1 1 0', width:0, minWidth:0}}/>
         </div>
-      ))}</React.Fragment>;
+      ), true)}</React.Fragment>;
       // Only with Is more than / Is less than: every increment above, or every decrement below.
       case 'repeat': { if(!countRepeatable(c)) return null;
         const step = repeatStepLabel(c);
@@ -2061,7 +2063,7 @@ function RenameWorkflowModal({name, onSave, onCancel}){
   const [value, setValue] = React.useState(name || '');
   return (
     <StModal title="Rename Workflow" primary="Save" canSubmit={!!value.trim()} onCancel={onCancel} onSubmit={()=>onSave(value.trim())}>
-      <div><label style={fieldLabel}>Workflow Name</label><input autoFocus value={value} onChange={e=>setValue(e.target.value)} style={fieldInput}/></div>
+      <div><label style={fieldLabel}>Workflow Name<Req/></label><input autoFocus value={value} onChange={e=>setValue(e.target.value)} style={fieldInput}/></div>
     </StModal>
   );
 }
@@ -2236,7 +2238,7 @@ function WorkflowEditor({data, initial, onCancel, onSave, onDelete, onRename, on
         <div style={{padding:'18px 20px', display:'flex', flexDirection:'column', gap:16}}>
           <span style={{fontSize:15, fontWeight:600, color:T.attioText}}>Workflow control</span>
           {/* Workflow Type — checked against the actions as it's chosen (and as actions change). */}
-          {cfgPart('Workflow Type', (
+          {cfgPart(<>Workflow Type<Req/></>, (
             <div style={{display:'flex', flexDirection:'column', gap:8}}>
               <div role="radiogroup" aria-label="Workflow Type" style={{display:'flex', flexDirection:'column', gap:8}}>
                 {WORKFLOW_TYPES.map(t => <StRadioCard key={t.key} selected={draft.type === t.key} title={t.label} description={t.description} onSelect={()=>setType(t.key)}/>)}
@@ -2245,7 +2247,7 @@ function WorkflowEditor({data, initial, onCancel, onSave, onDelete, onRename, on
             </div>
           ))}
           {/* Trigger Scope — set per workflow, for all its triggers: which records they apply to. */}
-          {cfgPart('Trigger Scope', (
+          {cfgPart(<>Trigger Scope<Req/></>, (
             <div role="radiogroup" aria-label="Trigger Scope" style={{display:'flex', flexDirection:'column', gap:8}}>
               {TRIGGER_SCOPES.map(o => <StRadioCard key={o.key} selected={draft.triggerScope === o.key} title={o.label} onSelect={()=>set({triggerScope:o.key})}/>)}
             </div>

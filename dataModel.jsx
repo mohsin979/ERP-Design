@@ -26,7 +26,15 @@
 
    Contacts and Deals have properties; each Object's creation form is built from them
    (ContactFormModal, contactActions.jsx). Not defined yet: what the Associated Objects count
-   opens, editing an Object, group management, and the enrichment / integration sources. */
+   opens, editing an Object, group management, and the enrichment / integration sources.
+
+   Not Qualified Reason (2026-11-20): a built-in Lead property (NOT_QUALIFIED_REASONS), added once
+   to settings saved before it (`notQualifiedReasonProperty`) — as Lost Reason was on Deals.
+
+   Referred By (2026-11-23): a built-in, system-generated property on Leads and Deals (key
+   `referrer`) — the name of the record a referral was created from, read from the record's
+   `referredBy` {object, id} (referrerOf / referralsOf); added once to settings saved before it
+   (`referredByProperty`). */
 
 /* The property types (propertyTypes.jsx — each type's input, value, display, validation and
    operators): the ones a property can be created with, the ones with options to configure, and
@@ -64,7 +72,11 @@ const DEFAULT_ASSOCIATIONS = [
 
    Contacts. Full Name and Contact Owner are mandatory and locked. Contact Owner is a User (stored
    as the user's ID). Contact Type drives the Types of Contact pipeline (its options are that
-   pipeline's stages). Lead Source is set when the contact comes in (Manual, Meta Form). */
+   pipeline's stages). Lead Source is set when the contact comes in (Manual, Meta Form).
+   Not Qualified Reason (2026-11-20): why a lead doesn't qualify — asked when a call's outcome is
+   Connected, not qualified (activityCards.jsx NotQualifiedReasonField) and set on the lead from
+   it; its options are editable like any other property's. */
+const NOT_QUALIFIED_REASONS = ['Age', 'Budget', 'Education', 'Nationality', 'Not Interested', 'Already Applied Elsewhere'];
 const CONTACT_PROPERTY_SETUP = {
   name:          {type:'Avatar',           onCreate:true, mandatory:true, locked:true, formLabel:'Full Name', placeholder:'Full name'},
   email:         {type:'Email',            onCreate:true, half:true, placeholder:'name@company.com'},
@@ -77,6 +89,7 @@ const CONTACT_PROPERTY_SETUP = {
   industry:      {type:'Single Selection', options:CONTACT_INDUSTRIES},
   source:        {type:'Single Selection', options:CONTACT_SOURCES, locked:true, auto:true},
   leadStatus:    {type:'Single Selection', options:LEAD_STATUSES},
+  notQualifiedReason: {type:'Single Selection', options:NOT_QUALIFIED_REASONS},
   owner:         {type:'User',             onCreate:true, mandatory:true, locked:true, placeholder:'Select owner'},
   ownerAssigned: {type:'Date', locked:true, auto:true, derived:true},
   deals:         {type:'Single-Line Text', locked:true, auto:true, derived:true},
@@ -92,6 +105,10 @@ const CONTACT_PROPERTY_SETUP = {
    archived: it's entered with Deal Amount (amountCurrencyKey, propertyTypes.jsx), starting at
    the default currency. */
 const DEAL_TYPES = ['New Business', 'Existing Business'];
+/* Lost Reason (2026-11-20): why a deal was lost — asked when a person moves it into a Lost stage
+   (board.jsx withLostReason); kept when it moves out again. Its options are editable like any
+   other property's. */
+const LOST_REASONS = ['Not Eligible', 'Too Expensive', 'Chose Another Consultant', 'Not Responding', 'Changed Plans', 'Other'];
 const DEAL_PROPERTY_SETUP = [
   {key:'name',      label:'Deal Name',     type:'Avatar',           onCreate:true, mandatory:true, locked:true, placeholder:'e.g. Ali Khan', width:220},
   // Email and Phone Number: filled in from the contact a deal is created from (editable).
@@ -104,6 +121,7 @@ const DEAL_PROPERTY_SETUP = [
   {key:'source',    label:'Deal Source',   type:'Single Selection', options:CONTACT_SOURCES, locked:true, auto:true, width:150},
   {key:'closeDate', label:'Expected Close Date', type:'Date',       onCreate:true, half:true, width:200},
   {key:'actualCloseDate', label:'Actual Close Date', type:'Timestamp', locked:true, auto:true, width:200},
+  {key:'lostReason', label:'Lost Reason',  type:'Single Selection', options:LOST_REASONS, width:200},
   {key:'created',   label:'Created Date',  type:'Timestamp',        locked:true, auto:true, width:200},
   {key:'lastActivity', label:'Last Activity Date', type:'Date',     locked:true, auto:true, derived:true, width:170},
   {key:'amount',    label:'Deal Amount',   type:'Number',           onCreate:true, half:true, width:150},
@@ -138,6 +156,13 @@ const ownerRecordProperty = (objectId) => ({key:'ownerAssignedBy', label:'Owner 
 const MERGE_STATUSES = ['Unique', 'Duplicate', 'Form Refill', 'Merged'];
 const mergeRecordProperty = (objectId) => ({key:'mergeStatus', label:'Merge Status', type:'Single Selection', options:MERGE_STATUSES, system:true, objectId,
   onCreate:false, mandatory:false, locked:true, auto:true, derived:true, width:150});
+/* Referred By (2026-11-23), on Leads and Deals: the record a referral lead or deal was created from
+   (Create Referral Lead / Deal) — its name, worked out from the record's link (`referredBy`
+   {object, id}; referrerOf below), never edited. The property's key is `referrer`: the name shown,
+   as Associated Lead (`contact`) is to `contactIds`. */
+const REFERRAL_OBJECTS = ['contacts', 'deals'];
+const referrerRecordProperty = (objectId) => ({key:'referrer', label:'Referred By', type:'Single-Line Text', system:true, objectId,
+  onCreate:false, mandatory:false, locked:true, auto:true, derived:true, width:200});
 const CUSTOMER_PROPERTY_SETUP = [
   {key:'name',    label:'Customer Name',  type:'Avatar',           onCreate:true, mandatory:true, locked:true, formLabel:'Customer Name', placeholder:'Full name', width:220},
   {key:'pipeline', label:'Customer Pipeline', type:'Pipeline',     onCreate:true, mandatory:true, locked:true, half:true, width:190},
@@ -175,6 +200,7 @@ const DEFAULT_PROPERTIES = () => [
   ...['contacts', 'deals', 'customers'].flatMap(formRecordProperties),
   ...['contacts', 'deals', 'customers'].map(ownerRecordProperty),
   ...['contacts', 'deals', 'customers'].map(mergeRecordProperty),
+  ...REFERRAL_OBJECTS.map(referrerRecordProperty),
   ...userDefaultProperties(),
 ];
 /* Settings saved before: Forms and Services go (with anything of theirs); the Customers–Deals
@@ -268,6 +294,27 @@ const migrateDataModel = (d0) => {
   if(!d.noFormProperties) properties = [...properties, ...['contacts', 'deals', 'customers'].filter(has).flatMap(formRecordProperties).filter(fp => !properties.some(p => p.objectId === fp.objectId && p.key === fp.key))];
   // Owner Assigned By (2026-11-16), on each record type that doesn't have it yet.
   properties = [...properties, ...['contacts', 'deals', 'customers'].filter(has).map(ownerRecordProperty).filter(op => !properties.some(p => p.objectId === op.objectId && p.key === op.key))];
+  /* Lost Reason (2026-11-20), once (`lostReasonProperty`), on the Deals (HOF Partners' Leads too)
+     of a branch saved before it — after the deals' other properties. Deleted since: not brought back. */
+  if(!d.lostReasonProperty && has('deals') && !properties.some(p => p.objectId === 'deals' && p.key === 'lostReason')){
+    const lr = DEFAULT_PROPERTIES().find(p => p.objectId === 'deals' && p.key === 'lostReason');
+    const at = properties.reduce((last, p, i) => p.objectId === 'deals' ? i : last, -1);
+    properties = at < 0 ? [...properties, lr] : [...properties.slice(0, at + 1), lr, ...properties.slice(at + 1)];
+  }
+  /* Not Qualified Reason (2026-11-20), once (`notQualifiedReasonProperty`), on the Leads of a
+     branch saved before it — after the leads' other properties. Deleted since: not brought back. */
+  if(!d.notQualifiedReasonProperty && has('contacts') && !properties.some(p => p.objectId === 'contacts' && p.key === 'notQualifiedReason')){
+    const nq = DEFAULT_PROPERTIES().find(p => p.objectId === 'contacts' && p.key === 'notQualifiedReason');
+    const at = properties.reduce((last, p, i) => p.objectId === 'contacts' ? i : last, -1);
+    properties = at < 0 ? [...properties, nq] : [...properties.slice(0, at + 1), nq, ...properties.slice(at + 1)];
+  }
+  /* Referred By (2026-11-23), once (`referredByProperty`), on the Leads and the Deals of a branch
+     saved before it — after each one's other properties. Deleted since: not brought back. */
+  if(!d.referredByProperty) REFERRAL_OBJECTS.filter(has).forEach(obj => {
+    if(properties.some(p => p.objectId === obj && p.key === 'referrer')) return;
+    const at = properties.reduce((last, p, i) => p.objectId === obj ? i : last, -1), rp = referrerRecordProperty(obj);
+    properties = at < 0 ? [...properties, rp] : [...properties.slice(0, at + 1), rp, ...properties.slice(at + 1)];
+  });
   // Merge Status (2026-11-12), on each record type that doesn't have it yet.
   properties = [...properties, ...['contacts', 'deals', 'customers'].filter(has).map(mergeRecordProperty).filter(mp => !properties.some(p => p.objectId === mp.objectId && p.key === mp.key))];
   // Merge Status gained Merged (2026-11-13).
@@ -299,7 +346,7 @@ const migrateDataModel = (d0) => {
   // Settings → Defaults' currency is a code (was "AED — UAE Dirham"); the earlier default, PKR, is AED (decided 2026-11-11).
   const cur = d.defaults && d.defaults.currency;
   if(cur && !/^[A-Z]{3}$/.test(cur)) rest.defaults = {...d.defaults, currency:/^PKR/.test(cur) ? 'AED' : cur.slice(0, 3)};
-  return {...rest, objects, associations, properties, pipelines, profileForms, postponedOpen:true, closeDateDay:true, propertySet:PROPERTY_SET_VERSION, propertiesObjectId: has(d.propertiesObjectId) ? d.propertiesObjectId : null};
+  return {...rest, objects, associations, properties, pipelines, profileForms, postponedOpen:true, closeDateDay:true, lostReasonProperty:true, notQualifiedReasonProperty:true, referredByProperty:true, propertySet:PROPERTY_SET_VERSION, propertiesObjectId: has(d.propertiesObjectId) ? d.propertiesObjectId : null};
 };
 
 /* Pipelines — one store for every Object's pipelines. Contacts' Types of Contact is the existing
@@ -395,6 +442,19 @@ const canLink = (records, x, xRec, y, yRec) => {
 };
 // A record being created (no links yet), for canLink.
 const NEW_RECORD = {id:'__new__', contactIds:[], dealIds:[]};
+/* ── Referrals (2026-11-23) ── a lead or deal made with Create Referral Lead / Deal keeps the record
+   it was created from: `referredBy` {object, id} on the referred record, one referrer per record.
+   Not an association: no link type, no limit. `records`: {contacts, deals, customers}.
+     referrerOf(records, r)             → the record that referred `r`, with its type ({object, record}) —
+                                          null without one, or once that record is gone.
+     referralsOf(records, object, id)   → the records it referred ([{object, record}]). */
+const referrerOf = (records, r) => {
+  const by = r && r.referredBy;
+  const record = by && by.id != null ? ((records && records[by.object]) || []).find(x => sameId(x.id, by.id)) : null;
+  return record ? {object:by.object, record} : null;
+};
+const referralsOf = (records, object, id) => RECORD_OBJECTS.flatMap(o => ((records && records[o]) || [])
+  .filter(r => r.referredBy && r.referredBy.object === object && sameId(r.referredBy.id, id)).map(record => ({object:o, record})));
 // The link written on the record that holds it: `holderRec` with `id` added or removed.
 const withLinkId = (r, field, id) => (r[field] || []).some(x => sameId(x, id)) ? r : {...r, [field]:[...(r[field] || []), id]};
 const withoutLinkId = (r, field, id) => (r[field] || []).some(x => sameId(x, id)) ? {...r, [field]:r[field].filter(x => !sameId(x, id))} : r;
@@ -499,7 +559,7 @@ function PropertyTypeConfig({type, options, setOptions, range, setRange}){
   }
   if(CHOICE_TYPES.includes(propertyTypeId(type))) return (
     <div>
-      <label style={fieldLabel}>Options</label>
+      <label style={fieldLabel}>Options<Req/></label>
       <div style={{display:'flex', flexDirection:'column', gap:6}}>
         {options.map((o, i) => (
           <div key={i} style={{display:'flex', alignItems:'center', gap:6}}>
@@ -560,11 +620,11 @@ function DraftPropertyFields({p, duplicate, setProp, onRemove, onArchive}){
   return (<>
     <div style={{display:'flex', alignItems:'flex-end', gap:12}}>
       <div style={{flex:1, minWidth:0}}>
-        <label style={fieldLabel}>Property Label</label>
+        <label style={fieldLabel}>Property Label<Req/></label>
         <input autoFocus={!p.existing} value={p.label} onChange={e=>setProp({label:e.target.value})} placeholder="e.g. Status" style={fieldInput}/>
       </div>
       <div style={{flex:1, minWidth:0}}>
-        <label style={fieldLabel}>Property Type</label>
+        <label style={fieldLabel}>Property Type<Req/></label>
         {fixed ? <div style={{...fieldInput, ...readOnly}}>{propertyTypeId(p.type)}</div>
           : <FormSelect value={propertyTypeId(p.type)} placeholder="Select property type" options={PROPERTY_TYPES} onChange={v=>v && setProp({type:v})}/>}
       </div>
@@ -935,11 +995,11 @@ function RecordTypePanel({data, objectId, onClose, onSave, records = {}}){
           {/* Left — Record Name, Group (stacked), Associated Records. */}
           <div style={{flex:1, minWidth:0, overflowY:'auto', padding:'16px 24px', display:'flex', flexDirection:'column', gap:14}}>
             {/* Labels beside the fields, as every create and edit panel. */}
-            <Field label="Record Name" wide>
+            <Field label="Record Name" wide required>
               <input id="object-name" autoFocus={!editing} value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Projects" style={fieldInput}/>
               {taken && <div style={{fontSize:12, color:T.red, marginTop:4}}>A record with this name already exists.</div>}
             </Field>
-            <Field label="Group" wide><FormSelect value={group} placeholder="Select group" options={OBJECT_GROUPS} onChange={setGroup}/></Field>
+            <Field label="Group" wide required><FormSelect value={group} placeholder="Select group" options={OBJECT_GROUPS} onChange={setGroup}/></Field>
             <Field label="Associated Records" wide><div>
               {/* Fixed-height rows (as the Add Team user list) — selecting doesn't change the height;
                   the relationship shows as text + chevron. */}
@@ -1160,12 +1220,12 @@ function PropertyModal({data, property, defaultObjectId, onClose, onSave, holder
       <div style={{display:'grid', gridTemplateColumns:'minmax(0, 1fr) minmax(0, 1fr)', alignItems:'stretch'}}>
         <div style={{display:'flex', flexDirection:'column', gap:14, minWidth:0, paddingRight:24}}>
           <div>
-            <label style={fieldLabel} htmlFor="property-label">Property Label</label>
+            <label style={fieldLabel} htmlFor="property-label">Property Label<Req/></label>
             <input id="property-label" autoFocus value={label} onChange={e=>setLabel(e.target.value)} placeholder="e.g. Passport Number" style={fieldInput}/>
             {taken && <div style={{fontSize:12, color:T.red, marginTop:4}}>{objectName(data, objectId)} already has a property with this label.</div>}
           </div>
           <div>
-            <label style={fieldLabel}>Property Type</label>
+            <label style={fieldLabel}>Property Type<Req/></label>
             {locked
               ? <div title="The record relies on it" style={{...fieldInput, background:T.pageBg, color:T.gray600}}>{type}</div>
               : <FormSelect value={type} placeholder="Select property type" options={PROPERTY_TYPES} onChange={v=>v && setType(v)}/>}
@@ -1176,7 +1236,7 @@ function PropertyModal({data, property, defaultObjectId, onClose, onSave, holder
         {/* Right — the Object this property belongs to, and its creation settings. */}
         <div style={{minWidth:0, paddingLeft:24, borderLeft:`1px solid ${T.border}`, display:'flex', flexDirection:'column', gap:14}}>
           <div>
-            <label style={fieldLabel}>Record</label>
+            <label style={fieldLabel}>Record<Req/></label>
             {/* An existing property stays on its record (its values are there). */}
             {editing
               ? <div style={{...fieldInput, background:T.pageBg, color:T.gray600}}>{objectName(data, objectId)}</div>
@@ -1259,15 +1319,15 @@ function NewPipelinePanel({data, records = {}, onCancel, onSave}){
       <StCta label="Save" disabled={!ok} onClick={save}/>
     </>}>
       {stack(<>
-        <Field label="Pipeline Name">
+        <Field label="Pipeline Name" required>
           <input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Canada PR" style={{...fieldText, borderColor: taken ? T.red : undefined}}/>
           {taken && <div style={{fontSize:12, color:T.red, marginTop:4}}>This record already has a pipeline with this name.</div>}
         </Field>
-        <Field label="Record">
+        <Field label="Record" required>
           <Select value={objectId} placeholder="Select record" options={RECORD_OBJECTS.filter(id => data.objects.some(o => o.id === id) && pipelineAdminCan(id, 'create')).map(id => ({value:id, label:objectName(data, id)}))}
             onChange={v=>{ setObjectId(v || ''); setPropertyKey(''); if(v === 'contacts') setKind('property'); }}/>
         </Field>
-        <Field label="Type">
+        <Field label="Type" required>
           <div role="radiogroup" aria-label="Pipeline type" style={{display:'flex', gap:8}}>
             {/* Contacts have property-based pipelines only. */}
             {objectId !== 'contacts' && <StRadioCard selected={kind === 'manual'} title="Manual" onSelect={()=>setKind('manual')}/>}
@@ -1275,7 +1335,7 @@ function NewPipelinePanel({data, records = {}, onCancel, onSave}){
           </div>
         </Field>
         {kind === 'manual' ? (
-          <Field label="Stages">
+          <Field label="Stages" required>
             <div style={{display:'flex', flexDirection:'column', gap:8}}>
               {stages.map((s, i) => (
                 <div key={s.id} style={{display:'flex', alignItems:'center', gap:6}}>
@@ -1293,7 +1353,7 @@ function NewPipelinePanel({data, records = {}, onCancel, onSave}){
             </div>
           </Field>
         ) : (<>
-          <Field label="Property">
+          <Field label="Property" required>
             <Select value={propertyKey} placeholder={objectId ? (props.length ? 'Select property' : 'No single-choice properties') : 'Select a record first'}
               options={props.map(p => ({value:p.key, label:p.label}))} onChange={v=>setPropertyKey(v || '')}/>
           </Field>
@@ -1374,7 +1434,7 @@ function PipelinesSettings({data, setData, records = {}, onWorkflowOpen, target,
     <div style={{position:'relative', flex:1, minHeight:0, display:'flex', flexDirection:'column', overflow:'hidden'}}>
     <SettingsPage fill>
       <div style={{display:'flex', flexDirection:'column', flex:1, minHeight:0}}>
-        {/* Add Pipeline: the "+" after View Settings and Save View, as Add Record on Records. */}
+        {/* Add Pipeline: the "+" after Layout Settings and Save View, as Add Record on Records. */}
         <RecordViewsModule flushTop storeKey="views:plv-all-v2" schema={schema} rows={rows} columns={PIPELINE_COLS.map(c => c.key)} defaultViews={[{id:'plv-all', name:'All Pipelines'}]}
           actions={() => RECORD_OBJECTS.some(o => pipelineAdminCan(o, 'create')) && <NewButton label="New Pipeline" onClick={()=>setCreating(true)}/>}/>
       </div>
@@ -1393,5 +1453,5 @@ function PipelinesSettings({data, setData, records = {}, onWorkflowOpen, target,
   );
 }
 
-Object.assign(window, {LINK_STORE, linkStoreOf, setLinkAssociations, sameId, contactIdsOf, personIdOf, linkRule, linkRuleLimit, isLinked, linkedOf, canLink, withLinkId, withoutLinkId, linkPatch, withContactIds, linkBreaks, NEW_RECORD, mergeReportingOn, propertyShown, StageTypeSelect, CUSTOMER_PIPELINE_FOR_DEAL, REMOVED_PIPELINE_IDS, PipelinesSettings, DEFAULT_PIPELINES, objectPipelines, recordPipelines, recordInPipeline, DEAL_TYPES, PROPERTY_SET_VERSION, SYSTEM_PROPERTY_TYPES, PROPERTY_TYPES, RELATIONSHIP_TYPES, OBJECT_GROUPS, DEFAULT_DATA_MODEL, PropertyInput, storePropertyValue, inputPropertyValue,
+Object.assign(window, {referrerOf, referralsOf, referrerRecordProperty, REFERRAL_OBJECTS, LINK_STORE, linkStoreOf, setLinkAssociations, sameId, contactIdsOf, personIdOf, linkRule, linkRuleLimit, isLinked, linkedOf, canLink, withLinkId, withoutLinkId, linkPatch, withContactIds, linkBreaks, NEW_RECORD, mergeReportingOn, propertyShown, StageTypeSelect, CUSTOMER_PIPELINE_FOR_DEAL, REMOVED_PIPELINE_IDS, PipelinesSettings, DEFAULT_PIPELINES, objectPipelines, recordPipelines, recordInPipeline, DEAL_TYPES, LOST_REASONS, NOT_QUALIFIED_REASONS, PROPERTY_SET_VERSION, SYSTEM_PROPERTY_TYPES, PROPERTY_TYPES, RELATIONSHIP_TYPES, OBJECT_GROUPS, DEFAULT_DATA_MODEL, PropertyInput, storePropertyValue, inputPropertyValue,
   isEmptyValue, migrateDataModel, leadTokenLabel, withLeadTokens, propertyFilterMeta, PROPERTY_HOLDERS, userDefaultProperties, customerDefaultProperties, customContactSchema, propertyFilterType, creationAssociations, RECORD_OBJECTS, objectFormProperties, ObjectsSettings, PropertiesSettings, inverseRelationship});

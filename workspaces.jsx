@@ -367,7 +367,7 @@ function OrganizationSettingsPage(){
       actions={<>{dirty && <StSecondary label="Cancel" onClick={()=>{ setName(org.name); setLogo(org.logo || null); }}/>}<StCta label="Save" disabled={!dirty || !ok} onClick={save}/></>}>
       <div style={{maxWidth:560, display:'flex', flexDirection:'column', gap:20}}>
         <div>
-          <label style={fieldLabel} htmlFor="org-name">Organization Name</label>
+          <label style={fieldLabel} htmlFor="org-name">Organization Name<Req/></label>
           <input id="org-name" value={name} onChange={e=>setName(e.target.value)} style={fieldInput}/>
         </div>
         <div>
@@ -467,8 +467,8 @@ function UserAccessPanel({userId, onClose, onSaved, crmUsers}){
     </>}>
       {stack(<>
         {isNew ? <>
-          <Field label="Name"><input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="Full name" style={fieldText}/></Field>
-          <Field label="Email"><input value={email} onChange={e=>setEmail(e.target.value)} placeholder="name@hof-global.com" style={{...fieldText, borderColor: emailTaken ? T.red : undefined}}/>
+          <Field label="Name" required><input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="Full name" style={fieldText}/></Field>
+          <Field label="Email" required><input value={email} onChange={e=>setEmail(e.target.value)} placeholder="name@hof-global.com" style={{...fieldText, borderColor: emailTaken ? T.red : undefined}}/>
             {emailTaken && <div style={{fontSize:12, color:T.red, marginTop:4}}>This person is already a user.</div>}
             {email.trim() && !emailTaken && !signInAllowed(email) && <div style={{fontSize:12, color:T.red, marginTop:4}}>Use a hofmigration.com or hof-global.com address.</div>}
           </Field>
@@ -477,9 +477,9 @@ function UserAccessPanel({userId, onClose, onSaved, crmUsers}){
             <Avatar name={person.name} size={22}/><span style={{fontWeight:500, whiteSpace:'nowrap'}}>{person.name}</span>
             <span style={{color:T.attioMuted, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{person.email}</span></div></Field>
         )}
-        <Field label="Role"><Select value={role} options={ORG_ROLES.map(r => ({value:r, label:r}))} onChange={v=>v && setRole(v)}/>
+        <Field label="Role" required><Select value={role} options={ORG_ROLES.map(r => ({value:r, label:r}))} onChange={v=>v && setRole(v)}/>
           {lastSuperAdmin && <div style={{fontSize:12, color:T.red, marginTop:4}}>The Organization needs at least one Super Admin.</div>}</Field>
-        <Field label="People"><Select value={peopleId} options={reg.people.map(p => ({value:p.id, label:p.name}))} onChange={v=>v && setPeopleId(v)}/></Field>
+        <Field label="People" required><Select value={peopleId} options={reg.people.map(p => ({value:p.id, label:p.name}))} onChange={v=>v && setPeopleId(v)}/></Field>
         {role === 'Super Admin' && <Field label="People Access">
           {checkRows(reg.people.map(p => (
             <div key={p.id} style={p.id === peopleId ? {pointerEvents:'none'} : undefined}>
@@ -565,7 +565,7 @@ function BranchPanel({label, module, branch, others, onClose, onSave}){
       <StSecondary label="Cancel" onClick={onClose}/>
       <StCta label={branch ? 'Save Changes' : 'Add Branch'} disabled={!ok} onClick={()=>onSave(name.trim(), branch)}/>
     </>}>
-      {stack(<Field label="Name">
+      {stack(<Field label="Name" required>
         <input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder={BRANCH_NAME_HINTS[module] || 'e.g. Dubai'} style={{...fieldText, borderColor: taken ? T.red : undefined}}/>
         {taken && <div style={{fontSize:12, color:T.red, marginTop:4}}>A branch with this name already exists.</div>}
       </Field>)}

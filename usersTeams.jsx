@@ -2,7 +2,7 @@
 
    Follows the established Figma reference (HOF CRM Redesign → Claude Feeder → Design):
      Users & Teams  — node 40:36842 (Save View open: 140:1977). Title + Add user; tabs Users /
-                      Seats / Teams / Permission Presets; status pills that filter the table
+                      Seats / Teams / Permission Presets (and Notification Presets, 2026-11-23); status pills that filter the table
                       (Active Users / Pending / Bounced Invites / Deactivated Users); All Views,
                       Save View, Export, table settings; search + Filters; the Users table
                       (User, Seat, Team, Permission Preset, Last Active, Created, Actions) and
@@ -13,7 +13,7 @@
                       swaps the right-hand content — not a scroll anchor). Cancel / Save.
 
    The Users tab is built on the Contacts design system (UsersModule): the four statuses are
-   default views in the Contacts view system, with its View Settings, Save View, Filters, Table
+   default views in the Contacts view system, with its Layout Settings, Save View, Filters, Table
    Settings and grid. Edit Permissions (row ⋯) writes the seat, preset and permissions back to
    the user. Edit User (row ⋯) opens the Edit User panel, as Edit contact: the User Properties,
    saved with Save Changes, and Edit User in HRMS (placeholder until HRMS exists). A
@@ -28,6 +28,19 @@
    widgets, at the Personal / Team / Company level). No one edits their own permissions (a Super
    Admin may), and no one gives more than they hold (permissionsWithin) — the all-access option and
    presets beyond the giver's own are off, and Save while the matrix goes beyond.
+   Decided 2026-11-23: a user hands over their work before they're deactivated. Deactivate User
+   (the row's ⋯ and Bulk Actions) lists what they hold as counts — the Leads, Deals and Customers
+   they own, their open tasks, upcoming meetings and scheduled emails — and asks for the one
+   person who takes all of it (Hand Over To); nothing held: the plain confirmation. Delete User
+   hands over the same, through the same function (handOverWork). Past activity keeps their
+   name; Reactivate brings nothing back.
+   Decided 2026-11-23 (later): the hand-over can go to one user, to a team's members in turn, or
+   round-robin over the users picked (HandOverFields — the workflow's own assign methods); the
+   leaver's open tasks, meetings and scheduled emails go with the record they're on.
+   Decided 2026-11-23: Notification Presets (notifications.jsx) — a fifth tab here, a Notification
+   Preset column and text action on the Users table (Notifications → Assign), and three permissions
+   under Settings & Administration → Notifications. `accessAs` asks this file's checks for another
+   user (who may see the record a notification is about).
    Assigning to people (AssignPeopleFields / AssignPeopleModal, at the end of the file): the one
    pattern for giving something to people — teams, whose members can be unticked, and single
    users. Email templates use it (templates.jsx). */
@@ -131,7 +144,7 @@ const PERMISSION_TEMPLATES = [
   // Customer Profile templates (Settings → Customer Profile forms): Create, Edit form fields, Delete.
   {key:'profileForms',   tab:'Customer Profile', noun:'Customer Profile Template', plural:'Customer Profile Templates', rows:['create', 'edit', 'delete']},
 ];
-const ADMIN_TABS = ['Records', 'Properties', 'Pipelines', 'Tools Settings', 'Company Defaults', 'Users & Teams', 'Goals', 'Permission Management'];
+const ADMIN_TABS = ['Records', 'Properties', 'Pipelines', 'Tools Settings', 'Company Defaults', 'Users & Teams', 'Goals', 'Permission Management', 'Notifications'];
 const PERMISSION_TABS = {
   // The workspace's record types, by their names (HOF Partners: Leads, Customers).
   get Records(){ return PERMISSION_OBJECTS.filter(o => workspaceHasType(o.key)).map(o => o.tab); },
@@ -265,6 +278,8 @@ function extendedPermissions(level){
       users: {add:flag(all), edit:scopedPermission(all, 'all'), deactivate:scopedPermission(all, 'all'), delete:scopedPermission(all, 'all')},
       goals: {view:flag(all), edit:flag(all)},
       permissions: {edit:scopedPermission(all, 'all'), assign:scopedPermission(all, 'all')},
+      // Notifications (notifications.jsx): managing the presets, giving one to users (Their Team / All), and one's own settings.
+      notifications: {manage:flag(all), assign:scopedPermission(all, 'all'), own:flag(true)},
     },
   };
 }
@@ -327,7 +342,7 @@ let ACCESS = {user:null, perms:null, users:[], history:() => []};
 function capBySeat(perms, seat){
   if(seat === 'Full Seat') return perms;
   const cap = (v, path) => Array.isArray(v) || !v || typeof v !== 'object' ? v : Object.fromEntries(Object.entries(v).map(([k, x]) =>
-    k === 'on' && typeof x === 'boolean' ? [k, x && seat === 'View Seat' && path[path.length - 1] === 'view' && path[0] !== 'admin']
+    k === 'on' && typeof x === 'boolean' ? [k, x && seat === 'View Seat' && ((path[path.length - 1] === 'view' && path[0] !== 'admin') || path.join('.') === 'admin.notifications.own')]   // one's own notification settings: a View Seat's too
     : k === 'enabled' && typeof x === 'boolean' ? [k, x && seat === 'View Seat']
     : [k, cap(x, [...path, k])]));
   // The dashboard is viewing: a View Seat keeps it; no seat — nothing.
@@ -337,6 +352,13 @@ const seatTypeOf = (data, user) => !user || user.status === 'Deactivated' ? null
 const setAccessContext = ({user, users, history, data}) => { ACCESS = {user, data, users:users || [], history:history || (() => []),
   perms:user ? capBySeat(normalizePermissions(user.permissions, levelOfPreset(user.preset)), seatTypeOf(data, user)) : null}; };
 const accessUser = () => ACCESS.user;
+/* The same checks, asked for another user (notifications.jsx: who may see the record a notification
+   is about) — `fn` runs with `user` as the acting user, then the signed-in one is back. */
+const permsOfUser = (data, user) => user ? capBySeat(normalizePermissions(user.permissions, levelOfPreset(user.preset)), seatTypeOf(data, user)) : null;
+function accessAs(user, fn){
+  const keep = ACCESS;
+  try { ACCESS = {...keep, user, perms:permsOfUser(keep.data, user)}; return fn(); } finally { ACCESS = keep; }
+}
 function recordOwners(object, record, withHistory){
   const owner = userIdOf(record.ownerId || record.owner, ACCESS.users);
   if(!withHistory) return [owner].filter(Boolean);
@@ -515,11 +537,15 @@ const presetMatrix = ({create, view, edit = null, del = null, merge = null, futu
 /* The Sales Professional (2026-11-17): sees every record, works their own — Edit, Merge and Create
    Associated Record on Their records; no Delete, no Assign Owner. A record's tools follow (what's
    on their own records can be deleted), and its money — Payment Plans and Invoices — is their own
-   records' only. Dashboard: the Personal level. */
+   records' only. Dashboard: the Personal level.
+   Since 2026-11-23 (Mohsin: "I cannot see all calls as an employee") its activity tools — Call
+   Logs, Meetings, Notes, Tasks — are viewed on Their Team's records only: the Tools pages' switch
+   offers My and My Team, and another team's record shows them none of these. */
 const ownScope = () => scopedPermission(true, 'own'), teamScope = () => scopedPermission(true, 'team');
+const TEAM_VIEW_TOOLS = ['callLogs', 'meetings', 'notes', 'tasks'];
 const salesProfessionalMatrix = () => normalizePermissions({
   contacts:{...objectPermissions({create:true, view:'all', edit:'own', merge:'own', createAssociated:'own'}),
-    tools:{...Object.fromEntries(PERMISSION_TOOLS.filter(t => !t.createOnly).map(t => [t.key, {delete:ownScope()}])), invoices:{view:ownScope(), edit:ownScope(), delete:ownScope()}},
+    tools:{...Object.fromEntries(PERMISSION_TOOLS.filter(t => !t.createOnly).map(t => [t.key, {...(TEAM_VIEW_TOOLS.includes(t.key) ? {view:teamScope()} : {}), delete:ownScope()}])), invoices:{view:ownScope(), edit:ownScope(), delete:ownScope()}},
     accounting:{create:{on:true}, view:ownScope(), edit:ownScope(), delete:ownScope()}},
   dashboard:dashboardLevels(true, false, false)});
 /* The Team Lead (2026-11-17): sees every record (never less than their team does), works Their
@@ -530,7 +556,7 @@ const teamLeadMatrix = () => normalizePermissions({
   contacts:{...objectPermissions({create:true, view:'all', edit:'team', del:'team', merge:'team', assign:'team', createAssociated:'team'}),
     tools:{invoices:{view:teamScope(), edit:teamScope(), delete:teamScope()}},
     accounting:{create:{on:true}, view:teamScope(), edit:teamScope(), delete:teamScope()}},
-  admin:{permissions:{edit:teamScope(), assign:teamScope()}},
+  admin:{permissions:{edit:teamScope(), assign:teamScope()}, notifications:{assign:teamScope()}},
   dashboard:dashboardLevels(true, true, false, {company:{goalCompany:true}})});
 const DEFAULT_PRESETS = () => [
   {id:'pp-super-admin',  name:SUPER_ADMIN,          seat:'Full Seat', permissions:presetMatrix({create:true, view:ALL_CONTACTS, edit:ALL_CONTACTS, del:ALL_CONTACTS, merge:ALL_CONTACTS, future:true, assign:true, createAssociated:true, level:'all'})},
@@ -543,6 +569,14 @@ const DEFAULT_PRESETS = () => [
   {id:'pp-viewer',       name:'Viewer',             seat:'View Seat', permissions:presetMatrix({create:false, view:ALL_CONTACTS})},
 ];
 
+/* A CRM saved before 2026-11-23: the Sales Professional preset, and everyone on it, views the
+   activity tools on Their Team's records (once — `salesProTools`, app.jsx). Only those cells
+   change; whatever else was set on the preset or the person stays. */
+const withTeamViewTools = (permissions) => { if(!permissions) return permissions;
+  const next = {...permissions};
+  ['contacts', 'deals', 'customers'].forEach(o => { const p = next[o]; if(!p || !p.tools) return;
+    next[o] = {...p, tools:{...p.tools, ...Object.fromEntries(TEAM_VIEW_TOOLS.filter(k => p.tools[k]).map(k => [k, {...p.tools[k], view:teamScope()}]))}}; });
+  return next; };
 /* The Team Lead and Sales Professional presets as defined on 2026-11-17, in a CRM saved before
    (once — `presetDefaults`, app.jsx): the preset's own matrix; its users keep theirs. */
 const PRESET_DEFAULTS_VERSION = 1;
@@ -703,6 +737,7 @@ const USER_PROPERTIES = [
   {key:'seat',       label:'Seat',              width:140},
   {key:'team',       label:'Team',              width:230},
   {key:'preset',     label:'Permission Preset', width:170},
+  {key:'notifPreset', label:'Notification Preset', width:180},   // the preset's name (notifications.jsx); the user keeps its id
   {key:'lastActive', label:'Last Active',       width:190},
   {key:'created',    label:'Created',           width:150},
 ];
@@ -713,11 +748,12 @@ const USER_FILTER_PROPS = [
   {key:'seat',       label:'Seat',              type:'select'},
   {key:'team',       label:'Team',              type:'text'},
   {key:'preset',     label:'Permission Preset', type:'select'},
+  {key:'notifPreset', label:'Notification Preset', type:'select'},
   {key:'lastActive', label:'Last Active',       type:'date'},
   {key:'created',    label:'Created',           type:'date'},
 ];
 const USER_SELECT_VALUES = {status:USER_STATUSES, seat:USER_SEATS, preset:PERMISSION_PRESETS};
-const USER_COLUMNS = ['name', 'email', 'seat', 'team', 'preset', 'lastActive', 'created'];
+const USER_COLUMNS = ['name', 'email', 'seat', 'team', 'preset', 'notifPreset', 'lastActive', 'created'];
 
 const isFilter = (prop, value) => ({nodes:[{id:`f-${prop}-${value}`, kind:'row', joinOp:'AND', prop, op:'is', value, value2:'', values:[]}]});
 // `columnWidths`: columns dragged to a width (2026-11-17), kept with the view. `mergedColumns`: the
@@ -736,12 +772,13 @@ function UsersTeamsSettings({data, setData}){
   const TABS = [
     {id:'users', label:'Users', icon:'user'}, {id:'seats', label:'Seats', icon:'seat'},
     {id:'teams', label:'Teams', icon:'usersThree'}, {id:'presets', label:'Permission Presets', icon:'lock'},
+    {id:'notifPresets', label:'Notification Presets', icon:'notification'},
   ];
-  /* All four tabs stay mounted (only the active one shows), so views made on a tab are still there
+  /* All the tabs stay mounted (only the active one shows), so views made on a tab are still there
      when you come back. `usersFocus` opens Users filtered by a team's or a preset's user count. */
   const [usersFocus, setUsersFocus] = React.useState(null);
   const openUsers = (f) => { setUsersFocus({...f, nonce:Date.now()}); setTab('users'); };
-  const MODULES = {users:UsersModule, seats:SeatsModule, teams:TeamsModule, presets:PresetsModule};
+  const MODULES = {users:UsersModule, seats:SeatsModule, teams:TeamsModule, presets:PresetsModule, notifPresets:NotificationPresetsModule};   // the last: notifications.jsx
   return (
     <SettingsPage fill>
       {/* No gap under the tabs: the view row's own padding sets the space, so the views sit as
@@ -765,20 +802,20 @@ function UsersTeamsSettings({data, setData}){
 }
 
 /* One record list for every Users & Teams tab — the Contacts module's view system, table,
-   filters and column patterns: view pills; (savedViews) View Settings — reorder / rename /
+   filters and column patterns: view pills; (savedViews) Layout Settings — reorder / rename /
    clone / hide / delete, rows per page, Table settings — and Save View (copy / existing);
    search, Filters, and the grid with column menus, drag-reorder, freezing, selection and
    pagination. `actions` sits at the far right of the view row (Export, the icon-only +). */
 /* `board` {pipelines, defaultPipelineId, render(rows, {search, pipelineId, cardSettings}),
    cardSettings?: {defaults(), renderModal({draft, setDraft, onApply, onClose})}} adds the Contacts
    Table / Board switcher and pipeline selector: each view remembers its mode, pipeline and — as
-   in Contacts — its Card settings (View Settings → Card settings, kept with Save View). */
+   in Contacts — its Card settings (Layout Settings → Card settings, kept with Save View). */
 /* `filterControls` and `overlay` may be functions of what's in view ({mode, pipelineId, rows}). */
 /* `inset` — 'settings' (default): a table inside a Settings page, cancelling the page's padding;
    'page': a CRM page (Deals), laid out exactly like Contacts. */
 /* Saved views (and their card settings) are saved with everything else (store.jsx), one list per
    table — `storeKey`, by default the table's first default view. */
-/* `saveView:false` leaves out Save View (View Settings stays) — e.g. Settings → Pipelines. */
+/* `saveView:false` leaves out Save View (Layout Settings stays) — e.g. Settings → Pipelines. */
 /* `flushTop`: the page's top padding is cancelled too (a table that opens the page, with nothing
    above it), so the views row has the same space above and below. */
 function RecordViewsModule({schema, rows, defaultViews, columns, savedViews = true, saveView = true, viewCounts, actions, filterControls, overlay, initialFilters, initialViewId, focus, board, inset = 'settings', storeKey, flushTop, adaptSaved, children}){
@@ -950,49 +987,156 @@ function UserEditPanel({data, setData, user, onClose, onStub}){
   );
 }
 
-/* Deactivate user: they lose access and their seat is freed; the records they own keep them as owner. */
-function DeactivateUserModal({user, onCancel, onConfirm}){
+/* A user's work (2026-11-23): what they hold, handed over before they're deactivated or deleted.
+   Records keep their owner as a user ID; an activity names its person (as Tools reads whose it
+   is — tools.jsx activityPerson). Held by a user:
+     the Leads, Deals and Customers they own (`owner` = their ID);
+     their open tasks — a task not completed (isTaskOpen) whose `assignee` is their name;
+     their upcoming meetings — scheduled, or an office meeting still awaiting approval, with its
+       time still to come (as Tools' Upcoming), whose `organizer` — else `by` — is their name;
+     their scheduled emails — `status` scheduled, not a received one, whose `by` is their name
+       (a sequence's and a workflow's too).
+   `users`: one or several, counted together. → {records:[{object, id}], tasks, meetings, emails:
+   [{object, recordId, act}]}. */
+const HELD_RECORD_TYPES = ['contacts', 'deals', 'customers'];
+const heldTask = (a, names) => a.type === 'task' && isTaskOpen(a) && names.has(a.assignee);
+const heldMeeting = (a, names, now) => a.type === 'meeting' && (a.status === 'scheduled' || a.status === 'requested')
+  && new Date(a.scheduledFor || a.at).getTime() > now && names.has(a.organizer || a.by);
+const heldEmail = (a, names) => a.type === 'email' && a.status === 'scheduled' && a.direction !== 'received' && names.has(a.by);
+function userHoldings(hub, users, now = Date.now()){
+  const ids = new Set(users.map(u => u.id)), names = new Set(users.map(u => u.name).filter(Boolean));
+  const held = {records:[], tasks:[], meetings:[], emails:[]};
+  HELD_RECORD_TYPES.forEach(object => {
+    const records = ((hub && hub.records) || {})[object] || [], idOf = new Map(records.map(r => [String(r.id), r.id]));
+    records.forEach(r => { if(ids.has(r.owner)) held.records.push({object, id:r.id}); });
+    Object.entries(((hub && hub.activities) || {})[object] || {}).forEach(([rid, list]) => {
+      if(!idOf.has(String(rid))) return;   // activity of a record that's gone
+      (list || []).forEach(act => { const kind = heldTask(act, names) ? 'tasks' : heldMeeting(act, names, now) ? 'meetings' : heldEmail(act, names) ? 'emails' : null;
+        if(kind) held[kind].push({object, recordId:idOf.get(String(rid)), act}); });
+    });
+  });
+  return held;
+}
+const heldCount = (held) => held.records.length + held.tasks.length + held.meetings.length + held.emails.length;
+// As counts, only the kinds there are: "42 Leads", "6 Open Tasks", "1 Upcoming Meeting" …
+const heldCounts = (held) => [
+  ...HELD_RECORD_TYPES.map(o => { const one = {contacts:'Lead', deals:'Deal', customers:'Customer'}[o];
+    return [held.records.filter(r => r.object === o).length, typeSingular(o, one), typePlural(o, `${one}s`)]; }),
+  [held.tasks.length, 'Open Task'], [held.meetings.length, 'Upcoming Meeting'], [held.emails.length, 'Scheduled Email'],
+].filter(([n]) => n > 0).map(([n, one, many]) => bulkPlural(n, one, many));
+/* The hand-over — the one place it happens, for Deactivate and Delete: everything `users` hold goes
+   to `to` (a user ID). Records: their owner (each a recorded owner change — the engine's own
+   history). Tasks: the assignee, kept in the record's history as any new assignee is (Task
+   reassigned). Meetings: the organiser, and who set it up where that's them (an office meeting
+   still awaiting approval: its requester, who hears the answer). Scheduled emails: the sender,
+   and with it the signature the email ends with. Nothing else of the activity changes. */
+/* Who takes it over (2026-11-23) — `plan`: {method, user, team, users}, the workflow's own ways of
+   assigning an owner (workflows.jsx ASSIGN_METHODS): Assign to a Person — one user takes
+   everything; Within a Team — the team's activated members, in turn; Round-Robin — the users
+   picked, in turn. The records are dealt out in turn; each open task, upcoming meeting and
+   scheduled email goes with the record it's on — to whoever receives that record, or, on a record
+   the leaver didn't own, to that record's owner. A user ID alone is one person, as before. */
+const HAND_OVER_METHODS = ['person', 'team', 'roundRobin'];
+const NEW_HAND_OVER = () => ({method:'person', user:'', team:'', users:[]});
+function handOverPool(plan, data, leaving){
+  const gone = new Set((leaving || []).map(u => u.id)), ok = (id) => (data.users || []).some(u => u.id === id && u.status === 'Activated' && !gone.has(u.id));
+  if(typeof plan === 'string') return ok(plan) ? [plan] : [];
+  if(!plan) return [];
+  if(plan.method === 'team') return (data.users || []).filter(u => u.teamId === plan.team && ok(u.id)).map(u => u.id);
+  return (plan.method === 'roundRobin' ? (plan.users || []) : [plan.user]).filter(ok);
+}
+function handOverWork(hub, users, plan){
+  if(!hub) return null;
+  const data = hub.data || {}, pool = handOverPool(plan, data, users);
+  if(!pool.length) return null;
+  const held = userHoldings(hub, users), names = new Set(users.map(u => u.name).filter(Boolean)), gone = new Set(users.map(u => u.id));
+  // The records, in turn — straight to their new owner (a leaving owner can't wait for a handover to be accepted).
+  const receiver = new Map(); let turn = 0;
+  held.records.forEach(r => { const to = pool[turn++ % pool.length]; receiver.set(`${r.object}|${r.id}`, to); allowDirectOwner(String(r.id), to); hub.updateRecord(r.object, r.id, {owner:to}); });
+  // The work goes with its record: to whoever receives it, else to the record's own owner (when they're staying), else the first of the pool.
+  const takerOf = (object, recordId) => { const got = receiver.get(`${object}|${recordId}`); if(got) return got;
+    const rec = ((hub.records || {})[object] || []).find(r => String(r.id) === String(recordId)), owner = rec ? userIdOf(rec.owner, data.users || []) : '';
+    return owner && !gone.has(owner) && (data.users || []).some(u => u.id === owner && u.status === 'Activated') ? owner : pool[0]; };
+  held.tasks.forEach(({object, recordId, act:a}) => { const from = a.assignee || null, toName = userLabel(takerOf(object, recordId));
+    hub.update(object, recordId, a.id, {assignee:toName});
+    hub.add(object, recordId, {type:'taskReassigned', taskId:a.id, taskTitle:a.title || '', from, to:toName, source:'you', by:CURRENT_USER.name});
+  });
+  held.meetings.forEach(({object, recordId, act:a}) => { const r = a.officeRequest, toName = userLabel(takerOf(object, recordId));
+    hub.update(object, recordId, a.id, {...(names.has(a.organizer) ? {organizer:toName} : {}), ...(names.has(a.by) ? {by:toName} : {}),
+      ...(r && r.status === 'pending' && names.has(r.requestedBy) ? {officeRequest:{...r, requestedBy:toName}} : {})}); });
+  held.emails.forEach(({object, recordId, act:a}) => { const to = takerOf(object, recordId);
+    hub.update(object, recordId, a.id, {by:userLabel(to), ...(/data-hof-signature/i.test(a.html || '') ? {html:withSenderSignature(a.html, to)} : {})}); });
+  return held;
+}
+// What the users hold, for a dialog: counted once as it opens.
+const useHoldings = (users) => { const hub = useRecordHub(); return React.useMemo(() => userHoldings(hub, users), [users.map(u => u.id).join('|')]); };
+// Can the plan be carried out: someone to take it over (`people`: the users who may).
+const handOverReady = (plan, data, people) => handOverPool(plan, {...data, users:people}, []).length > 0;
+// The counts, then who takes it over: one user, a team's members in turn, or the users picked in turn.
+function HandOverFields({held, people, plan, setPlan}){
+  const hub = useRecordHub(), teams = ((hub && hub.data && hub.data.teams) || []).filter(t => people.some(u => u.teamId === t.id));
+  const set = (patch) => setPlan({...plan, ...patch});
+  return <>
+    <div style={{fontSize:13, fontWeight:500, color:T.attioText, lineHeight:1.5}}>{heldCounts(held).join(' · ')}</div>
+    <StField label="Hand Over" width="auto" required>
+      <StSelect value={plan.method} onChange={(method)=>set({method})} options={ASSIGN_METHODS.filter(m => HAND_OVER_METHODS.includes(m.key)).map(m => ({value:m.key, label:m.label}))}/>
+    </StField>
+    {plan.method === 'person' && <StField label="Hand Over To" width="auto" required><PersonSelect value={plan.user} people={people} labelOf={(u)=>u.name} onChange={(user)=>set({user})} placeholder="Select user"/></StField>}
+    {plan.method === 'team' && <StField label="Team" width="auto" required><PersonSelect value={plan.team} people={teams} labelOf={(t)=>t.name} onChange={(team)=>set({team})} placeholder="Select team"/></StField>}
+    {plan.method === 'roundRobin' && <StField label="Users" width="auto" required><MultiSelectMenu value={plan.users} options={people.map(u => ({value:u.id, label:u.name}))} placeholder="Select users" onChange={(v)=>set({users:v})}/></StField>}
+  </>;
+}
+
+/* Deactivate user: they lose access and their seat is freed — once someone has taken over what they
+   hold (Deactivate User stays off until then); holding nothing, the plain confirmation. */
+function DeactivateUserModal({user, users, onCancel, onConfirm}){
+  const [plan, setPlan] = React.useState(NEW_HAND_OVER);
+  const hub = useRecordHub(), people = users.filter(u => u.id !== user.id && u.status === 'Activated');
+  const held = useHoldings([user]), needs = heldCount(held) > 0;
   return (
-    <StModal title="Deactivate User" primary="Deactivate User" danger onCancel={onCancel} onSubmit={onConfirm}>
-      <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>{user.name} will lose access to the CRM and their seat will be freed. The records they own stay theirs.</div>
+    <StModal title="Deactivate User" primary="Deactivate User" danger canSubmit={!needs || handOverReady(plan, hub.data, people)} onCancel={onCancel} onSubmit={()=>onConfirm(needs ? plan : null)}>
+      <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>{needs ? `Before ${user.name} is deactivated, someone takes over what they hold.` : `${user.name} will lose access to the CRM and their seat will be freed.`}</div>
+      {needs && <HandOverFields held={held} people={people} plan={plan} setPlan={setPlan}/>}
     </StModal>
   );
 }
-/* Delete user: someone takes over the records they own first (each a recorded owner change); their
-   past activity keeps their name. The user and their seat go. */
-function DeleteUserModal({user, owned, users, onCancel, onConfirm}){
-  const [to, setTo] = React.useState('');
-  const n = owned.length, needs = n > 0;
+/* Delete user: someone takes over what they hold first (handOverWork — the records each a recorded
+   owner change); their past activity keeps their name. The user and their seat go. */
+function DeleteUserModal({user, users, onCancel, onConfirm}){
+  const [plan, setPlan] = React.useState(NEW_HAND_OVER);
+  const hub = useRecordHub(), people = users.filter(u => u.id !== user.id && u.status === 'Activated');
+  const held = useHoldings([user]), needs = heldCount(held) > 0;
   return (
-    <StModal title="Delete User" primary="Delete User" danger canSubmit={!needs || !!to} onCancel={onCancel} onSubmit={()=>onConfirm(to || null)}>
+    <StModal title="Delete User" primary="Delete User" danger canSubmit={!needs || handOverReady(plan, hub.data, people)} onCancel={onCancel} onSubmit={()=>onConfirm(needs ? plan : null)}>
       <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>
-        {needs ? `${user.name} owns ${n} record${n === 1 ? '' : 's'}. Choose who takes them over, then delete ${user.name}.` : `${user.name} will be deleted.`} Their past activity keeps their name. This can't be undone.
+        {needs ? `Before ${user.name} is deleted, someone takes over what they hold.` : `${user.name} will be deleted.`} Their past activity keeps their name. This can't be undone.
       </div>
-      {needs && <StField label="Reassign Their Records To">
-        <PersonSelect value={to} people={users.filter(u => u.id !== user.id && u.status === 'Activated')} labelOf={(u)=>u.name} onChange={setTo} placeholder="Select user"/>
-      </StField>}
+      {needs && <HandOverFields held={held} people={people} plan={plan} setPlan={setPlan}/>}
     </StModal>
   );
 }
 
-/* Bulk Deactivate / Delete of the users ticked (those it applies to; `skipped`: the others).
-   Delete: whoever takes over the records they own, then Delete typed to confirm. */
-function BulkUsersModal({kind, users, skipped, owned, people, onCancel, onConfirm}){
-  const [to, setTo] = React.useState('');
+/* Bulk Deactivate / Delete of the users ticked (those it applies to; `skipped`: the others): what
+   they hold together, counted, and the one person — not one of them (`people`) — who takes it
+   over. Delete: then Delete typed to confirm. */
+function BulkUsersModal({kind, users, skipped, people, onCancel, onConfirm}){
+  const [plan, setPlan] = React.useState(NEW_HAND_OVER);
   const [typed, setTyped] = React.useState('');
-  const n = users.length, del = kind === 'delete', needs = del && owned > 0;
+  const hub = useRecordHub();
+  const held = useHoldings(users);
+  const n = users.length, del = kind === 'delete', needs = heldCount(held) > 0;
   const skip = skipped ? ` ${bulkPlural(skipped, 'user')} can't be ${del ? 'deleted' : 'deactivated'} and will be skipped.` : '';
+  const before = `Before ${n === 1 ? `${users[0].name} is` : 'they are'} ${del ? 'deleted' : 'deactivated'}, someone takes over what they hold.`;
   return (
     <StModal title={`${del ? 'Delete' : 'Deactivate'} ${bulkPlural(n, 'User')}`} primary={del ? 'Delete' : 'Deactivate'} danger
-      canSubmit={!del || ((!needs || !!to) && typed === 'Delete')} onCancel={onCancel} onSubmit={()=>onConfirm(to || null)}>
+      canSubmit={(!needs || handOverReady(plan, hub.data, people)) && (!del || typed === 'Delete')} onCancel={onCancel} onSubmit={()=>onConfirm(needs ? plan : null)}>
       <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>
-        {del ? `${needs ? `${n === 1 ? `${users[0].name} owns` : 'They own'} ${bulkPlural(owned, 'record')}. Choose who takes them over. ` : ''}${n === 1 ? "Their past activity keeps their name. This can't be undone." : "Their past activity keeps their names. This can't be undone."}`
-          : n === 1 ? `${users[0].name} will lose access to the CRM and their seat will be freed. The records they own stay theirs.`
-          : 'They lose access to the CRM and their seats are freed. The records they own stay theirs.'}{skip}
+        {del ? `${needs ? `${before} ` : ''}${n === 1 ? "Their past activity keeps their name. This can't be undone." : "Their past activity keeps their names. This can't be undone."}`
+          : needs ? before
+          : n === 1 ? `${users[0].name} will lose access to the CRM and their seat will be freed.`
+          : 'They lose access to the CRM and their seats are freed.'}{skip}
       </div>
-      {needs && <StField label="Reassign Their Records To">
-        <PersonSelect value={to} people={people} labelOf={(u)=>u.name} onChange={setTo} placeholder="Select user"/>
-      </StField>}
+      {needs && <HandOverFields held={held} people={people} plan={plan} setPlan={setPlan}/>}
       {del && <input value={typed} onChange={e=>setTyped(e.target.value)} placeholder="Type Delete to confirm" aria-label="Type Delete to confirm" style={fieldInput}/>}
     </StModal>
   );
@@ -1008,12 +1152,13 @@ function UsersModule({data, setData, onStub, focus}){
   const [addingUser, setAddingUser] = React.useState(false);
   const [changingSeat, setChangingSeat] = React.useState(null);
   const [changingTeam, setChangingTeam] = React.useState(null);
+  const [notifUser, setNotifUser] = React.useState(null);   // the user whose notification preset is being chosen
   const [viewingId, setViewingId] = React.useState(null);   // an active user whose details are open
   const viewing = viewingId && data.users.find(u => u.id === viewingId);
   // A user's Country / Language / Designation — read wherever user properties are (owner panel, workflows).
   const saveProfile = (id, patch) => saveUserProfileIn(setData, id, patch);
-  const rows = React.useMemo(()=>data.users.map(u => ({...u, seat:(seatOfUser(data.seats, u.id) || {}).type || '', team:teamName(data.teams, u.teamId)})),
-    [data.users, data.seats, data.teams]);
+  const rows = React.useMemo(()=>data.users.map(u => ({...u, seat:(seatOfUser(data.seats, u.id) || {}).type || '', team:teamName(data.teams, u.teamId), notifPreset:(notifPresetOfUser(data, u) || {}).name || ''})),
+    [data.users, data.seats, data.teams, data.notificationPresets]);
   /* Bulk Actions: Reactivate, Deactivate and Delete — the row ⋯'s, for each ticked user they apply
      to (with the permission; never yourself, and one Super Admin always stays active). */
   const [bulkUsers, setBulkUsers] = React.useState(null);   // {kind, users, skipped, clear}
@@ -1032,10 +1177,18 @@ function UsersModule({data, setData, onStub, focus}){
     {label:'Deactivate', danger:true, onClick:()=>bulkOpen('deactivate', 'deactivated', ids, clear, u => u.status === 'Activated' && userAdminCan('users', 'deactivate', u))},
     {label:'Delete', danger:true, onClick:()=>bulkOpen('delete', 'deleted', ids, clear, u => userAdminCan('users', 'delete', u))},
   ];
-  // Deleting users: their records to `to` (each a recorded owner change); their names stay readable in history.
+  /* Deactivating users: what they hold goes to `to` first (handOverWork) — never while they still
+     hold any. Then they lose access and their seats are freed. */
+  const deactivateUsers = (list, to) => {
+    if(to) handOverWork(hub, list, to);
+    else if(heldCount(userHoldings(hub, list))) return;
+    const ids = list.map(u => u.id);
+    setData(d => ({...d, users:d.users.map(u => ids.includes(u.id) ? {...u, status:'Deactivated'} : u), seats:d.seats.map(st => ids.includes(st.assigneeId) ? {...st, assigneeId:null} : st)}));
+  };
+  // Deleting users: what they hold to `to` (handOverWork — the records each a recorded owner change); their names stay readable in history.
   const deleteUsers = (list, to) => {
     const ids = list.map(u => u.id);
-    if(to) ids.forEach(id => ownedBy(id).forEach(r => hub.updateRecord(r.object, r.id, {owner:to})));
+    if(to) handOverWork(hub, list, to);
     /* Their name stays readable in history (deletedUsers — owner changes, notes); a team they led has no lead. */
     setData(d => ({...d, users:d.users.filter(u => !ids.includes(u.id)), seats:d.seats.map(st => ids.includes(st.assigneeId) ? {...st, assigneeId:null} : st),
       teams:(d.teams || []).map(t => ids.includes(t.leadId) ? {...t, leadId:null} : t),
@@ -1045,8 +1198,8 @@ function UsersModule({data, setData, onStub, focus}){
   };
   const schema = {
     bulkActions,
-    properties:USER_PROPERTIES, filterProps:USER_FILTER_PROPS, selectValues:{...USER_SELECT_VALUES, preset:[...new Set(data.presets.map(p => p.name))]},
-    noun:'user', searchKeys:['name', 'email'], canCreateProperty:false, actionsWidth:184,   // room for Edit Permissions beside the ⋯ menu
+    properties:USER_PROPERTIES, filterProps:USER_FILTER_PROPS, selectValues:{...USER_SELECT_VALUES, preset:[...new Set(data.presets.map(p => p.name))], notifPreset:notificationPresetsOf(data).map(p => p.name)},
+    noun:'user', searchKeys:['name', 'email'], canCreateProperty:false, actionsWidth:330,   // room for Edit Permissions and Notification Preset beside the ⋯ menu
     renderCell: (key, u) => key === 'name'
       // An active user opens their details (the Record Owner profile, editable here).
       ? <ContactName name={u.name} onOpen={()=>u.status === 'Activated' ? setViewingId(u.id) : onStub(u.name)} style={{fontSize:'inherit', fontWeight:500}}/>
@@ -1058,11 +1211,15 @@ function UsersModule({data, setData, onStub, focus}){
     renderActions: (u) => { const can = (action) => userAdminCan('users', action, u);
       const canPerms = u.status === 'Activated' && permissionsEditableBy(u) && (userAdminCan('permissions', 'assign', u) || userAdminCan('permissions', 'edit', u));
       /* Edit Permissions is also a text action of its own beside the menu (2026-11-17; the Actions column wider for it — `actionsWidth`), for whoever the menu offers it to. */
+      // Notification Preset (2026-11-23): its own text action, for whoever may assign it to this user (Notifications → Assign).
+      const canNotif = u.status !== 'Deactivated' && userAdminCan('notifications', 'assign', u);
       return <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', gap:8}}>
-        <span onMouseDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()} style={{display:'flex', whiteSpace:'nowrap'}}>{canPerms && <StTextAction label="Edit Permissions" onClick={()=>setEditing(u)}/>}</span>
+        <span onMouseDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()} style={{display:'flex', gap:14, whiteSpace:'nowrap'}}>{canPerms && <StTextAction label="Edit Permissions" onClick={()=>setEditing(u)}/>}
+          {canNotif && <StTextAction label="Notification Preset" onClick={()=>setNotifUser(u)}/>}</span>
         <RowActionsMenu title="User Actions" items={[
         // Seats and permissions are for activated users (a deactivated user holds none); Reactivate brings one back, with no seat until given one.
         ...(canPerms ? [{label:'Edit Permissions', onClick:()=>setEditing(u)}] : []),
+        ...(canNotif ? [{label:'Change Notification Preset', onClick:()=>setNotifUser(u)}] : []),
         ...(can('edit') ? [{label:'Edit User', onClick:()=>setEditingUser(u.id)}, ...(u.status === 'Activated' ? [{label:'Change Seat', onClick:()=>setChangingSeat(u)}] : []), {label:'Change Team', onClick:()=>setChangingTeam(u)}] : []),
         // A pending invite: send it again, or take it back (the person is removed before ever joining).
         ...(u.status === 'Pending' && userAdminCan('users', 'add') ? [{label:'Resend Invite', onClick:()=>{ setData(d => ({...d, users:d.users.map(x => x.id === u.id ? {...x, invitedAt:new Date().toISOString()} : x)})); hub && hub.toast(`Invite sent again to ${u.email}`); }},
@@ -1073,7 +1230,6 @@ function UsersModule({data, setData, onStub, focus}){
         ...(can('delete') ? [{label:'Delete User', danger:!protectedUser(u), disabled:protectedUser(u), onClick:()=>!protectedUser(u) && setDeleting(u)}] : []),
       ]}/></div>; },
   };
-  const ownedBy = (uid) => ['contacts', 'deals', 'customers'].flatMap(o => (((hub && hub.records) || {})[o] || []).filter(r => r.owner === uid).map(r => ({object:o, id:r.id})));
   const activeSuperAdmins = data.users.filter(x => x.status === 'Activated' && x.preset === SUPER_ADMIN);
   const protectedUser = (u) => sameEmail(u.email, CURRENT_USER.email) || (u.preset === SUPER_ADMIN && u.status === 'Activated' && activeSuperAdmins.length <= 1);
   return (
@@ -1093,6 +1249,8 @@ function UsersModule({data, setData, onStub, focus}){
         onSave={(teamId) => { setData(d => ({...d, users:d.users.map(u => u.id === changingTeam.id ? {...u, teamId} : u),
           // Leading the team they leave: that team has no lead until one is chosen.
           teams:(d.teams || []).map(t => t.leadId === changingTeam.id && t.id !== teamId ? {...t, leadId:null} : t)})); setChangingTeam(null); }}/>}
+      {notifUser && <AssignNotificationPresetModal data={data} user={notifUser} onClose={()=>setNotifUser(null)}
+        onSave={(presetId) => { setData(d => ({...d, users:d.users.map(u => u.id === notifUser.id ? {...u, notifPresetId:presetId} : u)})); setNotifUser(null); }}/>}
       {addingUser && <AddUserModal data={data} onStub={onStub} onClose={()=>setAddingUser(false)}
         onAdd={(u, setPermissions) => {
           setData(d => ({...d, users:[...d.users, u]}));
@@ -1108,18 +1266,15 @@ function UsersModule({data, setData, onStub, focus}){
           leaveCrm(cancelling); hub && hub.toast(`Invite to ${cancelling.email} cancelled`); setCancelling(null); }}>
         <div style={{fontSize:13, color:T.gray600}}>{cancelling.name} won't be able to join with this invite.</div>
       </StModal>}
-      {deactivating && <DeactivateUserModal user={deactivating} onCancel={()=>setDeactivating(null)}
-        onConfirm={() => { const id = deactivating.id;
-          setData(d => ({...d, users:d.users.map(u => u.id === id ? {...u, status:'Deactivated'} : u), seats:d.seats.map(st => st.assigneeId === id ? {...st, assigneeId:null} : st)}));
-          setDeactivating(null); }}/>}
-      {deleting && <DeleteUserModal user={deleting} owned={ownedBy(deleting.id)} users={data.users} onCancel={()=>setDeleting(null)}
+      {deactivating && <DeactivateUserModal user={deactivating} users={data.users} onCancel={()=>setDeactivating(null)}
+        onConfirm={(to) => { deactivateUsers([deactivating], to); setDeactivating(null); }}/>}
+      {deleting && <DeleteUserModal user={deleting} users={data.users} onCancel={()=>setDeleting(null)}
         onConfirm={(to) => { deleteUsers([deleting], to); setDeleting(null); }}/>}
       {bulkUsers && <BulkUsersModal kind={bulkUsers.kind} users={bulkUsers.users} skipped={bulkUsers.skipped}
-        owned={bulkUsers.users.reduce((n, u) => n + ownedBy(u.id).length, 0)}
         people={data.users.filter(u => u.status === 'Activated' && !bulkUsers.users.some(x => x.id === u.id))} onCancel={()=>setBulkUsers(null)}
         onConfirm={(to) => { const {kind, users, clear} = bulkUsers;
           if(kind === 'delete') deleteUsers(users, to);
-          else setData(d => ({...d, users:d.users.map(u => users.some(x => x.id === u.id) ? {...u, status:'Deactivated'} : u), seats:d.seats.map(st => users.some(x => x.id === st.assigneeId) ? {...st, assigneeId:null} : st)}));
+          else deactivateUsers(users, to);
           clear(); setBulkUsers(null); }}/>}
       {editing && <EditPermissionsDrawer user={editing} seats={data.seats} presets={data.presets} onStub={onStub} onClose={()=>setEditing(null)}
         onCreatePreset={(p) => setData(d => ({...d, presets:[...d.presets, p]}))}
@@ -1157,7 +1312,7 @@ function AddUserModal({data, onClose, onAdd, onStub}){
       <div style={{display:'grid', gridTemplateColumns:'minmax(0, 1fr) minmax(0, 1fr)', alignItems:'stretch'}}>
         <div style={{display:'flex', flexDirection:'column', gap:14, minWidth:0, paddingRight:24}}>
           <div>
-            <label style={fieldLabel} htmlFor="add-user-search">Search Employees in HRMS</label>
+            <label style={fieldLabel} htmlFor="add-user-search">Search Employees in HRMS<Req/></label>
             <div style={{position:'relative'}}>
               <div style={{position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', display:'flex'}}><Icon name="search" size={13} color={T.gray400}/></div>
               <input id="add-user-search" autoFocus value={query} onChange={e=>{ setQuery(e.target.value); setPicked(null); }} placeholder="Name or email" style={{...fieldInput, paddingLeft:30}}/>
@@ -1212,7 +1367,7 @@ function ChangeSeatModal({data, user, onClose, onSave}){
     <StModal title="Change Seat" primary="Change Seat" canSubmit={type !== current && n > 0} onCancel={onClose} onSubmit={()=>onSave(type)}>
       <div style={stTextB}>{user.name} · {current ? `Currently ${current}` : 'No seat'}</div>
       <div>
-        <label style={fieldLabel}>Seat Type</label>
+        <label style={fieldLabel}>Seat Type<Req/></label>
         <StSelect value={type} onChange={setType} options={SEAT_TYPES.map(st => {
           const left = seatsAvailable(data.seats, st.key, user.id);
           return {value:st.key, label:`${st.key}: ${availableLabel(left)}`, disabled: left <= 0 && st.key !== current};
@@ -1229,7 +1384,7 @@ function ChangeTeamModal({data, user, onClose, onSave}){
     <StModal title="Change Team" primary="Change Team" canSubmit={!!teamId && teamId !== user.teamId} onCancel={onClose} onSubmit={()=>onSave(teamId)}>
       <div style={stTextB}>{user.name} · {user.teamId ? `Currently ${teamName(data.teams, user.teamId)}` : 'No team'}</div>
       <div>
-        <label style={fieldLabel}>Team</label>
+        <label style={fieldLabel}>Team<Req/></label>
         <PersonSelect value={teamId} people={data.teams} labelOf={t => t.name} onChange={setTeamId} placeholder="Select team"/>
       </div>
     </StModal>
@@ -1289,14 +1444,14 @@ function ReassignSeatModal({data, seat, onClose, onAssign}){
     <StModal title={seat.assigneeId ? 'Reassign Seat' : 'Assign Seat'} primary={seat.assigneeId ? 'Reassign Seat' : 'Assign Seat'} canSubmit={!!person} onCancel={onClose} onSubmit={()=>onAssign(person)}>
       <div style={stTextB}>{seat.type} · {seat.assigneeId ? `Currently ${personName(data.users, seat.assigneeId)}` : 'Unassigned'}</div>
       <div>
-        <label style={fieldLabel}>Assign to</label>
+        <label style={fieldLabel}>Assign to<Req/></label>
         <PersonSelect value={person} people={people} labelOf={u => personOptionLabel(data, u)} onChange={setPerson}/>
       </div>
     </StModal>
   );
 }
 
-/* ── Teams ── starts with one All Teams view; View Settings and Save View as on Users. Team management is not defined yet. */
+/* ── Teams ── starts with one All Teams view; Layout Settings and Save View as on Users. Team management is not defined yet. */
 const TEAM_PROPERTIES = [
   {key:'name', label:'Team Name', width:240}, {key:'lead', label:'Team Lead', width:220}, {key:'users', label:'Users', width:160},
 ];
@@ -1352,12 +1507,12 @@ function AddTeamModal({data, onClose, onAdd}){
       <div style={{display:'grid', gridTemplateColumns:'minmax(0, 1fr) minmax(0, 1fr)', alignItems:'stretch'}}>
         <div style={{display:'flex', flexDirection:'column', gap:14, minWidth:0, paddingRight:24}}>
           <div>
-            <label style={fieldLabel} htmlFor="team-name">Team Name</label>
+            <label style={fieldLabel} htmlFor="team-name">Team Name<Req/></label>
             <input id="team-name" autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Canada Desk" style={fieldInput}/>
             {taken && <div style={{fontSize:12, color:T.red, marginTop:4}}>A team with this name already exists.</div>}
           </div>
           <div>
-            <label style={fieldLabel}>Team Lead</label>
+            <label style={fieldLabel}>Team Lead<Req/></label>
             <PersonSelect value={leadId} people={activated} labelOf={u => u.name} onChange={id=>{ setLeadId(id); setMembers(m => m.filter(x => x !== id)); }} placeholder="Select team lead"/>
           </div>
         </div>
@@ -1717,6 +1872,14 @@ function PermissionMatrixEditor({seat, perms, setPerms, readOnly}){
         set={(key, patch)=>setAt([...admin, 'permissions'], key, patch)}
         rows={[{key:'assign', label:() => 'Assign permissions'}, {key:'edit', label:() => 'Edit permissions'}].map(a => ({...a, scopes:USERS_SCOPES, noLife:true, allowed:!viewOnly}))}/>
     );
+    /* Notifications (notifications.jsx): the presets, who gets which, and one's own settings — the last a View Seat's too. */
+    if(tab === 'Notifications') return (<>
+      <PermissionTable title="Notification presets" obj={{key:'notificationPresets', noun:'User', plural:'Users'}} idKey="admin-notifications" value={getAt([...admin, 'notifications'])}
+        set={(key, patch)=>setAt([...admin, 'notifications'], key, patch)}
+        rows={[{key:'manage', label:() => 'Manage notification presets', unscoped:true}, {key:'assign', label:() => 'Assign notification presets', scopes:USERS_SCOPES}].map(a => ({...a, noLife:true, allowed:!viewOnly}))}/>
+      <PermissionTable flat title="Own settings" obj={{key:'notificationOwn', plural:'Notifications'}} idKey="admin-notifications-own" value={getAt([...admin, 'notifications'])}
+        set={(key, patch)=>setAt([...admin, 'notifications'], key, patch)} rows={[{key:'own', label:() => 'Edit own notification settings', unscoped:true, allowed:true}]}/>
+    </>);
     return null;
   };
   return (
@@ -1742,7 +1905,7 @@ function PermissionMatrixEditor({seat, perms, setPerms, readOnly}){
             {PERMISSION_TABS[category].map(t => <UtTab key={t} label={t} active={tab === t} onClick={()=>setTabs(x => ({...x, [category]:t}))}/>)}
           </div>
         )}
-        {viewOnly && category === 'Settings & Administration' && <div style={stTextB}>A View Seat can't be given Settings & Administration permissions.</div>}
+        {viewOnly && category === 'Settings & Administration' && tab !== 'Notifications' && <div style={stTextB}>A View Seat can't be given Settings & Administration permissions.</div>}
         {readOnly && <div style={stTextB}>You can view these permissions but not change them.</div>}
         {readOnly ? <div aria-disabled="true" style={{pointerEvents:'none', display:'flex', flexDirection:'column', gap:16}}>{body()}</div> : body()}
       </div>
@@ -1805,7 +1968,7 @@ function EditPermissionsDrawer({user, seats, presets, onClose, onSave, onStub, o
       <div style={{display:'flex', flexDirection:'column', gap:24}}>
       {/* 1 — the seat type, with what's left of it; everything below follows from it. */}
       <div style={{display:'flex', flexDirection:'column', gap:12}}>
-        <StField label="Select Seat">
+        <StField label="Select Seat" required>
           <StSelect value={seat} onChange={setSeat} options={SEAT_TYPES.map(st => {
             const n = seatsAvailable(seats, st.key, user.id);
             return {value:st.key, label:`${st.key}: ${availableLabel(n)}`, disabled: n <= 0 && st.key !== user.seat};
@@ -1872,7 +2035,7 @@ function SavePresetModal({seat, presets, onCancel, onSave}){
   return (
     <StModal title="Save Permission Preset" primary="Save Permission Preset" canSubmit={!!n && !taken} onCancel={onCancel} onSubmit={()=>onSave(n)}>
       <div>
-        <label style={fieldLabel} htmlFor="preset-name">Preset Name</label>
+        <label style={fieldLabel} htmlFor="preset-name">Preset Name<Req/></label>
         <input id="preset-name" autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Senior Consultant" style={fieldInput}
           onKeyDown={e=>{ if(e.key === 'Enter' && n && !taken) onSave(n); }}/>
         {taken && <div style={{fontSize:12, color:T.red, marginTop:4}}>A preset with this name already exists.</div>}
@@ -1948,4 +2111,4 @@ function AssignPeopleModal({title, value, data, onCancel, onSave}){
   );
 }
 
-Object.assign(window, {PERSONAS, MOCK_PERSONAS_VERSION, withMockPersonas, personaRecords, DASHBOARD_LEVELS, dashboardOn, dashboardCan, PRESET_DEFAULTS_VERSION, withPresetDefaults, permissionsWithin, assignmentEmpty, assignedUserIds, assignmentLabel, AssignPeopleFields, AssignPeopleModal, countLink, iconBtn, UserEditPanel, saveUserProfileIn, nameFromEmail, memberFromSession, withSessionMember, EMPTY_PEOPLE_DATA, RecordAccessCtx, useRecordAccess, normalizePermissions, setAccessContext, accessUser, toolCan, visibleActivities, activityCan, canAdd, PERMISSION_TOOLS, EditPresetDrawer, PermissionMatrixEditor, UsersTeamsSettings, UsersModule, SeatsModule, TeamsModule, PresetsModule, RecordViewsModule, SAMPLE_USERS, SAMPLE_PEOPLE_DATA, EditPermissionsDrawer});
+Object.assign(window, {withTeamViewTools, accessAs, permsOfUser, userAdminCan, UtTab, PermissionsDrawerFrame, teamScope, PERSONAS, MOCK_PERSONAS_VERSION, withMockPersonas, personaRecords, DASHBOARD_LEVELS, dashboardOn, dashboardCan, PRESET_DEFAULTS_VERSION, withPresetDefaults, permissionsWithin, assignmentEmpty, assignedUserIds, assignmentLabel, AssignPeopleFields, AssignPeopleModal, countLink, iconBtn, UserEditPanel, saveUserProfileIn, nameFromEmail, memberFromSession, withSessionMember, EMPTY_PEOPLE_DATA, RecordAccessCtx, useRecordAccess, normalizePermissions, setAccessContext, accessUser, toolCan, visibleActivities, activityCan, canAdd, PERMISSION_TOOLS, EditPresetDrawer, PermissionMatrixEditor, UsersTeamsSettings, UsersModule, SeatsModule, TeamsModule, PresetsModule, RecordViewsModule, SAMPLE_USERS, SAMPLE_PEOPLE_DATA, EditPermissionsDrawer});

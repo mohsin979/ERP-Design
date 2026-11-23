@@ -64,6 +64,7 @@ const CRM_SETTINGS_NAV = [
     {id:'settings.defaults',      label:'Defaults',      icon:'sliders'},
     {id:'settings.usersTeams',    label:'Users & Teams', icon:'usersThree'},
     {id:'settings.goals',         label:'Goals',         icon:'target'},
+    {id:'settings.commission',    label:'Commission',    icon:'coins'},
     {id:'settings.notifications', label:'Notifications', icon:'notification'},
     {id:'settings.navigation',    label:'Navigation',    icon:'listBullets'},
     {id:'settings.brand',         label:'Brand',         icon:'brand'},
@@ -169,6 +170,17 @@ function CrmNavItem({icon, label, active, collapsed, onClick}){
 }
 
 /* A group: a small header that expands / collapses its items (always shown in the icon rail). */
+/* The Dashboard is "My Day" to an employee (2026-11-20; it was Home for a few hours): someone whose dashboard is Personal only
+   (dashboard.jsx dashIsHome — their Dashboard permissions give no Team or Company figure). Named
+   where it's shown, not in the saved navigation, which everyone shares. */
+const navIsHome = (e) => e.id === 'dashboard' && typeof dashIsHome === 'function' && dashIsHome();
+const navEntryLabel = (e) => navIsHome(e) ? 'My Day' : e.label;
+const navEntryIcon = (e) => navIsHome(e) ? 'home' : e.icon;
+/* …and the rest of their dashboard is Analytics, an item of its own above Reports (first in its group
+   when Reports is hidden) — theirs only, so shown here and not kept in the saved navigation. */
+const NAV_ANALYTICS = {id:'analytics', label:'Analytics', icon:'dashboard', hidden:false};
+const navWithAnalytics = (entries) => !(typeof dashIsHome === 'function' && dashIsHome()) ? entries : entries.map(e => { if(!e.group || e.id !== 'automation') return e;
+  const i = e.items.findIndex(x => x.id === 'reports'); return {...e, items:[...e.items.slice(0, Math.max(0, i)), NAV_ANALYTICS, ...e.items.slice(Math.max(0, i))]}; });
 function CrmNavGroup({group, active, collapsed, setActive, first}){
   const [open, setOpen] = React.useState(true);
   const items = group.items.filter(i => !i.hidden);
@@ -218,8 +230,8 @@ function CrmSidebar({active, setActive, onBack, nav, setNav}){
   const [collapsed, setCollapsed] = React.useState(false);
   const [managing, setManaging] = React.useState(null);   // draft while Navigation Management is open
   // Workflows shows only to those with Workflows → View (Edit Permissions).
-  const entries = (nav || CRM_NAV_DEFAULT()).filter(e => !e.hidden)
-    .map(e => e.group ? {...e, items:e.items.filter(x => x.id !== 'workflows' || workflowCan('view'))} : e);
+  const entries = navWithAnalytics((nav || CRM_NAV_DEFAULT()).filter(e => !e.hidden)
+    .map(e => e.group ? {...e, items:e.items.filter(x => x.id !== 'workflows' || workflowCan('view'))} : e));
 
   return (
     <div style={sidebarFrame(collapsed)}>
@@ -231,7 +243,7 @@ function CrmSidebar({active, setActive, onBack, nav, setNav}){
       {entries.map((e, i) => e.group
         ? <CrmNavGroup key={e.id} group={e} active={active} collapsed={collapsed} setActive={setActive}/>
         : <div key={e.id} style={{marginTop: i > 0 && entries[i-1].group ? (collapsed ? 10 : 18) : 0}}>
-            <CrmNavItem icon={e.icon} label={e.label} active={active===e.id} collapsed={collapsed} onClick={()=>setActive(e.id)}/>
+            <CrmNavItem icon={navEntryIcon(e)} label={navEntryLabel(e)} active={active===e.id} collapsed={collapsed} onClick={()=>setActive(e.id)}/>
           </div>)}
       </div>
 
@@ -367,7 +379,7 @@ function CrmSettingsNav({active, setActive, onClose, data, onOpenEntity}){
       {data && <SettingsQuickSearch query={query} setQuery={setQuery} onKey={onKey}/>}
       <div role={query.trim() ? 'listbox' : undefined} style={{flex:1, minHeight:0, overflowY:'auto', margin:'0 -12px', padding:'0 12px 8px'}}>
         {query.trim() ? <SettingsSearchResults results={results} cursor={cursor} setCursor={setCursor} onOpen={open}/>
-          : CRM_SETTINGS_NAV.map((g, i) => <CrmNavGroup key={g.id} group={{...g, items:g.items.filter(x => x.id !== 'settings.goals' || goalsCan('view'))}} active={active} setActive={setActive} first={i === 0}/>)}
+          : CRM_SETTINGS_NAV.map((g, i) => <CrmNavGroup key={g.id} group={{...g, items:g.items.filter(x => !['settings.goals', 'settings.commission'].includes(x.id) || goalsCan('view'))}} active={active} setActive={setActive} first={i === 0}/>)}
       </div>
     </div>
   );
@@ -376,7 +388,7 @@ function CrmSettingsNav({active, setActive, onClose, data, onOpenEntity}){
 /* ── Navigation Management ───────────────────────────────────────────────────────────────── */
 
 /* One row: drag handle, icon, label, and the eye toggle (the same hide / unhide control the
-   View Settings drawer uses). Hidden rows read muted. */
+   Layout Settings drawer uses). Hidden rows read muted. */
 // `onToggle` null: the entry is always shown (Settings) — no eye.
 function NavManageRow({label, icon, hidden, onToggle, drag, dragOver, group, indent}){
   return (
@@ -411,7 +423,7 @@ function NavManagementList({draft, setDraft}){
   const setEntry = (id, next) => setDraft(d => d.map(e => e.id === id ? next : e));
   return draft.map((e, i) => (
     <div key={e.id} style={{marginBottom: e.group ? 6 : 2}}>
-      <NavManageRow label={e.label} icon={e.group ? null : e.icon} group={e.group} hidden={e.hidden}
+      <NavManageRow label={navEntryLabel(e)} icon={e.group ? null : navEntryIcon(e)} group={e.group} hidden={e.hidden}
         drag={drag.props(i)} dragOver={drag.over === i}
         onToggle={NAV_ALWAYS_SHOWN.includes(e.id) ? null : ()=>setEntry(e.id, {...e, hidden:!e.hidden})}/>
       {e.group && <NavGroupItems group={e} onChange={(g)=>setEntry(e.id, g)}/>}

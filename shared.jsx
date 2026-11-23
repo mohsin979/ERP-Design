@@ -128,6 +128,7 @@ const ICON_PATHS = {
   arrowDown: 'M205.66,149.66l-72,72a8,8,0,0,1-11.32,0l-72-72a8,8,0,0,1,11.32-11.32L120,196.69V40a8,8,0,0,1,16,0V196.69l58.34-58.35a8,8,0,0,1,11.32,11.32Z',   // Phosphor regular arrow-down (CRM Settings)
   externalLink: 'M224,104a8,8,0,0,1-16,0V59.32l-66.33,66.34a8,8,0,0,1-11.32-11.32L196.68,48H152a8,8,0,0,1,0-16h64a8,8,0,0,1,8,8Zm-40,24a8,8,0,0,0-8,8v72H48V80h72a8,8,0,0,0,0-16H48A16,16,0,0,0,32,80V208a16,16,0,0,0,16,16H176a16,16,0,0,0,16-16V136A8,8,0,0,0,184,128Z',   // Phosphor regular arrow-square-out (opens outside this module)
   // Phosphor regular: arrow-bend-up-left (Reply). Pin / Unpin reuse freeze / unfreeze (push-pin, push-pin-slash).
+  refresh: 'M197.67,186.37a8,8,0,0,1,0,11.29C196.58,198.73,170.82,224,128,224c-37.39,0-64.53-22.4-80-39.85V208a8,8,0,0,1-16,0V160a8,8,0,0,1,8-8H88a8,8,0,0,1,0,16H55.44C67.76,183.35,93,208,128,208c36.28,0,58.2-21.47,58.41-21.69A8,8,0,0,1,197.67,186.37ZM216,40a8,8,0,0,0-8,8V71.85C192.53,54.4,165.39,32,128,32,85.18,32,59.42,57.27,58.34,58.34a8,8,0,0,0,11.3,11.34C69.86,69.46,91.78,48,128,48c35,0,60.24,24.65,72.56,40H168a8,8,0,0,0,0,16h48a8,8,0,0,0,8-8V48A8,8,0,0,0,216,40Z',
   reply: 'M232,200a8,8,0,0,1-16,0,88.1,88.1,0,0,0-88-88H51.31l34.35,34.34a8,8,0,0,1-11.32,11.32l-48-48a8,8,0,0,1,0-11.32l48-48A8,8,0,0,1,85.66,61.66L51.31,96H128A104.11,104.11,0,0,1,232,200Z',
   edit: 'M227.31,73.37,182.63,28.68a16,16,0,0,0-22.63,0L36.69,152A15.86,15.86,0,0,0,32,163.31V208a16,16,0,0,0,16,16H92.69A15.86,15.86,0,0,0,104,219.31L227.31,96a16,16,0,0,0,0-22.63ZM92.69,208H48V163.31l88-88L180.69,120ZM192,108.68,147.31,64l24-24L216,84.68Z',
   copy: 'M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z',
@@ -207,11 +208,15 @@ const Icon = ({name, size=18, color='currentColor', strokeWidth, style={}}) => {
    Deal or Customer: its uploaded square photo, in a circle; without one, the first letter of the
    name, white on pinkish red. In the name column, the record header and the creation form. */
 const AVATAR_RED = '#E5486A';
+/* A record's letter avatar takes one of six colours (2026-11-20; it was always the pinkish red) —
+   by its name, so a person keeps theirs everywhere: rose, blue, green, amber, violet, teal. */
+const AVATAR_COLORS = [AVATAR_RED, '#4C7CF3', '#1FA97A', '#E8912D', '#8B6CEF', '#16A3B8'];
+const avatarColor = (name) => { const s = String(name || '').trim().toLowerCase(); let h = 0; for(let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return AVATAR_COLORS[h % AVATAR_COLORS.length]; };
 function RecordAvatar({name, photo, size = 22}){
   if(photo) return <img src={photo} alt="" style={{width:size, height:size, borderRadius:9999, objectFit:'cover', flexShrink:0, display:'block'}}/>;
   const letter = (String(name || '').trim()[0] || '?').toUpperCase();
   return (
-    <span aria-hidden="true" style={{width:size, height:size, borderRadius:9999, background:AVATAR_RED, color:'#fff', flexShrink:0, display:'inline-flex', alignItems:'center', justifyContent:'center',
+    <span aria-hidden="true" style={{width:size, height:size, borderRadius:9999, background:avatarColor(name), color:'#fff', flexShrink:0, display:'inline-flex', alignItems:'center', justifyContent:'center',
       fontSize:Math.round(size * .46), fontWeight:600, lineHeight:1}}>{letter}</span>
   );
 }
@@ -374,12 +379,12 @@ function NewButton({label, onClick, title}){
   return <button onClick={onClick} title={title || label} aria-label={title || label} style={{display:'inline-flex', alignItems:'center', gap:6, height:32, padding:'0 12px', border:'none', borderRadius:8,
     background:T.black, color:'#fff', fontSize:13, fontWeight:500, fontFamily:'inherit', cursor:'pointer', flexShrink:0, whiteSpace:'nowrap'}}><Icon name="plus" size={13} color="#fff"/>{label}</button>;
 }
-/* View Settings entry point — the one button pattern for it (Table / Board toolbar, Contact
+/* Layout Settings entry point — the one button pattern for it (Table / Board toolbar, Contact
    Overview). */
 function ViewSettingsButton({onClick}){
   return (
     <button onClick={onClick} style={{display:'flex', alignItems:'center', gap:6, border:`1px solid ${T.borderStrong}`, background:'#fff', borderRadius:8, padding:'7px 12px', fontSize:13, color:T.gray800, cursor:'pointer', flexShrink:0}}>
-      <Icon name="settingsGear" size={13} color={T.gray600}/> View Settings
+      <Icon name="settingsGear" size={13} color={T.gray600}/> Layout Settings
     </button>
   );
 }
@@ -872,4 +877,21 @@ function StubPanel({title, onClose, zIndex=90}){
   );
 }
 
-Object.assign(window, {RecordAvatar, AVATAR_RED, REACH_LINK_CLASS, NewButton, useEscapeClose, Dropdown, Spinner, SkeletonLines, LoadingBar, LOCAL_TZ, setAppTimeZone, zonedParts, zonedDate, useFloatZ, DateField, DateTimeField, parseDate, dateLabel, TimeField, parseTime, timeLabel, ActionsMenu, menuDivider, ViewSettingsButton, T, Icon, Avatar, RowCheckbox, MenuShell, MenuItem, StubPanel});
+/* A required field's mark (2026-11-23): a red asterisk after its label — every create and edit form.
+   A form's save button stays disabled while a required field is empty. */
+const Req = () => <span aria-hidden="true" style={{color:T.red}}> *</span>;
+/* Spring's look (2026-11-23): wherever Spring — the AI — does something, the surface carries its
+   mark (the Spring logo) on a slight orange ground. `SpringButton`: the action that hands
+   something to Spring ("Ask Spring"). */
+const SPRING = {tint:'#FFF7F0', line:'#FBE2CC', soft:'#FDEBDD', accent:'#F07B1A', deep:'#9A4A0C'};
+const SpringMark = ({w = 20}) => <img src="assets/brand/spring-logo.svg" alt="" width={w} height={w / 2} style={{display:'block', flexShrink:0}}/>;
+function SpringButton({label = 'Ask Spring', onClick, disabled}){
+  return <button type="button" onClick={onClick} disabled={disabled}
+    style={{display:'inline-flex', alignItems:'center', gap:8, height:32, padding:'0 12px', borderRadius:8, border:`1px solid ${SPRING.line}`, background:SPRING.tint,
+      color:T.attioText, fontSize:13, fontWeight:500, fontFamily:'inherit', cursor: disabled ? 'default' : 'pointer', opacity: disabled ? .5 : 1, whiteSpace:'nowrap', flexShrink:0}}>
+    <SpringMark w={20}/>{label}</button>;
+}
+// HubSpot's mark (the sprocket, in its orange): notes that came from HubSpot (2026-11-23).
+const HubSpotMark = ({size = 13}) => <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" style={{display:'block', flexShrink:0}}>
+  <path fill="#FF7A59" d="M18.164 7.93V5.084a2.198 2.198 0 001.267-1.978v-.067A2.2 2.2 0 0017.238.845h-.067a2.2 2.2 0 00-2.193 2.193v.067a2.196 2.196 0 001.252 1.973l.013.006v2.852a6.22 6.22 0 00-2.969 1.31l.012-.01-7.828-6.095A2.497 2.497 0 104.3 4.656l-.012.006 7.697 5.991a6.176 6.176 0 00-1.038 3.446c0 1.343.425 2.588 1.147 3.607l-.013-.02-2.342 2.343a1.968 1.968 0 00-.58-.095h-.002a2.033 2.033 0 102.033 2.033 1.978 1.978 0 00-.1-.595l.005.014 2.317-2.317a6.247 6.247 0 104.782-11.134l-.036-.005zm-.964 9.378a3.206 3.206 0 113.215-3.207v.002a3.206 3.206 0 01-3.207 3.207z"/></svg>;
+Object.assign(window, {HubSpotMark, SPRING, SpringMark, SpringButton, Req, RecordAvatar, AVATAR_RED, AVATAR_COLORS, avatarColor, REACH_LINK_CLASS, NewButton, useEscapeClose, Dropdown, Spinner, SkeletonLines, LoadingBar, LOCAL_TZ, setAppTimeZone, zonedParts, zonedDate, useFloatZ, DateField, DateTimeField, parseDate, dateLabel, TimeField, parseTime, timeLabel, ActionsMenu, menuDivider, ViewSettingsButton, T, Icon, Avatar, RowCheckbox, MenuShell, MenuItem, StubPanel});

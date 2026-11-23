@@ -26,7 +26,9 @@
    record type supports is returned. On top of the table's three:
      Add Workflow      the workflow builder, its context the board's pipeline and the stage.
      Email             one email written once in the composer, sent to each record (emails.jsx).
-     Move to Stage     a stage of the board's pipeline; records already there stay.
+     Move to Stage     a stage of the board's pipeline; records already there stay. Deals moved
+                       into a Lost stage: one Lost Reason asked once, for all (board.jsx
+                       askLostReason); Cancel moves none.
      Move to Pipeline  another pipeline of the record type (records that reference a pipeline:
                        Deals), into its first open stage — as the workflow action does.
    Moves are written in one change through the page's `move` (the workflow engine): a record a
@@ -98,7 +100,7 @@ function BulkEditPanel({data, object, records, onSave, onClose}){
           return (
             // Its label beside the field (as every edit panel); Undo or "Mixed values" under the field.
             <div key={p.key} style={{display:'flex', alignItems:'flex-start', gap:12}}>
-              <span title={p.label} style={{...actFieldLabel, paddingTop:9, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{p.label}</span>
+              <span title={p.label} style={{...actFieldLabel, paddingTop:9, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{p.label}{p.mandatory && <Req/>}</span>
               <div style={{flex:1, minWidth:0, display:'flex', flexDirection:'column', gap:4}}>
               <TypedPropertyInput prop={p} value={value} invalid={tried && !!errors[p.key]} onChange={(v)=>setEdits(e => ({...e, [p.key]:v}))}/>
               <div style={{display:'flex', alignItems:'baseline', gap:8}}>
@@ -126,7 +128,7 @@ function BulkEnrollModal({data, records, onEnroll, onCancel}){
   return ReactDOM.createPortal(
     <StModal title="Enroll in Email Sequence" primary={`Enroll ${bulkPlural(withEmail, 'record')}`} canSubmit={!!seq && withEmail > 0 && emailListValid(cc) && emailListValid(bcc)} onCancel={onCancel} onSubmit={()=>onEnroll(seq, emailCopiesOf(cc, bcc))}>
       <div style={{display:'flex', flexDirection:'column', gap:12}}>
-        <div><label style={fieldLabel}>Email Sequence</label>
+        <div><label style={fieldLabel}>Email Sequence<Req/></label>
           <FormSelect value={seq} placeholder="Select sequence" options={sequences.map(q => ({value:q.id, label:`${q.name} · ${bulkPlural(q.emails.length, 'email')}`}))} onChange={setSeq}/></div>
         <div><label style={fieldLabel}>Cc</label><EmailListInput label="Cc" value={cc} onChange={setCc} style={fieldInput}/></div>
         <div><label style={fieldLabel}>Bcc</label><EmailListInput label="Bcc" value={bcc} onChange={setBcc} style={fieldInput}/></div>
@@ -141,7 +143,7 @@ function BulkMoveModal({title, label, placeholder, options, primary, note, onMov
   return ReactDOM.createPortal(
     <StModal title={title} primary={primary} canSubmit={!!to} onCancel={onCancel} onSubmit={()=>onMove(to)}>
       <div style={{display:'flex', flexDirection:'column', gap:12}}>
-        <div><label style={fieldLabel}>{label}</label>
+        <div><label style={fieldLabel}>{label}<Req/></label>
           <FormSelect value={to} placeholder={placeholder} options={options} onChange={setTo}/></div>
         {line && <div style={{fontSize:12.5, color:T.attioMuted, lineHeight:1.5}}>{line}</div>}
       </div>
@@ -199,10 +201,17 @@ function useRecordBulk({object, data, records, update, remove, move}){
         const {p, stage} = destOf(to);
         if(!p || !stage) return setBulk(null);
         const list = may.filter(r => toPipeline || stageIdOf(pl, r) !== stage.id);
-        const res = list.length ? move(list.map(r => r.id), r => withStage(p, r, stage.id)) : null;
-        const blocked = res && res.blocked ? res.blocked.length : 0;
-        toast(`${bulkPlural(list.length - blocked, noun)} moved to ${toPipeline ? p.label : stage.label}${blocked ? ` · ${blocked} blocked by a workflow` : ''}${skipped ? ` · ${skipped} skipped (no permission)` : ''}`);
-        done();
+        const write = (extra) => {
+          const res = list.length ? move(list.map(r => r.id), r => ({...withStage(p, r, stage.id), ...extra})) : null;
+          const blocked = res && res.blocked ? res.blocked.length : 0;
+          toast(`${bulkPlural(list.length - blocked, noun)} moved to ${toPipeline ? p.label : stage.label}${blocked ? ` · ${blocked} blocked by a workflow` : ''}${skipped ? ` · ${skipped} skipped (no permission)` : ''}`);
+          done();
+        };
+        // Deals into a Lost stage: one Lost Reason, asked once, for all of them (board.jsx); Cancel moves none.
+        const lost = object === 'deals' && list.length && lostStageMove(data, null, {pipeline:p.id, stage:stage.id});
+        if(!lost) return write({});
+        askLostReason(data, lost, (lostReason) => write({lostReason}));
+        setBulk(null);
       }}/>;
   }
   else if(bulk){

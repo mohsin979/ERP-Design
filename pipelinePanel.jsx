@@ -251,11 +251,11 @@ function EditPipelineModal({pipeline, setData, onClose, taken = []}){
       <StCta label="Save Changes" disabled={!ok} onClick={()=>ok && save()}/>
     </>}>
       <div style={{display:'flex', flexDirection:'column', gap:16}}>
-      <Field label="Pipeline Name" wide>
+      <Field label="Pipeline Name" wide required>
         <input id="pipeline-name" value={label} onChange={e=>setLabel(e.target.value)} style={fieldInput}/>
         {nameTaken && <div style={{fontSize:12, color:T.red, marginTop:6}}>Another pipeline has this name.</div>}
       </Field>
-      <Field label="Stages" wide>
+      <Field label="Stages" wide required>
         <div>
         <div style={{display:'flex', alignItems:'baseline'}}>
           <span style={{flex:1}}/>
@@ -296,13 +296,13 @@ function AddStageModal({stages, onCancel, onAdd}){
   return (
     <StModal title="Add Stage" primary="Add Stage" canSubmit={!!l && !taken} onCancel={onCancel} onSubmit={()=>onAdd(l, type)}>
       <div>
-        <label style={fieldLabel} htmlFor="stage-name">Stage Name</label>
+        <label style={fieldLabel} htmlFor="stage-name">Stage Name<Req/></label>
         <input id="stage-name" autoFocus value={label} onChange={e=>setLabel(e.target.value)} placeholder="e.g. Documents Received" style={fieldInput}
           onKeyDown={e=>{ if(e.key === 'Enter' && l && !taken) onAdd(l, type); }}/>
         {taken && <div style={{fontSize:12, color:T.red, marginTop:4}}>This pipeline already has a stage with this name.</div>}
       </div>
       <div>
-        <label style={fieldLabel}>Stage Type</label>
+        <label style={fieldLabel}>Stage Type<Req/></label>
         <StageTypeSelect value={type} onChange={setType}/>
       </div>
     </StModal>

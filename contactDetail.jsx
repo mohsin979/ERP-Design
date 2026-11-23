@@ -9,9 +9,11 @@
                      and expands from again (Open Full Screen). While it's open, another record
                      clicked in the list takes its place in the side panel.
 
-   The full page's top bar holds View Settings (Highlight Settings, Tab Settings — the tabs' order
+   The full page's top bar holds Layout Settings (Highlight Settings, Tab Settings — the tabs' order
    and which show). The tab bar shows as many tabs as fit and puts the rest under "<n> More", a
-   dropdown; the open tab always stays in the bar.
+   dropdown; the open tab always stays in the bar. The Referrals tab (2026-11-23, on a Lead, a Deal
+   and a Customer — ReferralsTab) lists the records created from this one with Create Referral
+   Lead / Deal; Lead Properties show Referred By, the record this lead was created from (a link).
 
    The body (header, quick actions, Summary/activity section, Contact Properties) is a single
    component rendered in both, so the two can't drift apart. Layout follows the Attio record
@@ -128,7 +130,7 @@ function QuickAction({icon, label, onClick, caption}){
 /* Name row. In the side panel it also carries Close / Expand / menu (`headerActions`) and is
    rendered outside the scrolling body, so those controls never scroll away — the panel has no
    separate top bar. The full-screen view uses it without actions, inside its own column. */
-/* `subtitle`: what View settings puts under the name (Avatar subtitle) — Job Title by default. */
+/* `subtitle`: what Layout Settings puts under the name (Avatar subtitle) — Job Title by default. */
 const contactSubtitle = (contact, settings) => { const k = (settings || DEFAULT_PANEL_SETTINGS()).subtitle; return k ? (contact[k] == null ? '' : String(formatValue(contact[k]))) : ''; };
 // `user`: a person's profile (not a record) keeps its initials.
 function NameRow({contact, subtitle, headerActions, user}){
@@ -165,7 +167,7 @@ function DetailHeader({contact, onStub, onCopied, onCall, withName=true, subtitl
   );
 }
 
-/* Quick actions, in the order and selection set in View Settings — the shared set (contactActions.jsx),
+/* Quick actions, in the order and selection set in Layout Settings — the shared set (contactActions.jsx),
    each running what its ⋯ menu item runs. */
 const contactQuickHandlers = (contact, actions, onStub, onCall) => ({onStub,
   onTool: actions && actions.onTool ? (k) => actions.onTool(k, contact) : (k) => k === 'call' && onCall ? onCall(contact) : onStub(quickActionLabel('contacts', k)),
@@ -173,7 +175,7 @@ const contactQuickHandlers = (contact, actions, onStub, onCall) => ({onStub,
   onCreateDeal: actions && actions.onCreateRecord && (() => actions.onCreateRecord('Create Deal', contact)),
   onCreateCustomer: actions && actions.onCreateRecord && (() => actions.onCreateRecord('Create Customer', contact))});
 /* A record's quick actions in its side panel (Contacts, Deals and Customers alike): the icons,
-   then — where View Settings names one Primary — that action beneath them as a filled button with
+   then — where Layout Settings names one Primary — that action beneath them as a filled button with
    its icon and name (contactActions.jsx splitQuickActions). `onRun(action)`. */
 function QuickActionsBlock({items, primaryKey, object, record, onRun}){
   const {primary, icons} = splitQuickActions(items, primaryKey, object, record);
@@ -233,9 +235,12 @@ function OwnerValue({object, record, name}){
   const raw = hub && ((hub.records || {})[object] || []).find(r => String(r.id) === String(record.id));
   const can = !!raw && recordCan(object, raw, 'edit');
   const noun = HUB_NOUN[object] || 'Record';
+  const engineCtx = useWorkflowEngineCtx(), handover = raw && engineCtx ? pendingHandover(engineCtx, object, raw.id) : null;
   return (
-    <span style={{flex:1, minWidth:0, display:'flex', alignItems:'baseline', gap:6}}>
+    <span style={{flex:1, minWidth:0, display:'flex', alignItems:'baseline', flexWrap:'wrap', columnGap:6, rowGap:2}}>
       {name ? <OwnerLink name={name}/> : <span style={{fontSize:13, color:T.attioFaint}}>—</span>}
+      {/* A handover still to be accepted (2026-11-23): the record stays with its owner meanwhile. */}
+      {handover && <span style={{fontSize:12.5, color:T.attioMuted, width:'100%', order:9}}>Handover to {userLabel(handover.to)} pending</span>}
       {can && <button onClick={()=>setEditing(true)} title={`Edit ${noun} Owner`} aria-label={`Edit ${noun} Owner`}
         style={{border:'none', background:'transparent', padding:2, cursor:'pointer', display:'flex', alignSelf:'center', flexShrink:0}}>
         <Icon name="edit" size={12} color={T.gray600}/>
@@ -279,6 +284,8 @@ function ContactInfo({contact, acts, onStub, keys, onOpenDeals, onOpenCustomers,
   const openDeal = (d) => onOpenDeals ? onOpenDeals(contact, d.id) : onStub(`Deal · ${d.name}`);
   const contactCustomers = ((hub && hub.records && hub.records.customers) || []).filter(listsMe);
   const openCustomer = (c) => onOpenCustomers ? onOpenCustomers(contact, c.id) : onStub(`Customer · ${c.name}`);
+  // Referred By: the record this lead was created from (Create Referral Lead) — its name opens it.
+  const referrer = hub ? referrerOf(hub.records, contact) : null;
 
   /* Values that point at another record open it. Neither a user profile nor Deal records are
      defined yet, so they open the standard placeholder named after the record. An editable
@@ -292,10 +299,11 @@ function ContactInfo({contact, acts, onStub, keys, onOpenDeals, onOpenCustomers,
     ownerChanged:  {value:owner.changed},
     deals:         {value: contactDeals.length ? String(contactDeals.length) : '', deals:contactDeals},
     customers:     {value: contactCustomers.length ? String(contactCustomers.length) : '', customers:contactCustomers},
+    referrer:      {value: referrer ? referrer.record.name || '' : '', open:() => hub.openRecord(referrer.object, referrer.record.id, 'full')},
   };
   const rows = (panelProperties || contactPanelProperties()).map(p => ({key:p.key, label:p.label,
     ...(special[p.key] || {value: contact[p.key] == null ? '' : String(formatValue(contact[p.key]))})}));
-  // Which properties show, and in what order, is set in View Settings.
+  // Which properties show, and in what order, is set in Layout Settings.
   const shown = keys ? keys.map(k => rows.find(r => r.key === k)).filter(Boolean) : rows;
   if(!shown.length) return null;
 
@@ -375,13 +383,13 @@ function AssociatedRecordsValue({records, noun, onOpen, width=220, inTable=false
 }
 
 /* The shared body: the profile (name, email, phone) always first, then the four sections in the
-   order and form set in View Settings (panelSettings.jsx). Summary and activity dropdowns use
+   order and form set in Layout Settings (panelSettings.jsx). Summary and activity dropdowns use
    the same treatment as the Board card. */
 function ContactDetailBody({contact, acts, onStub, onCopied, onCall, withName=true, settings, actions, panelProperties}){
   const ps = settings || DEFAULT_PANEL_SETTINGS();
   const sections = {
     quickActions: () => <PanelQuickActions contact={contact} items={ps.quickActions} primaryKey={ps.primaryAction} actions={actions} onStub={onStub} onCall={onCall}/>,
-    smartSummary: () => !ps.smartSummary.enabled ? null : (
+    smartSummary: () => true ? null : (   // gone from the side panel (2026-11-23): Smart Summary is on the Overview
       <div style={activityBox}><SummaryBlock contact={contact} acts={acts} source="From activity"/></div>
     ),
     dropdowns: () => {
@@ -421,7 +429,7 @@ const barIconBtn = {
 
 /* ── Full screen ────────────────────────────────────────────────────────────────────────── */
 
-/* Workspace tabs, in the default order (each record type's View Settings → Tab Settings may
+/* Workspace tabs, in the default order (each record type's Layout Settings → Tab Settings may
    reorder and hide them; Overview stays first). `list` marks tabs that hold lists of records;
    only those get Search and Filter. */
 const CONTACT_TABS = [
@@ -436,10 +444,25 @@ const CONTACT_TABS = [
   {id:'quotes',   label:'Quotes',           icon:'quote',    list:true},
   {id:'files',    label:'Files',            icon:'folder',   list:true},
   {id:'documents', label:'Documents',       icon:'files',    list:true},
-  {id:'supportNotes', label:'Support Notes', icon:'notepad', list:true},   // the record's Support Notes (2026-11-19)
   {id:'deals',    label:'Deals',            icon:'deals',    list:true},
   {id:'customers', label:'Customers',       icon:'customers', list:true},
+  {id:'referrals', label:'Referrals',       icon:'usersThree', list:true},   // the leads created from this one (2026-11-23 — ReferralsTab)
 ];
+/* The Referrals tab (2026-11-23) of a Lead, a Deal and a Customer: the records created from this
+   one with Create Referral Lead / Deal — those whose `referredBy` points at it (dataModel.jsx
+   referralsOf) — as the other associated-record lists (dealDetail.jsx AssociatedRecords): the name
+   opens the record; its type, owner, stage and created date beside it. It joins the tabs after the
+   associated records' and takes part in Tab Settings like any tab (saved Tab Settings that don't
+   name it yet keep it after the tabs they name — overviewSettings.jsx arrangeRecordTabs). */
+const REFERRAL_COLUMNS = [{key:'name', label:'Name', width:'1.4fr'}, {key:'type', label:'Type'}, {key:'owner', label:'Owner'}, {key:'stage', label:'Stage'}, {key:'created', label:'Created Date'}];
+function ReferralsTab({object, record, q}){
+  const hub = useRecordHub();
+  const data = (hub && hub.data) || {};
+  const rows = referralsOf(hub && hub.records, object, record && record.id).map(({object:o, record:r}) => ({id:`${o}:${r.id}`, object:o, recordId:r.id, name:r.name, type:HUB_NOUN[o],
+    owner:userLabel(r.owner), stage: o === 'contacts' ? r.contactType || '' : stageLabelIn(data, r.pipeline, r.stage) || '', created:dateOnly(r.created)}));
+  if(!rows.length) return <EmptyState compact title="No referrals yet"/>;
+  return <AssociatedRecords columns={REFERRAL_COLUMNS} rows={rows} q={q} empty="No referrals yet" onOpen={(r)=>hub.openRecord(r.object, r.recordId, 'full')}/>;
+}
 
 /* `more`: the bar's "<n> More" — semibold, no icon, a chevron, and no underline (it isn't a tab). */
 function WorkspaceTab({tab, active, onClick, more, open}){
@@ -521,7 +544,7 @@ function WorkspaceTabBar({tabs, activeId, onPick}){
    activity; without it they list the record's own activity, as before. */
 function ContactWorkspace({contact, acts, onStub, onCall, onCreateProfile, profiles, requestedTab, team, onUpdateActivity, onAddActivity, onReassignOwner, tabs:allTabs = CONTACT_TABS, renderTab, activityViews}){
   const hub = useRecordHub(), ra = useRecordAccess();
-  // The tabs in the order View Settings → Tab Settings gives the record type, hidden ones left out.
+  // The tabs in the order Layout Settings → Tab Settings gives the record type, hidden ones left out.
   const tabs = arrangeRecordTabs(allTabs, (((hub && hub.overviewSettings) || {})[ra ? ra.object : 'contacts'] || {}).tabs);
   const [tabId, setTabId] = React.useState(requestedTab ? requestedTab.id : 'overview');
   const [q, setQ] = React.useState('');
@@ -566,6 +589,8 @@ function ContactWorkspace({contact, acts, onStub, onCall, onCreateProfile, profi
         <div style={{padding:'20px 24px 16px', flexShrink:0, borderBottom:`1px solid ${T.border}`}}>
           <RecordHighlights object={ra ? ra.object : 'contacts'} record={ra ? ra.record : contact} view={contact} acts={acts}
             contact={ra && ra.object !== 'contacts' ? ((hub && hub.records.contacts) || []).find(c => sameId(c.id, personIdOf(ra.record))) || null : contact}/>
+          {/* Smart Summary (2026-11-23): on the Overview, under Highlights — off in Layout Settings. */}
+          <RecordSmartSummary object={ra ? ra.object : 'contacts'} record={ra ? ra.record : contact} view={contact} acts={acts}/>
         </div>
       )}
       {/* Files, Quotes and Documents bring their own toolbars (files.jsx, quotes.jsx, documents.jsx). */}
@@ -614,6 +639,9 @@ function ContactWorkspace({contact, acts, onStub, onCall, onCreateProfile, profi
       ) : tab.id === 'accounting' ? (
         /* Accounting: the record's payment structures (accounting.jsx). */
         <div style={{flex:1, minHeight:0, display:'flex', overflow:'hidden'}}><AccountingTab object={ra ? ra.object : 'contacts'} record={ra ? ra.record : contact}/></div>
+      ) : tab.id === 'referrals' ? (
+        /* Referrals: the records created from this one (ReferralsTab, above). */
+        <div style={{flex:1, minHeight:0, overflowY:'auto'}}><ReferralsTab object={ra ? ra.object : 'contacts'} record={ra ? ra.record : contact} q={q}/></div>
       ) : (
         <div style={{flex:1, minHeight:0, overflowY:'auto', display:'flex', alignItems:'center', justifyContent:'center', flexDirection:'column', gap:6, padding:24}}>
           <div style={{fontSize:15, fontWeight:600, color:T.gray800}}>{tab.label}</div>
@@ -751,7 +779,8 @@ function OwnerEditableValue({prop, value, onSave, options, display, pencil, alig
    editable property of the record type — not the name and owner (they have their own flows), not
    one the system sets, and only where the signed-in user may edit it (Records → Edit, its stage
    moves and property values). Pipeline and Stage pick from the record's pipelines and that pipeline's
-   stages (a new pipeline starts at its first stage). Saves through the record hub. → {prop,
+   stages (a new pipeline starts at its first stage). Saves through the record hub — a deal moved
+   into a Lost stage once its Lost Reason is chosen (board.jsx withLostReason). → {prop,
    options, value, save} or null. */
 function panelEditSpec(hub, object, record, key){
   if(!hub || !hub.updateRecord || !record) return null;
@@ -760,7 +789,10 @@ function panelEditSpec(hub, object, record, key){
   // The signed-in user's Records → Edit: the record, its stages, this property's value.
   if(!fieldEditCan(object, record, prop)) return null;
   const t = propertyTypeId(prop.type);
-  const save = (patch) => hub.updateRecord(object, record.id, patch);
+  // A deal moved into a Lost stage here (its Deal Stage or Pipeline) asks for its Lost Reason first (board.jsx withLostReason).
+  const save = (patch) => object === 'deals' && ('stage' in patch || 'pipeline' in patch)
+    ? withLostReason(hub.data, record, patch, (extra) => hub.updateRecord(object, record.id, {...patch, ...extra}))
+    : hub.updateRecord(object, record.id, patch);
   if(t === 'Pipeline'){
     const pls = recordPipelines(hub.data, object);
     return {prop:{...prop, type:'Single Selection', options:pls.map(p => p.id)}, options:pls.map(p => ({value:p.id, label:p.label})), value:record.pipeline,
@@ -884,7 +916,7 @@ function ContactDetail({mode, contact, acts, properties, panelProperties, onClos
       boxShadow: full ? 'none' : '-12px 0 32px rgba(16,24,40,.10)',
       display:'flex', flexDirection:'column',
     }}>
-      {/* Full-screen top bar: breadcrumb, then View Settings, Collapse and Close at the top right. Present in
+      {/* Full-screen top bar: breadcrumb, then Layout Settings, Collapse and Close at the top right. Present in
           both modes, opening to its height as the panel expands. */}
       <div aria-hidden={!full} style={{
         height: full ? 49 : 0, opacity: full ? 1 : 0, overflow:'hidden', flexShrink:0,
@@ -897,7 +929,7 @@ function ContactDetail({mode, contact, acts, properties, panelProperties, onClos
           </button>
           <span style={{fontSize:13, color:T.attioFaint}}>/</span>
           <span style={{fontSize:13, color:T.attioText, fontWeight:500, flex:1, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{contact.name}</span>
-          {/* View Settings: the record type's Highlights and tabs (overviewSettings.jsx). */}
+          {/* Layout Settings: the record type's Highlights and tabs (overviewSettings.jsx). */}
           <RecordViewSettings object={ra ? ra.object : 'contacts'}/>
           <button title="Back to side panel" onClick={onCollapse} style={barIconBtn}><Icon name="collapse" size={15} color={T.gray600}/></button>
           <button title="Close" onClick={onClose} style={barIconBtn}><Icon name="close" size={13} color={T.gray600}/></button>
@@ -959,4 +991,4 @@ function ContactDetail({mode, contact, acts, properties, panelProperties, onClos
   );
 }
 
-Object.assign(window, {PanelHeroCtx, PanelNameCtx, PanelHeroCard, heroName, PropertyRowLabel, AssociatedRecordsValue, panelEditSpec, PanelEditableValue, ContactDetail, ContactDetailBody, ContactWorkspace, ownerDates, NameRow, ContactLine, QuickAction, OwnerLink, barIconBtn, CONTACT_TABS});
+Object.assign(window, {ReferralsTab, PanelHeroCtx, PanelNameCtx, PanelHeroCard, heroName, PropertyRowLabel, AssociatedRecordsValue, panelEditSpec, PanelEditableValue, ContactDetail, ContactDetailBody, ContactWorkspace, ownerDates, NameRow, ContactLine, QuickAction, OwnerLink, barIconBtn, CONTACT_TABS});

@@ -480,8 +480,8 @@ function TemplateFormPanel({initial, onCancel, onSave}){
     <CreatePanelFrame title={initial ? 'Edit Email Template' : 'Add Email Template'} onClose={onCancel} width={EMAIL_PANEL_W + fileView.extra} flush
       actions={panelActions(onCancel, initial ? 'Save Changes' : 'Add Email Template', ok, save)}>
       <EmailSplit fileView={fileView} form={<>
-        <Field label="Email Template Name"><input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Document request" style={fieldText}/></Field>
-        <Field label="Subject"><SubjectField value={subject} onChange={setSubject}/></Field>
+        <Field label="Email Template Name" required><input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Document request" style={fieldText}/></Field>
+        <Field label="Subject" required><SubjectField value={subject} onChange={setSubject}/></Field>
         <EmailContentFields value={content} setValue={setContent}/>
       </>} preview={<EmailPreview content={content} subject={subject}/>}/>
     </CreatePanelFrame>
@@ -500,7 +500,7 @@ function SequenceEmailPanel({initial, onCancel, onSave}){
     <CreatePanelFrame title="Edit Email" onClose={onCancel} width={EMAIL_PANEL_W + fileView.extra} flush zIndex={90}
       actions={panelActions(onCancel, 'Save Changes', ok, ()=>onSave({subject:subject.trim(), ...emailContentToSave(content)}))}>
       <EmailSplit fileView={fileView} form={<>
-        <Field label="Subject"><SubjectField autoFocus value={subject} onChange={setSubject}/></Field>
+        <Field label="Subject" required><SubjectField autoFocus value={subject} onChange={setSubject}/></Field>
         <EmailContentFields value={content} setValue={setContent}/>
       </>} preview={<EmailPreview content={content} subject={subject}/>}/>
     </CreatePanelFrame>
@@ -541,7 +541,7 @@ function SequenceFormPanel({initial, templates, onCancel, onSave}){
     <CreatePanelFrame title={initial ? 'Edit Email Sequence' : 'Add Email Sequence'} onClose={onCancel} width={sequencePanelWidth(false, !!email, true)} flush
       actions={panelActions(onCancel, initial ? 'Save Changes' : 'Add Email Sequence', ok, save)}>
       <SequenceColumns fields onClosePreview={()=>setShown(null)} emails={stack(<>
-      <Field label="Name"><input autoFocus value={s.name} onChange={e=>setS(x => ({...x, name:e.target.value}))} placeholder="e.g. New client onboarding" style={fieldText}/></Field>
+      <Field label="Name" required><input autoFocus value={s.name} onChange={e=>setS(x => ({...x, name:e.target.value}))} placeholder="e.g. New client onboarding" style={fieldText}/></Field>
       <Field label="Settings"><div style={{display:'flex', flexDirection:'column', gap:12, paddingTop:8}}>
         {toggleRow(s.skipWeekends && !hasDate, (v)=>setS(x => ({...x, skipWeekends:v})), 'Skip Weekends', hasDate, hasDate ? 'Not available while an email goes on a Specific Date' : undefined)}
         {toggleRow(s.unsubscribe, (v)=>setS(x => ({...x, unsubscribe:v})), 'Include Unsubscribe Button')}
@@ -552,7 +552,7 @@ function SequenceFormPanel({initial, templates, onCancel, onSave}){
         {s.exit.on && <MultiSelectMenu value={s.exit.events} options={SEQUENCE_EXITS} placeholder="Select exit criteria"
           onChange={(v)=>setS(x => ({...x, exit:{...x.exit, events:v}}))}/>}
       </div></Field>
-      <Field label="Emails"><div style={{display:'flex', flexDirection:'column', gap:8, paddingTop:2}}>
+      <Field label="Emails" required><div style={{display:'flex', flexDirection:'column', gap:8, paddingTop:2}}>
         {s.emails.map((e, i) => (
           <div key={e.key} style={{border:`1px solid ${current && e.key === current.key ? T.gray400 : T.attioLine}`, borderRadius:10, padding:10, display:'flex', flexDirection:'column', gap:8}}>
             <div style={{display:'flex', alignItems:'center', gap:6}}>
@@ -569,7 +569,7 @@ function SequenceFormPanel({initial, templates, onCancel, onSave}){
               <SeqIconButton icon="edit" title="Edit Email" disabled={!sequenceEmailOf(e, templates)} onClick={()=>setEditing(e.key)}/>
             </div>
             <div style={{display:'flex', alignItems:'center', gap:8}}>
-              <span style={{fontSize:12.5, color:T.gray600, whiteSpace:'nowrap'}}>When</span>
+              <span style={{fontSize:12.5, color:T.gray600, whiteSpace:'nowrap'}}>When<Req/></span>
               <div style={{width:150}}><FormSelect value={e.when === 'date' ? 'date' : 'after'} options={SEQUENCE_WHEN} ariaLabel={`Email ${i + 1} when`}
                 onChange={(v)=>v && setEmail(i, {when: v === 'date' ? 'date' : undefined})}/></div>
               {e.when === 'date' ? <div style={{width:180}}><DateField required value={e.date || ''} onChange={(v)=>setEmail(i, {date:v})} ariaLabel={`Email ${i + 1} date`}/></div> : <>
@@ -582,7 +582,7 @@ function SequenceFormPanel({initial, templates, onCancel, onSave}){
             </div>
             {/* Time: Any Time, or a window of one or two hours from a start time — it goes at a time within it. */}
             <div style={{display:'flex', alignItems:'center', gap:8}}>
-              <span style={{fontSize:12.5, color:T.gray600, whiteSpace:'nowrap'}}>Time</span>
+              <span style={{fontSize:12.5, color:T.gray600, whiteSpace:'nowrap'}}>Time<Req/></span>
               <div style={{width:150}}><FormSelect value={e.window ? String(e.window.hours) : 'any'} options={SEQUENCE_WINDOWS} ariaLabel={`Email ${i + 1} time`}
                 onChange={(v)=>setEmail(i, {window: v && v !== 'any' ? {from:(e.window && e.window.from) || '09:00', hours:Number(v)} : undefined})}/></div>
               {e.window && <>
@@ -653,7 +653,7 @@ function QuoteTemplatesTab({data, setData, say}){
         </DetailPanel>}/>
       {renaming && <StModal title="Rename Template" primary="Rename Template" canSubmit={!!renaming.name.trim()} onCancel={()=>setRenaming(null)}
         onSubmit={()=>{ setList(ts => ts.map(t => t.id === renaming.id ? {...t, name:renaming.name.trim()} : t)); setRenaming(null); say('Template renamed'); }}>
-        <div><label style={fieldLabel}>Template Name</label><input autoFocus value={renaming.name} onChange={e=>setRenaming(r => ({...r, name:e.target.value}))} style={fieldInput}/></div>
+        <div><label style={fieldLabel}>Template Name<Req/></label><input autoFocus value={renaming.name} onChange={e=>setRenaming(r => ({...r, name:e.target.value}))} style={fieldInput}/></div>
       </StModal>}
       {qtBulk.bulkModal}
       {deleting && <StModal title="Delete Template" primary="Delete Template" danger onCancel={()=>setDeleting(null)}

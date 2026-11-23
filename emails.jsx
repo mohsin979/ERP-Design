@@ -114,9 +114,9 @@ function FetchPropertyModal({data, onCancel, onPick}){
   return ReactDOM.createPortal(
     <StModal title="Fetch Property" primary="Fetch Property" canSubmit={!!picked} onCancel={onCancel}
       onSubmit={()=>picked && onPick(key, `${picked.section || from} · ${picked.label}`)}>
-      <div><label style={fieldLabel}>Property Of</label>
+      <div><label style={fieldLabel}>Property Of<Req/></label>
         <FormSelect value={source} options={sources} onChange={(v)=>{ if(v){ setSource(v); setKey(''); } }} ariaLabel="Property of"/></div>
-      <div><label style={fieldLabel}>Property</label>
+      <div><label style={fieldLabel}>Property<Req/></label>
         <SearchableSelect value={key} options={options} placeholder="Select property" searchPlaceholder="Search properties" onChange={setKey}/></div>
     </StModal>, document.body);
 }
@@ -317,9 +317,11 @@ function EmailAttachmentList({list, onRemove}){
     </div>
   );
 }
-function EmailAttachmentsField({list, update}){
+/* `reports`: Attach Report beside Attach files — a report as CSV and / or PDF (reports.jsx, 2026-11-20). */
+function EmailAttachmentsField({list, update, reports}){
   const input = React.useRef(null);
   const [error, setError] = React.useState('');
+  const [pickReport, setPickReport] = React.useState(false);
   const add = (e) => {
     const files = [...(e.target.files || [])]; e.target.value = '';
     const big = files.filter(f => f.size > FILE_MAX_BYTES);
@@ -334,8 +336,12 @@ function EmailAttachmentsField({list, update}){
     <div style={{display:'flex', flexDirection:'column', gap:8, paddingTop:2}}>
       <EmailAttachmentList list={list} onRemove={(id)=>update(l => l.filter(a => a.id !== id))}/>
       <input ref={input} type="file" multiple onChange={add} style={{display:'none'}}/>
-      <span><StSecondary label={<span style={{display:'inline-flex', alignItems:'center', gap:6}}><Icon name="paperclip" size={13} color={T.gray800}/>Attach files</span>} onClick={()=>input.current.click()}/></span>
+      <span style={{display:'inline-flex', gap:8, flexWrap:'wrap'}}>
+        <StSecondary label={<span style={{display:'inline-flex', alignItems:'center', gap:6}}><Icon name="paperclip" size={13} color={T.gray800}/>Attach files</span>} onClick={()=>input.current.click()}/>
+        {reports && <StSecondary label={<span style={{display:'inline-flex', alignItems:'center', gap:6}}><Icon name="analytical" size={13} color={T.gray800}/>Attach Report</span>} onClick={()=>setPickReport(true)}/>}
+      </span>
       {error && <div style={{fontSize:12, color:T.red}}>{error}</div>}
+      {pickReport && <ReportAttachModal onAttach={(files)=>update(l => [...l, ...files])} onClose={()=>setPickReport(false)}/>}
     </div>
   );
 }
@@ -379,10 +385,10 @@ function EmailContentFields({value:c, setValue}){
   const fetched = (key, label) => { const insert = insertRef.current; setFetching(false); if(insert) setTimeout(() => insert(`${emailTokenHtml(key, label)}&nbsp;`), 0); };
   return <>
     {fetching && <FetchPropertyModal data={(hub && hub.data) || {}} onCancel={()=>setFetching(false)} onPick={fetched}/>}
-    <Field label="Email Format"><FormSelect value={c.format} options={EMAIL_FORMATS} onChange={(v)=>v && v !== c.format && setValue(x => switchEmailFormat(x, v))}/></Field>
-    {c.format === 'custom' ? <Field label="HTML File"><EmailHtmlUpload c={c} setValue={setValue}/></Field> : <>
-      <Field label="Body" wide><RichTextEditor value={c.body} onChange={(v)=>setValue(x => ({...x, body:v}))} minHeight={280} ctas={c.format === 'html'} sizes colors={emailTextColors()} tools={tools} ariaLabel="Email body"/></Field>
-      {c.format === 'simple' && <Field label="Attachments"><EmailAttachmentsField list={c.attachments || []} update={(fn)=>setValue(x => ({...x, attachments:fn(x.attachments || [])}))}/></Field>}
+    <Field label="Email Format" required><FormSelect value={c.format} options={EMAIL_FORMATS} onChange={(v)=>v && v !== c.format && setValue(x => switchEmailFormat(x, v))}/></Field>
+    {c.format === 'custom' ? <Field label="HTML File" required><EmailHtmlUpload c={c} setValue={setValue}/></Field> : <>
+      <Field label="Body" wide required><RichTextEditor value={c.body} onChange={(v)=>setValue(x => ({...x, body:v}))} minHeight={280} ctas={c.format === 'html'} sizes colors={emailTextColors()} tools={tools} ariaLabel="Email body"/></Field>
+      {c.format === 'simple' && <Field label="Attachments"><EmailAttachmentsField reports list={c.attachments || []} update={(fn)=>setValue(x => ({...x, attachments:fn(x.attachments || [])}))}/></Field>}
     </>}
     <Field label="">
       <div onClick={toggleSig} style={{display:'inline-flex', alignItems:'center', gap:8, paddingTop:7, fontSize:13, color:T.attioText, cursor:'pointer', userSelect:'none'}}>
@@ -487,7 +493,7 @@ function editContentOf(a, data){
    `edit`: a scheduled email of the record (the trail's Edit, 2026-11-18) — everything as
    scheduled, its date and time too; Save Changes keeps it scheduled (changed), Send Now Instead
    sends it now. The same email: no new one is added. */
-function EmailComposer({object, id, replyTo, forward, recipients, onSent, onClose, placement = 'inline', title, edit}){
+function EmailComposer({object, id, replyTo, forward, recipients, onSent, onClose, placement = 'inline', title, edit, draft}){
   const hub = useRecordHub();
   // Several records: who each one reaches; those without an email address are skipped.
   const many = recipients && recipients.length ? recipients.map(r => ({...r, person:hubRecordPerson(hub, r.object, r.id)})) : null;
@@ -505,7 +511,8 @@ function EmailComposer({object, id, replyTo, forward, recipients, onSent, onClos
   const [to, setTo] = React.useState(() => edit ? (edit.to || [])[0] || '' : forward ? '' : replyAddress || (person && person.email) || '');
   const [cc, setCc] = React.useState(() => edit ? (edit.cc || []).join(', ') : replyTo && (replyTo.cc || []).length ? replyTo.cc.join(', ') : ''), [bcc, setBcc] = React.useState(() => edit ? (edit.bcc || []).join(', ') : '');
   const [templateId, setTemplateId] = React.useState(() => (edit && edit.templateId) || '');
-  const [subject, setSubject] = React.useState(() => edit ? edit.title || '' : base ? `${forward ? 'Fwd' : 'Re'}: ${String(base.title || '').replace(/^(Re|Fwd):\s*/i, '')}` : '');
+  // `draft` ({subject, body}): an email started for the person — Spring's draft from My Day (myDay.jsx) — theirs to change before it goes.
+  const [subject, setSubject] = React.useState(() => edit ? edit.title || '' : draft && draft.subject && !base ? draft.subject : base ? `${forward ? 'Fwd' : 'Re'}: ${String(base.title || '').replace(/^(Re|Fwd):\s*/i, '')}` : '');
   /* A new email (Simple Text Body); a forward carries the message under it —
      who sent it, when, its subject, the message as written and its attachments. */
   const forwarded = React.useMemo(() => !forward ? '' : sanitizeRichText(`<p>---------- Forwarded message ----------</p>`
@@ -515,7 +522,7 @@ function EmailComposer({object, id, replyTo, forward, recipients, onSent, onClos
   const [content, setContent] = React.useState(() => {
     // An email being edited: its content as written (`content`, kept since 2026-11-18), else rebuilt from what it keeps.
     if(edit) return editContentOf(edit, hub.data);
-    const c = newEmailContent();
+    const c = draft && draft.body ? {...newEmailContent(), body:draft.body} : newEmailContent();
     return forward ? {...c, body:c.body + forwarded, attachments:[...(c.attachments || []), ...(forward.attachments || [])]} : c;
   });
   const [scheduling, setScheduling] = React.useState(!!edit);
@@ -591,7 +598,7 @@ function EmailComposer({object, id, replyTo, forward, recipients, onSent, onClos
         <StCta label={scheduling ? (edit ? 'Save Changes' : 'Schedule Send') : 'Send'} disabled={!ready} onClick={()=>send(scheduling)}/>
       </>}>
       <EmailSplit form={<>
-        <Field label="To">{many
+        <Field label="To" required>{many
           ? <div aria-label="To" style={{...fieldText, background:T.pageBg, color:T.gray600, cursor:'default'}}>
               {bulkPlural(reach.length, manyNoun)}{many.length - reach.length ? ` · ${many.length - reach.length} skipped` : ''}</div>
           : <input value={to} onChange={e=>setTo(e.target.value)} placeholder="name@email.com" aria-label="To"
@@ -599,11 +606,11 @@ function EmailComposer({object, id, replyTo, forward, recipients, onSent, onClos
         <Field label="Cc"><EmailListInput label="Cc" value={cc} onChange={setCc}/></Field>
         <Field label="Bcc"><EmailListInput label="Bcc" value={bcc} onChange={setBcc}/></Field>
         <Field label="Template"><FormSelect value={templateId} placeholder="Select email template" options={templates.map(t => ({value:t.id, label:t.name}))} onChange={pickTemplate}/></Field>
-        <Field label="Subject"><SubjectField value={subject} onChange={setSubject}/></Field>
+        <Field label="Subject" required><SubjectField value={subject} onChange={setSubject}/></Field>
         <EmailContentFields value={content} setValue={setContent}/>
         {scheduling && <>
-          <Field label="Send on"><DateField required value={date} onChange={(v)=>{ setDate(v); setError(''); }}/></Field>
-          <Field label="At"><TimeField required value={time} onChange={(v)=>{ setTime(v); setError(''); }}/></Field>
+          <Field label="Send on" required><DateField required value={date} onChange={(v)=>{ setDate(v); setError(''); }}/></Field>
+          <Field label="At" required><TimeField required value={time} onChange={(v)=>{ setTime(v); setError(''); }}/></Field>
         </>}
         {error && <div style={{fontSize:12.5, color:T.red}}>{error}</div>}
       </>} preview={<EmailPreview content={many ? content : {...content, body:named(content.body), html:named(content.html)}} subject={many ? subject : named(subject)}/>}/>

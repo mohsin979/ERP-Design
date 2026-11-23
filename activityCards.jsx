@@ -12,14 +12,23 @@
               [Person]" (entered by hand: call type, point of contact and outcome editable).
               Details: call type (Inbound / Outbound), point of contact (the internal
               representative), outcome; then its Notes (ActivityNotes: Notes linked to the call).
+              Connected, not qualified (2026-11-20) asks its Not Qualified Reason
+              (NotQualifiedReasonField) — kept on the call, shown under its outcome, and set on
+              the lead (setLeadNotQualified).
      Email  — subject and content; the header has Reply, ⋯ has Forward. Or "Email log …" (Log
               Email — an email outside the CRM, entered by hand, as a call log): email type (Sent /
               Received), point of contact, subject and content, all editable.
-     Task   — name, description, status (radios), task type, assigned to, assigned by; then its
+     Task   — its type first, as a tag (2026-11-23; "Due date passed" beside it once overdue), then
+              name, description, status, assigned to, due, assigned by; Edit: Task Type as radios
+              (To-do, Email, Call, Colleague follow-up), Status as radios, a Due Date (required) and
+              an optional Due Time. A new task has no Status field: it starts Not Started. Then its
               Notes (ActivityNotes: Notes linked to the task). Its header moves it on: Start (Not
               Started → In Progress), Put on Hold, Resume (On Hold → In Progress), Complete.
-     Note   — readable text; Edit makes it a field. A Support Note (2026-11-19) carries a red tag
-              and is also listed on the record's Support Notes tab; @tags notify and email the
+              Time Allowed (2026-11-20, optional, after Due Time on the new and edit forms —
+              TaskTimeAllowedField): once the task is In Progress, how it stands against it shows
+              beside its Status (TaskTimeLeft; activities.jsx taskTimeState, withTaskStart).
+     Note   — readable text; Edit makes it a field. Its Note Type (2026-11-23: General, Client
+              Request, Support — radios, first on the form; noteTools.jsx) shows as a tag; @tags notify and email the
               people tagged; replies are one level deep (noteTools.jsx, NoteReplies).
      Owner change — previous and new owner; Edit reassigns the owner (through the normal owner
               update, so it records its own Owner change).
@@ -30,7 +39,10 @@
               the header); then its Notes (ActivityNotes: Notes linked to the meeting).
    Overview, Calls, Notes, Emails and Meetings (2026-11-18): the activity is a time trail
    (ActivityTrail) — Upcoming, then each month; time and date left of a rail; its one action on the
-   right (trailAction). Tasks keep their Table / Board.
+   right (trailAction — the stakeholder's rules of 2026-11-23: only the latest call and emails carry
+   one, tasks by their type, notes by their author). Tasks keep their Table / Board.
+   Required fields (2026-11-23): `Field required` shows the red asterisk — on the create forms, and
+   on a detail only while it's being edited; Save waits for them.
    Every ⋯ menu follows one arrangement (detailMenu). Edits and new items go through onUpdate / onAdd
    (ContactsModule) — the one activity store the Overview, cards and side panel also read. */
 
@@ -300,6 +312,20 @@ function TaskStatusRadios({value, onChange, name, pipelineId, overdue}){
     </div>
   );
 }
+// Task Type as radios (2026-11-23): To-do, Email, Call, Colleague follow-up.
+function TaskTypeRadios({value, onChange, name}){
+  return (
+    <div role="radiogroup" aria-label="Task type" style={{display:'grid', gridTemplateColumns:'repeat(2, minmax(0, 160px))', gap:'10px 16px', paddingTop:7}}>
+      {TASK_TYPES.map(t => (
+        <label key={t} style={{display:'flex', alignItems:'center', gap:8, fontSize:13, color:T.attioText, cursor:'pointer', lineHeight:'16px'}}>
+          <input type="radio" name={name} checked={value === t} onChange={()=>onChange(t)}
+            style={{margin:0, width:15, height:15, flexShrink:0, accentColor:T.black, cursor:'pointer'}}/>
+          {t}
+        </label>
+      ))}
+    </div>
+  );
+}
 // The task pipeline dropdown; picking another pipeline puts the task at its first stage.
 const taskPipelineOptions = () => TASK_PIPELINES.map(p => ({value:p.id, label:p.name}));
 const firstStageOf = (pipelineId) => { const pl = TASK_PIPELINES.find(p => p.id === pipelineId) || TASK_PIPELINES[0]; return pl && pl.stages[0] ? pl.stages[0].id : ''; };
@@ -343,7 +369,8 @@ function NoteReplies({a, onUpdate, canReply, canRemove}){
   const users = React.useMemo(() => hub ? mentionUsers(hub.data) : [], [hub && hub.data.users]);
   const [text, setText] = React.useState('');
   const [files, setFiles] = React.useState([]);
-  const [writing, setWriting] = React.useState(null);   // null, 'top' (a new reply) or the id of the reply being answered
+  // Opened to reply (the trail's Reply icon — DetailIntentCtx 'reply'): the reply box is open from the start.
+  const [writing, setWriting] = React.useState(React.useContext(DetailIntentCtx) === 'reply' ? 'top' : null);   // null, 'top' (a new reply) or the id of the reply being answered
   const [removing, setRemoving] = React.useState(null);
   const replies = a.replies || [];
   const top = replies.filter(r => !r.parentId || !replies.some(p => p.id === r.parentId));
@@ -412,28 +439,30 @@ function NoteDetail({a, contact, calls, onUpdate, onStub, across}){
   const [editing, setEditing] = React.useState(false);
   // Edited in the rich text editor (a plain note saved before opens as paragraphs).
   const [text, setText] = React.useState(richHtmlOf(a.body || ''));
-  const [support, setSupport] = React.useState(!!a.support);
+  const [noteType, setNoteType] = React.useState(noteTypeOf(a));
   const hub = useRecordHub(), tagged = useMentionNotify();
   const users = React.useMemo(() => hub ? mentionUsers(hub.data) : [], [hub && hub.data.users]);
   const call = a.callId && calls.find(c => c.id === a.callId);
   const meeting = a.meetingId && calls.find(c => c.id === a.meetingId);
   const task = a.taskId && calls.find(c => c.id === a.taskId);
-  const cancel = () => { setText(richHtmlOf(a.body || '')); setSupport(!!a.support); setEditing(false); };
+  const cancel = () => { setText(richHtmlOf(a.body || '')); setNoteType(noteTypeOf(a)); setEditing(false); };
   const save = () => { const body = sanitizeRichText(text), changed = body !== sanitizeRichText(richHtmlOf(a.body || ''));
-    onUpdate(a.id, {...(changed ? noteEditPatch(a, body, contact) : {}), support, ...withMentions(a, tagged(a.body, body))}); setEditing(false); };
-  const dirty = !richIsEmpty(text) && (sanitizeRichText(text) !== sanitizeRichText(richHtmlOf(a.body || '')) || support !== !!a.support);
+    onUpdate(a.id, {...(changed ? noteEditPatch(a, body, contact) : {}), ...noteTypePatch(noteType), ...withMentions(a, tagged(a.body, body))}); setEditing(false); };
+  const dirty = !richIsEmpty(text) && (sanitizeRichText(text) !== sanitizeRichText(richHtmlOf(a.body || '')) || noteType !== noteTypeOf(a));
   return (
     <DetailFrame editing={editing} head={detailHead(a, contact, across)} actions={editing ? saveBar(cancel, save, dirty)
       : activityEditBar(a, ()=>setEditing(true), detailMenu({a, onUpdate, onStub, own:[stubItem('Copy Note', onStub, 'copy')], runProfile:true, deleteLabel:'Delete Note'}))}>
       <div style={{display:'flex', flexDirection:'column', gap:12}}>
-        {!editing && a.support && <SupportNoteTag/>}
+        {!editing && <NoteTypeTag a={a}/>}
+        {/* A HubSpot note keeps its type. */}
+        {editing && noteTypeOf(a) !== 'hubspot' && <Field label="Note Type" required><NoteTypeRadios name={`note-type-${a.id}`} value={noteType} onChange={setNoteType}/></Field>}
         {!editing && recordFirst(across)}
         {/* A note saved from a call keeps that context. */}
         {!editing && a.callId && <div style={{fontSize:12, color:T.attioMuted}}>Linked to call{call ? ` · ${fmtActStamp(call.at)}` : ''}</div>}
         {!editing && a.meetingId && <div style={{fontSize:12, color:T.attioMuted}}>Linked to meeting{meeting ? ` · ${fmtActStamp(meeting.at)}` : ''}</div>}
         {!editing && a.taskId && <div style={{fontSize:12, color:T.attioMuted}}>Linked to task{task && task.title ? ` · ${task.title}` : ''}</div>}
         {editing
-          ? <><div data-mentions="1"><RichTextEditor value={text} onChange={setText} minHeight={180} ariaLabel="Note"/></div><SupportNoteSwitch on={support} onChange={setSupport}/></>
+          ? <><div data-mentions="1"><RichTextEditor value={text} onChange={setText} minHeight={180} ariaLabel="Note"/></div></>
           : <RichTextView html={a.body} mentions={users} style={{fontSize:13.5, lineHeight:1.65}}/>}
         {!editing && <NoteEdited n={a} contact={contact}/>}
         {!editing && personLed(across) && stack(recordFields(across))}
@@ -525,13 +554,41 @@ function ActivityNotes({a, contact, notes, link, onUpdate, onAdd, own}){
 // A meeting's link, opened in a new tab.
 const meetingHref = (url) => /^https?:\/\//i.test(url) ? url : `https://${url}`;
 
+/* A Call back request's date and time (Log Call, a call log's edit, a workflow's Log Call): both asked, and still to come. */
+function CallBackFields({value, onChange}){
+  const set = (p) => onChange({...value, ...p});
+  return (<>
+    <Field label="Call Back Date" required><DateField required value={value.date} onChange={v=>set({date:v})} ariaLabel="Call back date"/></Field>
+    <Field label="Call Back Time" required><TimeField required value={value.time} onChange={v=>set({time:v})} ariaLabel="Call back time"/></Field>
+    {value.date && value.time && !callBackReady(value) && <div style={{fontSize:12, color:T.red}}>Choose a date and time that haven't passed.</div>}
+  </>);
+}
+/* Connected, not qualified (2026-11-20): its Not Qualified Reason (Log Call, a call log's edit, a
+   workflow's Log Call) — the Lead property's options as Settings → Properties has them
+   (dataModel.jsx `notQualifiedReason`). `data`: the settings, where the record hub isn't at hand. */
+const notQualifiedReasonOptions = (data) => { const p = ((data && data.properties) || []).find(x => x.objectId === 'contacts' && x.key === 'notQualifiedReason');
+  return p && (p.options || []).length ? p.options : NOT_QUALIFIED_REASONS; };
+function NotQualifiedReasonField({value, onChange, data}){
+  const hub = useRecordHub();
+  return <Field label="Not Qualified Reason" required><Select value={value} options={notQualifiedReasonOptions(data || (hub && hub.data))} placeholder="Select reason" onChange={onChange} ariaLabel="Not Qualified Reason"/></Field>;
+}
+/* The reason goes on the lead — the record the call is on (`on`: {object, record}), or a deal's or
+   customer's person (its first lead); none: nothing. Through the record's own update
+   (hub.updateRecord), so it's kept as a Property change. */
+const setLeadNotQualified = (hub, on, reason) => {
+  if(!hub || !hub.updateRecord || !on || !on.record || !reason) return;
+  const leadId = on.object === 'contacts' ? on.record.id : personIdOf(on.record);
+  const lead = leadId == null ? null : ((hub.records && hub.records.contacts) || []).find(c => String(c.id) === String(leadId));
+  if(lead && lead.notQualifiedReason !== reason) hub.updateRecord('contacts', lead.id, {notQualifiedReason:reason});
+};
 /* A call: "Call" (made through the system — its person and outcome are the real record and
    stay fixed) or "Call log" (entered by hand — person and outcome editable). Its Notes follow
    the details (ActivityNotes). */
 /* `across`: {object, record} when calls from different records are shown together (Tools →
    Calls) — the record leads: "Call to [Record]", and the details add its name and type. */
 function CallDetail({a, contact, team, comments, onUpdate, onAdd, onStub, across}){
-  const blank = () => ({type:callTypeOf(a), poc:callPocValue(a, contact), outcome:a.outcome});
+  const hub = useRecordHub(), ra = useRecordAccess();
+  const blank = () => ({type:callTypeOf(a), poc:callPocValue(a, contact), outcome:a.outcome, reason:a.notQualifiedReason || null});
   const [editing, setEditing] = React.useState(false);
   const [d, setD] = React.useState(blank);
   const set = (p) => setD(x => ({...x, ...p}));
@@ -543,12 +600,23 @@ function CallDetail({a, contact, team, comments, onUpdate, onAdd, onStub, across
     if(a.logged){
       if(d.poc && placed(d)) Object.assign(patch, callPatch(d.type, d.poc));
       if(d.outcome !== a.outcome) patch.outcome = d.outcome;
+      // Connected, not qualified: its reason, on the call; under another outcome the call keeps none.
+      if(notQualified ? reasonChanged : a.notQualifiedReason) patch.notQualifiedReason = notQualified ? d.reason : null;
     }
     if(Object.keys(patch).length) onUpdate(a.id, patch);
-    setEditing(false);
+    // …and on the lead (setLeadNotQualified).
+    if(notQualified && (reasonChanged || d.outcome !== a.outcome)) setLeadNotQualified(hub, ra, d.reason);
+    // Changed to Call back request: its task, for when they said (activities.jsx callBackTask).
+    if(asksBack) onAdd({id:newId('task'), source:'you', by:null, ...callBackTask(contact && contact.name, d.poc || callPocValue(a, contact), back, a.id)});
+    setBack({date:'', time:''}); setEditing(false);
   };
+  const [back, setBack] = React.useState({date:'', time:''});
+  const asksBack = a.logged && d.outcome === CALL_BACK_OUTCOME && a.outcome !== CALL_BACK_OUTCOME;
+  // Connected, not qualified: its Not Qualified Reason is asked (the call's own, to start with).
+  const notQualified = a.logged && d.outcome === CALL_NOT_QUALIFIED_OUTCOME;
+  const reasonChanged = notQualified && (d.reason || null) !== (a.notQualifiedReason || null);
   // Save only once something has actually changed — the same rule for every detail.
-  const dirty = a.logged && ((d.poc && placed(d)) || d.outcome !== a.outcome);
+  const dirty = a.logged && !!d.outcome && ((d.poc && placed(d)) || d.outcome !== a.outcome || reasonChanged) && (!asksBack || callBackReady(back)) && (!notQualified || !!d.reason);
   const record = across && across.record;
   const head = detailHead(a, contact, across);
   return (
@@ -559,17 +627,20 @@ function CallDetail({a, contact, team, comments, onUpdate, onAdd, onStub, across
         {!editing && recordFirst(across)}
         {/* Edit mode shows only what can be edited: call type, point of contact and outcome on
             a call log. */}
-        {editing ? (a.logged && <Field label="Call Type"><Select value={d.type} options={CALL_TYPES} onChange={v=>v && set({type:v})}/></Field>)
+        {editing ? (a.logged && <Field label="Call Type" required><Select value={d.type} options={CALL_TYPES} onChange={v=>v && set({type:v})}/></Field>)
                  : <Field label="Call Type"><ReadValue>{callTypeOf(a)}</ReadValue></Field>}
         {/* Tools → Calls is the current user's view: no point of contact there. */}
-        {(!across || personLed(across)) && (editing ? (a.logged && <Field label="Point of Contact"><Select value={d.poc} options={pocOptions(team, contact)} placeholder="Select person" onChange={v=>v && set({poc:v})}/></Field>)
+        {(!across || personLed(across)) && (editing ? (a.logged && <Field label="Point of Contact" required><Select value={d.poc} options={pocOptions(team, contact)} placeholder="Select person" onChange={v=>v && set({poc:v})}/></Field>)
                  : <Field label="Point of Contact"><PersonValue person={callPointOfContact(a, contact)}/></Field>)}
         {!editing && across && !across.hideType && <>
           <Field label="Record Name"><div style={{paddingTop:7, fontSize:13, display:'flex'}}>{record ? <HubRecordLink object={across.object} id={record.id} name={record.name}/> : '—'}</div></Field>
           {!across.hideType && <Field label="Record Type"><ReadValue>{HUB_NOUN[across.object]}</ReadValue></Field>}
         </>}
-        {editing ? (a.logged && <Field label="Call Outcome"><Select value={d.outcome} options={LOG_CALL_OUTCOMES} placeholder="Select outcome" onChange={v=>set({outcome:v})}/></Field>)
+        {editing ? (a.logged && <Field label="Call Outcome" required><Select value={d.outcome} options={LOG_CALL_OUTCOMES} placeholder="Select outcome" onChange={v=>set({outcome:v})}/></Field>)
                  : <Field label="Call Outcome"><ReadValue>{a.outcome}</ReadValue></Field>}
+        {editing && asksBack && <CallBackFields value={back} onChange={setBack}/>}
+        {editing ? (notQualified && <NotQualifiedReasonField value={d.reason} onChange={v=>set({reason:v})}/>)
+                 : (a.notQualifiedReason && <Field label="Not Qualified Reason"><ReadValue>{a.notQualifiedReason}</ReadValue></Field>)}
         {!editing && across && timeStampField(a.at)}
       </>)}
       {!editing && <ActivityNotes a={a} contact={contact} notes={comments} link="callId" onUpdate={onUpdate} onAdd={onAdd}
@@ -633,13 +704,13 @@ function EmailLogDetail({a, contact, team, onUpdate, onStub, across}){
       : activityEditBar(a, ()=>{ setD(blank()); setEditing(true); }, detailMenu({a, onUpdate, onStub, runProfile:true, deleteLabel:'Delete Email Log'}))}>
       {stack(<>
         {!editing && recordFirst(across)}
-        <Field label="Email Type">{editing ? <Select value={d.type} options={EMAIL_TYPES} onChange={v=>v && set({type:v})}/> : <ReadValue>{emailTypeOf(a)}</ReadValue>}</Field>
+        <Field label="Email Type" required={editing}>{editing ? <Select value={d.type} options={EMAIL_TYPES} onChange={v=>v && set({type:v})}/> : <ReadValue>{emailTypeOf(a)}</ReadValue>}</Field>
         {/* A Tools page from the current user's side: no point of contact there (as a call log). */}
-        {(!across || personLed(across)) && <Field label="Point of Contact">{editing
+        {(!across || personLed(across)) && <Field label="Point of Contact" required={editing}>{editing
           ? <Select value={d.poc} options={pocOptions(team, contact)} placeholder="Select person" onChange={v=>v && set({poc:v})}/>
           : <PersonValue person={callPointOfContact(a, contact)}/>}</Field>}
-        <Field label="Subject">{editing ? <input value={d.title} onChange={e=>set({title:e.target.value})} style={fieldText}/> : <ReadValue>{a.title}</ReadValue>}</Field>
-        <Field label="Content">{editing
+        <Field label="Subject" required={editing}>{editing ? <input value={d.title} onChange={e=>set({title:e.target.value})} style={fieldText}/> : <ReadValue>{a.title}</ReadValue>}</Field>
+        <Field label="Content" required={editing}>{editing
           ? <textarea value={d.body} onChange={e=>set({body:e.target.value})} rows={8} style={{...fieldText, resize:'vertical', lineHeight:1.5}}/>
           : <ReadValue>{a.body}</ReadValue>}</Field>
         {!editing && personLed(across) && recordFields(across)}
@@ -652,12 +723,13 @@ function EmailLogDetail({a, contact, team, onUpdate, onStub, across}){
 // Its Notes (linked by taskId) follow the details (ActivityNotes), as a call's and a meeting's.
 function TaskDetail({a, contact, team, comments = [], onUpdate, onAdd, onStub, across}){
   const hub = useRecordHub();
-  const blank = () => ({title:a.title || '', description:a.description || '', pipelineId:taskPipelineIdOf(a), status:a.status, taskType:a.taskType, assignee:a.assignee, dueDate:taskDueParts(a).date, dueTimeOfDay:taskDueParts(a).time});
+  const blank = () => ({title:a.title || '', description:a.description || '', pipelineId:taskPipelineIdOf(a), status:a.status, taskType:taskTypeOf(a), assignee:a.assignee, dueDate:taskDueParts(a).date, dueTimeOfDay:taskDueParts(a).time, allowedMin:a.allowedMin || null});
   const [editing, setEditing] = React.useState(false);
   const [d, setD] = React.useState(blank);
   const set = (p) => setD(x => ({...x, ...p}));
   const cancel = () => { setD(blank()); setEditing(false); };
-  const save = () => { const {dueDate, dueTimeOfDay, ...rest} = d; onUpdate(a.id, {...rest, ...taskDueValue(dueDate, dueTimeOfDay), title:d.title.trim(), description:d.description.trim()});
+  const save = () => { const {dueDate, dueTimeOfDay, allowedMin, ...rest} = d;
+    onUpdate(a.id, withTaskStart(a, {...rest, ...taskDueValue(dueDate, dueTimeOfDay), allowedMin:allowedMin || undefined, title:d.title.trim(), description:d.description.trim()}));
     // A new assignee is kept in the record's history (Task reassigned: from → to).
     if(hub && d.assignee !== a.assignee){ const [object, id] = a.customerId != null ? ['customers', a.customerId] : a.dealId != null ? ['deals', a.dealId] : ['contacts', a.contactId];
       hub.add(object, id, {type:'taskReassigned', taskId:a.id, taskTitle:d.title.trim(), from:a.assignee || null, to:d.assignee || null, source:'you', by:CURRENT_USER.name}); }
@@ -671,21 +743,25 @@ function TaskDetail({a, contact, team, comments = [], onUpdate, onAdd, onStub, a
     ...(a.status === 'onHold' ? [['Resume', 'inProgress']] : [['Put on Hold', 'onHold']]),
     ['Complete', 'completed']];
   return (
-    <DetailFrame editing={editing} head={activityHead(a, contact)} actions={editing ? saveBar(cancel, save, !!d.title.trim() && dirty)
-      : <>{steps.map(([label, status]) => <React.Fragment key={label}>{headerBtn(label, ()=>onUpdate(a.id, {status}))}</React.Fragment>)}
+    <DetailFrame editing={editing} head={activityHead(a, contact)} actions={editing ? saveBar(cancel, save, !!d.title.trim() && !!d.dueDate && dirty)
+      : <>{steps.map(([label, status]) => <React.Fragment key={label}>{headerBtn(label, ()=>onUpdate(a.id, withTaskStart(a, {status})))}</React.Fragment>)}
         {activityEditBar(a, ()=>{ setD(blank()); setEditing(true); }, detailMenu({a, onUpdate, onStub, own:[stubItem('Reassign Task', onStub, 'userSwitch'), stubItem('Copy Task Description', onStub, 'copy')], deleteLabel:'Delete Task'}))}</>}>
       {stack(<>
         {!editing && recordFirst(across)}
-        <Field label="Task Name">{editing ? <input value={d.title} onChange={e=>set({title:e.target.value})} style={fieldText}/> : <ReadValue>{a.title}</ReadValue>}</Field>
+        {/* Its type first, as its tag (2026-11-23). */}
+        {!editing && <Field label="Task Type"><div style={{paddingTop:6, display:'flex', gap:8}}><TaskTypeTag a={a}/>{isOverdue(a) && <TaskDueTag/>}</div></Field>}
+        <Field label="Task Name" required={editing}>{editing ? <input value={d.title} onChange={e=>set({title:e.target.value})} style={fieldText}/> : <ReadValue>{a.title}</ReadValue>}</Field>
         <Field label="Description">{editing
           ? <textarea value={d.description} onChange={e=>set({description:e.target.value})} rows={3} style={{...fieldText, resize:'vertical', lineHeight:1.5}}/>
           : <ReadValue>{a.description}</ReadValue>}</Field>
-        <Field label="Status">{editing ? <TaskStatusRadios name={`status-${a.id}`} pipelineId={d.pipelineId} value={d.status} overdue={d.status !== 'completed' && isPastDue(taskDueValue(d.dueDate, d.dueTimeOfDay))} onChange={v=>set({status:v})}/>
-          : <span style={{fontSize:13, paddingTop:7, display:'block', color: taskState(a) === 'overdue' ? T.red : T.attioText}}>{taskStateLabel(a)}</span>}</Field>
-        <Field label="Task Type">{editing ? <Select value={d.taskType} options={TASK_TYPES} onChange={v=>v && set({taskType:v})}/> : <ReadValue>{a.taskType}</ReadValue>}</Field>
-        <Field label="Assigned to">{editing ? <Select value={d.assignee} options={team} placeholder="Select person" onChange={v=>v && set({assignee:v})}/> : <ReadValue>{a.assignee}</ReadValue>}</Field>
+        <Field label="Status" required={editing}>{editing ? <TaskStatusRadios name={`status-${a.id}`} pipelineId={d.pipelineId} value={d.status} overdue={d.status !== 'completed' && isPastDue(taskDueValue(d.dueDate, d.dueTimeOfDay))} onChange={v=>set({status:v})}/>
+          : <span style={{fontSize:13, paddingTop:7, display:'block', color: taskState(a) === 'overdue' ? T.red : T.attioText}}>{taskStateLabel(a)}<TaskTimeLeft a={a} style={{marginLeft:10}}/></span>}</Field>
+        {editing && <Field label="Task Type" required><TaskTypeRadios name={`type-${a.id}`} value={d.taskType} onChange={v=>set({taskType:v})}/></Field>}
+        <Field label="Assigned to" required={editing}>{editing ? <Select value={d.assignee} options={team} placeholder="Select person" onChange={v=>v && set({assignee:v})}/> : <ReadValue>{a.assignee}</ReadValue>}</Field>
         {editing ? <TaskDueFields date={d.dueDate} time={d.dueTimeOfDay} onChange={(date, time)=>set({dueDate:date, dueTimeOfDay:time})}/>
-          : <Field label="Due">{a.due ? <ReadValue>{fmtTaskDue(a)}{isOverdue(a) ? ' · Overdue' : ''}</ReadValue> : <ReadValue>No due date</ReadValue>}</Field>}
+          : <Field label="Due">{a.due ? <ReadValue>{fmtTaskDue(a)}{isOverdue(a) ? ' · Due date passed' : ''}</ReadValue> : <ReadValue>No due date</ReadValue>}</Field>}
+        {editing ? <TaskTimeAllowedField value={d.allowedMin} onChange={(v)=>set({allowedMin:v})}/>
+          : a.allowedMin > 0 && <Field label="Time Allowed"><ReadValue>{taskTimeLabel(a.allowedMin)}</ReadValue></Field>}
         {!editing && <Field label="Assigned by"><PersonValue person={activityActor(a, contact)}/></Field>}
       </>)}
       {!editing && onAdd && <ActivityNotes a={a} contact={contact} notes={comments} link="taskId" onUpdate={onUpdate} onAdd={onAdd}/>}
@@ -748,8 +824,9 @@ function MeetingDetail({a, contact, team, comments, onUpdate, onAdd, onStub, acr
   const [d, setD] = React.useState(blank);
   const set = (p) => setD(x => ({...x, ...p}));
   const orig = blank();
-  const dirty = (a.logged && (d.organiser !== orig.organiser || d.platform !== orig.platform || d.title.trim() !== orig.title))
-    || d.link.trim() !== orig.link;
+  // A logged meeting keeps its platform and title (required).
+  const dirty = (!a.logged || (!!d.platform && !!d.title.trim())) && ((a.logged && (d.organiser !== orig.organiser || d.platform !== orig.platform || d.title.trim() !== orig.title))
+    || d.link.trim() !== orig.link);
   const cancel = () => { setD(blank()); setEditing(false); };
   const save = () => {
     const patch = {};
@@ -783,8 +860,8 @@ function MeetingDetail({a, contact, team, comments, onUpdate, onAdd, onStub, acr
       : <>{canMove && headerBtn('Reschedule', ()=>setMoving(whenParts()))}{activityEditBar(a, ()=>{ setD(blank()); setEditing(true); }, detailMenu({a, onUpdate, onStub, deleteLabel: a.logged ? 'Delete Meeting Log' : 'Delete Meeting'}))}</>}>
       {!editing && !moving && a.officeRequest && <OfficeRequestBlock a={a} onUpdate={onUpdate}/>}
       {moving && stack(<>
-        <Field label="Date"><DateField required value={moving.date} onChange={v=>setMoving(m => ({...m, date:v}))} ariaLabel="New meeting date"/></Field>
-        <Field label="Time"><TimeField required value={moving.time} onChange={v=>setMoving(m => ({...m, time:v}))} ariaLabel="New meeting time"/></Field>
+        <Field label="Date" required><DateField required value={moving.date} onChange={v=>setMoving(m => ({...m, date:v}))} ariaLabel="New meeting date"/></Field>
+        <Field label="Time" required><TimeField required value={moving.time} onChange={v=>setMoving(m => ({...m, time:v}))} ariaLabel="New meeting time"/></Field>
       </>)}
       {!moving && stack(<>
         {!editing && recordFirst(across)}
@@ -793,11 +870,11 @@ function MeetingDetail({a, contact, team, comments, onUpdate, onAdd, onStub, acr
             header; Notes follow. Edit: organiser, platform, title (logs only) and link. */}
         {!editing && <Field label="Title"><ReadValue>{a.title}</ReadValue></Field>}
         {!editing && (a.attendees || []).length > 0 && <Field label="Attendees"><ReadValue>{attendeesText(a.attendees)}</ReadValue></Field>}
-        {editing && a.logged && <Field label="Organizer"><Select value={d.organiser} options={teamOptions} onChange={v=>v && set({organiser:v})}/></Field>}
-        {editing ? (a.logged && <Field label="Platform"><Select value={d.platform} options={MEETING_PLATFORMS} placeholder="Select platform" onChange={v=>set({platform:v})}/></Field>)
+        {editing && a.logged && <Field label="Organizer" required><Select value={d.organiser} options={teamOptions} onChange={v=>v && set({organiser:v})}/></Field>}
+        {editing ? (a.logged && <Field label="Platform" required><Select value={d.platform} options={MEETING_PLATFORMS} placeholder="Select platform" onChange={v=>set({platform:v})}/></Field>)
                  : <Field label="Platform"><ReadValue>{a.platform}</ReadValue></Field>}
         {!editing && <Field label="Transcript"><MeetingTranscript a={a} onUpdate={onUpdate}/></Field>}
-        {editing && a.logged && <Field label="Title"><input value={d.title} onChange={e=>set({title:e.target.value})} style={fieldText}/></Field>}
+        {editing && a.logged && <Field label="Title" required><input value={d.title} onChange={e=>set({title:e.target.value})} style={fieldText}/></Field>}
         {editing && <Field label="Link"><input value={d.link} onChange={e=>set({link:e.target.value})} placeholder="Meeting link" style={fieldText}/></Field>}
         {!editing && personLed(across) && recordFields(across)}
         {!editing && <Field label="Time Stamp"><ReadValue>{fmtActStamp(a.at)}</ReadValue></Field>}
@@ -840,19 +917,19 @@ function OfficeMeetingRequestModal({object, record, onClose}){
     const who = users.find(u => u.id === approver);
     const a = hub.add(object, record.id, {type:'meeting', title:`Office meeting · ${record.name}`, at, scheduledFor:at, durationMin:Number(duration), platform:'Office', location:office.address.trim(),
       status:'requested', source:'you', by:CURRENT_USER.name, officeRequest:{approverId:approver, approverName:who ? who.name : '', requestedBy:CURRENT_USER.name, requestedAt:new Date().toISOString(), note:note.trim(), status:'pending'}});
-    if(engineCtx && engineCtx.api.notifyUsers) engineCtx.api.notifyUsers([approver], record.name, `${CURRENT_USER.name} asks you to meet ${record.name} at the office on ${fmtActStamp(at)}.${note.trim() ? `\n${note.trim()}` : ''}`, record.id, 'meetings');
+    if(engineCtx && engineCtx.api.notifyUsers) engineCtx.api.notifyUsers([approver], record.name, `${CURRENT_USER.name} asks you to meet ${record.name} at the office on ${fmtActStamp(at)}.${note.trim() ? `\n${note.trim()}` : ''}`, record.id, 'meetings', 'officeRequest');
     hub.toast(`Request sent to ${who ? who.name : 'the approver'}`);
     onClose(a && a.id);
   };
   return ReactDOM.createPortal(
     <StModal title="Request Office Meeting" primary="Send Request" canSubmit={ok} onCancel={()=>onClose()} onSubmit={send} width={520}>
       <div style={{display:'flex', flexDirection:'column', gap:14}}>
-        <div><label style={fieldLabel}>Meets the Client</label>
+        <div><label style={fieldLabel}>Meets the Client<Req/></label>
           <SearchableSelect value={approver} options={users.map(u => ({value:u.id, label:u.name, sub:u.email, search:u.email}))} placeholder="Select a colleague" searchPlaceholder="Search users" onChange={setApprover}/></div>
         <div style={{display:'flex', gap:12}}>
-          <div style={{flex:1}}><label style={fieldLabel}>Date</label><DateField required value={date} onChange={setDate} ariaLabel="Meeting date"/></div>
-          <div style={{flex:1}}><label style={fieldLabel}>Time</label><TimeField required value={time} onChange={setTime} ariaLabel="Meeting time"/></div>
-          <div style={{flex:1}}><label style={fieldLabel}>Duration</label><FormSelect value={duration} options={OFFICE_DURATIONS} onChange={(v)=>v && setDuration(v)}/></div>
+          <div style={{flex:1}}><label style={fieldLabel}>Date<Req/></label><DateField required value={date} onChange={setDate} ariaLabel="Meeting date"/></div>
+          <div style={{flex:1}}><label style={fieldLabel}>Time<Req/></label><TimeField required value={time} onChange={setTime} ariaLabel="Meeting time"/></div>
+          <div style={{flex:1}}><label style={fieldLabel}>Duration<Req/></label><FormSelect value={duration} options={OFFICE_DURATIONS} onChange={(v)=>v && setDuration(v)}/></div>
         </div>
         <div><label style={fieldLabel}>Office</label>
           <div style={{fontSize:13, color: office.address.trim() ? T.attioText : T.red, lineHeight:1.5}}>{office.address.trim() || 'No office address yet: set it in Settings → Meetings.'}</div></div>
@@ -866,7 +943,7 @@ function OfficeRequestBlock({a, onUpdate}){
   const hub = useRecordHub(), engineCtx = useWorkflowEngineCtx(), ra = useRecordAccess();
   const r = a.officeRequest, me = (hub.data.users || []).find(u => u.name === CURRENT_USER.name);
   const mine = !!me && me.id === r.approverId && r.status === 'pending';
-  const notify = (ids, text) => engineCtx && engineCtx.api.notifyUsers && engineCtx.api.notifyUsers(ids, ra ? ra.record.name : 'Office meeting', text, ra ? ra.record.id : null, 'meetings');
+  const notify = (ids, text) => engineCtx && engineCtx.api.notifyUsers && engineCtx.api.notifyUsers(ids, ra ? ra.record.name : 'Office meeting', text, ra ? ra.record.id : null, 'meetings', 'officeAnswer');
   const requesterId = ((hub.data.users || []).find(u => u.name === r.requestedBy) || {}).id;
   const approve = () => {
     if(!ra) return;
@@ -972,7 +1049,7 @@ function OwnerChangeDetail({a, contact, team, onReassign}){
     <DetailFrame editing={editing} head={activityHead(a, contact)} actions={editing ? saveBar(cancel, save, !!owner && owner !== contact.owner) : editBar(()=>{ setOwner(contact.owner || null); setEditing(true); })}>
       {stack(<>
         {editing
-          ? <Field label="Reassign Owner"><Select value={owner} options={team} placeholder="Select owner" onChange={setOwner}/></Field>
+          ? <Field label="Reassign Owner" required><Select value={owner} options={team} placeholder="Select owner" onChange={setOwner}/></Field>
           : <>
               <Field label="Previous Owner"><ReadValue>{userLabel(a.from)}</ReadValue></Field>
               <Field label="New Owner"><ReadValue>{userLabel(a.to)}</ReadValue></Field>
@@ -999,13 +1076,29 @@ function ActivityDetail({a, contact, team, acts, onUpdate, onAdd, onStub, onReas
   return null;
 }
 
-/* A task's due date and, optionally, a time on it (the time needs a date). */
+/* A task's due date (required, 2026-11-23) and, optionally, a time on it. */
 function TaskDueFields({date, time, onChange}){
   return (<>
-    <Field label="Due Date"><DateField value={date} onChange={(v)=>onChange(v, v ? time : '')} ariaLabel="Due date"/></Field>
+    <Field label="Due Date" required><DateField value={date} onChange={(v)=>onChange(v, v ? time : '')} ariaLabel="Due date"/></Field>
     <Field label="Due Time"><div style={{opacity: date ? 1 : .5, pointerEvents: date ? 'auto' : 'none'}}>
       <TimeField value={time} onChange={(v)=>onChange(date, v)} ariaLabel="Due time"/></div></Field>
   </>);
+}
+/* A task's Time Allowed (`allowedMin`, minutes; null when not set) — after Due Time on the new
+   task's form and the task's edit form. */
+function TaskTimeAllowedField({value, onChange}){
+  return <Field label="Time Allowed"><Select value={value} options={TASK_TIME_OPTIONS} placeholder="Select time" onChange={onChange} ariaLabel="Time allowed"/></Field>;
+}
+// Re-renders once a minute while `on` (something that counts minutes is showing).
+function useMinuteTick(on){
+  const [, setTick] = React.useState(0);
+  React.useEffect(() => { if(!on) return; const t = setInterval(() => setTick(n => n + 1), 60000); return () => clearInterval(t); }, [on]);
+}
+// How an In Progress task stands against its Time Allowed: "25 min left" (muted), "Over time · 10 min" (red); else nothing.
+function TaskTimeLeft({a, style}){
+  const st = taskTimeState(a);
+  useMinuteTick(!!st);
+  return st ? <span style={{color: st.over ? T.red : T.attioMuted, ...style}}>{st.label}</span> : null;
 }
 
 /* ── New items (right pane) — same frame: the form's title and Cancel / Save in the header ── */
@@ -1061,7 +1154,7 @@ function CreatePanelFrame({title, onClose, top, children, actions, placement, wi
 // The record a new activity is for (Tools pages): Record Type, then the record.
 function CreateRecordField({value, onChange}){
   return (
-    <Field label="Record Type" wide><RecordPicker value={value} onChange={onChange}/></Field>
+    <Field label="Record Type" wide required><RecordPicker value={value} onChange={onChange}/></Field>
   );
 }
 function NewItemPanel({title, children, canSave, onSave, onCancel, primary = 'Save'}){
@@ -1079,18 +1172,18 @@ function NewItemPanel({title, children, canSave, onSave, onCancel, primary = 'Sa
 
 /* A note is rich text (richText.jsx — the Quotes and Services editor): bold, italic, underline,
    numbered / bulleted / alphabetical lists and links, kept as HTML in `body`. */
-/* `support`: the Support Note switch starts on (the record's Support Notes tab — 2026-11-19).
+/* Note Type first (2026-11-23): General to start with, Client Request or Support — radios.
    @tags in it notify and email the people tagged (noteTools.jsx). */
-function NewNote({onAdd, onDone, support:startSupport = false}){
+function NewNote({onAdd, onDone}){
   const [html, setHtml] = React.useState('');
-  const [support, setSupport] = React.useState(startSupport);
+  const [noteType, setNoteType] = React.useState('general');
   const tagged = useMentionNotify();
   return (
     <NewItemPanel title="Add Note" primary="Add Note" canSave={!richIsEmpty(html)} onCancel={()=>onDone(null)}
       onSave={()=>{ const id = newId('note'), body = sanitizeRichText(html);
-        onAdd({id, type:'note', source:'you', by:null, body, ...(support ? {support:true} : {}), ...withMentions(null, tagged('', body, 'a note'))}); onDone(id); }}>
-      <Field label="Note"><div data-mentions="1"><RichTextEditor value={html} onChange={setHtml} placeholder="Write a note" minHeight={180} ariaLabel="Note"/></div></Field>
-      <SupportNoteSwitch on={support} onChange={setSupport}/>
+        onAdd({id, type:'note', source:'you', by:null, body, ...noteTypePatch(noteType), ...withMentions(null, tagged('', body, 'a note'))}); onDone(id); }}>
+      <Field label="Note Type" required><NoteTypeRadios name="note-type-new" value={noteType} onChange={setNoteType}/></Field>
+      <Field label="Note" required><div data-mentions="1"><RichTextEditor value={html} onChange={setHtml} placeholder="Write a note" minHeight={180} ariaLabel="Note"/></div></Field>
     </NewItemPanel>
   );
 }
@@ -1101,17 +1194,27 @@ function NewLogCall({contact, team, onAdd, onDone, fixedPoc}){
   // The point of contact (the call's responsible person): the record owner unless another is picked.
   const [poc, setPoc] = useOwnerDefault(contact, team, fixedPoc);
   const [outcome, setOutcome] = React.useState(null);
-  const ok = !!type && !!poc && !!outcome;
+  const [back, setBack] = React.useState({date:'', time:''});   // Call back request: when to call back
+  const asksBack = outcome === CALL_BACK_OUTCOME;
+  const [reason, setReason] = React.useState(null);   // Connected, not qualified: its Not Qualified Reason
+  const notQualified = outcome === CALL_NOT_QUALIFIED_OUTCOME;
+  const hub = useRecordHub(), ra = useRecordAccess();
+  const ok = !!type && !!poc && !!outcome && (!asksBack || callBackReady(back)) && (!notQualified || !!reason);
   const save = () => {
     const id = newId('call');
-    onAdd({id, type:'call', logged:true, outcome, durationMin:0, body:'', ...callPatch(type, poc)});
+    onAdd({id, type:'call', logged:true, outcome, ...(notQualified ? {notQualifiedReason:reason} : {}), durationMin:0, body:'', ...callPatch(type, poc)});
+    if(asksBack) onAdd({id:newId('task'), source:'you', by:null, ...callBackTask(contact && contact.name, poc, back, id)});
+    // The reason goes on the lead too (setLeadNotQualified).
+    if(notQualified) setLeadNotQualified(hub, ra, reason);
     onDone(id);
   };
   return (
     <NewItemPanel title="Log Call" canSave={ok} onSave={save} onCancel={()=>onDone(null)}>
-      <Field label="Call Type"><Select value={type} options={CALL_TYPES} placeholder="Select call type" onChange={setType}/></Field>
-      {!fixedPoc && <Field label="Point of Contact"><PersonPicker value={poc} team={team} contact={contact} onChange={setPoc}/></Field>}
-      <Field label="Call Outcome"><Select value={outcome} options={LOG_CALL_OUTCOMES} placeholder="Select outcome" onChange={setOutcome}/></Field>
+      <Field label="Call Type" required><Select value={type} options={CALL_TYPES} placeholder="Select call type" onChange={setType}/></Field>
+      {!fixedPoc && <Field label="Point of Contact" required><PersonPicker value={poc} team={team} contact={contact} onChange={setPoc}/></Field>}
+      <Field label="Call Outcome" required><Select value={outcome} options={LOG_CALL_OUTCOMES} placeholder="Select outcome" onChange={setOutcome}/></Field>
+      {asksBack && <CallBackFields value={back} onChange={setBack}/>}
+      {notQualified && <NotQualifiedReasonField value={reason} onChange={setReason}/>}
     </NewItemPanel>
   );
 }
@@ -1132,10 +1235,10 @@ function NewLogEmail({contact, team, onAdd, onDone}){
   };
   return (
     <NewItemPanel title="Log Email" canSave={ok} onSave={save} onCancel={()=>onDone(null)}>
-      <Field label="Email Type"><Select value={type} options={EMAIL_TYPES} placeholder="Select email type" onChange={setType}/></Field>
-      <Field label="Point of Contact"><PersonPicker value={poc} team={team} contact={contact} onChange={setPoc}/></Field>
-      <Field label="Subject"><input value={m.title} onChange={e=>set({title:e.target.value})} placeholder="Email subject" style={fieldText}/></Field>
-      <Field label="Content"><textarea value={m.body} onChange={e=>set({body:e.target.value})} rows={8} placeholder="What the email said" aria-label="Content" style={{...fieldText, resize:'vertical', lineHeight:1.5}}/></Field>
+      <Field label="Email Type" required><Select value={type} options={EMAIL_TYPES} placeholder="Select email type" onChange={setType}/></Field>
+      <Field label="Point of Contact" required><PersonPicker value={poc} team={team} contact={contact} onChange={setPoc}/></Field>
+      <Field label="Subject" required><input value={m.title} onChange={e=>set({title:e.target.value})} placeholder="Email subject" style={fieldText}/></Field>
+      <Field label="Content" required><textarea value={m.body} onChange={e=>set({body:e.target.value})} rows={8} placeholder="What the email said" aria-label="Content" style={{...fieldText, resize:'vertical', lineHeight:1.5}}/></Field>
     </NewItemPanel>
   );
 }
@@ -1152,10 +1255,10 @@ function NewLogMeeting({contact, team, onAdd, onDone}){
   };
   return (
     <NewItemPanel title="Log Meeting" canSave={ok} onSave={save} onCancel={()=>onDone(null)}>
-      <Field label="Organizer"><PersonPicker value={organiser} team={team} contact={contact} placeholder="Select organizer" onChange={setOrganiser}/></Field>
+      <Field label="Organizer" required><PersonPicker value={organiser} team={team} contact={contact} placeholder="Select organizer" onChange={setOrganiser}/></Field>
       <Field label="Attendees"><AttendeesField value={m.attendees} team={team} contact={contact} onChange={v=>set({attendees:v})}/></Field>
-      <Field label="Platform"><Select value={m.platform} options={MEETING_PLATFORMS} placeholder="Select platform" onChange={v=>set({platform:v})}/></Field>
-      <Field label="Title"><input value={m.title} onChange={e=>set({title:e.target.value})} placeholder="Meeting title" style={fieldText}/></Field>
+      <Field label="Platform" required><Select value={m.platform} options={MEETING_PLATFORMS} placeholder="Select platform" onChange={v=>set({platform:v})}/></Field>
+      <Field label="Title" required><input value={m.title} onChange={e=>set({title:e.target.value})} placeholder="Meeting title" style={fieldText}/></Field>
       <Field label="Link"><input value={m.link} onChange={e=>set({link:e.target.value})} placeholder="Meeting link (optional)" style={fieldText}/></Field>
     </NewItemPanel>
   );
@@ -1179,13 +1282,13 @@ function NewScheduleMeeting({contact, team, onAdd, onDone}){
   };
   return (
     <NewItemPanel title="Schedule Meeting" canSave={ok} onSave={save} onCancel={()=>onDone(null)}>
-      <Field label="Title"><input autoFocus value={m.title} onChange={e=>set({title:e.target.value})} placeholder="Meeting title" style={fieldText}/></Field>
-      <Field label="Platform"><Select value={m.platform} options={MEETING_PLATFORMS} placeholder="Select platform" onChange={v=>set({platform:v})}/></Field>
-      <Field label="Date"><DateField required value={m.date} onChange={v=>set({date:v})} ariaLabel="Meeting date"/></Field>
-      <Field label="Time"><TimeField required value={m.time} onChange={v=>set({time:v})} ariaLabel="Meeting time"/>
+      <Field label="Title" required><input autoFocus value={m.title} onChange={e=>set({title:e.target.value})} placeholder="Meeting title" style={fieldText}/></Field>
+      <Field label="Platform" required><Select value={m.platform} options={MEETING_PLATFORMS} placeholder="Select platform" onChange={v=>set({platform:v})}/></Field>
+      <Field label="Date" required><DateField required value={m.date} onChange={v=>set({date:v})} ariaLabel="Meeting date"/></Field>
+      <Field label="Time" required><TimeField required value={m.time} onChange={v=>set({time:v})} ariaLabel="Meeting time"/>
         {when && !future && <div style={{fontSize:12, color:T.red, marginTop:4}}>Choose a time in the future.</div>}</Field>
-      <Field label="Duration"><Select value={m.duration} options={SCHEDULE_DURATIONS.map(d => d[0])} onChange={v=>v && set({duration:v})}/></Field>
-      <Field label="Organizer"><PersonPicker value={organiser} team={team} contact={contact} placeholder="Select organizer" onChange={setOrganiser}/></Field>
+      <Field label="Duration" required><Select value={m.duration} options={SCHEDULE_DURATIONS.map(d => d[0])} onChange={v=>v && set({duration:v})}/></Field>
+      <Field label="Organizer" required><PersonPicker value={organiser} team={team} contact={contact} placeholder="Select organizer" onChange={setOrganiser}/></Field>
       <Field label="Attendees"><AttendeesField value={m.attendees} team={team} contact={contact} onChange={v=>set({attendees:v})}/></Field>
       <Field label="Description"><textarea value={m.description} onChange={e=>set({description:e.target.value})} rows={3} style={{...fieldText, resize:'vertical', lineHeight:1.5}}/></Field>
     </NewItemPanel>
@@ -1201,26 +1304,28 @@ function NewTask({team, contact, onAdd, onDone, initial}){
     return {title:'', description:'', pipelineId, status:firstStageOf(pipelineId), taskType:'To-do', ...taskDueDefaults(hub && hub.data), ...given}; });
   const [assignee, setAssignee] = useOwnerDefault(contact, team, initial && initial.assignee);
   const set = (p) => setT(x => ({...x, ...p}));
-  const ok = !!t.title.trim() && !!assignee;
+  // No Status here (2026-11-23): a new task is Not Started — its status changes in Edit, or by dragging it on the board.
+  const ok = !!t.title.trim() && !!assignee && !!t.dueDate;
   return (
     <NewItemPanel title="Add Task" primary="Add Task" canSave={ok} onCancel={()=>onDone(null)}
-      onSave={()=>{ const id = newId('task'); const {dueDate, dueTimeOfDay, ...rest} = t;
-        onAdd({id, type:'task', source:'you', by:null, ...rest, assignee, ...taskDueValue(dueDate, dueTimeOfDay), title:t.title.trim(), description:t.description.trim()}); onDone(id); }}>
-      <Field label="Task Name"><input autoFocus value={t.title} onChange={e=>set({title:e.target.value})} placeholder="What needs doing" style={fieldText}/></Field>
+      onSave={()=>{ const id = newId('task'); const {dueDate, dueTimeOfDay, allowedMin, ...rest} = t;
+        // A task added as In Progress is started now (withTaskStart).
+        onAdd(withTaskStart(null, {id, type:'task', source:'you', by:null, ...rest, assignee, ...taskDueValue(dueDate, dueTimeOfDay), ...(allowedMin ? {allowedMin} : {}), title:t.title.trim(), description:t.description.trim()})); onDone(id); }}>
+      <Field label="Task Name" required><input autoFocus value={t.title} onChange={e=>set({title:e.target.value})} placeholder="What needs doing" style={fieldText}/></Field>
       <Field label="Description">
         <textarea value={t.description} onChange={e=>set({description:e.target.value})} rows={3} style={{...fieldText, resize:'vertical', lineHeight:1.5}}/>
       </Field>
-      <Field label="Status"><TaskStatusRadios name="status-new" pipelineId={t.pipelineId} value={t.status} onChange={v=>set({status:v})}/></Field>
-      <Field label="Task Type"><Select value={t.taskType} options={TASK_TYPES} onChange={v=>v && set({taskType:v})}/></Field>
-      <Field label="Assigned to"><PersonPicker value={assignee} team={team} contact={contact} onChange={setAssignee}/></Field>
+      <Field label="Task Type" required><TaskTypeRadios name="type-new" value={t.taskType} onChange={v=>set({taskType:v})}/></Field>
+      <Field label="Assigned to" required><PersonPicker value={assignee} team={team} contact={contact} onChange={setAssignee}/></Field>
       <TaskDueFields date={t.dueDate} time={t.dueTimeOfDay} onChange={(date, time)=>set({dueDate:date, dueTimeOfDay:time})}/>
+      <TaskTimeAllowedField value={t.allowedMin} onChange={(v)=>set({allowedMin:v})}/>
     </NewItemPanel>
   );
 }
 
 /* ── Tab ─────────────────────────────────────────────────────────────────────────────────── */
 
-const ACTIVITY_TAB_TYPES = {activity:null, calls:'call', email:'email', tasks:'task', notes:'note', supportNotes:'note', meetings:'meeting'};   // Meetings: the Deal tabs
+const ACTIVITY_TAB_TYPES = {activity:null, calls:'call', email:'email', tasks:'task', notes:'note', meetings:'meeting'};   // Meetings: the Deal tabs
 
 /* The tab's add action, at the right of the toolbar: a primary button. Where a tab offers more
    than one type, it still opens the list of types. */
@@ -1228,7 +1333,6 @@ const ACTIVITY_ADD = {
   activity: {label:'Add',       menu:['Note', 'Call', 'Log Call', 'Start Meeting', 'Schedule Meeting', 'Log Meeting', 'Task', 'Email', 'Log Email']},
   calls:    {label:'Add Call',  menu:['Call', 'Log Call']},
   notes:    {label:'Add Note',  pick:'Note'},
-  supportNotes: {label:'Add Support Note', pick:'Support Note'},
   email:    {label:'Add Email', menu:['Email', 'Log Email']},
   tasks:    {label:'Add Task',  pick:'Task'},
   meetings: {label:'Add Meeting', menu:['Start Meeting', 'Schedule Meeting', 'Log Meeting', 'Request Office Meeting']},
@@ -1277,27 +1381,67 @@ function ActivityNavItem({a, contact, context, selected, onSelect, record, count
 /* A record's activity as a time trail (2026-11-18): Overview, Calls, Notes, Emails and
    Meetings (Tasks keeps its Table / Board): Upcoming first, then each month, newest first. Each activity has its time and date
    on the left of a rail, its row as before (ActivityRow, without the date), and on the right one
-   action where it has one (Mohsin's list, 2026-11-18):
-     Email sent → Follow Up (the composer, in its thread)  ·  Email received → Reply
-     Email scheduled → Edit (the composer with everything as scheduled, its date and time too; Mohsin
-       2026-11-18 — it was Discard; Delete Email stays in its ⋯)  ·  Email log → none
-     Call or Call log: Connected → Schedule Meeting; No answer, Left voicemail, Disconnected → Call Again
-     Meeting → Add Note (opens it with a new note started)
-     Workflow → Revert, for those with the Workflows · Revert permission while it can still be undone
-     ·  everything else → none.
-   A row opens the activity in its side panel. */
-const trailAction = (a) => {
-  if(a.type === 'email') return a.status === 'scheduled' ? 'edit' : a.logged ? null : a.direction === 'received' ? 'reply' : 'followUp';
-  if(a.type === 'call') return /^connected/i.test(a.outcome || '') ? 'meeting' : /no answer|voicemail|disconnected/i.test(a.outcome || '') ? 'callAgain' : null;
-  if(a.type === 'workflow') return a.runId ? 'revert' : null;
-  return a.type === 'meeting' ? 'note' : null;
+   action where it has one (the stakeholder's list, 2026-11-23 — it replaced Mohsin's of 2026-11-18;
+   on a record's pages only: the Tools pages show no row action, `actions={false}`):
+     Call — the record's latest call only: No answer, Left voicemail, Disconnected, Call back
+       request → Call Again; Connected → none
+     Email — the record's latest sent email only → Follow Up (the composer, in its thread); its
+       latest received email only → Reply; scheduled → Edit; an email log → none
+     Note by someone else → Reply (an icon); one's own → none
+     Task, still open: Email → Send Email (the composer, to the record); Call → Call; To-do, also an
+       overdue one → Mark as Complete; Colleague follow-up → Remind a Colleague (a bell notification
+       to its assignee — Mohsin 2026-11-23; the assignee themself: Mark as Complete)
+     Meeting that has happened → View Details  ·  Workflow → Revert (the Workflows · Revert
+       permission, while it can still be undone)  ·  everything else → none.
+   A row opens the activity in its side panel; the panel's filled button is detailAction. */
+const CALL_UNANSWERED = /no answer|voicemail|disconnected|call back request/i;
+/* A record's latest call, latest email sent and latest email received (through the CRM; a log and a
+   scheduled email aren't counted): the only call and emails whose row carries the action. */
+const trailLatest = (acts) => {
+  const pick = (keep) => { let best = null; (acts || []).forEach(a => { if(keep(a) && (!best || new Date(a.at) > new Date(best.at))) best = a; }); return best ? best.id : null; };
+  const sent = (a) => a.type === 'email' && !a.logged && a.status !== 'scheduled';
+  return {call:pick(a => a.type === 'call'), sent:pick(a => sent(a) && a.direction !== 'received'), received:pick(a => sent(a) && a.direction === 'received')};
 };
-const TRAIL_ACTION_LABEL = {reply:'Reply', followUp:'Follow Up', edit:'Edit', meeting:'Schedule Meeting', callAgain:'Call Again', note:'Add Note', revert:'Revert'};
+// A meeting that has happened: a logged one, or a scheduled one whose time is over.
+const meetingHappened = (a) => !!a.logged || (!['requested', 'cancelled', 'declined'].includes(a.status)
+  && new Date(a.scheduledFor || a.at).getTime() + (Number(a.durationMin) || 30) * 60000 <= Date.now());
+/* The row's action on a record's trail (2026-11-23, the stakeholder's list). `env`: {me — the
+   signed-in person's name, latest — trailLatest of the record's whole activity}. */
+const trailAction = (a, env = {}) => {
+  const latest = env.latest || {};
+  if(a.type === 'email') return a.status === 'scheduled' ? 'edit' : a.logged ? null
+    : a.direction === 'received' ? (latest.received === a.id ? 'reply' : null) : latest.sent === a.id ? 'followUp' : null;
+  if(a.type === 'call') return latest.call === a.id && CALL_UNANSWERED.test(a.outcome || '') ? 'callAgain' : null;
+  if(a.type === 'note') return ((activityActor(a) || {}).name || '') !== env.me ? 'replyNote' : null;
+  if(a.type === 'task'){ if(!isTaskOpen(a)) return null; const type = taskTypeOf(a);
+    return type === 'Email' ? 'sendEmail' : type === 'Call' ? 'call' : type === COLLEAGUE_TASK && a.assignee && a.assignee !== env.me ? 'remind' : 'completeTask'; }
+  if(a.type === 'meeting') return meetingHappened(a) ? 'viewDetails' : null;
+  if(a.type === 'workflow') return a.runId ? 'revert' : null;
+  return null;
+};
+/* The filled button of an activity's own panel: its row's action — and, where the row no longer
+   carries one (an earlier email, a connected call, a meeting, one's own note), what the panel
+   had before: Follow Up / Reply, Schedule Meeting / Call Again, Add Note, Reply. A task keeps its
+   Complete button, so Mark as Complete isn't repeated. */
+const detailAction = (a, env = {}) => {
+  const row = trailAction(a, env);
+  if(row && row !== 'viewDetails' && row !== 'completeTask') return row;
+  if(a.type === 'email') return a.logged || a.status === 'scheduled' ? null : a.direction === 'received' ? 'reply' : 'followUp';
+  if(a.type === 'call') return a.outcome === CALL_NOT_QUALIFIED_OUTCOME ? null : /^connected/i.test(a.outcome || '') ? 'meeting' : CALL_UNANSWERED.test(a.outcome || '') ? 'callAgain' : null;
+  return a.type === 'meeting' ? 'note' : a.type === 'note' ? 'replyNote' : null;
+};
+const TRAIL_ACTION_LABEL = {reply:'Reply', followUp:'Follow Up', edit:'Edit', meeting:'Schedule Meeting', callAgain:'Call Again', note:'Add Note', replyNote:'Reply', revert:'Revert',
+  sendEmail:'Send Email', call:'Call', completeTask:'Mark as Complete', remind:'Remind a Colleague', viewDetails:'View Details'};
+const TRAIL_ACTION_ICON = {replyNote:'reply'};   // shown as its icon alone
 // What each action needs the person to be allowed to do on the record.
-const TRAIL_ACTION_TOOL = {reply:'Email', followUp:'Email', meeting:'Schedule Meeting', callAgain:'Call', note:'Note'};
+const TRAIL_ACTION_TOOL = {reply:'Email', followUp:'Email', meeting:'Schedule Meeting', callAgain:'Call', note:'Note', replyNote:'Note', sendEmail:'Email', call:'Call'};
 const TRAIL_TIME_W = 84;
 // `context`: how the rows read (the tab's, as its list read them); `countOf(a)`: an email thread's size (Emails).
-function ActivityTrail({list, contact, recordOf, selectedId, onOpen, onAction, canDo, empty, context = 'all', countOf}){
+// `contactOf(a)`: each row's own record, where the list runs across records (the Tools pages).
+// `envOf(a)`: what trailAction reads for the row (who is signed in, the record's latest call and emails);
+// `actions` false: no row action (the Tools pages, whose detail is beside the trail).
+// `pick` {can(a), has(a), toggle(a)}: a tick before each row that can be picked (Notes: for Spring — noteTools.jsx).
+function ActivityTrail({list, contact, contactOf, recordOf, selectedId, onOpen, onAction, canDo, empty, context = 'all', countOf, envOf, actions = true, pick}){
   const now = Date.now();
   const groups = new Map();
   list.forEach(a => { const d = new Date(a.at);
@@ -1307,20 +1451,21 @@ function ActivityTrail({list, contact, recordOf, selectedId, onOpen, onAction, c
   return [...groups].map(([key, items]) => (
     <section key={key} style={{paddingBottom:8}}>
       <div style={{padding:'14px 20px 6px', fontSize:13, fontWeight:600, color:T.attioText}}>{key}</div>
-      {items.map((a, i) => <TrailRow key={a.id} a={a} contact={contact} upcoming={key === 'Upcoming'} first={i === 0} last={i === items.length - 1} context={context}
-        count={countOf ? countOf(a) : 1} record={recordOf && recordOf(a)} selected={selectedId === a.id} onOpen={onOpen} onAction={onAction} canDo={canDo}/>)}
+      {items.map((a, i) => <TrailRow key={a.id} a={a} contact={contactOf ? contactOf(a) : contact} upcoming={key === 'Upcoming'} first={i === 0} last={i === items.length - 1} context={context}
+        count={countOf ? countOf(a) : 1} record={recordOf && recordOf(a)} selected={selectedId === a.id} onOpen={onOpen} onAction={onAction} canDo={canDo} env={envOf ? envOf(a) : undefined} actions={actions} pick={pick}/>)}
     </section>
   ));
 }
-function TrailRow({a, contact, upcoming, first, last, record, selected, onOpen, onAction, canDo, context = 'all', count = 1}){
+function TrailRow({a, contact, upcoming, first, last, record, selected, onOpen, onAction, canDo, context = 'all', count = 1, env, actions = true, pick}){
   const [h, setH] = React.useState(false);
   const plainRecords = !!(React.useContext(OpenRecordCtx) || {}).all;
   const d = new Date(a.at);
-  const action = trailAction(a), shownAction = action && canDo(a, action) ? action : null;
+  const action = actions ? trailAction(a, env) : null, shownAction = action && canDo(a, action) ? action : null;
   return (
-    <div onClick={()=>onOpen(a)} onMouseEnter={()=>setH(true)} onMouseLeave={()=>setH(false)}
+    <div data-act-id={a.id} onClick={()=>onOpen(a)} onMouseEnter={()=>setH(true)} onMouseLeave={()=>setH(false)}
       style={{display:'flex', alignItems:'stretch', padding:'0 20px', cursor:'pointer', background: selected ? '#F4F5F7' : h ? T.headerBg : 'transparent', transition:'background 120ms ease'}}>
-      <div style={{width:TRAIL_TIME_W, flexShrink:0, textAlign:'right', padding:'14px 0 10px', whiteSpace:'nowrap'}}>
+      {pick && <div style={{width:20, flexShrink:0, paddingTop:15}}>{pick.can(a) && <RowCheckbox checked={pick.has(a)} onChange={()=>pick.toggle(a)}/>}</div>}
+      <div style={{width: pick ? TRAIL_TIME_W - 12 : TRAIL_TIME_W, flexShrink:0, textAlign:'right', padding:'14px 0 10px', whiteSpace:'nowrap'}}>
         <div style={{fontSize:12.5, fontWeight:600, color:T.attioText, lineHeight:'17px'}}>{fmtActTime(d)}</div>
         <div style={{fontSize:11.5, color:T.attioMuted, marginTop:1}}>{fmtActDate(d)}</div>
       </div>
@@ -1334,16 +1479,29 @@ function TrailRow({a, contact, upcoming, first, last, record, selected, onOpen, 
         {/* On a record's journey (`all`) the row names no record (2026-11-19). */}
         <ActivityRow a={a} contact={contact} context={context} first hideWhen record={record && !plainRecords ? {object:record.object, id:record.record.id, name:record.record.name} : null}/>
       </div>
-      <div style={{flexShrink:0, minWidth:72, display:'flex', flexDirection:'column', alignItems:'flex-end', gap:8, paddingTop:13}}>
-        {shownAction && <button onClick={e=>{ e.stopPropagation(); onAction(a, shownAction); }} className={LINK_CLASS}
+      <div style={{flexShrink:0, minWidth: actions ? 72 : 0, display:'flex', flexDirection:'column', alignItems:'flex-end', gap:8, paddingTop:13}}>
+        {shownAction && (TRAIL_ACTION_ICON[shownAction]
+          ? <button onClick={e=>{ e.stopPropagation(); onAction(a, shownAction); }} title={TRAIL_ACTION_LABEL[shownAction]} aria-label={TRAIL_ACTION_LABEL[shownAction]}
+              style={{border:'none', background:'transparent', padding:2, height:18, cursor:'pointer', display:'flex', alignItems:'center'}}><Icon name={TRAIL_ACTION_ICON[shownAction]} size={14} color={T.gray600}/></button>
+          : <button onClick={e=>{ e.stopPropagation(); onAction(a, shownAction); }} className={LINK_CLASS}
           style={{border:'none', background:'transparent', padding:0, height:18, cursor:'pointer', fontSize:12.5, fontFamily:'inherit', color:T.attioText, whiteSpace:'nowrap'}}>
-          {TRAIL_ACTION_LABEL[shownAction]}</button>}
+          {TRAIL_ACTION_LABEL[shownAction]}</button>)}
         {count > 1 && <span title={`${count} emails in this thread`} style={{fontSize:11, fontWeight:600, color:T.gray600, background:T.headerBg, borderRadius:9999, padding:'1px 7px'}}>{count}</span>}
       </div>
     </div>
   );
 }
 
+/* Remind a Colleague (2026-11-23): the task's assignee is told in their bell by whoever asks —
+   it opens the record on its Tasks. Always in-app; no Notification Preset switches it off. */
+function remindColleague(hub, wfCtx, task, where){
+  const to = (hub.data.users || []).find(u => u.name === task.assignee && u.status !== 'Deactivated');
+  const record = hubRecord(hub, where.object, where.recordId);
+  if(!to || !wfCtx || !wfCtx.api.addNotifications) return hub.toast('No colleague to remind');
+  wfCtx.api.addNotifications([{userId:to.id, kind:'taskReminder', object:'direct', recordId:where.recordId, tab:'tasks', dealId:null, dealName:record ? record.name : '', by:CURRENT_USER.name, channels:{inApp:true},
+    text:`${CURRENT_USER.name} reminded you about the task ${task.title || 'Task'}${record ? ` on ${record.name}` : ''}.`}]);
+  hub.toast(`Reminder sent to ${to.name}`);
+}
 // `emptyText`: replaces the tab's empty message (e.g. when a view's search or filters hide everything).
 // `prefill`: what a new item's form starts with (a task's name and type).
 /* `recordOf(act)` → {object, record}: an associated feed — each item names the record it's on,
@@ -1355,8 +1513,7 @@ const ACTIVITY_SIDE_W = 640;
 function ActivityTab({tabId, taskView = 'board', contact, acts, allActs, team, adding, setAdding, prefill, onUpdate, onAdd, onStub, onReassign, emptyText, recordOf}){
   const hub = useRecordHub();
   const type = ACTIVITY_TAB_TYPES[tabId];
-  // Support Notes (2026-11-19): the notes marked Support Note.
-  const all = type ? acts.filter(a => a.type === type && (tabId !== 'supportNotes' || a.support)) : listedActivities(acts);
+  const all = type ? acts.filter(a => a.type === type) : listedActivities(acts);
   /* Emails: one row per thread — its latest email, with how many it has (emails.jsx). A row's
      record (an associated record's feed) keeps threads apart per record. */
   const threads = type === 'email' ? threadedEmailRows([...all].sort((x, y) => emailTime(y) - emailTime(x)), (a) => a,
@@ -1373,34 +1530,76 @@ function ActivityTab({tabId, taskView = 'board', contact, acts, allActs, team, a
   // The trail's actions — the same in the trail and as the side panel's filled button (DetailPrimaryCtx).
   const wfCtx = useWorkflowEngineCtx();
   const runOf = (a) => wfCtx && a.runId ? (wfCtx.state.runs || []).find(r => r.id === a.runId) || null : null;
+  /* What a row's action reads (trailAction): the signed-in person, and the latest call and emails of
+     the record the activity is on — its whole activity, whatever the tab lists. */
+  const latestByRecord = React.useRef(new Map()); latestByRecord.current = new Map();
+  const envOf = (a) => { const on = recordOf && recordOf(a), key = on ? `${on.object}:${on.record.id}` : 'own';
+    if(!latestByRecord.current.has(key)) latestByRecord.current.set(key, trailLatest(on ? (hub.activities[on.object] || {})[on.record.id] || [] : allActs || acts));
+    return {me:CURRENT_USER.name, latest:latestByRecord.current.get(key)}; };
   const canTrail = (a, what) => { const on = recordOf && recordOf(a), o = on ? on.object : ra && ra.object, r = on ? on.record : ra && ra.record;
+    if(what === 'viewDetails' || what === 'remind') return true;
     // Revert: the run is still kept, not reverted, has something to undo, and the person may revert.
     if(what === 'revert'){ const run = runOf(a); return !!run && !run.reverted && automationRevertible(run) && workflowCan('revert'); }
     if(!o) return true;
-    return what === 'edit' ? activityCan(o, r, a, 'edit') : canAdd(o, r, TRAIL_ACTION_TOOL[what]); };
+    return what === 'edit' || what === 'completeTask' ? activityCan(o, r, a, 'edit') : canAdd(o, r, TRAIL_ACTION_TOOL[what]); };
   const runTrail = (a, what) => {
+    if(what === 'viewDetails') return open(a);
     if(what === 'note') return open(a, 'note');
+    if(what === 'replyNote') return open(a, 'reply');
     if(what === 'revert'){ wfCtx.api.revertRun(a.runId); return hub && hub.toast('Workflow reverted'); }
     // The record the activity is on (an associated feed's is another record).
     const where = (hub && hubFindActivity(hub, a.id)) || (ra && {object:ra.object, recordId:ra.record.id});
     if(!where) return onStub(TRAIL_ACTION_LABEL[what]);
+    // A task's actions (2026-11-23): complete it, write the email or make the call it's for, remind its colleague.
+    if(what === 'completeTask'){ hub.update(where.object, where.recordId, a.id, {status:'completed'}); return hub.toast('Task completed'); }
+    if(what === 'sendEmail') return setCompose({object:where.object, id:where.recordId});
+    if(what === 'call') return hub.startCall({object:where.object, id:where.recordId});
+    if(what === 'remind') return remindColleague(hub, wfCtx, a, where);
     if(what === 'reply' || what === 'followUp') return setCompose({object:where.object, id:where.recordId, replyTo:a, ...(what === 'followUp' ? {title:'Follow Up'} : {})});
     if(what === 'callAgain') return hub.startCall({object:where.object, id:where.recordId});
     if(what === 'edit') return setCompose({object:where.object, id:where.recordId, edit:a, title:'Edit Email'});
     if(what === 'meeting'){ const on = recordOf && recordOf(a); setSelectedId(null); setMeetingFor(on ? {object:on.object, record:on.record} : null); setAdding('Schedule Meeting'); }
   };
-  const primaryOf = (a) => { const what = a && trailAction(a);
+  const primaryOf = (a) => { const what = a && detailAction(a, envOf(a));
     return what && canTrail(a, what) ? {what, el:<button key="primary" onClick={()=>runTrail(a, what)} style={btnPrimarySm()}>{TRAIL_ACTION_LABEL[what]}</button>} : null; };
+  /* Notes (2026-11-23): tick notes — or Select All — and Ask Spring (noteTools.jsx). General and
+     Client Request notes only; Spring's suggested actions open the usual forms, on the note's record. */
+  const noteMode = tabId === 'notes';
+  const [picked, setPicked] = React.useState(() => new Set());
+  const [spring, setSpring] = React.useState(false), [springTask, setSpringTask] = React.useState(null);
+  const pickable = noteMode ? list.filter(a => noteTypeOf(a) !== 'support') : [], pickedList = pickable.filter(a => picked.has(a.id));
+  const togglePick = (a) => setPicked(s => { const n = new Set(s); n.has(a.id) ? n.delete(a.id) : n.add(a.id); return n; });
+  const springItems = pickedList.map(a => { const on = recordOf && recordOf(a); return {act:a, object:on ? on.object : ra ? ra.object : 'contacts', record:on ? on.record : ra ? ra.record : contact, on}; });
+  const runSpring = (action) => { const it = action.item, target = {object:it.object, id:it.record.id};
+    setSpring(false);
+    if(action.kind === 'call') return hub.startCall(target);
+    if(action.kind === 'email') return setCompose({...target, draft:{subject:action.subject, body:action.body}});
+    setSelectedId(null); setMeetingFor(it.on ? {object:it.on.object, record:it.on.record} : null);
+    if(action.kind === 'meeting') return setAdding('Schedule Meeting');
+    setSpringTask({title:action.title, taskType:'To-do'}); setAdding('Task'); };
+  /* An activity asked for from elsewhere on the page (a Smart Summary insight — overviewSettings.jsx
+     openActivityFromInsight): the list scrolls to its row, lit for a moment. One the list isn't
+     showing (filtered out, or inside an email thread's row) opens in its side panel instead. */
+  const pageVisible = React.useContext(PageVisibleCtx), everyAct = allActs || acts;
+  const wrapRef = React.useRef(null), [flashId, setFlashId] = React.useState(null);
+  React.useEffect(() => {
+    const on = (e) => { const id = e.detail && e.detail.id; if(!pageVisible || tabId === 'tasks') return;
+      const row = wrapRef.current && [...wrapRef.current.querySelectorAll('[data-act-id]')].find(el => el.getAttribute('data-act-id') === String(id));
+      if(row){ row.scrollIntoView({block:'center', behavior:'smooth'}); setFlashId(id); setTimeout(() => setFlashId(f => f === id ? null : f), 2400); }
+      else if(everyAct.some(a => a.id === id)){ setSelectedId(id); setIntent(null); } };
+    window.addEventListener('hof-open-activity', on);
+    return () => window.removeEventListener('hof-open-activity', on);
+  }, [pageVisible, tabId, everyAct]);
   // Nothing is open until an activity is picked: it opens in its own side panel (below).
-  const selected = list.find(a => a.id === selectedId) || null;
+  const selected = list.find(a => a.id === selectedId) || (selectedId && everyAct.find(a => a.id === selectedId)) || null;
   const done = (id) => { setAdding(null); if(id) setSelectedId(id); };
-  const empty = emptyText || {activity:'No activity yet', calls:'No calls yet', email:'No emails yet', tasks:'No tasks yet', notes:'No notes yet', supportNotes:'No support notes yet', meetings:'No meetings yet'}[tabId];
+  const empty = emptyText || {activity:'No activity yet', calls:'No calls yet', email:'No emails yet', tasks:'No tasks yet', notes:'No notes yet', meetings:'No meetings yet'}[tabId];
   // A new email from this record, or a reply / forward of one shown here.
   const emailOpts = adding === 'Email' && ra ? {object:ra.object, id:ra.record.id} : compose;
   const closeEmail = (result, id) => { setAdding(a => a === 'Email' ? null : a); setCompose(null); if(id) setSelectedId(id); };
   return (
     <ComposeHostCtx.Provider value={{compose:setCompose}}>
-    <div style={{display:'flex', flex:1, minWidth:0, minHeight:0, height:'100%', position:'relative'}}>
+    <div ref={wrapRef} style={{display:'flex', flex:1, minWidth:0, minHeight:0, height:'100%', position:'relative'}}>
       {/* Tasks: the Tasks module's board — In Progress, Overdue, Completed — for this record's tasks
           (and its associated records' on their feeds); a task opens in a side panel. */}
       {tabId === 'tasks' ? (() => {
@@ -1431,10 +1630,12 @@ function ActivityTab({tabId, taskView = 'board', contact, acts, allActs, team, a
       {/* The activity list, full width (2026-11-18); an activity picked opens in its own
           side panel — its details, with Edit and ⋯ at the bottom right (DetailFooterCtx). */}
       <div style={{flex:1, minWidth:0, overflowY:'auto', padding:'8px 0'}}>
+        {noteMode && <NoteSelectBar total={pickable.length} count={pickedList.length} onAsk={()=>{ setSelectedId(null); setSpring(true); }}
+          onToggleAll={()=>setPicked(pickedList.length === pickable.length ? new Set() : new Set(pickable.map(a => a.id)))}/>}
         {/* The time trail, on Overview and on Calls, Notes, Emails and Meetings (2026-11-18). */}
-        <ActivityTrail list={list} contact={contact} recordOf={recordOf} selectedId={selected && selected.id} empty={empty}
+        <ActivityTrail pick={noteMode && pickable.length ? {can:(a) => noteTypeOf(a) !== 'support', has:(a) => picked.has(a.id), toggle:togglePick} : undefined} list={list} contact={contact} recordOf={recordOf} selectedId={(selected && selected.id) || flashId} empty={empty}
           context={context} countOf={threads ? threadCount : undefined}
-          onOpen={(a)=>open(a)} canDo={canTrail} onAction={runTrail}/>
+          onOpen={(a)=>open(a)} canDo={canTrail} onAction={runTrail} envOf={envOf}/>
       </div>
       {selected && (() => {
         const on = recordOf && recordOf(selected);
@@ -1462,7 +1663,6 @@ function ActivityTab({tabId, taskView = 'board', contact, acts, allActs, team, a
       {/* A new item: the creation side panel over this area, without the record section — the
           record is this one. */}
       {adding === 'Note' && <NewNote onAdd={onAdd} onDone={done}/>}
-      {adding === 'Support Note' && <NewNote support onAdd={onAdd} onDone={done}/>}
       {adding === 'Log Call' && <NewLogCall contact={contact} team={team} onAdd={onAdd} onDone={done}/>}
       {adding === 'Log Meeting' && <NewLogMeeting contact={contact} team={team} onAdd={onAdd} onDone={done}/>}
       {adding === 'Log Email' && <NewLogEmail contact={contact} team={team} onAdd={onAdd} onDone={done}/>}
@@ -1470,11 +1670,16 @@ function ActivityTab({tabId, taskView = 'board', contact, acts, allActs, team, a
         ? <NewScheduleMeeting contact={{...meetingFor.record, owner:userLabel(meetingFor.record.owner) || meetingFor.record.owner}} team={team}
             onAdd={(x)=>hub.add(meetingFor.object, meetingFor.record.id, x)} onDone={()=>{ setMeetingFor(null); setAdding(null); }}/>
         : <NewScheduleMeeting contact={contact} team={team} onAdd={onAdd} onDone={done}/>)}
-      {adding === 'Task' && <NewTask team={team} contact={contact} initial={prefill} onAdd={onAdd} onDone={done}/>}
+      {adding === 'Task' && (springTask && meetingFor
+        ? <NewTask team={team} contact={{...meetingFor.record, owner:userLabel(meetingFor.record.owner) || meetingFor.record.owner}} initial={springTask}
+            onAdd={(x)=>hub.add(meetingFor.object, meetingFor.record.id, x)} onDone={()=>{ setMeetingFor(null); setSpringTask(null); setAdding(null); }}/>
+        : <NewTask team={team} contact={contact} initial={springTask || prefill} onAdd={onAdd} onDone={(id)=>{ setSpringTask(null); done(id); }}/>)}
+      {spring && springItems.length > 0 && <SpringNotesPanel items={springItems} onClose={()=>setSpring(false)} onRun={runSpring}
+        onSource={(act)=>window.dispatchEvent(new CustomEvent('hof-open-activity', {detail:{id:act.id}}))}/>}
       {emailOpts && <EmailComposer key={adding === 'Email' ? 'new' : emailOpts.edit ? `edit:${emailOpts.edit.id}` : 'reply'} {...emailOpts} onClose={closeEmail}/>}
     </div>
     </ComposeHostCtx.Provider>
   );
 }
 
-Object.assign(window, {DetailFooterCtx, OfficeMeetingRequestModal, CreatePanelFrame, ContentSidePanel, APP_HEADER_H, PageVisibleCtx, CreatePanelCtx, CreateRecordField, ComposeHostCtx, ActivityDetail, NewNote, NewLogCall, NewLogEmail, NewLogMeeting, NewScheduleMeeting, NewTask, SCHEDULE_DURATIONS, ActivityTab, ActivityAddButton, ACTIVITY_TAB_TYPES});
+Object.assign(window, {trailAction, detailAction, trailLatest, remindColleague, TRAIL_ACTION_LABEL, TRAIL_ACTION_TOOL, ActivityTrail, ACTIVITY_SIDE_W, DetailIntentCtx, DetailPrimaryCtx, TaskTimeLeft, useMinuteTick, CallBackFields, NotQualifiedReasonField, notQualifiedReasonOptions, setLeadNotQualified, DetailFooterCtx, OfficeMeetingRequestModal, CreatePanelFrame, ContentSidePanel, APP_HEADER_H, PageVisibleCtx, CreatePanelCtx, CreateRecordField, ComposeHostCtx, ActivityDetail, NewNote, NewLogCall, NewLogEmail, NewLogMeeting, NewScheduleMeeting, NewTask, SCHEDULE_DURATIONS, ActivityTab, ActivityAddButton, ACTIVITY_TAB_TYPES});

@@ -89,8 +89,12 @@ const BIZ_TASKS = [['Follow up on signed CCL', 'Call'], ['Collect experience let
 /* `users`: the workspace's users (owners: its active sales people); `services`: the catalogue (the
    CCL's items); `now`: the day it's generated (everything is dated before or around it);
    `takenNames`: names already in use (the workspace's contacts). */
-function generateBusinessData({users, services, now = new Date(), takenNames = []}){
-  const r = bizRng(20261030);
+/* `only` (a small batch of its own, for one owner — app.jsx: the sample Employee's busy dashboard):
+   {ownerId, count, maxAgeDays, seed, firstContactId, dealBase, custBase, quoteNo, tag} — that many
+   leads, all that owner's, arrived over the last `maxAgeDays`, with ids of their own; a lost deal
+   has its Lost Reason. */
+function generateBusinessData({users, services, now = new Date(), takenNames = [], only = null}){
+  const r = bizRng(only ? only.seed : 20261030), tag = only ? only.tag : 'b';
   const pick = (a) => a[Math.floor(r() * a.length)];
   const between = (a, b) => a + r() * (b - a);
   const chance = (p) => r() < p;
@@ -102,7 +106,7 @@ function generateBusinessData({users, services, now = new Date(), takenNames = [
   const day = (t) => { const x = new Date(t); return storePropertyValue('Date', `${x.getFullYear()}-${x.getMonth() + 1}-${x.getDate()}`); };
   const SALES = ['Waleed bin Zaman', 'Hamza Siddiqui', 'Ali Noor', 'Anaya Malik', 'Arwa Zafar', 'Asim Ali'];
   const owners = (users || []).filter(u => SALES.includes(u.name) && u.status !== 'Deactivated');
-  const ownerPool = owners.length ? owners : (users || []).slice(0, 4);
+  const ownerPool = only ? (users || []).filter(u => u.id === only.ownerId) : owners.length ? owners : (users || []).slice(0, 4);
   const weights = ownerPool.map((u, i) => [1.1, 1.05, 1, 0.95, 0.9, 0.85][i % 6]);
   const pickOwner = () => { let x = r() * weights.reduce((s, w) => s + w, 0); for(let i = 0; i < ownerPool.length; i++){ x -= weights[i]; if(x <= 0) return ownerPool[i]; } return ownerPool[0]; };
   const svc = (id) => (services || []).find(s => s.id === id);
@@ -113,21 +117,22 @@ function generateBusinessData({users, services, now = new Date(), takenNames = [
   const dealActivities = {}, contactActivities = {}, customerActivities = {};
   // No one shares a name with a contact already in the workspace (so nothing reads as a duplicate).
   const usedNames = new Set(takenNames);
-  let quoteNo = 100, actNo = 0;
-  const actId = (rec) => `${rec}-b${++actNo}`;
+  let quoteNo = only ? only.quoteNo : 100, actNo = 0;
+  const actId = (rec) => `${rec}-${tag}${++actNo}`;
 
-  for(let i = 0; i < 1000; i++){
-    const id = 1001 + i;
+  for(let i = 0; i < (only ? only.count : 1000); i++){
+    const id = (only ? only.firstContactId : 1001) + i;
     // A unique name.
     let name;
-    do { name = `${chance(.55) ? pick(BIZ_FIRST_M) : pick(BIZ_FIRST_F)} ${pick(BIZ_LAST)}`; } while(usedNames.has(name) && usedNames.size < 1500);
+    // (`only`: one draw — a name already taken gets a letter — so the batch is the same whatever names the workspace has.)
+    do { name = `${chance(.55) ? pick(BIZ_FIRST_M) : pick(BIZ_FIRST_F)} ${pick(BIZ_LAST)}`; } while(!only && usedNames.has(name) && usedNames.size < 1500);
     if(usedNames.has(name)) name = `${name} ${String.fromCharCode(65 + (i % 26))}.`;
     usedNames.add(name);
     const [country, dial, cities] = pickPlace();
     const [titles, industry, employers] = pick(BIZ_WORK);
     const owner = pickOwner();
     // Arrived over the last year, more of them recently.
-    const ageDays = Math.floor(Math.pow(r(), 2.1) * 360) + 1;
+    const ageDays = Math.floor(Math.pow(r(), only ? 1.3 : 2.1) * (only ? only.maxAgeDays : 360)) + 1;
     const created = atHour(today0 - ageDays * BIZ_DAY);
     const handle = name.toLowerCase().replace(/[^a-z ]/g, '').trim().replace(/\s+/g, '.');
     const contact = {id, name, email:`${handle}${chance(.4) ? Math.floor(between(1, 99)) : ''}@${pick(BIZ_DOMAINS)}`,
@@ -157,7 +162,7 @@ function generateBusinessData({users, services, now = new Date(), takenNames = [
        before now is where it is. */
     const pipeline = chance(.36) ? 'us-niw' : 'australia-canada';
     const [offerLabel, offerSvcs, amount] = pick(BIZ_OFFERS[pipeline]);
-    const dealId = `deal-${1000 + deals.length + 1}`;
+    const dealId = `deal-${(only ? only.dealBase : 1000) + deals.length + 1}`;
     const path = [['qualified-client', dealAt]];
     let t = dealAt, quote = null, closeDate = dealAt + between(30, 60) * BIZ_DAY;
     const qcDays = between(4, 26), q1 = r();
@@ -201,7 +206,8 @@ function generateBusinessData({users, services, now = new Date(), takenNames = [
 
     const deal = {id:dealId, name, contactIds:[id], email:contact.email, phone:contact.phone, pipeline, stage, dealType: chance(.12) ? 'Existing Business' : 'New Business',
       owner:owner.id, amount, currency:DEAL_CURRENCY, health: lost ? 'At Risk' : chance(.2) ? 'Needs Attention' : 'Healthy', created:stamp(dealAt), createdAt:dealAt,
-      source:contact.source, closeDate:day(Math.max(closeDate, dealAt + BIZ_DAY)), actualCloseDate: closedAt ? stamp(closedAt) : '', stageEnteredAt, pipelineEnteredAt:dealAt};
+      source:contact.source, closeDate:day(Math.max(closeDate, dealAt + BIZ_DAY)), actualCloseDate: closedAt ? stamp(closedAt) : '', stageEnteredAt, pipelineEnteredAt:dealAt,
+      ...(only && lost ? {lostReason:pick(LOST_REASONS)} : {})};
     deals.push(deal);
     contact.contactType = lost ? 'Others' : stage === 'postponed' ? 'Not Responded' : 'Opportunity';
     contact.leadStatus = 'Qualified';
@@ -236,7 +242,7 @@ function generateBusinessData({users, services, now = new Date(), takenNames = [
     // The CCL — a quotation for the deal's services, sent from Qualified Client and signed before CCL Sent.
     let quoteRec = null;
     if(qs){
-      const qid = `q-b${++quoteNo}`;
+      const qid = `q-${tag}${++quoteNo}`;
       const year = new Date(quote.draftAt).getFullYear();
       const terms = BIZ_TERMS[pipeline].map(([description, percent, days], k) => ({id:`${qid}-in${k + 1}`, description, percent, due:{type:'days', days}}));
       quoteRec = {id:qid, number:`Q-${year}-${String(quoteNo).padStart(4, '0')}`, title:offerLabel, object:'deals', recordId:dealId, recipient:{name, email:contact.email},
@@ -296,7 +302,7 @@ function generateBusinessData({users, services, now = new Date(), takenNames = [
       const since = (NOW - closedAt) / BIZ_DAY;
       const closedOut = since > 200 && chance(.25);
       const cst = closedOut ? outcomes[outcomes.length - 1] : open[Math.min(open.length - 1, Math.floor(since / between(14, 24)))];
-      const custId = `cust-${1000 + customers.length + 1}`;
+      const custId = `cust-${(only ? only.custBase : 1000) + customers.length + 1}`;
       customers.push({id:custId, name, email:contact.email, phone:contact.phone, owner:owner.id, pipeline:pl, stage:cst.id,
         status: closedOut ? 'Closed' : chance(.08) ? 'On Hold' : 'Active', source:'Deal', customerSince:dayLabel(closedAt), company:contact.company,
         contactIds:[id], dealIds:[dealId], created:stamp(closedAt + 3600000), stageEnteredAt:closedAt + 3600000 + since * .7 * BIZ_DAY});

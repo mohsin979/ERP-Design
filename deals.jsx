@@ -2,14 +2,16 @@
 
    The Deal object on the same infrastructure as Contacts: its columns, filters and creation form
    are built from the Deal properties (Settings → Properties), the page is the Contacts view
-   system (RecordViewsModule: views, View Settings, Save View, search, Filters, Table Settings,
+   system (RecordViewsModule: views, Layout Settings, Save View, search, Filters, Table Settings,
    grid) with the Contacts Board, grouped by the selected pipeline's stages.
 
    A Deal references a Pipeline and a stage of it — {pipeline, stage} ids, the board's
    source:'record' pipeline model (board.jsx) — so a deal's stage always belongs to its own
    pipeline and every pipeline can bring its own stages. Dragging a card writes the stage through
-   `withStage`, the same path pipeline logic would use later. No stage logic (requirements,
-   entry / exit / backward rules, automation) is implemented.
+   `withStage`, the same path pipeline logic would use later. A move into a Lost stage — a card
+   dragged there, or Deal Stage changed on the Edit form — first asks for the deal's Lost Reason
+   (board.jsx withLostReason); Cancel leaves the deal where it was (the Edit form stays open).
+   No other stage logic (requirements, entry / exit / backward rules, automation) is implemented here.
 
    The Deal card is the Contact card's structure on the Deal object: Name on top, then the
    configurable sections Quick Actions, Tags (Deal Health, Deal Score), Properties, Smart Features
@@ -26,7 +28,11 @@
    linked to the contact it was created from (`contactIds`: its contacts, as many as the link's type
    allows; the first is its person — emails, calls, Customer Profile); Contact → Deal is
    CreateDealModal, and Edit Deal picks its contacts. Create Customer makes a customer linked to the
-   deal; deleting a deal keeps its customers, unlinked. Export downloads the current view as CSV. Not defined yet (placeholder): Enrich, calling,
+   deal; deleting a deal keeps its customers, unlinked. Create Referral Deal (2026-11-23, the deal's
+   ⋯ menu): the Add Deal form under that title, empty (its Associated Lead — an existing lead or a
+   new one — is the referred person, never the source deal's); the saved deal keeps the deal it was
+   created from (`referredBy`) — its Referred By, and a row on that deal's Referrals tab.
+   Export downloads the current view as CSV. Not defined yet (placeholder): Enrich, calling,
    email and meetings from a deal, what Smart Actions recommend, how Deal Health and Deal Score are calculated (sample
    values only). */
 
@@ -343,7 +349,7 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
   /* Deal Detail: which deal is open and how (side panel / full screen), by id like Contacts. */
   // A deal opens straight on its detail page (2026-11-17), not in the side panel first; the page can still be collapsed into the side panel and expanded again.
   const [detail, setDetail] = React.useState(null);   // {id, mode:'panel'|'full', tab?}
-  // Deal side panel layout (View Settings from the deal's ⋯ menu) — one setting for every deal.
+  // Deal side panel layout (Layout Settings from the deal's ⋯ menu) — one setting for every deal.
   const [panelSettings, setPanelSettings] = usePersistedState('panel:deals', () => defaultDealPanelSettings(props), quietPanelSettings);
   const [panelDraft, setPanelDraft] = React.useState(null);
   const [profileRun, setProfileRun] = React.useState(null);   // {contactId, dealId, templateIds, call}
@@ -388,10 +394,12 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
   const contactOf = (d) => contactsOfDeal(byId.get(d.id) || d)[0] || null;
   // Go to contact: the Contacts page with the deal's contact open.
   const goToContact = (d) => { const c = contactOf(d); if(c && onOpenContact) onOpenContact(c.id, 'full'); };
-  /* The deal ⋯ menu — the one record menu (DealActionsMenu); View settings only on the
+  /* The deal ⋯ menu — the one record menu (DealActionsMenu); Layout Settings only on the
      deal itself. Same menu on the table row, the board card and the deal. */
   const dealMenu = (d, onViewSettings) => <DealActionsMenu deal={byId.get(d.id) || d} contact={contactOf(d)} onTool={(key)=>dealToolAction(key, d)}
     onCreateCustomer={onCreateCustomer && (()=>onCreateCustomer({deal:byId.get(d.id), contact:contactOf(d)}))}
+    // Create Referral Deal: the Add Deal form, empty — the referral is another person's deal; the new deal keeps this one as its referrer.
+    onCreateReferral={()=>setForm({mode:'add', initial:null, referredBy:{object:'deals', id:d.id}})}
     onEdit={()=>setForm({mode:'edit', id:d.id, initial:byId.get(d.id)})} onOwner={()=>setChangingOwner(byId.get(d.id))}
     onEnrich={()=>setStub(`Enrich deal · ${d.name}`)} onDelete={()=>setPendingDelete(byId.get(d.id))}
     onStub={(t)=>setStub(`${t} · ${d.name}`)} onCopied={showToast} onViewSettings={onViewSettings}/>;
@@ -430,7 +438,9 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
     // The name with the deal's workflow violations beside it.
     renderCell: (key, r) => key === 'name' ? <span data-deal-id={r.id} style={{display:'inline-flex', alignItems:'center', gap:8, minWidth:0, maxWidth:'100%'}}>
         <ContactName name={r.name} onOpen={()=>openDeal(r)} style={{fontSize:'inherit', fontWeight:500}}/><DealPromptMarker dealId={r.id}/></span>
-      : key === 'amount' ? moneyText(r.amount, r.currency) || '—' : undefined,
+      : key === 'amount' ? moneyText(r.amount, r.currency) || '—'
+      // Referred By: the referrer's name, opening that record.
+      : key === 'referrer' && r.referrer && r.referredBy ? <HubRecordLink object={r.referredBy.object} id={r.referredBy.id} name={r.referrer}/> : undefined,
     renderActions: (r) => dealMenu(r),
     bulkActions: dealBulk.bulkActions,
   };
@@ -443,8 +453,16 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
     if(!prev || owner === prev.owner) return;
     setDeals(ds => ds.map(d => d.id === id ? {...d, owner} : d));
   };
+  /* Edit: a stage changed into a Lost one asks for its Lost Reason before anything is saved (the
+     reason picked on the form, if changed there, to start with); Cancel leaves the form open. */
   const save = (vals, assocList, links) => {
-    const assoc = (assocList || []).find(a => a.object === 'contacts'), custLink = (assocList || []).find(a => a.object === 'customers');
+    if(form.mode !== 'edit') return saveNow(vals, assocList, links);
+    const before = byId.get(form.id) || form.initial || {};
+    const typed = vals.lostReason && vals.lostReason !== before.lostReason ? vals.lostReason : undefined;
+    withLostReason(data, before, vals, (extra) => saveNow({...vals, ...extra}, assocList, links), typed);
+  };
+  const saveNow = (vals, assocList, links) => {
+    const assoc =(assocList || []).find(a => a.object === 'contacts'), custLink = (assocList || []).find(a => a.object === 'customers');
     const amount = vals.amount === '' || vals.amount == null ? '' : Number(vals.amount);
     if(form.mode === 'edit'){
       // Its contacts, as picked on the form (Associated Contact).
@@ -457,7 +475,9 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
       const viaCustomer = linkedCustomer ? personIdOf(linkedCustomer) : null;
       const contactId = !assoc ? (viaCustomer != null && takesDeal('contacts', {id:viaCustomer}) ? viaCustomer : null)
         : assoc.existingId != null && assoc.existingId !== '' ? assoc.existingId : onCreateContact ? onCreateContact(assoc.values) : null;
-      setDeals(ds => [...ds, {id, contactIds: contactId != null ? [contactId] : [], ...vals, amount, currency:vals.currency || defaultCurrency(), created:dealStamp(new Date())}]);
+      // A referral deal (Create Referral Deal) keeps the deal it was created from (`referredBy`).
+      setDeals(ds => [...ds, {id, contactIds: contactId != null ? [contactId] : [], ...vals, amount, currency:vals.currency || defaultCurrency(), created:dealStamp(new Date()),
+        ...(form.referredBy ? {referredBy:form.referredBy} : {})}]);
       setActivities(m => ({...m, [id]: []}));
       // An existing customer: the new deal joins its deals (when the link allows another).
       if(custLink && custLink.existingId && onLinkCustomer) onLinkCustomer(custLink.existingId, {dealId:id});
@@ -512,7 +532,8 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
               onChangeStage={(id, stageId)=>{
                 const d0 = deals.find(d => d.id === id);
                 if(d0 && !stageMoveCan('deals', d0)) return hub && hub.toast(`You can't move this ${typeNoun('deals', 'deal')} between stages`);
-                setDeals(ds => ds.map(d => d.id === id ? withStage(pipeline, d, stageId) : d));
+                // Into a Lost stage: its Lost Reason first (board.jsx withLostReason).
+                withLostReason(data, d0, {pipeline:pipeline.id, stage:stageId}, (extra) => setDeals(ds => ds.map(d => d.id === id ? {...withStage(pipeline, d, stageId), ...extra} : d)));
               }}
               onAddToStage={(pl, stageId)=>setForm({mode:'add', initial:withStage(pl, {}, stageId)})}
               renderCard={(d, ui) => card(d, cardSettings, ui)}/>;
@@ -523,7 +544,7 @@ function DealsModule({data, deals, setDeals, activities, setActivities, contacts
         </>}
         filterControls={(v) => <><MergeCasesButton object="deals"/><ViolationsButton object="deals" pipelines={viewPipelines(v)} active={violationMode} onClick={()=>setViolationMode(!violationMode)}/></>}
         overlay={(v) => violationMode && <ViolationPanel object="deals" pipelines={viewPipelines(v)} onClose={()=>setViolationMode(false)}/>}/>
-      {form && <ContactFormModal mode={form.mode} initial={form.initial} properties={props} noun={typeNoun('deals', 'deal')}
+      {form && <ContactFormModal mode={form.mode} initial={form.initial} properties={props} noun={typeNoun('deals', 'deal')} title={form.referredBy ? createReferralLabel('deals') : undefined}
         canEditField={form.mode === 'edit' ? (p)=>fieldEditCan('deals', form.initial, p) : undefined}
         optionsFor={formOptions} adjust={adjust} association={association} onCancel={()=>setForm(null)} onSave={save}
         links={editLinks} initialLinks={linkFieldValues(editLinks, {contacts:contactIdsOf(form.initial)})}/>}

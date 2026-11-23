@@ -20,7 +20,10 @@
 
    Last Contacted (a Contact's property) and the Summary's "Last contacted" are one rule
    (isRealTouch): the latest connected call, sent email or held meeting — for a contact, on it and
-   on its deals and customers (kept in step by App). */
+   on its deals and customers (kept in step by App). A call with the outcome Call back request
+   (2026-11-20) counts as connected (callReached) and makes a call-back task (callBackTask).
+   Connected, qualified / Connected, not qualified (2026-11-20) are connected calls too; the
+   second carries its Not Qualified Reason (`notQualifiedReason`), set on the lead as well. */
 
 const ACTIVITY_TYPES = {
   email:       {label:'Email',        icon:'envelope'},
@@ -56,8 +59,10 @@ const CARD_ACTIVITY_ORDER = ['email', 'call', 'meeting', 'task', 'note'];
 const TOUCH_TYPES = ['email', 'call', 'meeting'];   // what "contacted" means
 /* A real touch — what Last Contacted counts (the property and the Summary alike): a connected call,
    an email sent (not one still scheduled), a meeting that has taken place; never one in the future. */
+// A call that reached the person: Connected, or Call back request (they answered and asked to be called back).
+const callReached = (a) => /^(connected|call back request)/i.test((a && a.outcome) || '');
 const isRealTouch = (a, now = Date.now()) => { const t = new Date(a && a.at).getTime(); if(!t || t > now) return false;
-  return (a.type === 'call' && /^connected/i.test(a.outcome || '')) || (a.type === 'email' && a.direction === 'sent' && a.status !== 'scheduled') || (a.type === 'meeting' && a.status !== 'cancelled'); };
+  return (a.type === 'call' && callReached(a)) || (a.type === 'email' && a.direction === 'sent' && a.status !== 'scheduled') || (a.type === 'meeting' && a.status !== 'cancelled'); };
 const latestTouch = (acts, now = Date.now()) => (acts || []).filter(a => isRealTouch(a, now)).reduce((best, a) => !best || new Date(a.at) > new Date(best.at) ? a : best, null);
 
 /* ── Mock history ───────────────────────────────────────────────────────────────────────── */
@@ -90,16 +95,45 @@ const CALL_OUTCOMES = ['Connected', 'Connected', 'No answer', 'Left voicemail'];
 /* Call outcomes — two lists for now: a logged call (entered by hand) and a call made through
    the system. Older values map onto them (Missed → No answer, Left live message / Meeting
    booked → Connected), so every call shows a current value. */
-const LOG_CALL_OUTCOMES = ['Disconnected', 'No answer', 'Left voicemail', 'Connected', 'Wrong number'];
-const SYSTEM_CALL_OUTCOMES = ['No answer', 'Left voicemail', 'Connected', 'Wrong number', 'Cancelled'];
+/* Call back request (2026-11-20): the person answered and asked to be called back — a contact,
+   like Connected (callReached). Whoever logs it says when (a date and time), and a task "Call back
+   <name>" is made for then (callBackTask), for the call's point of contact — it shows in their
+   tasks and My Day's Follow-ups on the day. */
+const CALL_BACK_OUTCOME = 'Call back request';
+/* Connected, qualified / Connected, not qualified (2026-11-20): a connected call (callReached)
+   that also says whether the person qualifies. Not qualified asks its Not Qualified Reason — a
+   built-in Lead property (dataModel.jsx `notQualifiedReason`, NOT_QUALIFIED_REASONS) — kept on
+   the call and set on the lead: the record itself, or a deal's or customer's person
+   (activityCards.jsx NotQualifiedReasonField, setLeadNotQualified). */
+const CALL_QUALIFIED_OUTCOME = 'Connected, qualified', CALL_NOT_QUALIFIED_OUTCOME = 'Connected, not qualified';
+const LOG_CALL_OUTCOMES = ['Disconnected', 'No answer', 'Left voicemail', 'Connected', CALL_QUALIFIED_OUTCOME, CALL_NOT_QUALIFIED_OUTCOME, CALL_BACK_OUTCOME, 'Wrong number'];
+const SYSTEM_CALL_OUTCOMES = ['No answer', 'Left voicemail', 'Connected', CALL_QUALIFIED_OUTCOME, CALL_NOT_QUALIFIED_OUTCOME, CALL_BACK_OUTCOME, 'Wrong number', 'Cancelled'];
 const LEGACY_OUTCOME = {Missed:'No answer', 'Left live message':'Connected', 'Meeting booked':'Connected'};
 const outcomeOf = (raw) => LEGACY_OUTCOME[raw] || raw;
 
 /* Tasks — type and status (2026-11-17). A task is Not Started (a new one), In Progress (Start),
    On Hold (Put on Hold; Resume brings it back) or Completed (`status`). Overdue is worked out —
    any open task (Not Started, In Progress, On Hold) past its due date — and never set by hand
-   (taskState). The same states everywhere: the Tasks board, a record's Tasks tab, Settings → Tasks. */
-const TASK_TYPES = ['Email', 'Call', 'To-do'];
+   (taskState). The same states everywhere: the Tasks board, a record's Tasks tab, Settings → Tasks.
+   A task may have a Time Allowed, counted from when it's started (2026-11-20 — taskTimeState). */
+/* Note types (2026-11-23): General, Client Request, Support — noteTools.jsx has the form's radios, the tag and Spring.
+   HubSpot (`imported`, the same day): a note that came from HubSpot — hard-coded for now; never offered on the note
+   form, it carries HubSpot's mark on its tag and on its filled tab, which comes right after All. */
+const NOTE_TYPES = [{id:'general', label:'General'}, {id:'clientRequest', label:'Client Request'}, {id:'support', label:'Support'}, {id:'hubspot', label:'HubSpot', imported:true}];
+const noteTypeOf = (a) => (a && a.noteType) || (a && a.support ? 'support' : 'general');
+const noteTypePatch = (type) => ({noteType:type, support:type === 'support'});
+const NOTE_TYPE_TABS = [{id:'all', name:'All'}, {id:'hubspot', name:<span style={{display:'inline-flex', alignItems:'center', gap:6}}><HubSpotMark size={13}/>HubSpot</span>}, {id:'clientRequest', name:'Client Request'}, {id:'support', name:'Support'}, {id:'general', name:'General'}];
+const noteInTab = (a, id) => id === 'all' || noteTypeOf(a) === id;
+/* Task Type (2026-11-23): To-do, Email, Call, Colleague follow-up — a task given to a colleague
+   (saved as "Colleague" for a few hours: taskTypeOf reads it). It shows as a tag on every task. */
+const TASK_TYPES = ['To-do', 'Email', 'Call', 'Colleague follow-up'];
+const COLLEAGUE_TASK = 'Colleague follow-up';
+const taskTypeOf = (t) => !t || !t.taskType ? 'To-do' : t.taskType === 'Colleague' ? COLLEAGUE_TASK : t.taskType;
+// A task's type, as its tag — and "Due date passed", red, on an open task past its due date.
+const taskTag = (tone) => ({display:'inline-flex', alignItems:'center', height:18, padding:'0 7px', borderRadius:9999, flexShrink:0, fontSize:11, fontWeight:600, whiteSpace:'nowrap',
+  ...(tone === 'danger' ? {background:'#FEF3F2', border:'1px solid #FECDCA', color:T.red} : {background:T.headerBg, border:`1px solid ${T.borderStrong}`, color:T.gray600})});
+const TaskTypeTag = ({a}) => <span style={taskTag()}>{taskTypeOf(a)}</span>;
+const TaskDueTag = () => <span style={taskTag('danger')}>Due date passed</span>;
 const TASK_STATUSES = [
   {key:'notStarted', label:'Not Started'},
   {key:'inProgress', label:'In Progress'},
@@ -292,6 +326,27 @@ const isOverdue = (t) => t.type === 'task' && isTaskOpen(t) && isPastDue(t);
 // A task's state: Completed, Overdue (worked out — any open task past its due date), else its status — and its label.
 const taskState = (t) => !isTaskOpen(t) ? 'completed' : isPastDue(t) ? 'overdue' : TASK_OPEN_STATUSES.includes(t.status) ? t.status : 'inProgress';
 const taskStateLabel = (t) => (TASK_STATES.find(s => s.key === taskState(t)) || {}).label || '';
+/* Time Allowed (2026-11-20): how long a task may take once it's started — `allowedMin`, a number
+   of minutes, absent when not set (the task's form: TaskTimeAllowedField, activityCards.jsx).
+   `startedAt`: the moment the task first moved to In Progress, kept from then on — every path that
+   sets a task's status passes its patch through withTaskStart. While the task is In Progress and
+   has both, taskTimeState says how it stands: "25 min left", then "Over time · 10 min". On Hold
+   and Completed show nothing; the clock isn't paused — nothing else is stored for it. */
+const taskTimeLabel = (min) => { const n = Math.round(Number(min)); if(!(n > 0)) return ''; const h = Math.floor(n / 60), m = n % 60;
+  return [h ? `${h} ${h === 1 ? 'Hour' : 'Hours'}` : '', m ? `${m} ${m === 1 ? 'Minute' : 'Minutes'}` : ''].filter(Boolean).join(' '); };
+const TASK_TIME_OPTIONS = [15, 30, 45, 60, 120, 240].map(value => ({value, label:taskTimeLabel(value)}));
+const taskSpanText = (min) => min < 60 ? `${min} min` : `${Math.floor(min / 60)} h${min % 60 ? ` ${min % 60} min` : ''}`;
+// null when it doesn't apply; else {leftMs (negative once past it), over, label}.
+const taskTimeState = (task, now = Date.now()) => {
+  if(!task || task.status !== 'inProgress' || !(Number(task.allowedMin) > 0) || !task.startedAt) return null;
+  const start = new Date(task.startedAt).getTime(); if(!start) return null;
+  const leftMs = start + Number(task.allowedMin) * 60000 - now, over = leftMs <= 0;
+  const min = over ? Math.floor(-leftMs / 60000) : Math.ceil(leftMs / 60000);
+  return {leftMs, over, label: over ? (min ? `Over time · ${taskSpanText(min)}` : 'Over time') : `${taskSpanText(min)} left`};
+};
+// A task's patch (or a new task, `prevTask` null) with `startedAt` when it moves to In Progress and has none yet.
+const withTaskStart = (prevTask, patch, now = new Date()) =>
+  patch && patch.status === 'inProgress' && !patch.startedAt && !(prevTask && (prevTask.startedAt || prevTask.status === 'inProgress')) ? {...patch, startedAt:now} : patch;
 const ymdOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 // The task form's values (date 'YYYY-MM-DD', time 'HH:MM') ⇄ the task's `due` / `dueTime`.
 // Read and written in the app's time zone (shared.jsx): a due "Nov 12, 09:00" is 09:00 there.
@@ -302,6 +357,11 @@ const taskDueValue = (date, time) => {
   const [y, m, dd] = date.split('-').map(Number), [h, mi] = time ? time.split(':').map(Number) : [0, 0];
   return {due:zonedDate(y, m - 1, dd, h, mi), dueTime:!!time};
 };
+// A Call back request's task: "Call back <name>", a Call task due at the time given, for the call's point of contact.
+const callBackTask = (name, assignee, when, callId) => ({type:'task', title:`Call back ${name || ''}`.trim(), description:'', status:'notStarted', taskType:'Call', pipelineId:DEFAULT_TASK_PIPELINE_ID,
+  assignee, ...taskDueValue(when.date, when.time), ...(callId ? {callId} : {})});
+// Its date and time are both given, and still to come.
+const callBackReady = (when) => { if(!when || !when.date || !when.time) return false; const d = taskDueValue(when.date, when.time).due; return !!d && d.getTime() > Date.now(); };
 
 const fmtActDate = (d) => {
   const sameYear = d.getFullYear() === new Date().getFullYear();
@@ -572,12 +632,19 @@ function ActivityRow({a, contact, first, context = 'all', compact = false, recor
             <span onClick={ev=>ev.stopPropagation()} style={{minWidth:0, flex:'0 1 auto', overflow:'hidden', display:'flex'}}>
               <HubRecordLink object={record.object} id={record.id} name={record.name}/>
             </span>
+            {a.type === 'note' && <NoteTypeTag a={a}/>}
           </span>
-        ) : a.type === 'note' && a.support ? (
-          /* A Support Note: its tag right after who wrote it, a short line between (2026-11-19). */
+        ) : a.type === 'note' && noteTypeOf(a) !== 'general' ? (
+          /* A Client Request or Support note: its tag right after who wrote it, a short line between (2026-11-23; the Support Note tag of 2026-11-19). */
           <span style={{flex:1, minWidth:0, display:'flex', alignItems:'center', gap:8}}>
             <ActivityLead a={a} lead={lead} style={{...quiet, flex:'0 1 auto'}}/>
-            <SupportNoteDivider/><SupportNoteTag/>
+            <SupportNoteDivider/><NoteTypeTag a={a}/>
+          </span>
+        ) : a.type === 'task' ? (
+          /* A task: its type as a tag after who it's with, and Due date passed while it's overdue (2026-11-23). */
+          <span style={{flex:1, minWidth:0, display:'flex', alignItems:'center', gap:8}}>
+            <ActivityLead a={a} lead={lead} style={{...quiet, flex:'0 1 auto'}}/>
+            <TaskTypeTag a={a}/>{isOverdue(a) && <TaskDueTag/>}
           </span>
         ) : <ActivityLead a={a} lead={lead} style={quiet}/>}
         {compact && !hideWhen && <span style={{...quiet, flexShrink:0, whiteSpace:'nowrap'}}>{l.when}</span>}
@@ -746,11 +813,11 @@ function ActivityHistory({acts}){
   );
 }
 
-Object.assign(window, {isPipelineChange, isRealTouch, latestTouch, isOverdue, taskDueParts, taskDueValue, fmtTaskDue, ymdOf, 
+Object.assign(window, {NOTE_TYPES, noteTypeOf, noteTypePatch, NOTE_TYPE_TABS, noteInTab, taskTypeOf, COLLEAGUE_TASK, TaskTypeTag, TaskDueTag, isPipelineChange, isRealTouch, latestTouch, isOverdue, taskDueParts, taskDueValue, fmtTaskDue, ymdOf, TASK_TIME_OPTIONS, taskTimeLabel, taskTimeState, withTaskStart,
   ACTIVITY_TYPES, generateActivities, withSampleTaskDescriptions, buildActivitySummary,
   ActivitySection, ActivityHistory, SummaryBlock, ActivityDropdown, HistoryItem, activityBox,
   ActivityRow, ActivityLead, activityLines, activityActor, listedActivities, leadText,
-  LOG_CALL_OUTCOMES, SYSTEM_CALL_OUTCOMES, MEETING_PLATFORMS, TASK_TYPES, TASK_STATUSES, TASK_OPEN_STATUSES, TASK_STATES, taskState, taskStateLabel, isPastDue, withTaskStatuses, isTaskOpen, DEFAULT_TASK_PIPELINE_ID, DEFAULT_TASK_PIPELINES, setTaskPipelines, taskPipelinesOf, taskPipelineIdOf, taskPipelineOf, taskStageLabel, outcomeOf, fmtActStamp,
+  CALL_BACK_OUTCOME, CALL_QUALIFIED_OUTCOME, CALL_NOT_QUALIFIED_OUTCOME, callReached, callBackTask, callBackReady, LOG_CALL_OUTCOMES, SYSTEM_CALL_OUTCOMES, MEETING_PLATFORMS, TASK_TYPES, TASK_STATUSES, TASK_OPEN_STATUSES, TASK_STATES, taskState, taskStateLabel, isPastDue, withTaskStatuses, isTaskOpen, DEFAULT_TASK_PIPELINE_ID, DEFAULT_TASK_PIPELINES, setTaskPipelines, taskPipelinesOf, taskPipelineIdOf, taskPipelineOf, taskStageLabel, outcomeOf, fmtActStamp,
   PersonAvatar, PersonName, CallDirection,
   fmtActDate, isOverdue, activityHeadline, activityWhen,
 });

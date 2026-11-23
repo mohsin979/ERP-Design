@@ -5,7 +5,10 @@
    view as CSV, exportViewCsv) + Table Settings buttons, and the All Views modal matching the new Figma reference
    ("Claude Feeder - Contacts module all view modal", node 144:3152).
    Merge Columns (2026-11-18, Contacts / Deals / Customers): Table Settings → Merge Columns joins
-   2 to 3 properties into one column kept with the view (`mergedColumns`, see MERGE_PREFIX). */
+   2 to 3 properties into one column kept with the view (`mergedColumns`, see MERGE_PREFIX).
+   Create Referral Lead (2026-11-23, a lead's and a customer's ⋯ menu): the Add Lead form under that
+   title (ReferralLeadForm); the saved lead keeps the record it was created from (`referredBy`) —
+   shown as Referred By (a link, in the table and the side panel) and on that record's Referrals tab. */
 
 /* 30 sample rows — enough to actually exercise 25-per-page pagination (page 1 full, page 2
    with the remainder) rather than a single trivial page. */
@@ -135,6 +138,8 @@ const CONTACT_PROPERTIES = [
   {key:'industry',      label:'Industry',           width:170},
   {key:'source',        label:'Lead Source',        width:160},
   {key:'leadStatus',    label:'Lead Status',        width:150},
+  // Why the lead doesn't qualify (2026-11-20): from a call's outcome Connected, not qualified (dataModel.jsx).
+  {key:'notQualifiedReason', label:'Not Qualified Reason', width:200},
   {key:'owner',         label:'Lead Owner',         width:170},
   {key:'ownerAssigned', label:'Owner Assignment Date', width:230},
   {key:'deals',         label:'Associated Deal',    width:200},
@@ -241,7 +246,7 @@ const SELECT_VALUES = {
 };
 const selectValues = (key, values = SELECT_VALUES) => values[key] || [];
 
-/* Record schema — the one place the grid, filters, Table Settings and View Settings learn which
+/* Record schema — the one place the grid, filters, Table Settings and Layout Settings learn which
    object they show. Contacts is the default (no provider), so Contacts behaves exactly as it
    always has; another object (Settings → Users & Teams, the connected-account tables) passes its
    own properties, filter properties, select values and cell / row-action rendering through
@@ -997,7 +1002,7 @@ function ContactsDataGrid({rows, columnOrder, setColumnOrder, sort, setSort, sea
                            frozenLeft=0, frozenRight=0, actionsFrozen=true, rowsPerPage=25, resetKey, columnWidths, setColumnWidths, loading,
                            mergedColumns, onRenameMerged}){
   const {propByKey:schemaPropByKey, colWidth:schemaColWidth, renderCell, renderActions, noun, nounPlural, searchKeys, selectable, fillWidth, onRowReorder,
-         pinGutter = true, paginate = true, ordered = false, bulkActions, actionsWidth, recordObject} = useRecordSchema();
+         pinGutter = true, paginate = true, ordered = false, bulkActions, actionsWidth, recordObject, noActions = false} = useRecordSchema();
   /* `recordObject` (Contacts, Deals, Customers — 2026-11-19): the name starts with the record's
      avatar (its Avatar property: photo, else first letter); the email and phone are blue links — a
      new email to the record, a call to it. */
@@ -1290,7 +1295,8 @@ function ContactsDataGrid({rows, columnOrder, setColumnOrder, sort, setSort, sea
               );
             })}
 
-            <th style={{
+            {/* `noActions` (a report's tables, 2026-11-20): no Actions column. */}
+            {!noActions && <th style={{
               position: actionsFrozen ? 'sticky' : 'static', right:0, top:0,
               zIndex: actionsFrozen ? 5 : 4, background: actionsFrozen ? T.headerBg : '#fff',
               width:ACTIONS_W, minWidth:ACTIONS_W, height:T.attioRowH,
@@ -1300,7 +1306,7 @@ function ContactsDataGrid({rows, columnOrder, setColumnOrder, sort, setSort, sea
               padding:'0 12px', textAlign:'left', transition:'border-color 120ms',
             }}>
               <span style={{fontWeight:500, color:T.attioMuted, whiteSpace:'nowrap'}}>Actions</span>
-            </th>
+            </th>}
           </tr>
         </thead>
         <tbody style={loading ? {opacity:.55, transition:'opacity 120ms'} : undefined}>
@@ -1338,7 +1344,7 @@ function ContactsDataGrid({rows, columnOrder, setColumnOrder, sort, setSort, sea
                 </td>
               ); })}
 
-              <td style={{
+              {!noActions && <td style={{
                 position: actionsFrozen ? 'sticky' : 'static', right:0,
                 zIndex: actionsFrozen ? 2 : 1, background: actionsFrozen ? T.headerBg : '#fff',
                 width:ACTIONS_W, minWidth:ACTIONS_W, height:ROW_H,
@@ -1348,7 +1354,7 @@ function ContactsDataGrid({rows, columnOrder, setColumnOrder, sort, setSort, sea
                 padding:'0 12px', transition:'border-color 120ms', ...focusBg(row),
               }}>
                 {renderActions ? renderActions(row) : <ContactActionsMenu contact={row} {...actions}/>}
-              </td>
+              </td>}
             </tr>
           ))}
           {/* Filters can now empty the grid too, so this no longer always blames the search
@@ -1444,7 +1450,7 @@ function SaveAsCopyModal({defaultName, onCancel, onConfirm}){
   const canSave = name.trim().length > 0;
   return (
     <StModal title="Save as Copy" primary="Save as Copy" canSubmit={canSave} onCancel={onCancel} onSubmit={()=>canSave && onConfirm(name.trim())}>
-      <div><label style={fieldLabel}>View Name</label>
+      <div><label style={fieldLabel}>View Name<Req/></label>
         <input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="Enter a view name"
           onKeyDown={e=>{ if(e.key==='Enter' && canSave) onConfirm(name.trim()); }} style={fieldInput}/></div>
     </StModal>
@@ -1751,7 +1757,7 @@ function MergeColumnsModal({initial, propByKey, taken, onSave, onClose}){
           </div>
         </div>
       ) : (
-        <div><label style={fieldLabel}>Column Name</label>
+        <div><label style={fieldLabel}>Column Name<Req/></label>
           <input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="Enter a column name"
             onKeyDown={e=>{ if(e.key === 'Enter') submit(); }} style={fieldInput}/></div>
       )}
@@ -1764,7 +1770,7 @@ const freezeBtn = {
   padding:4, cursor:'pointer', flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center',
 };
 
-/* View Settings — the right-side drawer (kept per the product designer's earlier instruction,
+/* Layout Settings — the right-side drawer (kept per the product designer's earlier instruction,
    which overrode a compact modal). Each view is a draggable card: handle, name, Table/Board
    switcher, three-dot menu; table views also carry rows-per-page and Table Settings. Board
    behaviour is deliberately undefined — the switcher only records the choice. */
@@ -1790,7 +1796,7 @@ function ViewSettingsDrawer({views, activeViewId, setActiveViewId, onClose, onRe
     <ContentSidePanel width={400} zIndex={90} style={{background:'#fff', borderLeft:`1px solid ${T.border}`, boxShadow:'-8px 0 24px rgba(16,24,40,.08)', display:'flex', flexDirection:'column'}}>
       <div style={{display:'flex', flexDirection:'column', flex:1, minHeight:0}}>
         <div style={{display:'flex', alignItems:'center', gap:10, padding:'16px 20px', borderBottom:`1px solid ${T.border}`, flexShrink:0}}>
-          <span style={{flex:1, fontSize:15, fontWeight:600, color:T.attioText}}>View Settings</span>
+          <span style={{flex:1, fontSize:15, fontWeight:600, color:T.attioText}}>Layout Settings</span>
           <button onClick={onClose} title="Close" style={{border:'none', background:'transparent', cursor:'pointer', display:'flex', padding:4}}><Icon name="close" size={14} color={T.gray600}/></button>
         </div>
 
@@ -1883,7 +1889,7 @@ function ViewSettingsDrawer({views, activeViewId, setActiveViewId, onClose, onRe
 const rowIconBtn = {border:'none', background:'transparent', cursor:'pointer', padding:0, display:'flex', alignItems:'center'};
 
 /* ── Record toolbar ── the one toolbar for every record list (Contacts, Deals, Settings tables).
-   Row 1: the view pills (scrolling on their own), View Settings + Save View, then the page
+   Row 1: the view pills (scrolling on their own), Layout Settings + Save View, then the page
    controls (pipeline selector, Table / Board switcher, Export, +). Row 2: search + Filters (+ Clear
    all). `inset` is the only variation: 'page' for a CRM page (Contacts, Deals: 16/20/12 and 12/20),
    'settings' for a table inside a Settings page (12/16), whose page already pads around it. */
@@ -1945,8 +1951,10 @@ function ToolbarSearch({search, onSearch, width = 200, placeholder = 'Search', i
       {focused && (
         <div onMouseDown={e=>e.preventDefault()} style={{position:'absolute', top:'calc(100% + 4px)', left:0, width:'100%', zIndex:60,
           background:'#fff', border:`1px solid ${T.borderStrong}`, borderRadius:8, boxShadow:'0 8px 24px rgba(16,24,40,.10)', padding:4}}>
-          <MenuItem icon={<img src="assets/brand/spring-logo.svg" alt="" width={20} height={10} style={{display:'block'}}/>} label="Ask Spring"
-            onClick={()=>{ setSpring(true); document.activeElement && document.activeElement.blur(); }}/>
+          {/* A Spring action: its mark on Spring's slight orange ground (shared.jsx SPRING, 2026-11-23). */}
+          <div role="button" tabIndex={-1} onClick={()=>{ setSpring(true); document.activeElement && document.activeElement.blur(); }}
+            style={{display:'flex', alignItems:'center', gap:8, padding:'7px 10px', borderRadius:6, fontSize:13, color:T.attioText, cursor:'pointer', background:SPRING.tint, border:`1px solid ${SPRING.line}`}}>
+            <SpringMark w={20}/>Ask Spring</div>
         </div>
       )}
       {spring && <StubPanel title="Spring" zIndex={130} onClose={()=>setSpring(false)}/>}
@@ -1995,7 +2003,7 @@ function RecordToolbar({inset = 'page', views, activeViewId, onSelectView, viewC
   );
   return (<>
     {/* Row 1. No page title — the CRM navigation already provides that context. The view pills
-        scroll horizontally on their own; View Settings and Save View sit outside that scrolling
+        scroll horizontally on their own; Layout Settings and Save View sit outside that scrolling
         wrapper so their menus are never clipped by it. */}
     <div style={{display:'flex', alignItems:'center', gap:16, padding:pad.row1, borderBottom:`1px solid ${T.border}`}}>
       <div style={{display:'flex', alignItems:'center', gap:8, flex:1, minWidth:0, overflowX:'auto'}}>
@@ -2035,6 +2043,53 @@ const newContactRecord = (id, vals) => ({
 const contactView = (c) => c && {...c, owner:userLabel(c.owner), ownerId:c.owner};
 // Activated users as owner options (value: the user ID).
 const ownerUserOptions = (users) => (users || []).filter(u => u.status === 'Activated').map(u => ({value:u.id, label:u.name}));
+
+/* The Add Lead form's Create through associated record — a Deal: an existing one that can take
+   another lead (the link's type), or a new deal created with the lead; a Customer: an existing one
+   that can take another lead. `data`: Settings; `records`: {contacts, deals, customers}. */
+const leadFormAssociation = (data, {contacts, deals, customers}) => {
+  if(!data) return [];
+  const takesContact = (object, r) => canLink({contacts:contacts || [], deals:deals || [], customers:customers || []}, 'contacts', NEW_RECORD, object, r);
+  const creatable = creationAssociations(data, 'contacts');
+  return [
+    ...(deals && creatable.includes('deals') ? [{object:'deals', noun:'deal',
+      existing:deals.filter(d => takesContact('deals', d)).map(d => { const r = dealRowOf(data, d); return recordOption(d, {label:`${d.name} · ${r.pipeline} · ${r.stage}`}); }),
+      fields:objectFormProperties(data, 'deals').filter(p => p.onCreate), optionsFor:dealFormOptions(data), adjust:dealFormAdjust(data)}] : []),
+    ...(customers && creatable.includes('customers') ? [{object:'customers', noun:'customer', existingOnly:true,
+      existing:customers.filter(c => takesContact('customers', c)).map(c => recordOption(c))}] : []),
+  ];
+};
+/* A new lead saved from the Add Lead form — the one way, for Add Lead and Create Referral Lead: a
+   new, never-used ID (store.jsx — never one a deleted lead had); the record from what the form
+   collects (newContactRecord) plus `extra` (a referral's `referredBy`); then its associated records
+   — a deal: an existing one that can take another lead, or a new one; an existing customer that can
+   take another lead (the links' types). `to`: {add(record), linkDeal(dealId, leadId),
+   createDeal(lead, values), linkCustomer(customerId, {contactId})}. → the lead. */
+const saveNewLead = (vals, assoc, to, extra) => {
+  const id = newRecordId('contacts');
+  const record = {...newContactRecord(id, vals), ...(extra || {})};
+  to.add(record);
+  (assoc || []).forEach(a => {
+    if(a.object === 'deals'){
+      if(a.existingId && to.linkDeal) to.linkDeal(a.existingId, id);
+      else if(a.values && to.createDeal) to.createDeal(record, a.values);
+    }
+    if(a.object === 'customers' && a.existingId && to.linkCustomer) to.linkCustomer(a.existingId, {contactId:id});
+  });
+  return record;
+};
+/* Create Referral Lead (2026-11-23) — a lead's or a customer's ⋯ menu: the Add Lead form as it is
+   (the same fields, validation and associated records), titled Create Referral Lead. The saved lead
+   keeps the record it was created from — `referredBy` {object, id}, one referrer — and is saved as
+   any new lead is (saveNewLead, through App's lead creation: its "Lead created" activity and
+   workflows run). `source`: {object, id}; `onSaved(lead)`. */
+function ReferralLeadForm({source, onClose, onSaved}){
+  const hub = useRecordHub();
+  const data = hub.data;
+  return <ContactFormModal mode="add" initial={null} title={createReferralLabel('contacts')} properties={objectFormProperties(data, 'contacts')}
+    owners={ownerUserOptions(data.users)} stages={CONTACT_TYPE_STAGES.map(st => st.value)} association={leadFormAssociation(data, hub.records)}
+    onCancel={onClose} onSave={(vals, assoc) => { const lead = saveNewLead(vals, assoc, hub.leadCreation, {referredBy:{object:source.object, id:source.id}}); onClose(); onSaved && onSaved(lead); }}/>;
+}
 
 /* Shared with Deals (App): `activities` (each contact's history), `profileStore` (Customer
    Profiles: {profiles, facts, save}), `dealData` (Settings data, for Create Deal), `dealsFor(id)`
@@ -2078,7 +2133,7 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
   const [showSaveAsCopy, setShowSaveAsCopy] = React.useState(false);
   const [tableSettingsDraft, setTableSettingsDraft] = React.useState(null);
   const [cardSettingsDraft, setCardSettingsDraft] = React.useState(null);
-  /* Contact side panel layout (View Settings from the contact's ⋯ menu) — one setting for every
+  /* Contact side panel layout (Layout Settings from the contact's ⋯ menu) — one setting for every
      contact, side panel and full page alike. */
   const [panelSettingsSaved, setPanelSettings] = usePersistedState('panel:contacts', DEFAULT_PANEL_SETTINGS, quietPanelSettings);
   const panelSettings = withContactPanelProperties(panelSettingsSaved, contactProperties);
@@ -2097,6 +2152,7 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
   const profileFacts = profileStore ? profileStore.facts : ownFacts;
   const profiles = profileStore ? profileStore.profiles : ownProfiles;
   const [creatingDeal, setCreatingDeal] = React.useState(null);   // the contact a deal is being created from
+  const [referralFor, setReferralFor] = React.useState(null);     // the lead a referral lead is being created from (Create Referral Lead)
   // Activity views on the contact's activity tabs (activityViews.jsx) — one set for every contact.
   const [activityViewState, setActivityViewState] = React.useState({});
   const [profilePrompt, setProfilePrompt] = React.useState(null); // after Create Deal: the contact without a profile
@@ -2205,6 +2261,8 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
     onCreateRecord: (label, c) => /^create deal$/i.test(label) && onCreateDeal && c ? setCreatingDeal(c)
       : /^create customer$/i.test(label) && onCreateCustomer && c ? onCreateCustomer({contact:recordOf(c.id)})
       : setActivityStub(label),   // menu: Create Deal; quick action: Create Deal
+    // Create Referral Lead (the ⋯ menu): the Add Lead form; the new lead keeps this one as its referrer.
+    onCreateReferral: hub && hub.leadCreation ? (c) => setReferralFor(c) : undefined,
     // The ⋯ menu's tools (contactToolAction).
     onTool: (key, c) => contactToolAction(key, c),
     /* Associated Deals: one deal (or the deal picked, `dealId`) opens it; several open the contact's Deals tab. */
@@ -2320,22 +2378,10 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
     if(contactForm.mode === 'edit'){
       updateContact(contactForm.id, vals);
     } else {
-      // A new, never-used ID (store.jsx) — never one a deleted contact had.
-      const id = newRecordId('contacts');
       /* What the form collects (the properties available during creation), plus Create Date.
          Everything else starts empty — in particular there is no deal temperature, because
-         nothing computes one yet. */
-      const record = newContactRecord(id, vals);
-      setContacts(cs => [...cs, record]);
-      /* Associated records: a deal — an existing one that can take another contact, or a new one —
-         and an existing customer that can take another contact (the links' types). */
-      (assoc || []).forEach(a => {
-        if(a.object === 'deals'){
-          if(a.existingId && onLinkDeal) onLinkDeal(a.existingId, id);
-          else if(a.values && onCreateDeal) onCreateDeal(record, a.values);
-        }
-        if(a.object === 'customers' && a.existingId && onLinkCustomer) onLinkCustomer(a.existingId, {contactId:id});
-      });
+         nothing computes one yet. Then its associated records (saveNewLead, above). */
+      saveNewLead(vals, assoc, {add:(record) => setContacts(cs => [...cs, record]), linkDeal:onLinkDeal, createDeal:onCreateDeal, linkCustomer:onLinkCustomer});
     }
     showToast(contactForm.mode === 'edit' ? 'Lead saved' : 'Lead added');
     setContactForm(null);
@@ -2344,15 +2390,7 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
   /* Add contact: Create through associated record → Deal — an existing deal that can take another
      contact (the link's type), or a new deal created with the contact; → Customer — an existing
      customer that can take another contact. */
-  const takesContact = (object, r) => canLink({contacts:records, deals:deals || [], customers:customers || []}, 'contacts', NEW_RECORD, object, r);
-  const creatable = dealData ? creationAssociations(dealData, 'contacts') : [];
-  const association = [
-    ...(deals && creatable.includes('deals') ? [{object:'deals', noun:'deal',
-      existing:deals.filter(d => takesContact('deals', d)).map(d => { const r = dealRowOf(dealData, d); return recordOption(d, {label:`${d.name} · ${r.pipeline} · ${r.stage}`}); }),
-      fields:objectFormProperties(dealData, 'deals').filter(p => p.onCreate), optionsFor:dealFormOptions(dealData), adjust:dealFormAdjust(dealData)}] : []),
-    ...(customers && creatable.includes('customers') ? [{object:'customers', noun:'customer', existingOnly:true,
-      existing:customers.filter(c => takesContact('customers', c)).map(c => recordOption(c))}] : []),
-  ];
+  const association = leadFormAssociation(dealData, {contacts:records, deals, customers});
 
   const persist = (id, patch) => setViews(vs => vs.map(v => v.id===id ? {...v, ...patch} : v));
 
@@ -2386,7 +2424,9 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
   const setContactViolationMode = (on) => engineCtx && engineCtx.setViolationMode(on ? 'contacts' : false);
 
   return (
-    <RecordSchema.Provider value={{...objectSchema, bulkActions:contactBulkActions, mergeColumns:true, recordObject:'contacts'}}>
+    <RecordSchema.Provider value={{...objectSchema, bulkActions:contactBulkActions, mergeColumns:true, recordObject:'contacts',
+      // Referred By: the referrer's name, opening that record.
+      renderCell:(key, r) => key === 'referrer' && r.referrer && r.referredBy ? <HubRecordLink object={r.referredBy.object} id={r.referredBy.id} name={r.referrer}/> : undefined}}>
     <div style={{flex:1, display:'flex', flexDirection:'column', minWidth:0, overflow:'hidden', position:'relative'}}>
       <RecordToolbar inset="page" views={visibleViews} activeViewId={activeViewId} onSelectView={setActiveViewId} searchPlaceholder={recordSearchLabel({noun:'lead'})}
         viewControls={<>
@@ -2497,6 +2537,7 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
           owners={ownerChoices} stages={CONTACT_TYPE_STAGES.map(st=>st.value)} association={association}
           onCancel={()=>setContactForm(null)} onSave={saveContact}/>
       )}
+      {referralFor && <ReferralLeadForm source={{object:'contacts', id:referralFor.id}} onClose={()=>setReferralFor(null)} onSaved={()=>showToast('Lead added')}/>}
       {contactBulkModal}
       {pendingDelete && (
         <DeleteConfirmModal contactName={pendingDelete.name} paid={recordHasPayments('contacts', pendingDelete.id)}
@@ -2581,5 +2622,5 @@ function ContactsModule({contactProperties, contacts:sharedContacts, setContacts
   );
 }
 
-Object.assign(window, {ToolbarSearch, recordSearchLabel, viewPillStyle, viewRowCount, exportViewCsv, gridRowsOf, withScopeFilters, recordScopeFilterProps, newContactRecord, contactView, ownerUserOptions, assocFilterSchema, withAssocRecords, withAssocFilters, RecordToolbar, TableBoardSwitch, toolbarButton, toolbarIconButton, ContactsModule, RecordSchema, useRecordSchema, ContactsDataGrid, Pagination, SaveViewMenu, FilterModal,
+Object.assign(window, {leadFormAssociation, saveNewLead, ReferralLeadForm, ToolbarSearch, recordSearchLabel, viewPillStyle, viewRowCount, exportViewCsv, gridRowsOf, withScopeFilters, recordScopeFilterProps, newContactRecord, contactView, ownerUserOptions, assocFilterSchema, withAssocRecords, withAssocFilters, RecordToolbar, TableBoardSwitch, toolbarButton, toolbarIconButton, ContactsModule, RecordSchema, useRecordSchema, ContactsDataGrid, Pagination, SaveViewMenu, FilterModal,
   TableSettingsModal, MergeColumnsModal, isMergedKey, mergedOf, ViewSettingsDrawer, ConfirmOverwriteModal, SaveAsCopyModal, applyFilters, countAppliedFilters, EMPTY_FILTERS});

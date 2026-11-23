@@ -39,7 +39,7 @@ const relatedFieldOptions = (properties) => [
 ];
 
 /* Clickable (relationship) properties — values that open another record. They stay available
-   wherever properties are configured (Card Settings, Side Panel View Settings); add more here. */
+   wherever properties are configured (Card Settings, Side Panel Settings); add more here. */
 const CLICKABLE_PROPERTIES = {
   owner: {open:(c) => `Lead Owner · ${c.owner}`, show:(c) => !!c.owner},
   deals: {open:(c) => `Associated Deals · ${c.name}`, show:(c) => c.dealCount > 0, value:(c) => String(c.dealCount)},

@@ -1,5 +1,5 @@
 /* HOF Pulse ERP — shared pieces for configurable-layout settings modals (Board Card Settings,
-   Contact Side Panel View Settings). One pattern, so the two can't drift apart:
+   Contact Side Panel Settings). One pattern, so the two can't drift apart:
 
      SettingsModalShell — Table Settings' box (900 × the height that modal settles at, 88vh
                           cap), header, draggable section nav on the left (its order IS the

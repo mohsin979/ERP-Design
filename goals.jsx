@@ -1,8 +1,15 @@
-/* HOF Pulse ERP — Goals (Settings → CRM Settings → Goals): Cash Received targets for the company,
-   each team and each user, per period.
+/* HOF Pulse ERP — Goals (Settings → CRM Settings → Goals): three goals — Cash Received, Deals
+   Created and Daily Activity (2026-11-20) — each with targets for the company, each team and each
+   user; the first two per period, Daily Activity per day.
 
    One Goals system, not target fields on users or teams: settings data `goals` —
-     {period, company:{<period>: amount}, teams:{<teamId>: {<period>: amount}}, users:{<userId>: {<period>: amount}}}
+     {period, company:{<period>: amount}, teams:{<teamId>: {<period>: amount}}, users:{<userId>: {<period>: amount}},
+      deals:{company:{<period>: n}, teams:{<teamId>: {<period>: n}}, users:{<userId>: {<period>: n}}},
+      activity:{company:{<metric>: n}, teams:{<teamId>: {<metric>: n}}, users:{<userId>: {<metric>: n}}}}
+   The top-level company / teams / users are Cash Received (as saved before Deals Created came);
+   `deals` holds the Deals Created targets in the same shape — a number of deals to create (owned
+   by the team's or user's people, by created date) in the period, no currency. Both goals share
+   `period` and the same inheritance (goalTargetsFrom). The page switches between them (UtTab strip).
    `period` is the one being viewed and reported (Daily, Weekly, Monthly, Quarterly, Yearly) —
    kept, so the page, the dashboard and each user's profile show the same period. A target is a
    Cash Received figure (payments recorded in Accounting, by payment date) for the current period
@@ -15,7 +22,18 @@
    page shows what is allocated. Higher levels never overwrite lower ones.
    Reporting: the dashboard's Target KPI and Goals widget (dashboard.jsx, with Cash Received: View
    Payment Terms) — by the dashboard's level: the company's, a team's or the person's own target —
-   and each user's own target in their profile panel (UserGoalRow).
+   and each user's own target in their profile panel (UserGoalRow): Cash Received only. Deals
+   Created is read through dealsGoalTargets(data, period) (goalTargets' structure) and
+   dealsGoalTarget(data, {level:'company'|'team'|'user', id, period}) → the number or null (Reports).
+   Daily Activity (`activity`, 2026-11-20): how many of each of five activities a person is to do
+   in a day (DAY_ACTIVITY_METRICS: Calls only, since later the same day — it was five) — no
+   period. Every figure is one person's for one day, at every level, so nothing is divided: a user
+   with no figure of their own for a metric reads their team's, a team with none the company's (a
+   user without a team: the company's), metric by metric (activityGoalTargets). Read through
+   activityGoalTarget(data, {level:'company'|'team'|'user', id}) → {calls, connected, qualified,
+   quotes, won}, each a number or null. The page shows the five figures in a row per level, the
+   inherited one as the field's placeholder. Sample figures for the sample Employee:
+   withSampleActivityGoals(data) (pure; the caller keeps the once-only flag).
    Access: Settings & Administration → Goals — View shows the page, Edit lets targets be set
    (usersTeams.jsx goalsCan). */
 
@@ -25,6 +43,8 @@ const GOAL_PERIODS = [
 ];
 const goalPeriod = (id) => GOAL_PERIODS.find(p => p.id === id) || GOAL_PERIODS[2];
 const goalsOf = (data) => ({period:'monthly', company:{}, teams:{}, users:{}, ...((data && data.goals) || {})});
+// The Deals Created targets (goals.deals), in the same {company, teams, users} shape.
+const goalDealsOf = (g) => ({company:{}, teams:{}, users:{}, ...((g && g.deals) || {})});
 // The current period of a kind: today, this week (Monday to Sunday), this month, this quarter, this year.
 function goalPeriodRange(period, now = new Date()){
   if(period === 'daily') return dashPeriodRange('today', now);
@@ -39,7 +59,59 @@ const goalShare = (total, n) => total == null || !n ? null : Math.round(total / 
    ({own:true}), else its suggested share; each user's — their own, else their share of their
    team's (a user with no team has no suggestion). */
 function goalTargets(data, period){
-  const g = goalsOf(data), p = period || g.period;
+  const g = goalsOf(data);
+  return goalTargetsFrom(g, data, period || g.period);
+}
+// The same for Deals Created (goals.deals): a number of deals per level, inherited the same way.
+function dealsGoalTargets(data, period){
+  const g = goalsOf(data);
+  return goalTargetsFrom(goalDealsOf(g), data, period || g.period);
+}
+// One Deals Created target after inheritance — the company's, a team's or a user's — or null.
+function dealsGoalTarget(data, {level, id, period} = {}){
+  const t = dealsGoalTargets(data, period);
+  if(level === 'team') return id == null ? null : t.teamTarget(id).value;
+  if(level === 'user') return id == null ? null : t.userTarget(id).value;
+  return t.company;
+}
+/* Daily Activity (goals.activity): a person's figures for a day, per metric. */
+// One daily target since later on 2026-11-20: Calls. The day's other numbers are read out of the step before them
+// (connected of the calls made, qualified of the connected … — myDay.jsx), so they have no target; ones saved earlier are left unread.
+const DAY_ACTIVITY_METRICS = [{id:'calls', label:'Calls'}];
+const goalActivityOf = (g) => ({company:{}, teams:{}, users:{}, ...((g && g.activity) || {})});
+/* Every Daily Activity target, by metric id: the company's; a team's — its own ({own:true}), else
+   the company's; a user's — their own, else their team's (without a team, the company's). Each is
+   one person's figure for a day, so a level with none reads the level above as it is. */
+function activityGoalTargets(data){
+  const a = goalActivityOf(goalsOf(data)), users = ((data && data.users) || []).filter(u => u.status !== 'Deactivated');
+  const own = (o, m) => goalNum((o || {})[m]);
+  const companyTarget = (m) => { const v = own(a.company, m); return {value:v, own:v != null}; };
+  const teamTarget = (tid, m) => { const v = own((a.teams || {})[tid], m); return v != null ? {value:v, own:true} : {value:companyTarget(m).value, own:false}; };
+  const userTarget = (uid, m) => {
+    const v = own((a.users || {})[uid], m);
+    if(v != null) return {value:v, own:true};
+    const u = users.find(x => x.id === uid);
+    return {value: u && u.teamId ? teamTarget(u.teamId, m).value : companyTarget(m).value, own:false};
+  };
+  return {companyTarget, teamTarget, userTarget};
+}
+// One level's Daily Activity targets after inheritance: {calls, connected, qualified, quotes, won}, each a number or null.
+function activityGoalTarget(data, {level, id} = {}){
+  const t = activityGoalTargets(data);
+  const read = (m) => level === 'team' ? (id == null ? null : t.teamTarget(id, m).value) : level === 'user' ? (id == null ? null : t.userTarget(id, m).value) : t.companyTarget(m).value;
+  return Object.fromEntries(DAY_ACTIVITY_METRICS.map(m => [m.id, read(m.id)]));
+}
+/* The sample Employee's Daily Activity figures (Mustafa — usersTeams.jsx PERSONAS): added where he
+   has none of his own; data without him is returned as it is. Pure — the caller runs it once. */
+const SAMPLE_ACTIVITY_GOALS = {calls:40};
+function withSampleActivityGoals(data){
+  if(!((data && data.users) || []).some(u => u.id === 'mustafa')) return data;
+  const g = data.goals || {}, a = g.activity || {}, users = a.users || {};
+  const mine = Object.fromEntries(Object.entries(users.mustafa || {}).filter(([, v]) => goalNum(v) != null));
+  return {...data, goals:{...g, activity:{...a, users:{...users, mustafa:{...SAMPLE_ACTIVITY_GOALS, ...mine}}}}};
+}
+// The targets in one goal's {company, teams, users} for period p.
+function goalTargetsFrom(g, data, p){
   const teams = (data && data.teams) || [], users = ((data && data.users) || []).filter(u => u.status !== 'Deactivated');
   const company = goalNum((g.company || {})[p]);
   const members = (tid) => users.filter(u => u.teamId === tid);
@@ -54,6 +126,9 @@ function goalTargets(data, period){
 // Cash Received in a range (the dashboard's records): everyone's, or the given users'.
 const goalReceived = (dash, range, userIds) => ((dash && dash.people) || []).filter(p => !userIds || userIds.includes(p.id))
   .reduce((s, p) => s + p.ev.payments.filter(x => dashIn(x.at, range)).reduce((a, x) => a + (Number(x.amount) || 0), 0), 0);
+// Deals Created in a range: the deals created by everyone, or by the given users (the deal's owner).
+const goalDealsCreated = (dash, range, userIds) => ((dash && dash.people) || []).filter(p => !userIds || userIds.includes(p.id))
+  .reduce((s, p) => s + p.ev.created.filter(x => dashIn(x.at, range)).length, 0);
 const goalPct = (received, target) => target ? Math.round(received / target * 100) : null;
 const fmtGoalPct = (pct) => pct == null ? '—' : `${pct}%`;
 /* Whose target a dashboard level reads (dashboard.jsx levels): Personal — the person's own; Team —
@@ -68,19 +143,24 @@ function goalKpi(ctx){
   return {target, received, pct, sub: target == null ? 'No target set' : `${fmtGoalPct(pct)} reached · ${goalPeriod(t.period).now}`};
 }
 
-/* ── Settings → Goals ── the period, then the company's target, each team's with its users'. */
+/* ── Settings → Goals ── the goal (Cash Received / Deals Created / Daily Activity), the period
+   (not for Daily Activity: its figures are per day), then the company's target, each team's with
+   its users'. */
+const GOAL_KINDS = [{id:'cash', label:'Cash Received'}, {id:'deals', label:'Deals Created'}, {id:'activity', label:'Daily Activity'}];
 const goalInput = {...stInput, width:160, textAlign:'right', fontVariantNumeric:'tabular-nums'};
 /* A target's field, in the default currency (Settings → Defaults) — Cash Received counts every
    payment converted to it. What's typed shows as typed while the field has focus (so "2500." can
-   become 2500.50); the target is stored as a number. */
-function GoalTargetInput({target, ariaLabel, onChange}){
+   become 2500.50); the target is stored as a number. `count` (Deals Created, Daily Activity): a
+   whole number, no currency. `width`: a narrower field (Daily Activity's five in a row);
+   `invalid`: a red border (commission.jsx: a slab that can't be saved). */
+function GoalTargetInput({target, ariaLabel, onChange, count, width = 160, invalid}){
   const [text, setText] = React.useState(null);
   return (
-    <div style={{position:'relative', width:160}}>
-      <span style={{position:'absolute', left:12, top:'50%', transform:'translateY(-50%)', fontSize:12, color:T.gray400, pointerEvents:'none'}}>{defaultCurrency()}</span>
-      <input value={text != null ? text : target.own ? target.value : ''} placeholder={target.value == null ? '0' : formatAmount(target.value)} inputMode="decimal" aria-label={ariaLabel}
+    <div style={{position:'relative', width}}>
+      {!count && <span style={{position:'absolute', left:12, top:'50%', transform:'translateY(-50%)', fontSize:12, color:T.gray400, pointerEvents:'none'}}>{defaultCurrency()}</span>}
+      <input value={text != null ? text : target.own ? target.value : ''} placeholder={target.value == null ? '0' : formatAmount(target.value)} inputMode={count ? 'numeric' : 'decimal'} aria-label={ariaLabel}
         onFocus={()=>setText(target.own ? String(target.value) : '')} onBlur={()=>setText(null)}
-        onChange={e=>{ const v = e.target.value.replace(/[^0-9.]/g, ''); setText(v); if(v === '' || Number.isFinite(Number(v))) onChange(v); }} style={{...goalInput, paddingLeft:44}}/>
+        onChange={e=>{ const v = e.target.value.replace(count ? /[^0-9]/g : /[^0-9.]/g, ''); setText(v); if(v === '' || Number.isFinite(Number(v))) onChange(v); }} style={{...goalInput, width, ...(count ? {} : {paddingLeft:44}), ...(invalid ? {border:`1px solid ${T.red}`} : {})}}/>
     </div>
   );
 }
@@ -89,27 +169,53 @@ function GoalsSettings({data, setData}){
   const hub = useRecordHub();
   const dash = useDashBusinessData(hub);
   const {draft:g, set, actions} = useSettingsForm(goalsOf(data), v => setData(x => ({...x, goals:v})));
-  const t = goalTargets({...data, goals:g}, g.period), p = g.period;
+  // The goal shown: Cash Received (goals' own company / teams / users), Deals Created (goals.deals) or Daily Activity (goals.activity).
+  const [kind, setKind] = React.useState('cash'), deals = kind === 'deals', activity = kind === 'activity';
+  const src = deals ? goalDealsOf(g) : g;
+  const t = deals ? dealsGoalTargets({...data, goals:g}, g.period) : goalTargets({...data, goals:g}, g.period), p = g.period;
   const range = goalPeriodRange(p, new Date(dash.now)), money = accountingViewAny();
   // One level's figure for the period: typed → its own; cleared → the suggestion again.
-  const setAt = (level, id, v) => set({[level]: id == null ? {...(g[level] || {}), [p]:v === '' ? undefined : Number(v)}
-    : {...(g[level] || {}), [id]:{...((g[level] || {})[id] || {}), [p]:v === '' ? undefined : Number(v)}}});
+  const setAt = (level, id, v) => {
+    const at = {[level]: id == null ? {...(src[level] || {}), [p]:v === '' ? undefined : Number(v)}
+      : {...(src[level] || {}), [id]:{...((src[level] || {})[id] || {}), [p]:v === '' ? undefined : Number(v)}}};
+    set(deals ? {deals:{...src, ...at}} : at);
+  };
   const input = (level, id, target, ariaLabel) => (
-    <GoalTargetInput key={`${level}:${id}:${p}`} target={target} ariaLabel={ariaLabel} onChange={(v)=>setAt(level, id, v)}/>
+    <GoalTargetInput key={`${kind}:${level}:${id}:${p}`} target={target} ariaLabel={ariaLabel} count={deals} onChange={(v)=>setAt(level, id, v)}/>
   );
-  const progress = (target, ids) => { if(!money) return '—'; const r = goalReceived(dash, range, ids); return `${fmtMoney(r)} · ${fmtGoalPct(goalPct(r, target))}`; };
-  const cols = `minmax(0, 1fr) 200px 200px 220px`;
+  const fmtTarget = (n) => deals ? formatAmount(n || 0) : fmtMoney(n);
+  const progress = (target, ids) => {
+    if(deals){ const n = goalDealsCreated(dash, range, ids); return `${formatAmount(n)} · ${fmtGoalPct(goalPct(n, target))}`; }
+    if(!money) return '—'; const r = goalReceived(dash, range, ids); return `${fmtMoney(r)} · ${fmtGoalPct(goalPct(r, target))}`;
+  };
+  /* Daily Activity (goals.activity): a level's five figures in its row, each typed → its own,
+     cleared → the level above's again (the placeholder). */
+  const act = activityGoalTargets({...data, goals:g});
+  const setActivityAt = (level, id, metric, v) => {
+    const a = goalActivityOf(g), at = (o) => ({...(o || {}), [metric]:v === '' ? undefined : Number(v)});
+    set({activity:{...a, [level]: id == null ? at(a[level]) : {...(a[level] || {}), [id]:at((a[level] || {})[id])}}});
+  };
+  const activityCells = (level, id, name) => DAY_ACTIVITY_METRICS.map(m => (
+    <div key={m.id} role="cell" style={cell}>
+      <GoalTargetInput count width={88} target={level === 'company' ? act.companyTarget(m.id) : level === 'teams' ? act.teamTarget(id, m.id) : act.userTarget(id, m.id)}
+        ariaLabel={`${name} ${m.label} target`} onChange={(v)=>setActivityAt(level, id, m.id, v)}/>
+    </div>
+  ));
+  const cols = activity ? `minmax(140px, 1fr) repeat(${DAY_ACTIVITY_METRICS.length}, 112px)` : `minmax(0, 1fr) 200px 200px 220px`;
   const cell = {padding:'8px 12px', minWidth:0, display:'flex', alignItems:'center', fontSize:13, color:T.attioText, minHeight:46};
   const header = {...cell, padding:'8px 12px', fontSize:12.5, fontWeight:500, color:T.gray600, minHeight:0};
   // Money reads right-aligned (as every table).
   const num = {...cell, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', justifyContent:'flex-end', textAlign:'right'};
   const row = (key, cells, style) => <div key={key} role="row" style={{display:'grid', gridTemplateColumns:cols, borderTop:`1px solid ${T.attioLine}`, ...style}}>{cells}</div>;
-  const allocated = (ids, target) => { const sum = ids.reduce((s, uid) => s + (t.userTarget(uid).value || 0), 0); return target == null ? fmtMoney(sum) : `${fmtMoney(sum)} of ${fmtMoney(target)}`; };
+  const allocated = (ids, target) => { const sum = ids.reduce((s, uid) => s + (t.userTarget(uid).value || 0), 0); return target == null ? fmtTarget(sum) : `${fmtTarget(sum)} of ${fmtTarget(target)}`; };
   const table = (label, rows, key) => (
     <div key={key || label} role="table" aria-label={label} style={{border:`1px solid ${T.attioLine}`, borderRadius:8, overflow:'hidden'}}>
       <div role="row" style={{display:'grid', gridTemplateColumns:cols, background:T.headerBg}}>
-        <div role="columnheader" style={header}>{label}</div><div role="columnheader" style={header}>Target · {goalPeriod(p).now}</div>
-        <div role="columnheader" style={{...header, justifyContent:'flex-end'}}>Allocated to Users</div><div role="columnheader" style={{...header, justifyContent:'flex-end'}}>Received</div>
+        <div role="columnheader" style={header}>{label}</div>
+        {activity ? DAY_ACTIVITY_METRICS.map(m => <div key={m.id} role="columnheader" style={header}>{m.label}</div>) : <>
+          <div role="columnheader" style={header}>Target · {goalPeriod(p).now}</div>
+          <div role="columnheader" style={{...header, justifyContent:'flex-end'}}>Allocated to Users</div><div role="columnheader" style={{...header, justifyContent:'flex-end'}}>{deals ? 'Created' : 'Received'}</div>
+        </>}
       </div>
       {rows}
     </div>
@@ -119,25 +225,34 @@ function GoalsSettings({data, setData}){
     <SettingsPage actions={can && actions}>
       <ReadOnlySettings on={can}>
       <div style={{display:'flex', flexDirection:'column', gap:20}}>
-        <StField label="Period" width={200}><StSelect value={p} options={GOAL_PERIODS.map(x => ({value:x.id, label:x.label}))} onChange={v=>set({period:v})}/></StField>
+        <div style={{display:'flex', gap:8, borderBottom:`1px solid ${T.borderStrong}`}}>
+          {GOAL_KINDS.map(k => <UtTab key={k.id} label={k.label} active={kind === k.id} onClick={()=>setKind(k.id)}/>)}
+        </div>
+        {!activity && <StField label="Period" width={200} required><StSelect value={p} options={GOAL_PERIODS.map(x => ({value:x.id, label:x.label}))} onChange={v=>set({period:v})}/></StField>}
         {table('Company', row('company', <>
           <div role="cell" style={{...cell, fontWeight:500}}>{ACTIVE_CRM.name}</div>
-          <div role="cell" style={cell}>{input('company', null, {value:t.company, own:t.company != null}, 'Company target')}</div>
-          <div role="cell" style={num}>{allocated(t.users.map(u => u.id), t.company)}</div>
-          <div role="cell" style={num}>{progress(t.company)}</div>
+          {activity ? activityCells('company', null, 'Company') : <>
+            <div role="cell" style={cell}>{input('company', null, {value:t.company, own:t.company != null}, 'Company target')}</div>
+            <div role="cell" style={num}>{allocated(t.users.map(u => u.id), t.company)}</div>
+            <div role="cell" style={num}>{progress(t.company)}</div>
+          </>}
         </>))}
         {teamsWithUsers.map(tm => table(tm.name, [
           ...(tm.id ? [row(tm.id, <>
             <div role="cell" style={{...cell, fontWeight:500}}>{tm.name}</div>
-            <div role="cell" style={cell}>{input('teams', tm.id, t.teamTarget(tm.id), `${tm.name} target`)}</div>
-            <div role="cell" style={num}>{allocated(tm.users.map(u => u.id), t.teamTarget(tm.id).value)}</div>
-            <div role="cell" style={num}>{progress(t.teamTarget(tm.id).value, tm.users.map(u => u.id))}</div>
+            {activity ? activityCells('teams', tm.id, tm.name) : <>
+              <div role="cell" style={cell}>{input('teams', tm.id, t.teamTarget(tm.id), `${tm.name} target`)}</div>
+              <div role="cell" style={num}>{allocated(tm.users.map(u => u.id), t.teamTarget(tm.id).value)}</div>
+              <div role="cell" style={num}>{progress(t.teamTarget(tm.id).value, tm.users.map(u => u.id))}</div>
+            </>}
           </>, {background:T.headerBg})] : []),
           ...tm.users.map(u => row(u.id, <>
             <div role="cell" style={{...cell, paddingLeft: tm.id ? 28 : 12}}>{u.name}</div>
-            <div role="cell" style={cell}>{input('users', u.id, t.userTarget(u.id), `${u.name} target`)}</div>
-            <div role="cell" style={{...num, color:T.attioFaint}}>—</div>
-            <div role="cell" style={num}>{progress(t.userTarget(u.id).value, [u.id])}</div>
+            {activity ? activityCells('users', u.id, u.name) : <>
+              <div role="cell" style={cell}>{input('users', u.id, t.userTarget(u.id), `${u.name} target`)}</div>
+              <div role="cell" style={{...num, color:T.attioFaint}}>—</div>
+              <div role="cell" style={num}>{progress(t.userTarget(u.id).value, [u.id])}</div>
+            </>}
           </>)),
           ...(!tm.users.length ? [row('none', <div role="cell" style={{...cell, color:T.attioMuted, gridColumn:'1 / -1'}}>No users in this team</div>)] : []),
         ], tm.id || 'no-team'))}
@@ -217,4 +332,4 @@ function UserGoalRow({userId}){
   );
 }
 
-Object.assign(window, {GOAL_PERIODS, goalsOf, goalTargets, goalPeriodRange, goalReceived, goalKpi, GoalsSettings, GoalsWidget, UserGoalRow});
+Object.assign(window, {DAY_ACTIVITY_METRICS, activityGoalTargets, activityGoalTarget, withSampleActivityGoals, GoalTargetInput, GOAL_PERIODS, goalsOf, goalTargets, dealsGoalTargets, dealsGoalTarget, goalPeriodRange, goalReceived, goalDealsCreated, goalKpi, GoalsSettings, GoalsWidget, UserGoalRow});

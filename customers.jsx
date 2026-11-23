@@ -2,11 +2,11 @@
 
    The Customer object at parity with Deals, on the same infrastructure: columns, filters and the
    creation form are built from the Customer properties (Settings → Properties); the page is the
-   record view system (RecordViewsModule: views, View Settings, Save View, search, Filters with
+   record view system (RecordViewsModule: views, Layout Settings, Save View, search, Filters with
    the associated Contacts and Deals, Table Settings, the grid) with the Board, grouped by the
    selected Customer pipeline's stages (Canada & AUS Service, USA NIW - Service). The card is the shared
    record card (RecordCard, Card Settings), the record is the Deal record's shell (side panel ⇄
-   full screen, View Settings, workspace tabs with activity views).
+   full screen, Layout Settings, workspace tabs with activity views).
 
    Relationships (Settings → Records) — every link optional, each record exists on its own; how many
    a customer may have comes from the link's type (dataModel.jsx linkRule). By default:
@@ -15,6 +15,9 @@
    Create Customer on a contact or a deal makes a customer linked to it (CustomerFormModal, App);
    Create Deal on a customer that can take another deal makes one (Go to Deal opens its first), with
    the contact picked on its form. The Add / Edit form picks the contacts and deals from existing records.
+   Create Referral Lead (2026-11-23, the customer's ⋯ menu) opens the Add Lead form (contacts.jsx
+   ReferralLeadForm); the new lead keeps the customer as its referrer (`referredBy`) and is listed
+   on the customer's Referrals tab.
 
    Customer Owner is a user (stored by ID); each change is recorded as an owner-change activity
    (App). Export downloads the current view as CSV. Not defined yet (placeholder): Enrich, calling, email and meetings, what Smart
@@ -90,9 +93,9 @@ const CUSTOMER_TABS = [
   {id:'quotes',   label:'Quotes',           icon:'quote',       list:true},
   {id:'files',    label:'Files',            icon:'folder',      list:true},
   {id:'documents', label:'Documents',       icon:'files',    list:true},
-  {id:'supportNotes', label:'Support Notes', icon:'notepad', list:true},   // the record's Support Notes (2026-11-19)
   {id:'contacts', label:'Leads',            icon:'contacts',    list:true},
   {id:'deals',    label:'Deals',            icon:'deals',       list:true},
+  {id:'referrals', label:'Referrals',       icon:'usersThree',  list:true},   // the leads created from this customer (2026-11-23 — contactDetail.jsx ReferralsTab)
 ];
 
 /* A customer as a list / filter row: names and labels for its pipeline, stage and owner (the
@@ -157,12 +160,11 @@ const DEFAULT_CUSTOMER_CARD_SETTINGS = () => ({
 });
 const CUSTOMER_RECORD_KIND = {object:'customers', noun:'customer', dataAttr:'data-customer-id', defaults:() => DEFAULT_CUSTOMER_CARD_SETTINGS(), dropdowns:DEAL_DROPDOWNS, cardRow:(row) => row};
 
-/* ── Side panel sections and View Settings ── as on a deal. */
+/* ── Side panel sections and Layout Settings ── as on a deal. */
 const CUSTOMER_PANEL_SECTIONS = {
   avatarSubtitle:     'Avatar subtitle',
   cardStyle:          'Card Style',
   quickActions:       'Quick Actions',
-  smartSummary:       'Smart Summary',
   dropdowns:          'Dropdowns',
   customerProperties: 'Customer Properties',
 };
@@ -198,7 +200,7 @@ const customerSubtitle = (customer, view, settings) => {
 };
 const defaultCustomerPanelSettings = (props) => ({
   subtitle: 'stage',
-  order: ['quickActions', 'smartSummary', 'dropdowns', 'customerProperties'],
+  order: ['quickActions', 'dropdowns', 'customerProperties'],
   quickActions: defaultQuickActions('customers'),
   smartSummary: {enabled:false},
   dropdowns: [{id:'d-all', type:'all', enabled:false, count:10}],
@@ -238,12 +240,13 @@ function CustomerFormModal({data, mode = 'add', initial, links, contacts = [], d
 }
 
 /* The customer ⋯ menu — the one record menu (StandardRecordMenu): the tools · Create Deal while
-   the customer has no deal, then Go to Deal (its parent deal — a customer has one) · Copy Email, Edit Customer, Edit Customer Owner,
-   Copy Phone Number, Copy Customer, Enrich Customer · View settings · Delete Customer. */
-function CustomerActionsMenu({customer, onTool, onCreateDeal, onGoToDeal, onEdit, onOwner, onEnrich, onDelete, onCopied, onViewSettings, visible}){
+   the customer has no deal, Create Referral Lead (a lead referred by this customer — 2026-11-23),
+   then Go to Deal (its parent deal — a customer has one) · Copy Email, Edit Customer, Edit Customer Owner,
+   Copy Phone Number, Copy Customer, Enrich Customer · Layout Settings · Delete Customer. */
+function CustomerActionsMenu({customer, onTool, onCreateDeal, onGoToDeal, onCreateReferral, onEdit, onOwner, onEnrich, onDelete, onCopied, onViewSettings, visible}){
   return (
     <StandardRecordMenu object="customers" record={customer} noun="Customer" email={customer.email} phone={customer.phone} copyText={customerCopyText(customer)}
-      onTool={onTool} onCreateDeal={customerTakesDeal(customer) ? onCreateDeal : undefined} onGoToDeal={customerHasDeal(customer) ? onGoToDeal : undefined} onEdit={onEdit} onOwner={onOwner} onEnrich={onEnrich}
+      onTool={onTool} onCreateDeal={customerTakesDeal(customer) ? onCreateDeal : undefined} onGoToDeal={customerHasDeal(customer) ? onGoToDeal : undefined} onCreateReferral={onCreateReferral} onEdit={onEdit} onOwner={onOwner} onEnrich={onEnrich}
       onDelete={onDelete} onCopied={onCopied} onViewSettings={onViewSettings} visible={visible}/>
   );
 }
@@ -372,6 +375,7 @@ function CustomersModule({data, customers, setCustomers, activities, setActiviti
   const [changingOwner, setChangingOwner] = React.useState(null);
   const [pendingDelete, setPendingDelete] = React.useState(null);
   const [creatingDeal, setCreatingDeal] = React.useState(null);   // the customer a deal is being created for
+  const [referralFor, setReferralFor] = React.useState(null);     // the customer a referral lead is being created from (Create Referral Lead)
   const [panelSettings, setPanelSettings] = usePersistedState('panel:customers', () => defaultCustomerPanelSettings(props), quietPanelSettings);
   const [panelDraft, setPanelDraft] = React.useState(null);
   const [activityViewState, setActivityViewState] = React.useState({});
@@ -438,6 +442,7 @@ function CustomersModule({data, customers, setCustomers, activities, setActiviti
     const rec = byId.get(c.id) || c;
     return <CustomerActionsMenu customer={rec} onTool={(k)=>toolAction(k, rec)}
       onCreateDeal={onCreateDeal ? ()=>setCreatingDeal(rec) : undefined} onGoToDeal={()=>goToDeal(rec)}
+      onCreateReferral={hub && hub.leadCreation ? ()=>setReferralFor(rec) : undefined}
       onEdit={()=>setForm({mode:'edit', id:rec.id, initial:rec})} onOwner={()=>setChangingOwner(rec)}
       onEnrich={()=>setStub(`Enrich customer · ${rec.name}`)} onDelete={()=>setPendingDelete(rec)} onCopied={showToast} onViewSettings={onViewSettings}/>;
   };
@@ -543,6 +548,9 @@ function CustomersModule({data, customers, setCustomers, activities, setActiviti
           setCreatingDeal(null);
           showToast(`${typeSingular('deals', 'Deal')} created · ${deal.name}${linked ? '' : ` · not linked (the customer already has a ${typeNoun('deals', 'deal')})`}`, {label:`Open ${typeNoun('deals', 'deal')}`, onClick:()=>{ setToast(null); onOpenDeal && onOpenDeal(deal.id, 'panel'); }});
         }}/>}
+      {/* Create Referral Lead: the Add Lead form (contacts.jsx ReferralLeadForm); the new lead keeps this customer as its referrer. */}
+      {referralFor && <ReferralLeadForm source={{object:'customers', id:referralFor.id}} onClose={()=>setReferralFor(null)}
+        onSaved={(lead)=>showToast('Lead added', {label:'Open lead', onClick:()=>{ setToast(null); onOpenContact && onOpenContact(lead.id, 'full'); }})}/>}
       {(() => {
         const dc = detail && byId.get(detail.id);
         if(!dc) return null;

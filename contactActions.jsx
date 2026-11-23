@@ -87,15 +87,23 @@ const viewSettingsItem = (onViewSettings) => onViewSettings && {label:'Side Pane
 
 /* ── The record ⋯ menu ── one structure for Contacts, Deals and Customers, named for the record:
      Tools          Call, Email, Meeting, Task, Note, File, Quote (by tool permission)
-     Create         Create Deal, Create Customer (only where the Object can create them)
+     Create         Create Deal, Create Customer (only where the Object can create them), then Create
+                    Referral Lead (a lead's and a customer's) / Create Referral Deal (a deal's) —
+                    2026-11-23, a menu item only (not a quick action), for whoever may create that
+                    record type (recordCreateCan); `onCreateReferral` opens its form
      Record         Copy Email, Edit <Record>, Edit <Record> Owner, Copy Phone Number, Copy <Record>, Enrich <Record>,
                     Split <Record> (a record others were merged into, with the Merge permission — merge.jsx)
-     View Settings  (only where the menu opens from the record)
+     Layout Settings  (only where the menu opens from the record)
      Delete         Delete <Record>
    `onTool(key)`: what a tool does is the Object's (the record's tab, its form, the call window…).
    `email` / `phone`: what Copy Email / Copy Phone Number copy (a deal's are its contact's). */
 const RECORD_TOOLS = [['call', 'Call'], ['email', 'Email'], ['meeting', 'Meeting'], ['task', 'Task'], ['note', 'Note'], ['file', 'File'], ['quote', 'Quote']];
-function StandardRecordMenu({object, record, noun, email, phone, copyText:copied, onTool, onCreateDeal, createDealDisabled, onCreateCustomer, onGoToDeal,
+// May the signed-in person create records of this type (Records → Create)? No permissions set up: allowed.
+const recordCreateCan = (object) => { if(!ACCESS.user || !ACCESS.perms) return true; const p = ACCESS.perms[object]; return !!(p && p.enabled && p.create && p.create.on); };
+// What a record's referral is: a deal's, a deal; a lead's and a customer's, a lead.
+const referralTypeOf = (object) => object === 'deals' ? 'deals' : 'contacts';
+const createReferralLabel = (object) => `Create Referral ${typeSingular(referralTypeOf(object), referralTypeOf(object) === 'deals' ? 'Deal' : 'Lead')}`;
+function StandardRecordMenu({object, record, noun, email, phone, copyText:copied, onTool, onCreateDeal, createDealDisabled, onCreateCustomer, onGoToDeal, onCreateReferral,
                              onEdit, onOwner, onEnrich, onDelete, onCopied, onViewSettings, visible = true}){
   const hub = useRecordHub();
   const [splitting, setSplitting] = React.useState(null);   // the merge being split
@@ -105,6 +113,7 @@ function StandardRecordMenu({object, record, noun, email, phone, copyText:copied
       onTool ? RECORD_TOOLS.filter(([k]) => canAdd(object, record, k)).map(([k, label]) => ({label, onClick:()=>onTool(k)})) : [],
       [onCreateDeal && workspaceHasType('deals') && {label:quickActionLabel(object, 'createDeal'), disabled:!!createDealDisabled, onClick:onCreateDeal},
        onCreateCustomer && workspaceHasType('customers') && {label:quickActionLabel(object, 'createCustomer'), onClick:onCreateCustomer},
+       onCreateReferral && workspaceHasType(referralTypeOf(object)) && recordCreateCan(referralTypeOf(object)) && {label:createReferralLabel(object), onClick:onCreateReferral},
        onGoToDeal && workspaceHasType('deals') && {label:quickActionLabel(object, 'goToDeal'), onClick:onGoToDeal}],
       [{label:'Copy Email', onClick:copyAction(email, 'email', onCopied)},
        onEdit && {label:`Edit ${noun}`, onClick:onEdit},
@@ -119,12 +128,13 @@ function StandardRecordMenu({object, record, noun, email, phone, copyText:copied
     {splitting && <SplitRecordPanel object={object} entry={splitting} onClose={()=>setSplitting(null)}/>}
   </>);
 }
-function ContactActionsMenu({contact, onEdit, onDelete, onEnrich, onCopied, onTool, onOwner, onCreateRecord, onViewSettings, visible=true}){
+function ContactActionsMenu({contact, onEdit, onDelete, onEnrich, onCopied, onTool, onOwner, onCreateRecord, onCreateReferral, onViewSettings, visible=true}){
   return (
     <StandardRecordMenu object="contacts" record={contact} noun="Lead" email={contact.email} phone={contact.phone} copyText={contactCopyText(contact)}
       onTool={onTool && ((k) => onTool(k, contact))}
       onCreateDeal={onCreateRecord && (() => onCreateRecord('Create deal', contact))}
       onCreateCustomer={onCreateRecord && (() => onCreateRecord('Create customer', contact))}
+      onCreateReferral={onCreateReferral && (() => onCreateReferral(contact))}
       onEdit={onEdit && (() => onEdit(contact))} onOwner={onOwner && (() => onOwner(contact))} onEnrich={onEnrich && (() => onEnrich(contact))}
       onDelete={onDelete && (() => onDelete(contact))} onCopied={onCopied} onViewSettings={onViewSettings} visible={visible}/>
   );
@@ -133,7 +143,7 @@ function ContactActionsMenu({contact, onEdit, onDelete, onEnrich, onCopied, onTo
 /* ── Quick actions ── one set for Contacts, Deals and Customers, named as in the ⋯ menu: the tools,
    then the owner, then what the Object creates (Create Deal, Create Customer) or opens (a deal's
    Go to Contact). Which ones a card or panel shows, and their order, are set in Card Settings /
-   View Settings. `runQuickAction` sends each to the same handler its menu item uses. */
+   Layout Settings. `runQuickAction` sends each to the same handler its menu item uses. */
 const QUICK_ACTION_DEFS = {
   call:{label:'Call', icon:'call'}, email:{label:'Email', icon:'envelope'}, meeting:{label:'Meeting', icon:'calendar'},
   task:{label:'Task', icon:'tasks'}, note:{label:'Note', icon:'notepad'}, file:{label:'File', icon:'folder'}, quote:{label:'Quote', icon:'quote'},
@@ -184,7 +194,7 @@ const defaultQuickActions = (object, enabled) => normalizeQuickActions(null, obj
 const shownQuickActions = (list, object, record) => normalizeQuickActions(list, object)
   .filter(q => q.enabled && (!QUICK_TOOL_KEYS.includes(q.key) || canAdd(object, record, q.key)) && quickActionAvailable(object, q.key, record))
   .map(q => ({key:q.key, label:quickActionLabel(object, q.key), short:quickActionShort(object, q.key), icon:QUICK_ACTION_DEFS[q.key].icon}));
-/* A side panel's primary quick action (View Settings → Quick Actions → Primary, 2026-11-17): one
+/* A side panel's primary quick action (Layout Settings → Quick Actions → Primary, 2026-11-17): one
    of the actions the record shows, drawn on its own beneath the icons as a filled button with its
    icon and name — and so left out of the icons. None unless one is chosen (`primaryKey`). */
 const splitQuickActions = (list, primaryKey, object, record) => { const on = shownQuickActions(list, object, record), primary = (primaryKey && on.find(q => q.key === primaryKey)) || null;
@@ -212,17 +222,32 @@ const associatedNote = (counts, noun) => {
 };
 
 /* Edit <Record> Owner — any activated user; only the owner changes (each change is recorded as an
-   owner-change activity by the Object). `noun`: Contact, Deal, Customer. */
+   owner-change activity by the Object). `noun`: Contact, Deal, Customer.
+   Owner handover (2026-11-23): a record that has an owner, given to someone else than oneself, is a
+   handover — the button reads Hand Over, an optional Handover Note goes with it (it waits for the
+   handover the save starts — workflowEngine.jsx stageHandoverNote), and the record stays with its
+   owner until the new one accepts. One still pending shows here, with Cancel Handover. */
 function ChangeOwnerModal({record, noun, users, ownerName, onClose, onSave}){
+  const ctx = useWorkflowEngineCtx();
   const [owner, setOwner] = React.useState(record.owner || '');
+  const [note, setNote] = React.useState('');
+  const me = (accessUser() || {}).id || '';
+  const handover = !!record.owner && !!owner && owner !== record.owner && owner !== me;
+  const pending = ctx ? pendingHandover(ctx, recordObjectOf(record.id), record.id) : null;
   return (
-    <StModal title={`Edit ${noun} Owner`} primary="Change Owner" canSubmit={!!owner && owner !== record.owner} onCancel={onClose} onSubmit={()=>onSave(owner)}>
-      <div style={stTextB}>{record.name} · {record.owner ? `Currently ${ownerName(record.owner)}` : 'No owner'}</div>
+    <StModal title={`Edit ${noun} Owner`} primary={handover ? 'Hand Over' : 'Change Owner'} canSubmit={!!owner && owner !== record.owner} onCancel={onClose}
+      onSubmit={()=>{ if(handover) stageHandoverNote(record.id, owner, note); onSave(owner); }}
+      textAction={pending ? {label:'Cancel Handover', onClick:()=>{ ctx.api.answerHandover(pending.id, 'cancel'); onClose(); }} : undefined}>
+      <div style={stTextB}>{record.name} · {record.owner ? `Currently ${ownerName(record.owner)}` : 'No owner'}{pending ? ` · Handover to ${ownerName(pending.to)} pending` : ''}</div>
       <div>
-        <label style={fieldLabel}>{noun} Owner</label>
+        <label style={fieldLabel}>{noun} Owner<Req/></label>
         <SearchableSelect value={owner} options={users.map(u => ({value:u.id, label:u.name}))} onChange={setOwner}
           placeholder="Select user" searchPlaceholder="Search users"/>
       </div>
+      {handover && <div>
+        <label style={fieldLabel} htmlFor="handover-note">Handover Note</label>
+        <textarea id="handover-note" value={note} onChange={e=>setNote(e.target.value)} rows={3} style={{...fieldInput, height:'auto', padding:'8px 10px', resize:'vertical'}}/>
+      </div>}
     </StModal>
   );
 }
@@ -449,10 +474,11 @@ const linkFieldIds = (fields, values) => Object.fromEntries(fields.map(f => { co
    email and phone — all editable). `association` (Add
    only): Create through associated object; onSave(values, [association]). `links` (Add and Edit):
    associated records picked from existing ones, starting at `initialLinks` ({key: id | ids});
-   onSave(values, association, links). `zIndex`: over a modal it's opened from. */
+   onSave(values, association, links). `zIndex`: over a modal it's opened from. `title`: the Add
+   form under another name (Create Referral Lead / Deal — the same form). */
 /* `canEditField(p)`: editing, the fields the signed-in user may change (Records → Edit — its stage
    moves and property values); the others aren't offered, and keep their values. */
-function ContactFormModal({mode, initial, properties, owners, stages, onCancel, onSave, noun = 'lead', optionsFor: optionsForProp, adjust, association, links, initialLinks, zIndex, canEditField}){
+function ContactFormModal({mode, initial, properties, owners, stages, onCancel, onSave, noun = 'lead', optionsFor: optionsForProp, adjust, association, links, initialLinks, zIndex, canEditField, title:titleProp}){
   const fields = (properties || []).filter(p => mode === 'edit' ? !p.auto && (!canEditField || canEditField(p)) : p.onCreate)
     .map(p => mode === 'edit' ? {...p, required:!!p.mandatory} : p);
   const [v, setV] = React.useState(() => emptyValues(fields, initial));
@@ -475,7 +501,7 @@ function ContactFormModal({mode, initial, properties, owners, stages, onCancel, 
   const linksShown = (links || []).filter(l => !q || `associated ${l.noun}`.includes(q));
   // Title Case: "Add Contact", "Edit Deal"; the button "Add Contact" / "Save Changes".
   const Noun = String(noun).replace(/\b\w/g, c => c.toUpperCase());
-  const title = mode === 'edit' ? `Edit ${Noun}` : `Add ${Noun}`;
+  const title = titleProp || (mode === 'edit' ? `Edit ${Noun}` : `Add ${Noun}`);
   const top = mode === 'edit' ? (
     <div style={{position:'relative'}}>
       <div style={{position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', display:'flex'}}><Icon name="search" size={13} color={T.gray400}/></div>
@@ -498,4 +524,4 @@ function ContactFormModal({mode, initial, properties, owners, stages, onCancel, 
   );
 }
 
-Object.assign(window, {quickActionShort, TOAST_MS, TOAST_ACTION_MS, customerHasDeal, customerTakesDeal, quickActionAvailable, RecordFields, AssociatedCreation, RecordLinkField, recordLinkFields, linkFieldValues, linkFieldIds, RecordActionsMenu, StandardRecordMenu, RECORD_TOOLS, ChangeOwnerModal, associatedNote, QUICK_ACTION_DEFS, QUICK_TOOL_KEYS, OBJECT_QUICK_ACTIONS, objectQuickActions, OBJECT_NOUNS, quickActionLabel, quickActionLabels, normalizeQuickActions, defaultQuickActions, shownQuickActions, splitQuickActions, runQuickAction, copyAction, viewSettingsItem, contactCopyText, ContactActionsMenu, ContactFormModal, CopyToast, copyText, todayLabel});
+Object.assign(window, {recordCreateCan, createReferralLabel, quickActionShort, TOAST_MS, TOAST_ACTION_MS, customerHasDeal, customerTakesDeal, quickActionAvailable, RecordFields, AssociatedCreation, RecordLinkField, recordLinkFields, linkFieldValues, linkFieldIds, RecordActionsMenu, StandardRecordMenu, RECORD_TOOLS, ChangeOwnerModal, associatedNote, QUICK_ACTION_DEFS, QUICK_TOOL_KEYS, OBJECT_QUICK_ACTIONS, objectQuickActions, OBJECT_NOUNS, quickActionLabel, quickActionLabels, normalizeQuickActions, defaultQuickActions, shownQuickActions, splitQuickActions, runQuickAction, copyAction, viewSettingsItem, contactCopyText, ContactActionsMenu, ContactFormModal, CopyToast, copyText, todayLabel});

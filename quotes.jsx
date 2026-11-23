@@ -54,7 +54,17 @@
    PDF, the email) — only Installments and Recurring do; Bank details after the terms (only the
    filled fields); Download PDF in a quote's ⋯ menu — the quotation exactly as the view shows it, on
    A4 pages (quotePdfBlob: html2pdf.js from cdnjs, loaded when first needed); Send Quote attaches
-   that PDF to the quote's email. */
+   that PDF to the quote's email.
+
+   Referral Discount (2026-11-23): a second, optional discount on the Payment Plan step, under the
+   Discount and entered with the same control (`referralDiscount` {type, value}) — offered only
+   while the quote's record has a referral link on either side (recordHub.jsx hasReferralLink: it,
+   or its person lead, was referred or has referred someone); without one it isn't shown, counts as
+   nothing in the builder and isn't saved. Worked out on the services subtotal as the Discount is,
+   both off before VAT (quoteTotals), so the Payment Plan is for the lowered total. The quotation —
+   Preview, the view, the client's page, the PDF — and the quote's email show it as its own line,
+   "Referral Discount", under Discount, only when it's above zero. A quote template never carries
+   one; a saved quote keeps the one it was saved with. */
 
 const QUOTE_STATUS = {draft:{label:'Draft', tone:'neutral'}, sent:{label:'Sent', tone:'info'}, signed:{label:'Signed', tone:'success'}, expired:{label:'Expired', tone:'danger'}};
 /* Expired: a draft or sent quote past its Valid Until date — it can't be sent, signed or pulled into
@@ -97,16 +107,21 @@ const discountIn = (d, from, to) => d && d.type === 'amount' && d.value !== '' &
 // A service's total in a quote: its milestones' prices (a quote saved before them: its price).
 const quoteItemTotal = (it) => (it.milestones || []).some(m => m.price != null && m.price !== '')
   ? it.milestones.reduce((s, m) => s + (Number(m.price) || 0), 0) : Number(it.price) || 0;
-/* The quote's money, top to bottom: services subtotal − discount = discounted subtotal; + VAT =
-   total. A quote saved before VAT had none. */
+/* The quote's money, top to bottom: services subtotal − discount − referral discount = discounted
+   subtotal; + VAT = total. A quote saved before VAT had none.
+   Referral Discount (2026-11-23, `referralDiscount` {type, value}): a second, optional discount on
+   the same base as Discount — the services subtotal (a percentage of it, or an amount) — both taken
+   off before VAT, together never more than the subtotal (the total never goes below zero). */
+const discountAmount = (d, subtotal) => { const dv = Math.max(0, Number((d || {}).value) || 0);
+  return round2((d || {}).type === 'amount' ? Math.min(dv, subtotal) : subtotal * Math.min(dv, 100) / 100); };
 function quoteTotals(q){
   const subtotal = round2((q.items || []).reduce((s, it) => s + quoteItemTotal(it), 0));
-  const d = q.discount || {type:'percent', value:0}, dv = Math.max(0, Number(d.value) || 0);
-  const discount = round2(d.type === 'amount' ? Math.min(dv, subtotal) : subtotal * Math.min(dv, 100) / 100);
-  const discounted = round2(subtotal - discount);
+  const discount = discountAmount(q.discount, subtotal);
+  const referralDiscount = Math.min(discountAmount(q.referralDiscount, subtotal), round2(subtotal - discount));
+  const discounted = round2(subtotal - discount - referralDiscount);
   const vatRate = q.vatRate == null ? 0 : Number(q.vatRate) || 0;
   const vat = round2(discounted * vatRate / 100);
-  return {subtotal, discount, discounted, vatRate, vat, total:round2(discounted + vat)};
+  return {subtotal, discount, referralDiscount, discounted, vatRate, vat, total:round2(discounted + vat)};
 }
 const quoteTotal = (q) => quoteTotals(q).total;
 /* Installment amounts from their percentages: each rounded to the cent, the last one taking what's
@@ -258,10 +273,10 @@ function QuoteDocument({quote, flat, brand:given}){
         {/* The money: subtotal, discount, discounted subtotal, VAT, total. */}
         <div className="pdf-keep" style={{marginLeft:'auto', width:'100%', maxWidth:340}}>
           {sumRow('Services subtotal', fmtMoney(t.subtotal, cur))}
-          {t.discount > 0 && <>
-            {sumRow(`Discount${quote.discount && quote.discount.type === 'percent' ? ` (${Number(quote.discount.value)}%)` : ''}`, `− ${fmtMoney(t.discount, cur)}`)}
-            {sumRow('Discounted subtotal', fmtMoney(t.discounted, cur))}
-          </>}
+          {t.discount > 0 && sumRow(`Discount${quote.discount && quote.discount.type === 'percent' ? ` (${Number(quote.discount.value)}%)` : ''}`, `− ${fmtMoney(t.discount, cur)}`)}
+          {/* Referral Discount: its own line under Discount, only when there is one. */}
+          {t.referralDiscount > 0 && sumRow(`Referral Discount${quote.referralDiscount.type === 'percent' ? ` (${Number(quote.referralDiscount.value)}%)` : ''}`, `− ${fmtMoney(t.referralDiscount, cur)}`)}
+          {(t.discount > 0 || t.referralDiscount > 0) && sumRow('Discounted subtotal', fmtMoney(t.discounted, cur))}
           {quote.vatRate != null && sumRow(`VAT (${t.vatRate}%)`, fmtMoney(t.vat, cur))}
           <div style={{borderTop:`2px solid ${brand.colors.primary}`, marginTop:6, paddingTop:6}}>{sumRow('Total', fmtMoney(t.total, cur), true)}</div>
         </div>
@@ -409,7 +424,7 @@ async function sendQuoteVia(hub, q){
     title:`Quotation ${q.number}: ${q.title}`,
     body:`Hi ${emailFirstName(q.recipient.name) || 'there'},\n\nPlease find your quotation ${q.number} for ${q.title} below.\n\n`
       + (q.items || []).map(it => `${it.name} — ${fmtMoney(quoteItemTotal(it), cur)}`).join('\n')
-      + `\n\nSubtotal: ${fmtMoney(t.subtotal, cur)}` + (t.discount ? `\nDiscount: − ${fmtMoney(t.discount, cur)}` : '') + (q.vatRate != null ? `\nVAT (${t.vatRate}%): ${fmtMoney(t.vat, cur)}` : '')
+      + `\n\nSubtotal: ${fmtMoney(t.subtotal, cur)}` + (t.discount ? `\nDiscount: − ${fmtMoney(t.discount, cur)}` : '') + (t.referralDiscount ? `\nReferral Discount: − ${fmtMoney(t.referralDiscount, cur)}` : '') + (q.vatRate != null ? `\nVAT (${t.vatRate}%): ${fmtMoney(t.vat, cur)}` : '')
       + `\nTotal: ${fmtMoney(t.total, cur)}` + (q.validUntil ? `\nValid until ${fmtQuoteDate(q.validUntil)}.` : '')
       + (!quoteShowsPlan(q) ? '' : q.payment ? `\n\nPayment plan (${PAYMENT_TYPE_LABEL[quotePlanOf(q).paymentType]}):\n` + quoteSchedule(q).map((x, i) => `${i + 1}. ${x.description} — ${fmtMoney(x.amount, cur)} — due ${fmtQuoteDate(x.dueDate) || x.tentative}`).join('\n') + (planOngoing(quotePlanOf(q)) ? '\nUntil cancelled' : '')
         : (q.installments || []).length ? `\n\nPayment plan:\n` + q.installments.map((x, i) => `${i + 1}. ${x.description} — ${round2(x.percent)}% — ${fmtMoney(installmentAmount(q, x), cur)}${fmtTentative(x.due) ? ` — ${fmtTentative(x.due)}` : ''}`).join('\n') : '')
@@ -426,11 +441,14 @@ const itemPricesOk = (it) => (it.milestones || []).length ? it.milestones.every(
 /* What the Services and Payment Terms steps check (the builder and a quote template): a service
    or more, every price given; the discount within the subtotal (or 100%); the payment terms
    complete for the total (planOk). */
+/* The Referral Discount is checked as the Discount is, and the two together stay within the subtotal. */
 function quoteConfigChecks(q){
-  const totals = quoteTotals(q), d = q.discount || {type:'percent', value:''};
-  const discountOk = d.value === '' || (Number(d.value) >= 0 && (d.type === 'amount' ? Number(d.value) <= totals.subtotal : Number(d.value) <= 100));
+  const totals = quoteTotals(q), d = q.discount || {type:'percent', value:''}, rd = q.referralDiscount || {type:'percent', value:''};
+  const within = (x) => x.value === '' || x.value == null || (Number(x.value) >= 0 && (x.type === 'amount' ? Number(x.value) <= totals.subtotal : Number(x.value) <= 100));
+  const discountOk = within(d);
+  const referralOk = within(rd) && round2(totals.discount + discountAmount(rd, totals.subtotal)) <= totals.subtotal;
   const paymentOk = !(totals.total > 0) || planOk(quotePlanOf(q), totals.total);
-  return {totals, itemsOk:(q.items || []).length > 0 && q.items.every(itemPricesOk), discountOk, paymentOk};
+  return {totals, itemsOk:(q.items || []).length > 0 && q.items.every(itemPricesOk), discountOk, referralOk, paymentOk};
 }
 // The services, payment terms and discount as saved: prices as numbers; the plan without an amount or currency (the quote's).
 const normalizeQuoteConfig = (q) => ({
@@ -534,32 +552,41 @@ function QuoteServicesFields({q, set, checks, template}){
 }
 /* Payment Plan — the quote's currency, then the payment terms for the quote's total
    (PaymentTermsFields), then the discount on the services subtotal (a percentage or an amount)
-   and VAT on the discounted subtotal, down to the total. */
-function QuotePaymentFields({q, set, checks}){
-  const {totals, discountOk} = checks, cur = quoteCurrency(q);
+   and VAT on the discounted subtotal, down to the total. `referral`: the quote's record has a
+   referral link — the Referral Discount is offered under the Discount, with the same control. */
+function QuotePaymentFields({q, set, checks, referral}){
+  const {totals, discountOk, referralOk} = checks, cur = quoteCurrency(q);
   // Another currency restates every price (and an amount discount) in it.
-  const setCurrency = (c) => c && c !== cur && set({currency:c, items:itemsIn(q.items, cur, c), discount:discountIn(q.discount, cur, c)});
+  const setCurrency = (c) => c && c !== cur && set({currency:c, items:itemsIn(q.items, cur, c), discount:discountIn(q.discount, cur, c),
+    ...(q.referralDiscount ? {referralDiscount:discountIn(q.referralDiscount, cur, c)} : {})});
+  // A discount's control — Discount and Referral Discount alike: % or an amount, then the value.
+  const discountField = (label, key, ok) => { const d = q[key] || {type:'percent', value:''}; return (
+    <div style={{display:'flex', alignItems:'center', gap:10, padding:'6px 0'}}>
+      <span style={{flex:1, fontSize:13, color:T.attioText}}>{label}</span>
+      <div role="radiogroup" aria-label={`${label} type`} style={{display:'inline-flex', border:`1px solid ${T.borderStrong}`, borderRadius:8, overflow:'hidden'}}>
+        {[['percent', '%'], ['amount', cur]].map(([k, l]) => (
+          <button key={k} type="button" role="radio" aria-checked={d.type === k} onClick={()=>set({[key]:{...d, type:k}})}
+            style={{border:'none', cursor:'pointer', padding:'5px 10px', fontSize:12.5, fontWeight:500, fontFamily:'inherit', background: d.type === k ? T.black : 'transparent', color: d.type === k ? '#fff' : T.gray600}}>{l}</button>
+        ))}
+      </div>
+      <input value={d.value} onChange={e=>set({[key]:{...d, value:e.target.value.replace(/[^0-9.]/g, '')}})} inputMode="decimal" placeholder="0" aria-label={label}
+        style={{...fieldText, width:110, textAlign:'right', fontVariantNumeric:'tabular-nums', borderColor: ok ? T.borderStrong : T.red}}/>
+    </div>); };
   return (<>
     {/* The plan's first field, laid out as its own (accounting.jsx PaymentTermsFields). */}
-    {stack(<Field label="Currency" wide><div style={{display:'grid', gridTemplateColumns:`${PT_W}px ${PT_W}px`, gap:12}}>
+    {stack(<Field label="Currency" wide required><div style={{display:'grid', gridTemplateColumns:`${PT_W}px ${PT_W}px`, gap:12}}>
       <Dropdown required value={cur} options={currencyOptions()} controlStyle={{...fieldControl, height:PT_H, boxSizing:'border-box'}} ariaLabel="Currency" onChange={setCurrency}/><span/></div></Field>)}
     <PaymentTermsFields plan={quotePlanOf(q)} onChange={(p)=>set({payment:p})} total={totals.total} currency={cur}/>
     <div style={{borderTop:`1px solid ${T.border}`, margin:'4px -20px 0'}}/>
     <span style={QUOTE_SECTION}>Discount & tax</span>
     <div style={{maxWidth:420, width:'100%', alignSelf:'flex-end'}}>
       {quoteSumRow('Services subtotal', fmtMoney(totals.subtotal, cur))}
-      <div style={{display:'flex', alignItems:'center', gap:10, padding:'6px 0'}}>
-        <span style={{flex:1, fontSize:13, color:T.attioText}}>Discount</span>
-        <div role="radiogroup" aria-label="Discount type" style={{display:'inline-flex', border:`1px solid ${T.borderStrong}`, borderRadius:8, overflow:'hidden'}}>
-          {[['percent', '%'], ['amount', cur]].map(([k, l]) => (
-            <button key={k} type="button" role="radio" aria-checked={q.discount.type === k} onClick={()=>set({discount:{...q.discount, type:k}})}
-              style={{border:'none', cursor:'pointer', padding:'5px 10px', fontSize:12.5, fontWeight:500, fontFamily:'inherit', background: q.discount.type === k ? T.black : 'transparent', color: q.discount.type === k ? '#fff' : T.gray600}}>{l}</button>
-          ))}
-        </div>
-        <input value={q.discount.value} onChange={e=>set({discount:{...q.discount, value:e.target.value.replace(/[^0-9.]/g, '')}})} inputMode="decimal" placeholder="0" aria-label="Discount"
-          style={{...fieldText, width:110, textAlign:'right', fontVariantNumeric:'tabular-nums', borderColor: discountOk ? T.borderStrong : T.red}}/>
-      </div>
+      {discountField('Discount', 'discount', discountOk)}
       {quoteSumRow('Discount amount', `− ${fmtMoney(totals.discount, cur)}`)}
+      {referral && <>
+        {discountField('Referral Discount', 'referralDiscount', referralOk)}
+        {quoteSumRow('Referral Discount amount', `− ${fmtMoney(totals.referralDiscount, cur)}`)}
+      </>}
       {quoteSumRow('Discounted subtotal', fmtMoney(totals.discounted, cur))}
       {quoteSumRow(`VAT (${totals.vatRate}% of the discounted subtotal)`, fmtMoney(totals.vat, cur))}
       <div style={{borderTop:`2px solid ${T.attioText}`, marginTop:6, paddingTop:4}}>{quoteSumRow('Total', fmtMoney(totals.total, cur), true)}</div>
@@ -607,10 +634,16 @@ function QuoteBuilder({mode, id, object, onClose, placement = 'fixed', template}
   const [templating, setTemplating] = React.useState(null); // Save as template: its name
   const templates = quoteTemplatesOf(hub.data);
   const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((q.recipient.email || '').trim());
-  const checks = quoteConfigChecks(q), totals = checks.totals;
-  const stepOk = [isTpl ? !!q.name.trim() : target.id != null && !!q.recipient.name.trim() && validEmail, checks.itemsOk, checks.discountOk && checks.paymentOk, true, true, true];
+  /* Referral Discount (2026-11-23): offered while the quote's record has a referral link on either
+     side (recordHub.jsx hasReferralLink) — never on a template. Without one the field isn't shown,
+     what it holds counts as nothing and isn't saved with the quote. */
+  const referralOn = React.useMemo(() => { const record = !isTpl && target.id != null ? hubRecord(hub, target.object, target.id) : null;
+    return !!record && hasReferralLink(hub, target.object, record); }, [hub.records.contacts, hub.records.deals, hub.records.customers, target.object, target.id, isTpl]);
+  const referralValue = referralOn && q.referralDiscount ? Number(q.referralDiscount.value) || 0 : 0;
+  const checks = quoteConfigChecks(referralOn ? q : {...q, referralDiscount:undefined}), totals = checks.totals;
+  const stepOk = [isTpl ? !!q.name.trim() : target.id != null && !!q.recipient.name.trim() && validEmail, checks.itemsOk, checks.discountOk && checks.referralOk && checks.paymentOk, true, true, true];
   const draft = () => ({...q, title:q.title.trim() || (q.items[0] && q.items[0].name) || 'Quotation', recipient:{name:q.recipient.name.trim(), email:q.recipient.email.trim()},
-    ...normalizeQuoteConfig(q), object:target.object, recordId:target.id});
+    ...normalizeQuoteConfig(q), referralDiscount: referralValue > 0 ? {type:q.referralDiscount.type || 'percent', value:referralValue} : undefined, object:target.object, recordId:target.id});
   const save = (andSend) => {
     let saved;
     if(existing){ saved = {...existing, ...draft()}; hub.setQuotes(qs => qs.map(x => x.id === existing.id ? saved : x)); }
@@ -680,15 +713,15 @@ function QuoteBuilder({mode, id, object, onClose, placement = 'fixed', template}
 
           {/* 1 · Basics — a quote: a saved template to start from, who it's for, its title, description and validity; a template: its name and code, the title and description. */}
           {step === 0 && (isTpl ? stack(<>
-            <Field label="Template Name"><input autoFocus value={q.name} onChange={e=>set({name:e.target.value})} placeholder="e.g. US NIW Standard" style={fieldText}/></Field>
+            <Field label="Template Name" required><input autoFocus value={q.name} onChange={e=>set({name:e.target.value})} placeholder="e.g. US NIW Standard" style={fieldText}/></Field>
             <Field label="Code"><ReadValue>{tpl0 ? tpl0.code : nextTemplateCode(template.templates)}</ReadValue></Field>
             <Field label="Quote Title"><input value={q.title} onChange={e=>set({title:e.target.value})} placeholder="e.g. US NIW Petition" style={fieldText}/></Field>
             <Field label="Description"><RichTextEditor value={q.description} onChange={(v)=>set({description:v})} ariaLabel="Quote description"/></Field>
           </>) : stack(<>
             <Field label="Quote Template"><FormSelect value={q.templateId || ''} placeholder={templates.length ? 'Select quote template' : 'No quote templates yet'}
               options={templates.map(t => ({value:t.id, label:`${t.code} · ${t.name}`}))} onChange={useTemplate}/></Field>
-            <Field label="Recipient Name"><input value={q.recipient.name} onChange={e=>set({recipient:{...q.recipient, name:e.target.value}})} style={fieldText}/></Field>
-            <Field label="Recipient Email"><input value={q.recipient.email} onChange={e=>set({recipient:{...q.recipient, email:e.target.value}})}
+            <Field label="Recipient Name" required><input value={q.recipient.name} onChange={e=>set({recipient:{...q.recipient, name:e.target.value}})} style={fieldText}/></Field>
+            <Field label="Recipient Email" required><input value={q.recipient.email} onChange={e=>set({recipient:{...q.recipient, email:e.target.value}})}
               style={{...fieldText, borderColor: q.recipient.email && !validEmail ? T.red : T.borderStrong}}/></Field>
             <Field label="Quote Title"><input value={q.title} onChange={e=>set({title:e.target.value})} placeholder="e.g. US NIW Petition" style={fieldText}/></Field>
             <Field label="Description"><RichTextEditor value={q.description} onChange={(v)=>set({description:v})} ariaLabel="Quote description"/></Field>
@@ -699,7 +732,7 @@ function QuoteBuilder({mode, id, object, onClose, placement = 'fixed', template}
           {step === 1 && <QuoteServicesFields q={q} set={set} checks={checks} template={isTpl}/>}
 
           {/* 3 · Payment Terms — the payment terms, then the discount and VAT. */}
-          {step === 2 && <QuotePaymentFields q={q} set={set} checks={checks}/>}
+          {step === 2 && <QuotePaymentFields q={q} set={set} checks={checks} referral={referralOn}/>}
 
           {/* 4 · Terms & Conditions */}
           {step === 3 && <>
@@ -735,7 +768,7 @@ function QuoteBuilder({mode, id, object, onClose, placement = 'fixed', template}
         </StModal>, document.body)}
       {templating != null && ReactDOM.createPortal(
         <StModal title="Save as Template" primary="Save as Template" canSubmit={!!templating.trim()} onCancel={()=>setTemplating(null)} onSubmit={()=>saveTemplate(templating.trim())}>
-          <div><label style={fieldLabel}>Template Name</label><input autoFocus value={templating} onChange={e=>setTemplating(e.target.value)} style={fieldInput}/></div>
+          <div><label style={fieldLabel}>Template Name<Req/></label><input autoFocus value={templating} onChange={e=>setTemplating(e.target.value)} style={fieldInput}/></div>
           <div style={{fontSize:12.5, color:T.attioMuted}}>Code {nextTemplateCode(templates)}</div>
         </StModal>, document.body)}
     </CreatePanelFrame>
@@ -842,7 +875,7 @@ function MarkSignedModal({sentAt, onCancel, onSave}){
   const save = () => onSave({signedAt:date, signedCopy:copy});
   return ReactDOM.createPortal(
     <StModal title="Mark as Signed" primary="Mark as Signed" canSubmit={dateOk} onCancel={onCancel} onSubmit={()=>dateOk && save()}>
-      <div><label style={fieldLabel}>Signed on</label><DateField required value={date} onChange={setDate}/>
+      <div><label style={fieldLabel}>Signed on<Req/></label><DateField required value={date} onChange={setDate}/>
         {date && !dateOk && <div style={{fontSize:12, color:T.red, marginTop:4}}>Choose a date from {fmtQuoteDate(sentOn || today)} to today.</div>}</div>
       <div>
         <label style={fieldLabel}>Signed Copy</label>

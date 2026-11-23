@@ -2,7 +2,10 @@
 
    Each page lists every activity of its kind, whatever Contact, Deal or Customer it's on — the
    record views every CRM page has (views, search, Filters, Table Settings), with the record it
-   belongs to (a link that opens it). Opening one shows it in a side panel with its usual detail
+   belongs to (a link that opens it). Calls, Emails, Meetings and Notes use the page's whole width
+   (2026-11-23, the stakeholder's layout): the record's time trail on the left, without row actions,
+   and the picked activity's details on the right — the first one to start with (ListToolPage);
+   Tasks keep their board / table, a task opening in a side panel. The details are the usual ones
    (Edit, ⋯ Delete, comments, Reply …) — the same component the record's own tab uses, so a change
    here is the record's change, and the other way round (recordHub.jsx). New items are created
    against a record chosen first: Log Call or a live Call, Task, Schedule / Log Meeting, Note, Log
@@ -189,7 +192,8 @@ const LIST_PAGES = {
     fields:(a) => ({meetingType:a.logged ? 'Meeting log' : 'Meeting', platform:a.platform || ''}),
     filters:[{key:'meetingType', label:'Meeting Type', type:'select', ops:['is', 'isNot'], values:['Meeting', 'Meeting log']}, {key:'platform', label:'Platform', type:'select', ops:['is', 'isNot', 'isAnyOf']}],
     byLabel:'Organizer', dateLabel:'Meeting Date'},
-  notes: {type:'note', noun:'note', addTab:'notes', get feeds(){ return RECORD_FEEDS('note'); }, inFeed:byRecordFeed, line:(a) => richTextPlain(a.body) || 'Note',
+  // `tabs`: the record types as the tab strip, the note types — All, Client Request, Support, General — as the pills (2026-11-23).
+  notes: {type:'note', noun:'note', addTab:'notes', feeds:NOTE_TYPE_TABS, get secondary(){ return SECOND_LEVEL('Notes'); }, tabs:true, inFeed:(e, feed) => noteInTab(e.act, feed), line:(a) => richTextPlain(a.body) || 'Note',
     added:'Note added', search:(a) => [byName(a), richTextPlain(a.body)], fields:(a) => ({linked:a.callId ? 'Call' : a.meetingId ? 'Meeting' : a.taskId ? 'Task' : 'None'}),
     filters:[{key:'linked', label:'Linked To', type:'select', ops:['is', 'isNot'], values:['Call', 'Meeting', 'Task', 'None']}], byLabel:'Note By', dateLabel:'Note Date'},
 };
@@ -222,7 +226,14 @@ function visibilityScope(type){
     const p = ACCESS.perms[o];
     if(!p || !p.enabled) return;
     const v = tool ? (p.tools && p.tools.enabled && p.tools[tool] && p.tools[tool].view) : p.view;
-    if(v && v.on) best = Math.max(best, SCOPE_RANK[v.scope] ?? 0);
+    if(!v || !v.on) return;
+    let rank = SCOPE_RANK[v.scope] ?? 0;
+    /* Emails have no tool permission of their own (they follow the record's View): on this page
+       they go no wider than the person's other activity tools — Call Logs, Meetings, Notes, Tasks
+       (2026-11-23: an employee's switch is My and My Team on every Tools page). */
+    if(!tool && p.tools && p.tools.enabled) Object.values(VISIBILITY_TOOL).filter(Boolean).forEach(k => { const t = p.tools[k] && p.tools[k].view;
+      if(t && t.on) rank = Math.min(rank, SCOPE_RANK[t.scope] ?? 0); });
+    best = Math.max(best, rank);
   });
   return ['own', 'team', 'all'][Math.max(best, 0)];
 }
@@ -295,84 +306,40 @@ function PeoplePicker({vis, open, setOpen}){
     </div>
   );
 }
+/* Whose activities the page lists — a switch (2026-11-23; it was a dropdown): My Calls, My Team,
+   Specific User, All Calls. Specific User adds its own dropdown beside it (PeoplePicker). What the
+   person's permissions cover decides the options: every record's — all four; their team's — My
+   Calls and My Team; their own only — no switch. */
 function VisibilitySelector({vis, noun}){
-  const [open, setOpen] = React.useState(false);
   const [peopleOpen, setPeopleOpen] = React.useState(false);
   if(vis.scope === 'own') return null;
   const plural = `${noun}s`;
-  const opts = [{mode:'my', label:`My ${plural}`, icon:'user'}, {mode:'team', label:'My Team', icon:'usersThree'},
-    {mode:'specific', label:'Specific User', icon:'userSwitch'}, ...(vis.scope === 'all' ? [{mode:'all', label:`All ${plural}`, icon:'listBullets'}] : [])];
+  const opts = [{mode:'my', label:`My ${plural}`}, {mode:'team', label:'My Team'},
+    ...(vis.scope === 'all' ? [{mode:'specific', label:'Specific User'}, {mode:'all', label:`All ${plural}`}] : [])];
   const cur = opts.find(o => o.mode === vis.value.mode) || opts[0];
+  const pick = (o) => { if(o.mode === cur.mode) return;
+    if(o.mode === 'specific'){ vis.setValue({mode:'specific', people:[]}); return setPeopleOpen(true); }
+    vis.setValue({mode:o.mode, people:[]}); setPeopleOpen(false); };
   return (
     <div style={{display:'flex', alignItems:'center', gap:8}}>
       {cur.mode === 'specific' && <PeoplePicker vis={vis} open={peopleOpen} setOpen={setPeopleOpen}/>}
-      <div style={{position:'relative'}}>
-        <button onClick={()=>setOpen(o => !o)} title="Whose activities" style={toolbarDropdownBtn(open)}>
-          <Icon name={cur.icon} size={13} color={T.gray600}/>
-          <span style={{minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{cur.label}</span>
-          <Icon name="chevDown" size={T.chevronSize} color={T.gray600} style={{transform: open ? 'rotate(180deg)' : 'none'}}/>
-        </button>
-        <MenuShell open={open} onClose={()=>setOpen(false)} anchorRight width={220}>
-          {opts.map(o => (
-            <VisibilityOption key={o.mode} icon={o.icon} label={o.label} active={o.mode === cur.mode}
-              onClick={()=>{ setOpen(false);
-                if(o.mode === 'specific'){ if(cur.mode !== 'specific') vis.setValue({mode:'specific', people:[]}); setPeopleOpen(true); return; }
-                vis.setValue({mode:o.mode, people:[]}); setPeopleOpen(false); }}/>
-          ))}
-        </MenuShell>
+      <div role="radiogroup" aria-label="Whose activities" style={{display:'flex', alignItems:'center', gap:2, border:`1px solid ${T.borderStrong}`, borderRadius:8, padding:2, background:'#fff'}}>
+        {opts.map(o => { const on = o.mode === cur.mode;
+          return <button key={o.mode} type="button" role="radio" aria-checked={on} onClick={()=>pick(o)}
+            style={{border:'none', borderRadius:6, height:28, padding:'0 10px', cursor:'pointer', fontFamily:'inherit', fontSize:13, whiteSpace:'nowrap',
+              fontWeight: on ? 600 : 500, background: on ? T.headerBg : 'transparent', color: on ? T.attioText : T.gray600}}>{o.label}</button>; })}
       </div>
     </div>
   );
 }
 
-// An item in the list, from the current user's side: "Call to / Received from / Meeting with /
-// Note added to [Record] · Contact" (the name opens the record's side panel) and when, then its main line.
-function ListToolItem({page, e, selected, onSelect, personLed}){
-  const [h, setH] = React.useState(false);
-  const quiet = {fontSize:12, color:T.attioMuted};
-  const at = page.when ? page.when(e.act) : new Date(e.act.at);
-  const view = {...e.record, owner:userLabel(e.record.owner) || e.record.owner};
-  return (
-    <div onClick={onSelect} onMouseEnter={()=>setH(true)} onMouseLeave={()=>setH(false)}
-      style={{background: selected ? '#F4F5F7' : h ? T.headerBg : 'transparent', padding:'10px 20px', cursor:'pointer', transition:'background 120ms ease'}}>
-      <div style={{display:'flex', alignItems:'center', gap:8, minWidth:0}}>
-        {personLed ? (
-          /* A team's / anyone's: the record pages' person-led line, then the record. */
-          <span style={{...quiet, flex:1, minWidth:0, display:'flex', alignItems:'center', gap:6, whiteSpace:'nowrap'}}>
-            <span style={{minWidth:0, flex:'0 1 auto', display:'flex'}}><ActivityLead a={e.act} lead={activityLines(e.act, view, 'all').lead} style={quiet}/></span>
-            <span style={{flexShrink:0}}>·</span>
-            <span onClick={ev=>ev.stopPropagation()} style={{minWidth:0, flex:'0 1000 auto', overflow:'hidden', display:'flex'}}>
-              <HubRecordLink object={e.object} id={e.recordId} name={e.record.name}/>
-            </span>
-            <span style={{flexShrink:0}}>· {HUB_NOUN[e.object]}</span>
-            {e.act.type === 'note' && e.act.support && <><SupportNoteDivider/><SupportNoteTag/></>}
-          </span>
-        ) : (
-          <span style={{...quiet, flex:1, minWidth:0, display:'flex', alignItems:'center', gap:6, whiteSpace:'nowrap'}}>
-            <span style={{flexShrink:0}}>{acrossLead(e.act)}</span>
-            <span onClick={ev=>ev.stopPropagation()} style={{minWidth:0, overflow:'hidden', display:'flex'}}>
-              <HubRecordLink object={e.object} id={e.recordId} name={e.record.name}/>
-            </span>
-            <span style={{flexShrink:0}}>· {HUB_NOUN[e.object]}</span>
-            {page.showDirection && <CallDirection incoming={isInboundCall(e.act)}/>}
-            {e.act.type === 'note' && e.act.support && <><SupportNoteDivider/><SupportNoteTag/></>}
-          </span>
-        )}
-        <span style={{...quiet, flexShrink:0, whiteSpace:'nowrap'}}>{fmtActStamp(at)}</span>
-      </div>
-      <div style={{display:'flex', alignItems:'center', gap:8, marginTop:4, minWidth:0}}>
-        <span style={{flex:1, minWidth:0, fontSize:13, fontWeight:500, color:T.attioText, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{page.line(e.act)}</span>
-        {e.threadCount > 1 && <span title={`${e.threadCount} emails in this thread`} style={{flexShrink:0, fontSize:11, fontWeight:600, color:T.gray600, background:T.headerBg, borderRadius:9999, padding:'1px 7px'}}>{e.threadCount}</span>}
-      </div>
-    </div>
-  );
-}
 /* A new activity from a Tools page: the creation side panel with the record first (Record Type,
    then the record), then the activity's form. `what`: 'Call' (start a call), 'Log Call', 'Note',
    'Task', 'Schedule Meeting', 'Log Meeting', 'Log Email'. `onDone(id, target, added)`. */
-function NewActivityPanel({what, initialObject, team, prefill, onDone}){
+// `initialTarget` {object, id}: the record it starts on (Schedule Meeting from a call's row).
+function NewActivityPanel({what, initialObject, initialTarget, team, prefill, onDone}){
   const hub = useRecordHub();
-  const [target, setTarget] = React.useState({object:initialObject || hubObjects()[0], id:null});
+  const [target, setTarget] = React.useState(initialTarget || {object:initialObject || hubObjects()[0], id:null});
   const record = target.id != null ? hubRecord(hub, target.object, target.id) : null;
   const view = record && {...record, owner:userLabel(record.owner) || record.owner};
   const added = React.useRef(null);
@@ -426,11 +393,42 @@ function ListToolPage({pageId}){
      (emails.jsx), threads kept apart per record. */
   const threadRows = page.type === 'email' ? threadedEmailRows(shown, (e) => e.act, (e) => `${e.object}:${e.recordId}`, (e) => (hub.activities[e.object] || {})[e.recordId] || []) : null;
   if(threadRows) shown = threadRows.map(t => ({...t.item, threadCount:t.count}));
-  const current = (selected && shown.find(e => e.act.id === selected.actId)) || (!selected && shown[0]) || null;
-  const sel = current || (selected && entries.find(e => e.act.id === selected.actId)) || null;
+  /* The page's whole width (2026-11-23, the stakeholder's layout): the time trail on the left, the
+     picked activity's details on the right — the first one to start with. The rows carry no action
+     here: the details beside them have the room for it (the filled button, bottom right). */
+  const sel = (selected && (shown.find(e => e.act.id === selected.actId) || entries.find(e => e.act.id === selected.actId))) || (!selected && shown[0]) || null;
+  const [intent, setIntent] = React.useState(null);     // what the opened activity is for ('note', 'reply')
+  const [meetingOn, setMeetingOn] = React.useState(null);   // Schedule Meeting from a call's row: its record
+  const entryOf = (a) => shown.find(e => e.act.id === a.id) || entries.find(e => e.act.id === a.id) || null;
+  const openAct = (a, why = null) => { const e = entryOf(a); if(e){ setSelected({object:e.object, recordId:e.recordId, actId:a.id}); setIntent(why); } };
+  // The trail's actions, as on a record (activityCards.jsx trailAction) — on the record each activity is on.
+  const canTrail = (a, what) => { const e = entryOf(a); return !!e && (what === 'edit' ? activityCan(e.object, e.record, a, 'edit') : canAdd(e.object, e.record, TRAIL_ACTION_TOOL[what])); };
+  const runTrail = (a, what) => { const e = entryOf(a); if(!e) return;
+    if(what === 'note' || what === 'replyNote') return openAct(a, what === 'note' ? 'note' : 'reply');
+    if(what === 'reply' || what === 'followUp') return setCompose({object:e.object, id:e.recordId, replyTo:a, ...(what === 'followUp' ? {title:'Follow Up'} : {})});
+    if(what === 'callAgain') return hub.startCall({object:e.object, id:e.recordId});
+    if(what === 'edit') return setCompose({object:e.object, id:e.recordId, edit:a, title:'Edit Email'});
+    if(what === 'meeting'){ setSelected(null); setCompose(null); setMeetingOn({object:e.object, id:e.recordId}); setAdding('Schedule Meeting'); } };
+  // What the details' filled button reads (activityCards.jsx detailAction): the latest call and emails of the activity's record.
+  const envOf = (a) => { const e = entryOf(a); return {me:CURRENT_USER.name, latest:trailLatest(e ? (hub.activities[e.object] || {})[e.recordId] || [] : [])}; };
+  const primaryOf = (a) => { const what = a && detailAction(a, envOf(a));
+    return what && canTrail(a, what) ? {what, el:<button key="primary" onClick={()=>runTrail(a, what)} style={btnPrimarySm()}>{TRAIL_ACTION_LABEL[what]}</button>} : null; };
+  /* Notes (2026-11-23): tick notes — or Select All — and Ask Spring (noteTools.jsx); General and
+     Client Request notes only. Spring's suggested actions open the usual forms on the note's record. */
+  const noteMode = pageId === 'notes';
+  const [picked, setPicked] = React.useState(() => new Set());
+  const [spring, setSpring] = React.useState(false), [springTask, setSpringTask] = React.useState(null);
+  const pickable = noteMode ? shown.filter(e => noteTypeOf(e.act) !== 'support') : [], pickedList = pickable.filter(e => picked.has(e.act.id));
+  const runSpring = (action) => { const e = action.item, target = {object:e.object, id:e.recordId};
+    setSpring(false);
+    if(action.kind === 'call') return hub.startCall(target);
+    if(action.kind === 'email'){ setAdding(null); return setCompose({...target, draft:{subject:action.subject, body:action.body}}); }
+    setCompose(null); setMeetingOn(target);
+    if(action.kind === 'meeting') return setAdding('Schedule Meeting');
+    setSpringTask({title:action.title, taskType:'To-do'}); setAdding('Task'); };
   const pick = (what) => {
     if(what === 'Start Meeting') return setStub('Start Meeting');   // a live meeting: not defined yet
-    setCompose(null); setAdding(null);
+    setCompose(null); setAdding(null); setMeetingOn(null); setSpringTask(null);
     if(what === 'Email') return setCompose({object: hubObjects().includes(scope) ? scope : hubObjects().includes(feed) ? feed : undefined});
     setAdding(what);
   };
@@ -443,33 +441,47 @@ function ListToolPage({pageId}){
   return (
     <RecordSchema.Provider value={schema}>
       <div style={{flex:1, minWidth:0, minHeight:0, display:'flex', flexDirection:'column', overflow:'hidden', background:'#fff'}}>
-        {page.tabs && <PrimaryTabs items={page.feeds} active={feed} onSelect={(id)=>{ setFeed(id); setSelected(null); }}/>}
-        <RecordToolbar inset="page" views={page.tabs ? page.secondary : page.feeds} activeViewId={page.tabs ? scope : feed} searchPlaceholder={`Search ${titleWord(page.noun)}s`}
-          onSelectView={(id)=>{ if(page.tabs) setScope(id); else setFeed(id); setSelected(null); }}
-          controls={<div style={{display:'flex', alignItems:'center', gap:8}}><VisibilitySelector vis={vis} noun={sentenceCase(page.noun)}/><ActivityAddButton iconOnly tabId={page.addTab} onPick={pick}/></div>}
+        {/* The page's head (2026-11-23): the record types as its main tabs with "+ New …" at their right.
+            Calls: one row under them — search and Filters, and at the right the switch of whose calls.
+            Emails, Meetings, Notes — three rows: the tabs; their filled pills (folders, times, note
+            types) with the switch at the right; then search and Filters. */}
+        <PrimaryTabs items={(page.tabs ? page.secondary : page.feeds).map(({icon, ...it}) => it)} active={page.tabs ? scope : feed} onSelect={(id)=>{ if(page.tabs) setScope(id); else setFeed(id); setSelected(null); }}
+          right={<ActivityAddButton iconOnly tabId={page.addTab} onPick={pick}/>}/>
+        <RecordToolbar inset="page" oneRow={!page.tabs} searchInRow={!page.tabs} views={page.tabs ? page.feeds : []} activeViewId={feed} onSelectView={(id)=>{ setFeed(id); setSelected(null); }}
+          searchPlaceholder={`Search ${titleWord(page.noun)}s`} controls={<VisibilitySelector vis={vis} noun={sentenceCase(page.noun)}/>}
           search={search} onSearch={setSearch} filters={filters} setFilters={(f)=>setFilters(typeof f === 'function' ? f(filters) : f)}
           appliedFilterCount={countAppliedFilters(filters, schema.filterProps)}/>
-        {page.secondary && !page.tabs && <SubPills items={page.secondary} active={scope} onSelect={(id)=>{ setScope(id); setSelected(null); }}/>}
         <ComposeHostCtx.Provider value={{compose:(o)=>{ setAdding(null); setCompose(o); }}}>
-        <div style={{flex:1, minHeight:0, display:'flex', overflow:'hidden', borderTop:`1px solid ${T.border}`, position:'relative'}}>
-          <div style={{width:460, flexShrink:0, overflowY:'auto', borderRight:`1px solid ${T.border}`, padding:'8px 0'}}>
-            {shown.map(e => <ListToolItem key={e.act.id} page={page} e={e} personLed={vis.personLed} selected={current && current.act.id === e.act.id}
-              onSelect={()=>setSelected({object:e.object, recordId:e.recordId, actId:e.act.id})}/>)}
-            {!shown.length && <EmptyState compact title={empty}/>}
+        <div style={{flex:1, minHeight:0, display:'flex', overflow:'hidden', borderTop: page.tabs ? `1px solid ${T.border}` : 'none', position:'relative'}}>
+          <div style={{width:'42%', minWidth:340, maxWidth:560, flexShrink:0, overflowY:'auto', borderRight:`1px solid ${T.border}`, padding:'8px 0'}}>
+            {noteMode && <NoteSelectBar total={pickable.length} count={pickedList.length} onAsk={()=>setSpring(true)}
+              onToggleAll={()=>setPicked(pickedList.length === pickable.length ? new Set() : new Set(pickable.map(e => e.act.id)))}/>}
+            <ActivityTrail pick={noteMode && pickable.length ? {can:(a) => noteTypeOf(a) !== 'support', has:(a) => picked.has(a.id),
+                toggle:(a) => setPicked(s => { const n = new Set(s); n.has(a.id) ? n.delete(a.id) : n.add(a.id); return n; })} : undefined}
+              list={shown.map(e => e.act)} contactOf={(a) => view((entryOf(a) || {}).record)} recordOf={(a) => { const e = entryOf(a); return e ? {object:e.object, record:e.record} : null; }}
+              selectedId={sel && sel.act.id} empty={empty} context={pageId === 'calls' ? 'calls' : 'type'} actions={false}
+              countOf={threadRows ? (a) => (shown.find(e => e.act.id === a.id) || {}).threadCount || 1 : undefined}
+              onOpen={(a)=>openAct(a)} canDo={canTrail} onAction={runTrail}/>
           </div>
           <div style={{flex:1, minWidth:0, minHeight:0, display:'flex', flexDirection:'column'}}>
-            {sel ? (
-              <RecordAccessCtx.Provider value={{object:sel.object, record:sel.record}}>
-                <ActivityDetail key={sel.act.id} a={sel.act} contact={view(sel.record)} team={team}
-                  acts={(hub.activities[sel.object] || {})[sel.recordId] || []}
-                  onUpdate={(id, patch)=>hub.update(sel.object, sel.recordId, id, patch)} onAdd={(a)=>hub.add(sel.object, sel.recordId, a)}
-                  onStub={hub.toast} onReassign={()=>{}} across={{object:sel.object, record:sel.record, perspective: vis.personLed ? 'person' : 'mine'}}/>
-              </RecordAccessCtx.Provider>
-            ) : null}
+            {sel && (
+              <DetailFooterCtx.Provider value={true}><DetailIntentCtx.Provider value={intent}><DetailPrimaryCtx.Provider value={primaryOf(sel.act)}>
+                <div key={`${sel.act.id}:${intent || ''}`} style={{flex:1, minHeight:0, display:'flex', flexDirection:'column'}}>
+                  <RecordAccessCtx.Provider value={{object:sel.object, record:sel.record}}>
+                    <ActivityDetail key={sel.act.id} a={sel.act} contact={view(sel.record)} team={team}
+                      acts={(hub.activities[sel.object] || {})[sel.recordId] || []}
+                      onUpdate={(id, patch)=>hub.update(sel.object, sel.recordId, id, patch)} onAdd={(a)=>hub.add(sel.object, sel.recordId, a)}
+                      onStub={hub.toast} onReassign={()=>{}} across={{object:sel.object, record:sel.record, perspective: vis.personLed ? 'person' : 'mine'}}/>
+                  </RecordAccessCtx.Provider>
+                </div>
+              </DetailPrimaryCtx.Provider></DetailIntentCtx.Provider></DetailFooterCtx.Provider>
+            )}
           </div>
           {/* New items: the creation side panel over this area (record first). */}
-          {adding && <NewActivityPanel key={adding} what={adding} initialObject={hubObjects().includes(scope) ? scope : hubObjects().includes(feed) ? feed : hubObjects()[0]} team={team} onDone={done}/>}
-          {compose && <EmailComposer key={compose.replyTo ? `re-${compose.replyTo.id}` : compose.forward ? `fw-${compose.forward.id}` : 'new'} {...compose} onClose={emailDone}/>}
+          {spring && pickedList.length > 0 && <SpringNotesPanel items={pickedList} onClose={()=>setSpring(false)} onRun={runSpring} onSource={(act)=>openAct(act)}/>}
+          {adding && <NewActivityPanel key={adding} what={adding} prefill={adding === 'Task' ? springTask : undefined} initialTarget={adding === 'Schedule Meeting' || (adding === 'Task' && springTask) ? meetingOn : null} initialObject={hubObjects().includes(scope) ? scope : hubObjects().includes(feed) ? feed : hubObjects()[0]} team={team}
+            onDone={noteMode && adding !== 'Note' ? (id) => { const what = adding; setAdding(null); setSpringTask(null); setMeetingOn(null); if(id) hub.toast(what === 'Task' ? 'Task added' : 'Meeting scheduled'); } : done}/>}
+          {compose && <EmailComposer key={compose.replyTo ? `re-${compose.replyTo.id}` : compose.forward ? `fw-${compose.forward.id}` : compose.edit ? `ed-${compose.edit.id}` : 'new'} {...compose} onClose={emailDone}/>}
         </div>
         </ComposeHostCtx.Provider>
       </div>
@@ -489,15 +501,20 @@ const CallsToolPage = () => <ListToolPage pageId="calls"/>;
 const TASK_FEEDS = () => RECORD_FEEDS('task');
 /* A task as a card (the boards, a record's Tasks tab, the dashboard's My Tasks): its name, its
    description (two lines, then cut off), its due date and who it's assigned to; the rest — record,
-   record type, task type, who assigned it, created date — under Details, an accordion (closed to start). */
+   record type, task type, who assigned it, created date — under Details, an accordion (closed to start).
+   While it's In Progress with a Time Allowed (2026-11-20), a line under Due Date says how it stands:
+   "25 min left", or in red "Over time · 10 min". */
 function TaskCard({e, onOpen, onDragStart, dragging, showAssignee}){
   const a = e.act;
   const [open, setOpen] = React.useState(false);
+  // In Progress with a Time Allowed: how it stands against it, refreshed each minute (activities.jsx taskTimeState).
+  const time = taskTimeState(a);
+  useMinuteTick(!!time);
   // The card's property rows: label on the left, value on the right.
   const row = (label, value, tone) => (
     <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', gap:12}}>
       <span style={{fontSize:12.5, color:T.attioMuted, flexShrink:0}}>{label}</span>
-      <span style={{fontSize:12.5, color: tone || T.attioText, minWidth:0, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{value || '—'}</span>
+      <span style={{fontSize:12.5, color: tone || T.attioText, minWidth:0, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', display:'flex'}}>{value || '—'}</span>
     </div>
   );
   return (
@@ -509,7 +526,11 @@ function TaskCard({e, onOpen, onDragStart, dragging, showAssignee}){
         {a.description && <div title={a.description} style={{fontSize:13, color:T.attioMuted, lineHeight:1.4, display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', overflow:'hidden', overflowWrap:'anywhere'}}>{a.description}</div>}
       </div>
       <div style={{padding:'10px 16px 12px', display:'flex', flexDirection:'column', gap:8, borderTop:`1px solid ${T.attioLine}`}}>
+        {/* Its type first, as its tag; "Due date passed" under an overdue one's date (2026-11-23). */}
+        {row('Task Type', <TaskTypeTag a={a}/>)}
         {row('Due Date', a.due ? fmtTaskDue(a) : '', isOverdue(a) ? T.red : null)}
+        {isOverdue(a) && <div style={{fontSize:12, color:T.red, textAlign:'right', marginTop:-4}}>Due date passed</div>}
+        {time && row('Time Allowed', time.label, time.over ? T.red : T.attioMuted)}
         {row('Assigned To', a.assignee)}
       </div>
       <div style={{borderTop:`1px solid ${T.attioLine}`}}>
@@ -521,7 +542,6 @@ function TaskCard({e, onOpen, onDragStart, dragging, showAssignee}){
         {open && <div style={{padding:'2px 16px 16px', display:'flex', flexDirection:'column', gap:10}}>
           {row('Record', e.record.name)}
           {row('Record Type', HUB_NOUN[e.object])}
-          {row('Task Type', a.taskType)}
           {row('Assigned By', byName(a))}
           {row('Created Date', fmtActDate(new Date(a.at)))}
         </div>}
@@ -544,7 +564,7 @@ function TaskStatusBoard({entries, onUpdate, onOpen, showAssignee}){
     if(state === 'completed') return onUpdate(e, {status:'completed'});
     // Not Started, In Progress, On Hold: an overdue task needs a new due date first.
     if(isPastDue(e.act)) return setRescheduling({e, date:'', time:'', status:state});
-    onUpdate(e, {status:state});
+    onUpdate(e, withTaskStart(e.act, {status:state}));   // into In Progress for the first time: started now
   };
   const rs = rescheduling, rsDue = rs && rs.date ? taskDueValue(rs.date, rs.time) : null, rsOk = !!rsDue && !isPastDue(rsDue);
   return (
@@ -568,9 +588,9 @@ function TaskStatusBoard({entries, onUpdate, onOpen, showAssignee}){
         );
       })}
       {rs && <StModal title="New due date" primary={`Move to ${(TASK_STATUSES.find(s => s.key === rs.status) || {}).label}`} canSubmit={rsOk} onCancel={()=>setRescheduling(null)}
-        onSubmit={()=>{ if(!rsOk) return; onUpdate(rs.e, {status:rs.status, ...rsDue}); setRescheduling(null); }}>
+        onSubmit={()=>{ if(!rsOk) return; onUpdate(rs.e, withTaskStart(rs.e.act, {status:rs.status, ...rsDue})); setRescheduling(null); }}>
         <div style={{display:'flex', gap:12}}>
-          <div style={{flex:1}}><label style={fieldLabel}>Due Date</label><DateField required value={rs.date} onChange={v=>setRescheduling(x => ({...x, date:v}))} ariaLabel="Due date"/></div>
+          <div style={{flex:1}}><label style={fieldLabel}>Due Date<Req/></label><DateField required value={rs.date} onChange={v=>setRescheduling(x => ({...x, date:v}))} ariaLabel="Due date"/></div>
           <div style={{flex:1}}><label style={fieldLabel}>Due Time</label><TimeField value={rs.time} onChange={v=>setRescheduling(x => ({...x, time:v}))} ariaLabel="Due time"/></div>
         </div>
         {rs.date && !rsOk && <div style={{fontSize:12, color:T.red}}>Choose a date and time that haven't passed.</div>}
@@ -590,12 +610,13 @@ function TaskTable({entries, onOpen}){
   const [columnWidths, setColumnWidths] = React.useState({});
   const [sort, setSort] = React.useState({key:'due', dir:'asc'});
   const rows = entries.map(e => ({id:e.act.id, _e:e, title:e.act.title || 'Task', record:e.record.name, object:HUB_NOUN[e.object], status:taskStateLabel(e.act),
-    due:e.act.due ? dateKey(e.act.due) : '', taskType:e.act.taskType || '', assignee:e.act.assignee || '', by:byName(e.act, e.record), created:dateKey(e.act.at)}));
+    due:e.act.due ? dateKey(e.act.due) : '', taskType:taskTypeOf(e.act), assignee:e.act.assignee || '', by:byName(e.act, e.record), created:dateKey(e.act.at)}));
   const schema = {properties:TASK_TABLE_COLUMNS, noun:'task', searchKeys:['title'], selectable:false, boards:false, canCreateProperty:false,
     renderCell:(key, r) => key === 'title' ? <ContactName name={r.title} onOpen={()=>onOpen(r._e)} style={{fontSize:'inherit', fontWeight:500}}/>
       : key === 'record' ? <HubRecordLink object={r._e.object} id={r._e.recordId} name={r.record}/>
       : key === 'status' ? <span style={{color: taskState(r._e.act) === 'overdue' ? T.red : T.attioText}}>{r.status}</span>
       : key === 'due' ? (r.due ? <span style={{color: isOverdue(r._e.act) ? T.red : T.attioText}}>{fmtTaskDue(r._e.act)}</span> : undefined)
+      : key === 'taskType' ? <TaskTypeTag a={r._e.act}/>
       : key === 'created' ? <span>{fmtActDate(new Date(r._e.act.at))}</span>
       : undefined,
     renderActions:(r) => <RowActionsMenu title="Task Actions" width={MENU_W} items={[{label:'View Task', onClick:()=>onOpen(r._e)}]}/>};
@@ -621,7 +642,7 @@ function TasksBoardPage(){
   // One fixed pipeline (2026-11-17): every task, in its status; the board or the table.
   const [mode, setMode] = React.useState('board');
   const entries = hubActivities(hub, 'task').filter(vis.keep);
-  const rows = entries.map(e => ({id:e.act.id, _e:e, taskType:e.act.taskType || '', assignee:e.act.assignee || '', by:byName(e.act, e.record),
+  const rows = entries.map(e => ({id:e.act.id, _e:e, taskType:taskTypeOf(e.act), assignee:e.act.assignee || '', by:byName(e.act, e.record),
     due:e.act.due ? activityDateValue(e.act.due) : '', date:activityDateValue(e.act.at), text:[e.act.title, e.act.description, e.record.name, e.act.assignee].filter(Boolean).join(' ')}));
   const uniq = (k) => [...new Set(rows.map(r => r[k]).filter(Boolean))].sort();
   const schema = {properties:[], noun:'task', searchKeys:['text'], boards:false, selectable:false, cardSettings:false, associated:false,
@@ -637,13 +658,14 @@ function TasksBoardPage(){
   return (
     <RecordSchema.Provider value={schema}>
       <div style={{flex:1, minWidth:0, minHeight:0, display:'flex', flexDirection:'column', overflow:'hidden', background:'#fff', position:'relative'}}>
-        <RecordToolbar inset="page" views={TASK_FEEDS()} activeViewId={feed} onSelectView={setFeed} searchPlaceholder="Search Tasks"
-          controls={<div style={{display:'flex', alignItems:'center', gap:8}}>
-            <TableBoardSwitch mode={mode} onChange={setMode}/>
-            <VisibilitySelector vis={vis} noun="Task"/><ActivityAddButton iconOnly tabId="tasks" onPick={()=>{ setPanel(null); setAdding(true); }}/></div>}
+        {/* The same head as the other Tools pages (2026-11-23): record types as tabs with "+ New Task";
+            search, Filters, then Table / Board and the switch of whose tasks. */}
+        <PrimaryTabs items={TASK_FEEDS()} active={feed} onSelect={setFeed} right={<ActivityAddButton iconOnly tabId="tasks" onPick={()=>{ setPanel(null); setAdding(true); }}/>}/>
+        <RecordToolbar inset="page" oneRow searchInRow views={[]} searchPlaceholder="Search Tasks"
+          controls={<div style={{display:'flex', alignItems:'center', gap:8}}><TableBoardSwitch mode={mode} onChange={setMode}/><VisibilitySelector vis={vis} noun="Task"/></div>}
           search={search} onSearch={setSearch} filters={filters} setFilters={(f)=>setFilters(typeof f === 'function' ? f(filters) : f)}
           appliedFilterCount={countAppliedFilters(filters, schema.filterProps)}/>
-        <div style={{flex:1, minHeight:0, display:'flex', position:'relative', borderTop:`1px solid ${T.border}`}}>
+        <div style={{flex:1, minHeight:0, display:'flex', position:'relative'}}>
         {mode === 'table' ? <TaskTable entries={shown} onOpen={(e)=>setPanel({ref:{object:e.object, recordId:e.recordId, actId:e.act.id}})}/>
           : <TaskStatusBoard entries={shown} showAssignee={vis.personLed} onUpdate={(e, patch)=>hub.update(e.object, e.recordId, e.act.id, patch)}
           onOpen={(e)=>setPanel({ref:{object:e.object, recordId:e.recordId, actId:e.act.id}})}/>}

@@ -6,6 +6,7 @@
    makes one from it (plansOnQuoteSigned; documents.jsx plansFromDocument), linked to it ("From
    Quote" / "From Document"). Each has a number (PP-<year>-<nnnn>) and sits in one of the tab's
    three tabs: Active; Paid — every payment reconciled and nothing left to bill (planState); Frozen.
+   Marking the payment that settles a plan switches the tab to Paid, where the plan now is (2026-11-23).
    A plan's fields (PaymentTermsFields — the same on a quote's Payment Plan step and a document's
    Add Payment Plan) are one of three types:
      One-Time Payment    — currency, amount, invoice issue date (Quote Signed or a fixed date) and
@@ -410,7 +411,8 @@ function PaymentTermsFields({plan, onChange, total, currency, signedLabel = 'Quo
   const bare = {flex:1, minWidth:0, border:'none', outline:'none', fontSize:13, fontFamily:'inherit', color:T.attioText, background:'transparent', textAlign:'right', fontVariantNumeric:'tabular-nums'};
   const affix = {fontSize:12, color:T.attioMuted, whiteSpace:'nowrap'};
   // A field: its input, and the one a choice adds beside it — the same size.
-  const F = (label, a, b) => <Field label={label} wide><div style={{display:'grid', gridTemplateColumns:`${PT_W}px ${PT_W}px`, gap:12}}>{a}{b || <span/>}</div></Field>;
+  // `req` (2026-11-23): the field's required mark — every field of the plan is required; a fixed (paid) value shows none.
+  const F = (label, a, b, req = true) => <Field label={label} wide required={req}><div style={{display:'grid', gridTemplateColumns:`${PT_W}px ${PT_W}px`, gap:12}}>{a}{b || <span/>}</div></Field>;
   const pick = (value, options, onPick, label) => <Dropdown required value={value} options={options} controlStyle={control} ariaLabel={label} onChange={onPick}/>;
   const num = (value, onValue, label, before, after, decimal) => <div style={box}>{before && <span style={affix}>{before}</span>}
     <input value={value ?? ''} onChange={e=>onValue(e.target.value.replace(decimal ? /[^0-9.]/g : /[^0-9]/g, ''))} inputMode={decimal ? 'decimal' : 'numeric'} placeholder="0" aria-label={label} style={bare}/>
@@ -451,7 +453,7 @@ function PaymentTermsFields({plan, onChange, total, currency, signedLabel = 'Quo
   const cols = 'minmax(0, 1fr) 170px 170px 170px 28px';
   return (<>
     {stack(<>
-      <Field label="Payment Type">{(
+      <Field label="Payment Type" required>{(
         <div role="radiogroup" aria-label="Payment type" style={{display:'inline-flex', border:`1px solid ${T.borderStrong}`, borderRadius:8, overflow:'hidden', background:'#fff'}}>
           {PAYMENT_TYPES.map(([id, l]) => { const off = id !== type && (paid ? id === 'recurring' : lockedAny); return (
             <button key={id} type="button" role="radio" aria-checked={type === id} disabled={off} onClick={()=>!off && set({paymentType:id})}
@@ -459,11 +461,11 @@ function PaymentTermsFields({plan, onChange, total, currency, signedLabel = 'Quo
                 background: type === id ? T.black : 'transparent', color: type === id ? '#fff' : T.gray600}}>{l}</button>); })}
         </div>)}</Field>
       {!inQuote && <>
-        {F('Currency', paid || lockedAny ? fixed(cur) : pick(cur, currencyOptions(), (c)=>c && set({currency:c}), 'Currency'))}
+        {F('Currency', paid || lockedAny ? fixed(cur) : pick(cur, currencyOptions(), (c)=>c && set({currency:c}), 'Currency'), null, !(paid || lockedAny))}
         {F(type === 'installments' ? 'Total Amount' : 'Amount', paidOneTime ? fixed(fmtMoney(paid.amount, cur), 'paid')
-          : num(plan.amount, (v)=>set({amount:v}), type === 'installments' ? 'Total amount' : 'Amount', cur, null, true))}
+          : num(plan.amount, (v)=>set({amount:v}), type === 'installments' ? 'Total amount' : 'Amount', cur, null, true), null, !paidOneTime)}
       </>}
-      {type === 'one-time' && (paidOneTime ? <>{F('Invoice Issue Date', fixed(fmtQuoteDate(paid.invoiceDate) || '—'))}{F('Due Date', fixed(fmtQuoteDate(paid.dueDate) || '—'))}</>
+      {type === 'one-time' && (paidOneTime ? <>{F('Invoice Issue Date', fixed(fmtQuoteDate(paid.invoiceDate) || '—'), null, false)}{F('Due Date', fixed(fmtQuoteDate(paid.dueDate) || '—'), null, false)}</>
         : <>{issueField('Invoice Issue Date')}{dueField('Due Date')}</>)}
       {type === 'recurring' && <>
         {F('Billing Frequency', pick(plan.frequency === 'yearly' ? 'yearly' : 'monthly', [{value:'monthly', label:'Monthly'}, {value:'yearly', label:'Yearly'}], (v)=>set({frequency:v}), 'Billing frequency'))}
@@ -479,9 +481,9 @@ function PaymentTermsFields({plan, onChange, total, currency, signedLabel = 'Quo
       {stack(<>
         {/* Paid (a paid One-Time payment, or anything paid on it): the deposit as it is. */}
         {depositFixed ? <>
-          {F('Amount', fixed(fmtMoney(paid ? paid.amount : rows[0].amount, cur), paid ? 'paid' : locked[rows[0].id].status))}
-          {F('Invoice Issue Date', fixed(fmtQuoteDate(paid ? paid.invoiceDate : rows[0].invoiceDate) || '—'))}
-          {F('Due Date', fixed(fmtQuoteDate(paid ? paid.dueDate : rows[0].dueDate) || '—'))}
+          {F('Amount', fixed(fmtMoney(paid ? paid.amount : rows[0].amount, cur), paid ? 'paid' : locked[rows[0].id].status), null, false)}
+          {F('Invoice Issue Date', fixed(fmtQuoteDate(paid ? paid.invoiceDate : rows[0].invoiceDate) || '—'), null, false)}
+          {F('Due Date', fixed(fmtQuoteDate(paid ? paid.dueDate : rows[0].dueDate) || '—'), null, false)}
         </> : <>
           {F('Amount', pick(byAmount ? 'amount' : 'percent', [{value:'amount', label:'Fixed Amount'}, {value:'percent', label:'Percentage of Total Amount'}], (v)=>{ setTyped(null); set({depositBy:v}); }, 'Deposit type'), depositInput)}
           {issueField('Invoice Issue Date')}
@@ -572,7 +574,7 @@ function CancelSubscriptionModal({onCancel, onSave}){
   const today = ymdOf(new Date()), [on, setOn] = React.useState(today), ok = ymdOk(on) && on >= today;
   return ReactDOM.createPortal(
     <StModal title="Cancel Subscription" primary="Cancel Subscription" canSubmit={ok} width={424} onCancel={onCancel} onSubmit={()=>ok && onSave(on)}>
-      <div><label style={fieldLabel}>Cancellation Date</label><DateField required value={on} onChange={setOn} ariaLabel="Cancellation date"/></div>
+      <div><label style={fieldLabel}>Cancellation Date<Req/></label><DateField required value={on} onChange={setOn} ariaLabel="Cancellation date"/></div>
     </StModal>, document.body);
 }
 
@@ -623,19 +625,19 @@ function PaymentModal({schedule, inst, oneTime, onCancel, onSave, onReverse}){
             ? <div style={{fontSize:13, color:T.attioText, lineHeight:1.5}}>The payment of {fmtMoney(st.received, cur)} on {fmtQuoteDate(last.paidOn)} will be reversed. It stays in the record's activity.</div>
             : <PayDetail label="Payment Date">{fmtQuoteDate(last.paidOn)}</PayDetail>)}
           {partial && <>
-            <div><label style={fieldLabel}>Amount received ({cur})</label>
+            <div><label style={fieldLabel}>Amount received ({cur})<Req/></label>
               <input autoFocus value={amount} onChange={e=>setAmount(e.target.value.replace(/[^0-9.]/g, ''))} inputMode="decimal" placeholder="0"
                 style={{...fieldInput, fontVariantNumeric:'tabular-nums', borderColor: amount && !amountOk ? T.red : T.borderStrong}}/>
               {amount && !amountOk && <div style={{fontSize:12, color:T.red, marginTop:4}}>Less than {fmtMoney(due, cur)} — a full payment is Paid.</div>}
             </div>
-            <div><label style={fieldLabel}>Remaining Balance Expected On</label><DateField required value={expected} onChange={setExpected}/>
+            <div><label style={fieldLabel}>Remaining Balance Expected On<Req/></label><DateField required value={expected} onChange={setExpected}/>
               {expected && !expectedOk && <div style={{fontSize:12, color:T.red, marginTop:4}}>Choose today or a later date.</div>}</div>
           </>}
           {!unpaid && !wasPaid && <>
-          <div><label style={fieldLabel}>Payment Date</label><DateField required value={paidOn} onChange={setPaidOn}/>
+          <div><label style={fieldLabel}>Payment Date<Req/></label><DateField required value={paidOn} onChange={setPaidOn}/>
             {paidOn && !paidOnOk && <div style={{fontSize:12, color:T.red, marginTop:4}}>A payment can't be dated in the future.</div>}</div>
           <div>
-            <label style={fieldLabel}>Payment Evidence <span style={{color:T.attioMuted, fontWeight:400}}>· a screenshot or a link</span></label>
+            <label style={fieldLabel}>Payment Evidence<Req/> <span style={{color:T.attioMuted, fontWeight:400}}>· a screenshot or a link</span></label>
             <div style={{display:'flex', flexDirection:'column', gap:8}}>
               <EvidenceFile tall value={file} accept="image/*,.pdf" onClear={()=>setFile(null)} onChange={(f)=>readUpload(f).then(v => { setFile(v); setError(''); }).catch(e => setError(e.message))}/>
               <input value={link} onChange={e=>setLink(e.target.value)} placeholder="Payment gateway or reference link (https://…)" aria-label="Reference link"
@@ -936,6 +938,8 @@ function RecordAccounting({object, record}){
       ? {...x, status:'archived', archivedAt:at.toISOString(), archivedReason:'partial', received:r2(v.amount)}
       : {...x, status:'paid', paidOn:v.paidOn, paymentId:payment.id, paidAt:at.toISOString()}));
     setPaying(null);
+    // The payment that settles the plan — nothing left to pay — takes the person to Paid, where the plan now is (2026-11-23).
+    if(v.status !== 'partial' && planState({...base, installments:base.installments.map(x => x.id === instId ? {...x, payments:[...(x.payments || []), payment]} : x)}) === 'paid') setTab('paid');
     hub.toast(paymentTypeOf(base) === 'one-time' ? 'Payment marked as paid' : v.status === 'paid' ? 'Installment marked as paid' : 'Partial payment recorded');
   };
   /* A paid One-Time payment back to Unpaid: its payment moves to the plan's `reversed` list (who and

@@ -121,7 +121,7 @@ function MilestonesEditor({value, onChange, currency}){
           <textarea value={m.description} onChange={e=>set(i, {description:e.target.value})} rows={2} placeholder="Description" aria-label={`Milestone ${i + 1} description`}
             style={{...fieldInput, resize:'vertical', lineHeight:1.5, marginLeft:28, width:'calc(100% - 28px)'}}/>
           <div style={{display:'flex', alignItems:'center', gap:8, marginLeft:28}}>
-            <span style={{fontSize:12.5, color:T.attioMuted}}>Price ({currency})</span>
+            <span style={{fontSize:12.5, color:T.attioMuted}}>Price ({currency})<Req/></span>
             <input value={m.price ?? ''} onChange={e=>set(i, {price:e.target.value.replace(/[^0-9.]/g, '')})} inputMode="decimal" placeholder="0" aria-label={`Milestone ${i + 1} price`}
               style={{...fieldInput, width:140, textAlign:'right', fontVariantNumeric:'tabular-nums'}}/>
           </div>
@@ -154,14 +154,14 @@ function ServiceFormPanel({initial, onCancel, onSave, zIndex}){
       <StCta label="Save" disabled={!ok} onClick={()=>ok && save()}/>
     </>}>
       {stack(<>
-        <Field label="Name"><input autoFocus value={s.name} onChange={e=>set({name:e.target.value})} placeholder="e.g. US NIW Petition" style={fieldText}/></Field>
+        <Field label="Name" required><input autoFocus value={s.name} onChange={e=>set({name:e.target.value})} placeholder="e.g. US NIW Petition" style={fieldText}/></Field>
         <Field label="Description"><RichTextEditor value={s.description} onChange={(v)=>set({description:v})} ariaLabel="Service description"/></Field>
-        <Field label="Currency"><FormSelect value={s.currency} options={currencyOptions()} onChange={(c)=>c && set({currency:c})}/></Field>
+        <Field label="Currency" required><FormSelect value={s.currency} options={currencyOptions()} onChange={(c)=>c && set({currency:c})}/></Field>
         <Field label="Enable Milestones"><label style={{display:'inline-flex', alignItems:'center', minHeight:34, cursor:'pointer'}}><UtToggle on={withMilestones} onChange={setWithMilestones}/></label></Field>
-        {withMilestones && <Field label="Milestones"><div style={{paddingTop:2}}><MilestonesEditor value={s.milestones} currency={s.currency} onChange={(v)=>set({milestones:v})}/></div></Field>}
+        {withMilestones && <Field label="Milestones" required><div style={{paddingTop:2}}><MilestonesEditor value={s.milestones} currency={s.currency} onChange={(v)=>set({milestones:v})}/></div></Field>}
         {withMilestones
           ? <Field label="Price"><ReadValue>{fmtMoney(total, s.currency)}</ReadValue></Field>
-          : <Field label="Price"><div style={{position:'relative', width:200}}>
+          : <Field label="Price" required><div style={{position:'relative', width:200}}>
               <span style={{position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', fontSize:12, color:T.attioMuted, pointerEvents:'none'}}>{s.currency}</span>
               <input value={s.price ?? ''} onChange={e=>set({price:e.target.value.replace(/[^0-9.]/g, '')})} inputMode="decimal" placeholder="0" aria-label="Price"
                 style={{...fieldText, paddingLeft:44, textAlign:'right', fontVariantNumeric:'tabular-nums'}}/>

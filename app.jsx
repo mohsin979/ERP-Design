@@ -37,10 +37,19 @@ const seedList = (f) => SEED ? f() : [];
    are derived from it, so new event kinds slot in without reshaping the widget.
      arrival   {expected:'HH:MM'}  "I'm on my way"
      clockIn / clockOut
-     breakStart / breakEnd
+     breakStart {kind:'paid'|'unpaid', minutes} / breakEnd
      note      {text}
    Default: not clocked in. Several breaks, notes at any point, and clocking in again after a
-   clock-out are all allowed — the trail keeps everything. */
+   clock-out are all allowed — the trail keeps everything.
+   Breaks (2026-11-20) are Paid or Unpaid, each started with the length it's planned for
+   (`minutes`); nothing ends by itself. Lunch Break (the paid one): 60 planned minutes a day — one hour or two
+   half hours — and its time counts as worked, up to the planned length. Tea / Bio Break (the unpaid one): any
+   number, 5 / 10 / 15 / 20 minutes each, an allowance of 20 minutes a day and never more than
+   30 — only the lengths that still fit in the 30 are offered; its time isn't worked. The limits
+   count the breaks started on the current calendar day (the browser's, as every "today"); the
+   session lives in App's state only, so a reload starts an empty trail and a trail holds an
+   earlier day only while the page stays open past midnight. A breakStart without a kind (from
+   before) is a plain "Break": not worked, counted in neither limit. */
 const NEW_WORK_SESSION = () => ({trail:[]});
 const tcStatus = (trail) => {
   let st = 'notClockedIn';
@@ -52,23 +61,61 @@ const tcStatus = (trail) => {
   });
   return st;
 };
-/* Worked time = every clocked-in interval, minus breaks. */
+const TC_MIN = 60000;
+const TC_PAID_BREAK_MIN = 60, TC_UNPAID_ALLOWANCE_MIN = 20, TC_UNPAID_CAP_MIN = 30;
+const TC_PAID_LENGTHS = [30, 60], TC_UNPAID_LENGTHS = [5, 10, 15, 20];
+// Named for what they are (2026-11-20, later): the paid break is the Lunch Break, the unpaid one the Tea / Bio Break — the kinds stay 'paid' and 'unpaid'.
+const tcBreakLabel = (e) => e.kind === 'paid' ? 'Lunch Break' : e.kind === 'unpaid' ? 'Tea / Bio Break' : 'Break';
+// A break's end: the next Finish Break or Clock Out after it (none while it's running).
+const tcBreakEnd = (trail, i) => trail.slice(i + 1).find(x => x.type === 'breakEnd' || x.type === 'clockOut');
+/* Worked time = every clocked-in interval, minus breaks — a paid break is worked, up to its
+   planned minutes. */
 function workedMs(trail, now){
-  let total = 0, inAt = null, breakAt = null;
+  let total = 0, inAt = null, brk = null;
+  const paid = (b, end) => b && b.kind === 'paid' ? Math.min(Math.max(0, end - b.at), (b.minutes || 0) * TC_MIN) : 0;
   trail.forEach(e => {
     if(e.type === 'clockIn'){ inAt = e.at; }
-    else if(e.type === 'breakStart' && inAt){ total += e.at - inAt; inAt = null; breakAt = e.at; }
-    else if(e.type === 'breakEnd'){ inAt = e.at; breakAt = null; }
-    else if(e.type === 'clockOut'){ if(inAt) total += e.at - inAt; inAt = null; breakAt = null; }
+    else if(e.type === 'breakStart' && inAt){ total += e.at - inAt; inAt = null; brk = e; }
+    else if(e.type === 'breakEnd'){ total += paid(brk, e.at); inAt = e.at; brk = null; }
+    else if(e.type === 'clockOut'){ if(inAt) total += e.at - inAt; total += paid(brk, e.at); inAt = null; brk = null; }
   });
   if(inAt) total += now - inAt;
+  else total += paid(brk, now);
   return Math.max(0, total);
 }
+/* Today's breaks — the ones started on `now`'s calendar day: the paid minutes planned, the
+   unpaid minutes actually taken (whole minutes, a running break up to now), and the break
+   running now, whenever it started. Other widgets may read it. */
+function tcBreakUsage(trail, now){
+  const day = (d) => { const x = new Date(d); return `${x.getFullYear()}-${x.getMonth()}-${x.getDate()}`; };
+  const today = day(now);
+  let paidPlannedMin = 0, unpaidMs = 0, onBreak = null;
+  trail.forEach((e, i) => {
+    if(e.type !== 'breakStart') return;
+    const end = tcBreakEnd(trail, i);
+    if(day(e.at) === today){
+      if(e.kind === 'paid') paidPlannedMin += e.minutes || 0;
+      else if(e.kind === 'unpaid') unpaidMs += Math.max(0, (end ? end.at : now) - e.at);
+    }
+    if(!end) onBreak = {kind:e.kind || null, startedAt:e.at, plannedMin:e.kind ? e.minutes || 0 : null};
+  });
+  return {paidPlannedMin, unpaidUsedMin:Math.floor(unpaidMs / TC_MIN), onBreak: tcStatus(trail) === 'onBreak' ? onBreak : null};
+}
+// The lengths a new break may have: Paid — 1 Hour only while none is used, 30 Minutes while 30 are left; Unpaid — what fits before the cap.
+const tcBreakOffers = (usage) => ({
+  paid:TC_PAID_LENGTHS.filter(m => m === TC_PAID_BREAK_MIN ? usage.paidPlannedMin === 0 : m <= TC_PAID_BREAK_MIN - usage.paidPlannedMin),
+  unpaid:TC_UNPAID_LENGTHS.filter(m => m <= TC_UNPAID_CAP_MIN - usage.unpaidUsedMin),
+});
+Object.assign(window, {tcBreakUsage});
 const tcClock = (d) => d.toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit'});
 const fmtHour = (d) => zonedParts(d).mi ? tcClock(d) : d.toLocaleTimeString('en-US', {hour:'numeric'});   // "2 PM", "3:14 PM"
 const fmtHMS = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return `${Math.floor(s / 3600)}h ${Math.floor(s % 3600 / 60)}m ${s % 60}s`; };
 const fmtMS = (ms) => { const s = Math.max(0, Math.floor(ms / 1000));   // never negative (a break can start a moment after the last tick)
   const h = Math.floor(s / 3600); return h ? `${h}h ${Math.floor(s % 3600 / 60)}m ${s % 60}s` : `${Math.floor(s / 60)}m ${s % 60}s`; };
+// A break's countdown and overrun: "12m 05s", and whole minutes for a finished one: "4m".
+const fmtCount = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)), h = Math.floor(s / 3600), sec = String(s % 60).padStart(2, '0');
+  return h ? `${h}h ${Math.floor(s % 3600 / 60)}m ${sec}s` : `${Math.floor(s / 60)}m ${sec}s`; };
+const fmtMin = (ms) => { const m = Math.max(0, Math.floor(ms / TC_MIN)); return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`; };
 const arrivalLabel = (hhmm) => { const [h, m] = hhmm.split(':').map(Number); const d = new Date(); d.setHours(h, m, 0, 0); return tcClock(d); };
 
 /* Time Clock — a header control (Figma, HOF CRM Redesign 6377:7657) that opens the Time Clock
@@ -100,7 +147,8 @@ const tcMarkCol = (children) => (
 );
 const tcDot = (c) => tcMarkCol(<span style={{width:7, height:7, borderRadius:12, background:c, boxShadow:`0 0 0 3px ${TC.bg}`}}/>);
 
-function TcRow({color, label, right, sub, railUp, railDown}){
+// `subRed`: the line under the time in red — a break past its planned minutes.
+function TcRow({color, label, right, sub, subRed, railUp, railDown}){
   return (
     <div style={{position:'relative', display:'flex', alignItems:'flex-start', gap:6, padding:'12px 12px 12px 6px'}}>
       <TcRail up={railUp} down={railDown}/>
@@ -108,7 +156,7 @@ function TcRow({color, label, right, sub, railUp, railDown}){
       <span style={{flex:1, minWidth:0, fontSize:12.5, lineHeight:'16px', color:TC.text, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{label}</span>
       <div style={{flexShrink:0}}>
         <div style={{fontSize:12.5, lineHeight:'16px', color:TC.sub, whiteSpace:'nowrap'}}>{right}</div>
-        {sub && <div style={{fontSize:12, fontWeight:600, color:TC.text, letterSpacing:-.3, whiteSpace:'nowrap'}}>{sub}</div>}
+        {sub && <div style={{fontSize:12, fontWeight:600, color: subRed ? TC.red : TC.text, letterSpacing:-.3, whiteSpace:'nowrap'}}>{sub}</div>}
       </div>
     </div>
   );
@@ -149,7 +197,8 @@ function TcNoteRow({e, railUp, railDown}){
 }
 
 /* The trail, in time order: arrival, clock-in/out, breaks (start…finish as one row once
-   finished), notes. */
+   finished), notes. A Lunch or Tea / Bio Break counts down its planned minutes while it runs and,
+   past them, reads "Over by …" in red — also once finished, by whole minutes. */
 function tcRows(trail, now){
   const rows = [];
   trail.forEach((e, i) => {
@@ -157,10 +206,15 @@ function tcRows(trail, now){
     else if(e.type === 'clockIn') rows.push({key:i, kind:'dot', color:TC.green, label:'Clocked In', right:tcClock(e.at)});
     else if(e.type === 'clockOut') rows.push({key:i, kind:'dot', color:TC.red, label:'Clocked Out', right:fmtHour(e.at)});
     else if(e.type === 'breakStart'){
-      const end = trail.slice(i + 1).find(x => x.type === 'breakEnd' || x.type === 'clockOut');
-      rows.push(end
-        ? {key:i, kind:'dot', color:TC.orange, label:'Break', right:`${fmtHour(e.at)} – ${fmtHour(end.at)}`}
-        : {key:i, kind:'dot', color:TC.orange, label:'Break Started', right:fmtHour(e.at), sub:fmtMS(now - e.at)});
+      const end = tcBreakEnd(trail, i);
+      const row = {key:i, kind:'dot', color:TC.orange, label:tcBreakLabel(e)};
+      // Past the planned minutes by this much (negative: time left); a break without a kind has no plan.
+      const over = e.kind ? Math.max(0, (end ? end.at : now) - e.at) - (e.minutes || 0) * TC_MIN : null;
+      // "3:24 – 3:54 PM": the half of the day once when both ends share it, so the label keeps its room in the narrow popover.
+      const half = (d) => (fmtHour(d).match(/ (AM|PM)$/) || [])[1], range = end && half(e.at) === half(end.at) ? `${fmtHour(e.at).replace(/ (AM|PM)$/, '')} – ${fmtHour(end.at)}` : end ? `${fmtHour(e.at)} – ${fmtHour(end.at)}` : '';
+      if(end) rows.push({...row, right:range, ...(over >= TC_MIN ? {sub:`Over by ${fmtMin(over)}`, subRed:true} : {})});
+      else if(over == null) rows.push({...row, label:'Break Started', right:fmtHour(e.at), sub:fmtMS(now - e.at)});
+      else rows.push({...row, right:fmtHour(e.at), sub: over > 0 ? `Over by ${fmtCount(over)}` : `${fmtCount(-over)} left`, subRed:over > 0});
     }
     else if(e.type === 'note') rows.push({key:i, kind:'note', e});
   });
@@ -171,7 +225,7 @@ function tcRows(trail, now){
 function TimeClockWidget({session, setSession, bare}){
   const [now, setNow] = React.useState(()=>new Date());
   React.useEffect(()=>{ const t = setInterval(()=>setNow(new Date()), 1000); return ()=>clearInterval(t); }, []);
-  const [mode, setMode] = React.useState(null);        // null | 'arrival' | 'note'
+  const [mode, setMode] = React.useState(null);        // null | 'arrival' | 'note' | 'break' (Paid or Unpaid) | 'paid' | 'unpaid' (its length)
   const [arrival, setArrival] = React.useState('10:00');
   const [note, setNote] = React.useState('');
   const trail = session.trail;
@@ -180,6 +234,13 @@ function TimeClockWidget({session, setSession, bare}){
   const worked = workedMs(trail, now);
   const rows = tcRows(trail, now);
   const hasArrival = trail.some(e => e.type === 'arrival');
+  // Add Break: what's used of today's breaks and the lengths still on offer. A break is chosen only while clocked in.
+  const usage = tcBreakUsage(trail, now);
+  const offers = tcBreakOffers(usage);
+  const breakMode = status === 'clockedIn' && (mode === 'break' || mode === 'paid' || mode === 'unpaid') ? mode : null;
+  const startBreak = (kind, minutes) => { add({type:'breakStart', kind, minutes}); setMode(null); };
+  // The session is shared (header and dashboard): a choice left open here closes once the state moves on elsewhere.
+  React.useEffect(()=>{ if(status !== 'clockedIn') setMode(m => m === 'break' || m === 'paid' || m === 'unpaid' ? null : m); }, [status]);
 
   const ghost = (label, icon, onClick) => (
     <button onClick={onClick} style={{...tcBtn, width:'100%', background:TC.greyBg, border:`1px solid ${TC.border}`, color:TC.sub}}>
@@ -191,6 +252,17 @@ function TimeClockWidget({session, setSession, bare}){
       <Icon name={icon} size={13} color="#fff"/>{label}
     </button>
   );
+  // A break choice — a kind or a length: the ghost button on one line; `hint` after the label in the muted colour.
+  const choice = (label, onClick, disabled, hint) => (
+    <button key={label} onClick={onClick} disabled={disabled}
+      style={{...tcBtn, flex:1, minWidth:0, padding:'0 6px', gap:4, whiteSpace:'nowrap', background:TC.greyBg, border:`1px solid ${TC.border}`, color:TC.sub,
+              opacity: disabled ? .45 : 1, cursor: disabled ? 'default' : 'pointer'}}>
+      <span style={{flexShrink:0}}>{label}</span>
+      {hint && <span style={{minWidth:0, overflow:'hidden', textOverflow:'ellipsis', fontSize:11.5, fontWeight:400, color:T.gray400}}>{hint}</span>}
+    </button>
+  );
+  const usedLine = (used, of) => <div style={{fontSize:11.5, color: used > of ? TC.red : TC.sub}}>{used} of {of} min used</div>;
+  const cancel = <button onClick={()=>setMode(null)} style={{...tcBtn, height:22, background:'transparent', border:'none', color:TC.sub, alignSelf:'center'}}>Cancel</button>;
   /* Note — opens the note input, available in every state. (A ⋯ menu can return once there are
      more Time Clock actions.) */
   const more = (
@@ -228,6 +300,25 @@ function TimeClockWidget({session, setSession, bare}){
           style={{...tcBtn, flex:1, border:'none', background: note.trim() ? T.black : T.gray400, color:'#fff'}}>Save</button>
       </div>
     </>);
+  } else if(breakMode === 'break'){
+    // Add Break becomes the choice of its kind in the same place; a kind with nothing left today is disabled.
+    actions = (<>
+      <div style={{display:'flex'}}>{choice('Lunch Break', ()=>setMode('paid'), !offers.paid.length)}</div>
+      <div style={{display:'flex'}}>{choice('Tea / Bio Break', ()=>setMode('unpaid'), !offers.unpaid.length)}</div>
+      {cancel}
+    </>);
+  } else if(breakMode === 'paid'){
+    actions = (<>
+      {usedLine(usage.paidPlannedMin, TC_PAID_BREAK_MIN)}
+      <div style={{display:'flex', gap:6}}>{offers.paid.map(m => choice(m === 60 ? '1 Hour' : `${m} Minutes`, ()=>startBreak('paid', m)))}</div>
+      {cancel}
+    </>);
+  } else if(breakMode === 'unpaid'){
+    actions = (<>
+      {usedLine(usage.unpaidUsedMin, TC_UNPAID_ALLOWANCE_MIN)}
+      <div style={{display:'flex', gap:6}}>{offers.unpaid.map(m => choice(`${m} min`, ()=>startBreak('unpaid', m)))}</div>
+      {cancel}
+    </>);
   } else if(status === 'notClockedIn'){
     actions = (<>
       {!hasArrival && ghost('I’m on my way', null, ()=>setMode('arrival'))}
@@ -235,7 +326,7 @@ function TimeClockWidget({session, setSession, bare}){
     </>);
   } else if(status === 'clockedIn'){
     actions = (<>
-      {ghost('Add Break', 'breakStart', ()=>add({type:'breakStart'}))}
+      {ghost('Add Break', 'breakStart', ()=>setMode('break'))}
       <div style={{display:'flex', gap:6}}>{primary('Clock Out', 'clockOut', ()=>add({type:'clockOut'}), 'out')}{more}</div>
     </>);
   } else if(status === 'onBreak'){
@@ -264,7 +355,7 @@ function TimeClockWidget({session, setSession, bare}){
               const railUp = i > 0, railDown = i < rows.length - 1;
               return r.kind === 'note'
                 ? <TcNoteRow key={r.key} e={r.e} railUp={railUp} railDown={railDown}/>
-                : <TcRow key={r.key} color={r.color} label={r.label} right={r.right} sub={r.sub} railUp={railUp} railDown={railDown}/>;
+                : <TcRow key={r.key} color={r.color} label={r.label} right={r.right} sub={r.sub} subRed={r.subRed} railUp={railUp} railDown={railDown}/>;
             })}
           </div>
           <div style={{height:1, background:TC.line}}/>
@@ -605,6 +696,8 @@ function App(){
   const [settingsTarget, setSettingsTarget] = React.useState(null);
   const openSettingsEntity = (r) => { setSettingsTarget({...r, nonce:Date.now()}); setCrmActive(r.page); };
   const inSettings = isSettingsPage(crmActive);
+  // Reports (reports.jsx): 'reports' is its landing page, 'reports.<id>' a report; Reports in the nav always opens the landing page.
+  const inReports = isReportsPage(crmActive);
   const selectCrm = (id) => {
     // Settings opens straight on its first page (Email), not a "Select an item" screen.
     if(id === 'settings'){ setSettingsNavOpen(true); if(inSettings) return; setCrmActive(SETTINGS_DEFAULT_PAGE); return; }
@@ -630,8 +723,10 @@ function App(){
     const presets0 = loaded.presetDefaults === PRESET_DEFAULTS_VERSION ? loaded.presets : withPresetDefaults(loaded.presets);
     // A CRM with a sample signature of its own (workspaces.jsx CRM_SIGNATURES): signatures saved there before it are put aside, once.
     const crmSignature = !!CRM_SIGNATURES[ACTIVE_CRM.id], dropSignatures = crmSignature && loaded.mockSignature !== MOCK_SIGNATURE_VERSION;
-    const base = {...loaded, users:(loaded.users || []).map(u => ({...u, ...(SEED && !u.signature && SAMPLE_SIGNATURES[u.id] ? {signature:SAMPLE_SIGNATURES[u.id]} : {}), ...(dropSignatures ? {signature:null} : {}), permissions:normalizePermissions(u.permissions, levelOfPreset(u.preset))})),
-      presets:(presets0 || []).map(x => ({...x, permissions:normalizePermissions(x.permissions, levelOfPreset(x.name))})), presetDefaults:PRESET_DEFAULTS_VERSION};
+    // The Sales Professional preset and its users view the activity tools on Their Team's records, once (usersTeams.jsx withTeamViewTools, 2026-11-23).
+    const teamTools = (name, perms) => loaded.salesProTools !== 1 && name === 'Sales Professional' ? withTeamViewTools(perms) : perms;
+    const base = {...loaded, users:(loaded.users || []).map(u => ({...u, ...(SEED && !u.signature && SAMPLE_SIGNATURES[u.id] ? {signature:SAMPLE_SIGNATURES[u.id]} : {}), ...(dropSignatures ? {signature:null} : {}), permissions:teamTools(u.preset, normalizePermissions(u.permissions, levelOfPreset(u.preset)))})),
+      presets:(presets0 || []).map(x => ({...x, permissions:teamTools(x.name, normalizePermissions(x.permissions, levelOfPreset(x.name)))})), presetDefaults:PRESET_DEFAULTS_VERSION, salesProTools:1};
     // The signed-in person is one of this CRM's users (added when they aren't yet).
     // One identity per person across the Organization: the signed-in person joins under their shared name.
     const shared = signedInOrgUser();
@@ -650,7 +745,7 @@ function App(){
       pipelines:withSeeded(saved.pipelines && saved.pipelines.filter(p => !SPLIT_AC_PIPELINES.includes(p.id)), d.pipelines, saved.seededPipelines), seededPipelines:d.pipelines.map(p => p.id),
       seededDeals:SAMPLE_DEALS().map(x => x.id), seededContacts:SAMPLE_CONTACTS.map(c => c.id), seededCustomers:SAMPLE_CUSTOMERS().map(c => c.id),
       ...(!v2 && saved.emailTemplates ? {emailTemplates:saved.emailTemplates} : {}),
-      ...(SEED ? {mockPersonas:MOCK_PERSONAS_VERSION, mockEnrollGroup:1, mockPersonaRecords:1} : {}),
+      ...(SEED ? {mockPersonas:MOCK_PERSONAS_VERSION, mockEnrollGroup:1, mockPersonaRecords:1, mockMyDayLeads:1, mockMustafaBusy:1, mockActivityGoals:1, mockCommission:1, mockMyDaySignals:1, mockMyDayTrail:1} : {}),
       ...(crmSignature ? {mockSignature:MOCK_SIGNATURE_VERSION} : {}),
       // The sample email templates and sequences, once (workflows.jsx withMockEmails).
       ...(SEED && loaded.mockEmails !== MOCK_EMAILS_VERSION ? withMockEmails(loaded) : {})});
@@ -676,9 +771,30 @@ function App(){
   const [biz] = React.useState(() => SEED && prevSettings.seededBusiness !== BUSINESS_DATA_VERSION
     ? generateBusinessData({users:settingsData.users, services:savedSlice('services') || SAMPLE_SERVICES(),
         takenNames:(savedSlice('contacts') || SAMPLE_CONTACTS).map(c => c.name)}) : null);
-  const withBiz = (list, key) => { if(!biz || !biz[key]) return list; const have = new Set((list || []).map(x => String(x.id))); return [...(list || []), ...biz[key].filter(x => !have.has(String(x.id)))]; };
-  const withBizMap = (map, key) => { if(!biz || !biz[key]) return map; return {...Object.fromEntries(Object.entries(biz[key]).filter(([id]) => !(map || {})[id])), ...(map || {})}; };
+  /* The sample CRM's Daily Activity targets for Mustafa (goals.jsx) and its commission plan (commission.jsx), once each. */
+  React.useEffect(() => {
+    if(!SEED) return;
+    if(prevSettings.mockActivityGoals !== 1 && (settingsData.users || []).some(u => u.id === 'mustafa')) setSettingsData(s => ({...withSampleActivityGoals(s), mockActivityGoals:1}));
+    if(prevSettings.mockCommission !== 1) setSettingsData(s => ({...withSampleCommission(s), mockCommission:1}));
+  }, []);
+  /* The sample Employee's own business, once (`mockMustafaBusy`, 2026-11-20): Mustafa — the persona My Day
+     and the Personal dashboard are reviewed as — gets leads, deals, customers, CCLs, payments and history
+     of his own from the last months (generateBusinessData `only`), a Cash Received and a Deals Created
+     goal for the month, and his dashboard laid out Time Clock first, My Day beside it — a busy dashboard. */
+  const [bizMine] = React.useState(() => {
+    if(!SEED || prevSettings.mockMustafaBusy === 1 || !(settingsData.users || []).some(u => u.id === 'mustafa')) return null;
+    const leads = [...(savedSlice('contacts') || SAMPLE_CONTACTS), ...((biz && biz.contacts) || [])];
+    return generateBusinessData({users:settingsData.users, services:savedSlice('services') || SAMPLE_SERVICES(), takenNames:leads.map(c => c.name),
+      only:{ownerId:'mustafa', count:110, maxAgeDays:200, seed:115, tag:'m', firstContactId:Math.max(5001, idFloorOf(leads)), dealBase:5000, custBase:5000, quoteNo:5000}});
+  });
+  const withBiz = (list, key) => [biz, bizMine].reduce((acc, b) => { if(!b || !b[key]) return acc; const have = new Set((acc || []).map(x => String(x.id))); return [...(acc || []), ...b[key].filter(x => !have.has(String(x.id)))]; }, list);
+  const withBizMap = (map, key) => [biz, bizMine].reduce((acc, b) => !b || !b[key] ? acc : {...Object.fromEntries(Object.entries(b[key]).filter(([id]) => !(acc || {})[id])), ...(acc || {})}, map);
   React.useEffect(() => { if(biz) setSettingsData(s => ({...s, seededBusiness:biz.version})); }, []);
+  React.useEffect(() => { if(bizMine) setSettingsData(s => { const g = s.goals || {}, mine = (o) => ({...(o || {}), mustafa:{monthly:null, ...((o || {}).mustafa || {})}});
+    const users = mine(g.users), deals = mine((g.deals || {}).users);
+    if(users.mustafa.monthly == null) users.mustafa.monthly = 120000;
+    if(deals.mustafa.monthly == null) deals.mustafa.monthly = 12;
+    return {...s, mockMustafaBusy:1, goals:{period:'monthly', ...g, users, deals:{...(g.deals || {}), users:deals}}}; }); }, []);
   // Deal records — kept here so they survive leaving the Deals page (they read users / pipelines from Settings).
   const [deals, setDealsRaw] = React.useState(() => {
     const v2 = savedSlice('deals'), DAY_TIME = /, \d{1,2}:\d{2}\s?[AP]M$/;
@@ -729,6 +845,19 @@ function App(){
   React.useEffect(() => { if(contacts.some(c => c.industry === undefined)) setContacts(cs => withSampleValues(cs, SAMPLE_CONTACTS, ['industry'])); }, []);
   const [contactActivities, setContactActivities] = usePersistedState('contactActivities', () => SEED ? withUpcomingMeetings(withSampleAttachments(generateActivities(SAMPLE_CONTACTS)), 9) : {},
     (m) => withTaskStatuses(withBizMap(m, 'contactActivities'), prevSettings.taskPipelines));
+  /* Type of Lead also follows reach (2026-11-20, myDay.jsx leadStageByReach): a lead's first contact moves it from
+     Assigned or Not Responded to Contacted; two unanswered calls with no contact yet move it from
+     Assigned to Not Responded. Only for a lead whose activity has just changed — not for what was there. */
+  const leadActsSeen = React.useRef(null);
+  React.useEffect(() => {
+    const prev = leadActsSeen.current;
+    leadActsSeen.current = contactActivities;
+    if(!prev || prev === contactActivities) return;
+    const moves = new Map();
+    contacts.forEach(c => { const acts = contactActivities[c.id]; if(!acts || acts === prev[c.id]) return;
+      const to = leadStageByReach(c, acts); if(to && to !== c.contactType) moves.set(String(c.id), to); });
+    if(moves.size) setContacts(cs => cs.map(c => moves.has(String(c.id)) ? {...c, contactType:moves.get(String(c.id))} : c));
+  }, [contactActivities]);
   // Sample calls, emails and notes for Run Customer Profile to read (a few sample contacts; added once).
   React.useEffect(() => { if(SEED) setContactActivities(m => withSampleProfileSources(m, contacts)); }, []);
   /* Customer records and their activity — here so contacts and deals can create customers and show
@@ -770,6 +899,22 @@ function App(){
     const tasks = (ids) => (m) => Object.fromEntries(Object.entries(m).map(([id, acts]) => [id, ids.has(String(id)) ? acts.map(a => a.type === 'task' && from.includes(a.assignee) ? {...a, assignee:userLabel(give.to)} : a) : acts]));
     setContacts(own(give.contacts)); setDealsRaw(own(give.deals)); setCustomersRaw(own(give.customers));
     setContactActivities(tasks(give.contacts)); setDealActivities(tasks(give.deals)); setCustomerActivities(tasks(give.customers));
+  }, []);
+  /* My Day's sample leads, once (myDay.jsx myDaySampleLeads — `mockMyDayLeads`): new leads not contacted
+     yet for the three test personas, a few already called with no answer. Added as they are — no workflow runs on them. */
+  React.useEffect(() => {
+    if(!SEED || prevSettings.mockMyDayLeads === 1) return;
+    const day = 86400000, label = (t) => new Date(t).toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'});
+    const made = myDaySampleLeads().filter(x => !contacts.some(c => c.email === x.values.email)).map(x => { const id = newRecordId('contacts'), at = Date.now() - x.daysAgo * day - 3 * 3600000;
+      const call = (n, outcome, when, mins) => ({id:`md-${id}-${n}`, contactId:id, type:'call', logged:true, outcome, durationMin:mins, body:'', direction:'outbound', source:'team', by:userLabel(x.owner), at:new Date(when)});
+      return {record:{...newContactRecord(id, {...x.values, owner:x.owner, contactType: x.touchDaysAgo ? 'Contacted' : x.tries ? 'Not Responded' : 'Assigned'}), created:label(at)},
+        acts:[...Array.from({length:x.tries}, (_, n) => call(n, 'No answer', at + (n + 1) * 5 * 3600000, 0)),
+          ...(x.touchDaysAgo ? [call('t', 'Connected', Date.now() - x.touchDaysAgo * day - 2 * 3600000, 12)] : []),
+          ...(x.task ? [{id:`md-${id}-k`, contactId:id, type:'task', source:'team', by:userLabel(x.owner), assignee:userLabel(x.owner), title:x.task, description:'', status:'notStarted', taskType:'To-do',
+            at:new Date(Date.now() - x.touchDaysAgo * day), ...taskDueValue(ymdOf(new Date()), '')}] : [])].sort((p, q) => new Date(q.at) - new Date(p.at))}; });
+    if(!made.length) return;
+    setContacts(cs => [...cs, ...made.map(m => m.record)]);
+    setContactActivities(m => ({...m, ...Object.fromEntries(made.map(x => [x.record.id, x.acts]))}));
   }, []);
   // Sample tasks saved before they had descriptions get theirs (activities.jsx).
   React.useEffect(() => { setContactActivities(withSampleTaskDescriptions); setDealActivities(withSampleTaskDescriptions); setCustomerActivities(withSampleTaskDescriptions); }, []);
@@ -872,6 +1017,65 @@ function App(){
      workflows run on. */
   // Quotes, forms and payment terms (declared before the engine, which reads quotes and payment terms).
   const [quotes, setQuotes] = usePersistedState('quotes', () => SEED ? SAMPLE_QUOTES(SAMPLE_SERVICES()) : [], (qs) => withBiz(qs, 'quotes'));
+  /* My Day's sample signals, once (`mockMyDaySignals`, 2026-11-20 — myDay.jsx): on Mustafa's own records,
+     so the Follow-ups tab and Meetings Today can be reviewed — a quote its client opened two hours ago,
+     a quote sent and left unanswered, a lead that replied after a silence, a deal passed to him by Ali,
+     and a meeting today. Each only where one of his records fits. */
+  const signalsMocked = React.useRef(false);
+  React.useEffect(() => {
+    // Once his sample business is there (it's added just after the first load).
+    if(!SEED || signalsMocked.current || prevSettings.mockMyDaySignals === 1 || !deals.some(d => d.owner === 'mustafa')) return;
+    signalsMocked.current = true;
+    const now = Date.now(), day = 86400000, timeOf = (a) => new Date(a.at).getTime() || 0;
+    const last = (acts) => Math.max(0, ...(acts || []).filter(a => ['call', 'email', 'meeting', 'task', 'note'].includes(a.type) && timeOf(a) <= now).map(timeOf));
+    const open = deals.filter(d => d.owner === 'mustafa' && (recordStageType('deals', d) || 'open') === 'open'), used = new Set();
+    const take = (list, ok) => { const r = list.find(x => !used.has(x.id) && ok(x)); if(r) used.add(r.id); return r || null; };
+    const sent = quotes.filter(q => q.status === 'sent' && !q.viewedAt && q.object === 'deals' && open.some(d => d.id === q.recordId));
+    const dealOf = (q) => open.find(d => d.id === q.recordId);
+    const opened = sent.find(q => !used.has(q.recordId)); if(opened) used.add(opened.recordId);
+    const quiet = sent.find(q => !used.has(q.recordId) && now - last(dealActivities[q.recordId]) >= 10 * day); if(quiet) used.add(quiet.recordId);
+    const passed = take(open, d => now - last(dealActivities[d.id]) > 2 * day), met = take(open, () => true);
+    const lead = contacts.find(c => c.owner === 'mustafa' && now - last(contactActivities[c.id]) >= 8 * day && (contactActivities[c.id] || []).some(a => isRealTouch(a)));
+    const at4 = new Date(); at4.setHours(16, 0, 0, 0);
+    if(opened || quiet) setQuotes(qs => qs.map(q => opened && q.id === opened.id ? {...q, viewedAt:new Date(now - 2 * 3600000)} : quiet && q.id === quiet.id ? {...q, sentAt:new Date(now - 9 * day)} : q));
+    const add = {...(opened ? {[opened.recordId]:[{id:`mds-view-${opened.id}`, dealId:opened.recordId, type:'quote', status:'viewed', title:`${opened.number} · ${opened.title}`, quoteId:opened.id, source:'client', by:'', at:new Date(now - 2 * 3600000)}]} : {}),
+      ...(passed ? {[passed.id]:[{id:`mds-pass-${passed.id}`, dealId:passed.id, type:'ownerChange', from:'ali-noor', to:'mustafa', source:'team', by:'Waleed bin Zaman', at:new Date(now - day)}]} : {}),
+      ...(met ? {[met.id]:[{id:`mds-meet-${met.id}`, dealId:met.id, type:'meeting', logged:false, status:'scheduled', at:at4, scheduledFor:at4, durationMin:30, title:'Proposal review', platform:'Google Meet', source:'team', by:'Mustafa'},
+        // …and two tasks at a time today, for the daily calendar: a call back, and one with a Time Allowed.
+        {id:`mds-task1-${met.id}`, dealId:met.id, type:'task', source:'team', by:'Ali Noor', assignee:'Mustafa', title:'Call back about the documents', description:'', status:'notStarted', taskType:'Call',
+          pipelineId:DEFAULT_TASK_PIPELINE_ID, at:new Date(now - day), ...taskDueValue(ymdOf(new Date()), '11:00')},
+        {id:`mds-task2-${met.id}`, dealId:met.id, type:'task', source:'team', by:'Ali Noor', assignee:'Mustafa', title:'Send the fee breakdown', description:'', status:'notStarted', taskType:'To-do',
+          pipelineId:DEFAULT_TASK_PIPELINE_ID, allowedMin:30, at:new Date(now - day), ...taskDueValue(ymdOf(new Date()), '14:30')}]} : {})};
+    if(Object.keys(add).length) setDealActivities(m => ({...m, ...Object.fromEntries(Object.entries(add).map(([id, list]) => [id, [...list, ...(m[id] || [])]]))}));
+    if(lead) setContactActivities(m => ({...m, [lead.id]:[{id:`mds-reply-${lead.id}`, contactId:lead.id, type:'email', direction:'received', status:'received', source:'client', by:null,
+      title:'Re: Your eligibility assessment', body:'Thank you for the details. I have spoken with my family and we would like to go ahead. What is the next step?', at:new Date(now - 5 * 3600000)}, ...(m[lead.id] || [])]}));
+  }, [deals.length]);
+  /* My Day's sample day, once (`mockMyDayTrail`, 2026-11-20): so the day's numbers read as a trail and My
+     Calendar has a day in it, Mustafa gets calls made today on his open deals — some not answered, most
+     connected, three of those marked qualified — two of his draft quotes sent today, and his latest won
+     deal closed today. */
+  const trailMocked = React.useRef(false);
+  React.useEffect(() => {
+    if(!SEED || trailMocked.current || prevSettings.mockMyDayTrail === 1 || !deals.some(d => d.owner === 'mustafa')) return;
+    // After the sample signals are in (the effect above), so these calls go on other deals and leave the signals standing.
+    if(prevSettings.mockMyDaySignals !== 1 && !Object.values(dealActivities).some(l => (l || []).some(a => String(a.id).startsWith('mds-')))) return;
+    trailMocked.current = true;
+    const now = Date.now(), start = new Date(); start.setHours(9, 10, 0, 0);
+    const from = Math.min(start.getTime(), now - 3 * 3600000), span = Math.max(600000, now - 300000 - from);
+    const open = deals.filter(d => d.owner === 'mustafa' && (recordStageType('deals', d) || 'open') === 'open' && !(dealActivities[d.id] || []).some(a => String(a.id).startsWith('mds-'))
+      && !quotes.some(q => q.object === 'deals' && q.recordId === d.id && q.status === 'sent'));   // not the deals the sample signals stand on
+    const outcomes = ['Connected', 'No answer', 'Connected, qualified', 'Connected', 'No answer', 'Connected', 'Connected, qualified', 'Connected', 'No answer', 'Connected, qualified', 'Connected'];
+    const calls = Object.fromEntries(open.slice(0, outcomes.length).map((d, i) => { const o = outcomes[i];
+      return [d.id, {id:`mdt-call-${d.id}`, dealId:d.id, type:'call', logged:true, outcome:o, durationMin: o === 'No answer' ? 0 : 6 + (i * 5) % 14, body:'', direction:'outbound', source:'team', by:'Mustafa', pointOfContact:'Mustafa',
+        at:new Date(from + Math.round(span * (i + .5) / outcomes.length))}]; }));
+    const drafts = quotes.filter(q => q.status === 'draft' && q.object === 'deals' && deals.some(d => d.id === q.recordId && d.owner === 'mustafa')).slice(0, 2);
+    const sentAt = (i) => new Date(from + Math.round(span * (i ? .82 : .46)));
+    if(drafts.length) setQuotes(qs => qs.map(q => { const i = drafts.findIndex(x => x.id === q.id); return i < 0 ? q : {...q, status:'sent', sentAt:sentAt(i), createdBy:'Mustafa'}; }));
+    const sent = Object.fromEntries(drafts.map((q, i) => [q.recordId, {id:`mdt-quote-${q.id}`, dealId:q.recordId, type:'quote', status:'sent', title:`${q.number} · ${q.title}`, quoteId:q.id, source:'team', by:'Mustafa', at:sentAt(i)}]));
+    setDealActivities(m => { const next = {...m}; [calls, sent].forEach(set => Object.entries(set).forEach(([id, a]) => { next[id] = [a, ...(next[id] || [])]; })); return next; });
+    const won = deals.filter(d => d.owner === 'mustafa' && recordStageType('deals', d) === 'won').sort((a, b) => (b.stageEnteredAt || 0) - (a.stageEnteredAt || 0))[0];
+    if(won) setDealsRaw(ds => ds.map(d => d.id === won.id ? {...d, actualCloseDate:storePropertyValue('Date & time', new Date(now - 3600000)), stageEnteredAt:now - 3600000} : d));
+  }, [deals.length, dealActivities]);
   ensureIdFloor('quotes', quoteSeqFloor(quotes));   // quote numbers never fall back below one used (quotes.jsx)
   // Documents (Tools → Documents, documents.jsx): their numbers likewise.
   const [documents, setDocuments] = usePersistedState('documents', [], (ds) => (ds || []).map(upgradeDocument));   // saved before: one body (upgradeDocument)
@@ -918,8 +1122,14 @@ function App(){
     const differs = (c) => { const n = next(c); return (c.lastContacted || '') !== n.lastContacted || (c.lastActivity || '') !== n.lastActivity; };
     if(contacts.some(differs)) setContacts(cs => cs.map(c => differs(c) ? {...c, ...next(c)} : c));
   }, [contacts, deals, customers, contactActivities, dealActivities, customerActivities]);
-  // Overview View Settings per record type — pinned Highlights and Snapshots (overviewSettings.jsx).
+  // Overview Layout Settings per record type — pinned Highlights and Snapshots (overviewSettings.jsx).
   const [overviewSettings, setOverviewSettings] = usePersistedState('overviewSettings', {}, withTabOrderV2);
+  // …and Mustafa's saved dashboard layout, once with it: the Time Clock first, My Day beside it.
+  React.useEffect(() => { if(!bizMine) return;
+    setOverviewSettings(o => { const mine = ((o || {}).userDashboards || {}).mustafa; if(!mine || !Array.isArray(mine.widgets)) return o;
+      const first = ['personal/timeClock', 'personal/myDay'], at = (w) => { const i = first.indexOf(w.id); return i < 0 ? first.length : i; };
+      return {...o, userDashboards:{...o.userDashboards, mustafa:{...mine, widgets:mine.widgets.map((w, i) => ({w, i})).sort((x, y) => at(x.w) - at(y.w) || x.i - y.i).map(x => first.includes(x.w.id) ? {...x.w, hidden:false} : x.w)}}}; });
+  }, []);
   const mergeRecordsRef = React.useRef(null);   // the merge below, for the workflow action Merge Record
   const engine = useWorkflowEngine({data:settingsData, setData:setSettingsData, deals, setDealsRaw, dealActivities, setDealActivities, setContacts,
     customers, setCustomersRaw, customerActivities, setCustomerActivities, contacts, contactActivities, setContactActivities,
@@ -931,6 +1141,8 @@ function App(){
   /* The system-generated Contact properties worked out here: Associated Deal / Customer (the
      linked records' names), Owner Assignment Date and Owner Assigned By (from the owner history). */
   // Form Name / Form Submission Date: from the form submission that created each record (forms.jsx); Merge Status (merge.jsx).
+  // Referred By (2026-11-23): the name of the record a referral was created from (dataModel.jsx referrerOf) — a lead's: a lead or a customer; a deal's: a deal.
+  const referrerName = (r, recs) => { const by = r.referredBy && referrerOf(recs, r); return by ? by.record.name || '' : ''; };
   const contactsWithDeals = React.useMemo(() => {
     // Each contact's deals and customers (the records listing it).
     const byContact = (list) => { const m = new Map(); list.forEach(r => contactIdsOf(r).forEach(id => m.set(String(id), [...(m.get(String(id)) || []), r]))); return m; };
@@ -939,10 +1151,10 @@ function App(){
     const ds = dealsOf.get(String(c.id)) || [], cs = customersOf.get(String(c.id)) || [];
     const od = ownerDates(c, contactActivities[c.id] || []);
     return {...c, dealCount:ds.length, customerCount:cs.length, deals:ds.map(d => d.name).join(', '), customers:cs.map(x => x.name).join(', '),
-      ownerAssigned:od.assigned, ownerAssignedBy:od.assignedBy, ...formRecordValues(formSubs, 'contacts', c.id), mergeStatus:mergeStatusIn(mergeIdx.contacts, c.id)};
+      ownerAssigned:od.assigned, ownerAssignedBy:od.assignedBy, ...formRecordValues(formSubs, 'contacts', c.id), mergeStatus:mergeStatusIn(mergeIdx.contacts, c.id), referrer:referrerName(c, {contacts, customers})};
   }); }, [contacts, deals, customers, contactActivities, formSubs, mergeIdx]);
   // Owner Assigned By, on Deals and Customers as on Contacts (from the owner history).
-  const dealsView = React.useMemo(() => deals.map(d => ({...d, ownerAssignedBy:ownerDates(d, dealActivities[d.id] || []).assignedBy, ...(formSubs.size ? formRecordValues(formSubs, 'deals', d.id) : {}), mergeStatus:mergeStatusIn(mergeIdx.deals, d.id)})), [deals, dealActivities, formSubs, mergeIdx]);
+  const dealsView = React.useMemo(() => deals.map(d => ({...d, ownerAssignedBy:ownerDates(d, dealActivities[d.id] || []).assignedBy, ...(formSubs.size ? formRecordValues(formSubs, 'deals', d.id) : {}), mergeStatus:mergeStatusIn(mergeIdx.deals, d.id), referrer:referrerName(d, {deals})})), [deals, dealActivities, formSubs, mergeIdx]);
   const customersView = React.useMemo(() => customers.map(c => ({...c, ownerAssignedBy:ownerDates(c, customerActivities[c.id] || []).assignedBy, ...(formSubs.size ? formRecordValues(formSubs, 'customers', c.id) : {}), mergeStatus:mergeStatusIn(mergeIdx.customers, c.id)})), [customers, customerActivities, formSubs, mergeIdx]);
   const [recordLink, setRecordLink] = React.useState(null);   // {object:'contacts'|'deals', id, mode, tab, nonce}
   const openRecord = (object, id, mode, tab) => { setCrmActive(object); setRecordLink({object, id, mode, tab, nonce:Date.now()}); };
@@ -1287,11 +1499,15 @@ function App(){
     activities:{contacts:contactActivities, deals:dealActivities, customers:customerActivities},
     add:hubAdd, update:hubUpdate, remove:hubRemove, openRecord, workSession:{session, setSession}, quotes, setQuotes, documents, setDocuments, services, setServices, forms, setForms, createRecord, setData:setSettingsData, accounting, setAccounting, invoices, setInvoices, overviewSettings, setOverviewSettings,
     merge:{...mergeIdx, mergeRecords, keepSeparate, history:mergeHistory, splitRecords},
+    // A new lead saved from a form outside the Leads page (Create Referral Lead — contacts.jsx saveNewLead): as the Leads page saves one, through the engine.
+    leadCreation:{add:(record) => engine.setContacts(cs => [...cs, record]), createDeal, linkDeal, linkCustomer},
+    // A CRM page opened from anywhere (the bell's Notification Settings).
+    openPage:(pageId) => { setScreen('crm'); setCrmActive(pageId); },
     // A workflow violation's details: its Object's page with Workflow Violations open and it selected.
     openViolation:(object, id) => { setCrmActive(object); engine.value.openViolation(object, id); }};
   const withEngine = (el) => (
     <WorkflowEngineCtx.Provider value={engineValue}>
-      <RecordHubProvider value={hubValue}><ProfileFormsCtx.Provider value={profileFormsStore}>{el}</ProfileFormsCtx.Provider><PublicFormInbox/><DocumentSignInbox/><QuoteViewInbox/><QuoteExpiryWatch/><InvoiceIssuer/><DictationHost/><MentionsHost/></RecordHubProvider>
+      <RecordHubProvider value={hubValue}><ProfileFormsCtx.Provider value={profileFormsStore}>{el}</ProfileFormsCtx.Provider><PublicFormInbox/><DocumentSignInbox/><QuoteViewInbox/><QuoteExpiryWatch/><InvoiceIssuer/><DictationHost/><MentionsHost/><NotificationHost/></RecordHubProvider>
       {engine.openPromptId && <WorkflowPromptModal key={engine.openPromptId} promptId={engine.openPromptId} direct={engine.promptDirect} onClose={engine.closePrompt} hidden={eventAway}/>}
       <WorkflowNotices notices={engine.notices} onDismiss={engine.dismissNotice} onView={engine.value.openEvent}/>
       {engine.event && <AutomaticActionModal key={engine.event.id} event={engine.event} onClose={engine.closeEvent} hidden={eventAway}/>}
@@ -1307,7 +1523,7 @@ function App(){
     {people}
     <PageVisibleCtx.Provider value={screen === 'crm'}>
     <div style={{display: screen === 'crm' ? 'flex' : 'none', height:'100vh', width:'100vw', overflow:'hidden', background:T.pageBg}}>
-      <CrmSidebar active={inSettings ? 'settings' : crmActive} setActive={selectCrm} onBack={()=>setScreen('main')} nav={crmNavWithObjects} setNav={setCrmNav}/>
+      <CrmSidebar active={inSettings ? 'settings' : inReports ? 'reports' : crmActive === 'analytics' && !dashIsHome() ? 'dashboard' : crmActive} setActive={selectCrm} onBack={()=>setScreen('main')} nav={crmNavWithObjects} setNav={setCrmNav}/>
       {inSettings && settingsNavOpen && <CrmSettingsNav active={crmActive} setActive={setCrmActive} onClose={()=>setSettingsNavOpen(false)} data={settingsData} onOpenEntity={openSettingsEntity}/>}
       <div style={{flex:1, display:'flex', flexDirection:'column', minWidth:0, minHeight:0}}>
         <CrmHeader session={session} setSession={setSession}/>
@@ -1333,6 +1549,8 @@ function App(){
           : SETTINGS_PAGES[crmActive] ? <CrmSettingsPage pageId={crmActive} data={settingsData} setData={setSettingsData} navigate={setCrmActive} records={{contacts, deals, customers}} nav={crmNavWithObjects}
               updateRecords={(object, fn) => object === 'contacts' ? setContacts(fn) : object === 'deals' ? setDealsRaw(fn) : object === 'customers' ? setCustomersRaw(fn) : null} setNav={setCrmNav}
               onWorkflowOpen={(open)=>setSettingsNavOpen(!open)} target={settingsTarget} onTargetDone={()=>setSettingsTarget(null)}/>
+          // Reports (reports.jsx): its landing page, or the report opened from it.
+          : inReports ? (crmActive === 'reports' ? <ReportsHome navigate={setCrmActive}/> : <ReportPage key={crmActive} pageId={crmActive} navigate={setCrmActive}/>)
           // Automation → Workflows: every configured workflow (workflowsPage.jsx).
           : crmActive === 'workflows' ? (workflowCan('view') ? <WorkflowsPage data={settingsData} setData={setSettingsData}/>
             : <div style={{flex:1, display:'flex', alignItems:'center', justifyContent:'center', fontSize:13, color:T.gray400}}>You don't have access to Workflows.</div>)
@@ -1350,7 +1568,8 @@ function App(){
           : crmActive === 'documents' ? <DocumentsPage/>
           : crmActive === 'services' ? <ServicesPage/>
           // Dashboard: Financial KPIs, Wall of Fame, Business Velocity (dashboard.jsx).
-          : crmActive === 'dashboard' ? <DashboardPage/>
+          : crmActive === 'analytics' && dashIsHome() ? <AnalyticsPage key="analytics"/>
+          : crmActive === 'dashboard' || crmActive === 'analytics' ? <DashboardPage key={crmActive} part={crmActive === 'analytics' ? 'analytics' : 'day'}/>
           : <EmptyCrmCanvas activeId={crmActive} label={(settingsData.objects.find(o => o.id === crmActive) || {}).name}/>}
       </div>
       {customerForm && <CustomerFormModal data={settingsData} initial={customerForm.initial} links={customerForm.links} contacts={contactsWithDeals} deals={deals} customers={customers}

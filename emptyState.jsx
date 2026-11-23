@@ -28,4 +28,15 @@ function EmptyState({illustration = 'list', title, description, action, compact}
   );
 }
 
-Object.assign(window, {EmptyState, EMPTY_ILLUSTRATIONS});
+/* A feature Spring AI defines and the dev team builds (2026-11-23 — Call Reviews on a record's
+   Calls tab, Call Performance in Analytics): its place is here, its content isn't the prototype's. */
+// In Spring's look (shared.jsx SPRING, 2026-11-23): its mark, on its slight orange ground.
+function SpringPlaceholder({title}){
+  return <div style={{flex:1, minHeight:0, display:'flex', alignItems:'center', justifyContent:'center', padding:24}}>
+    <div style={{display:'flex', flexDirection:'column', alignItems:'center', textAlign:'center', maxWidth:420, padding:'36px 40px', borderRadius:16, background:SPRING.tint, border:`1px solid ${SPRING.line}`}}>
+      <SpringMark w={44}/>
+      <div style={{fontSize:14, fontWeight:500, color:T.attioText, marginTop:18}}>{title}</div>
+      <div style={{fontSize:13, color:T.attioMuted, marginTop:4}}>This feature is defined by Spring AI. The dev team will define it.</div>
+    </div></div>;
+}
+Object.assign(window, {EmptyState, EMPTY_ILLUSTRATIONS, SpringPlaceholder});

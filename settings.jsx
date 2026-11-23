@@ -18,7 +18,8 @@
    provider, enter the account, Connect. A connected item's only action is Disconnect (row ⋯,
    with a confirmation; several at once from Bulk Actions). Forms save through Cancel / Save, Save disabled until something changes.
 
-   Not defined yet — placeholder pages: Notifications, Objects, Properties,
+   Notifications is the person's own notification settings (notifications.jsx, 2026-11-23).
+   Not defined yet — placeholder pages: Objects, Properties,
    Pipelines, Customer Profile, Templates, Import & Export. */
 
 /* ── Data ──────────────────────────────────────────────────────────────────────────────── */
@@ -188,10 +189,11 @@ const stControl = {
   border:`1px solid ${T.borderStrong}`, borderRadius:6, padding:'0 36px 0 14px', background:'#fff',
   fontSize:13, fontFamily:'inherit', color:T.black, cursor:'pointer',
 };
-function StField({label, width = 310, children}){
+// `required`: the red asterisk after the label (shared.jsx Req).
+function StField({label, width = 310, children, required}){
   return (
     <div style={{display:'flex', flexDirection:'column', gap:6, minWidth:0, ...(width === 'auto' ? {flex:1} : {width})}}>
-      <span style={{fontSize:14, fontWeight:500, color:T.black, lineHeight:1.4}}>{label}</span>
+      <span style={{fontSize:14, fontWeight:500, color:T.black, lineHeight:1.4}}>{label}{required && <Req/>}</span>
       {children}
     </div>
   );
@@ -355,7 +357,7 @@ function ConnectAccountModal({provider, onCancel, onConnect}){
     <StModal title={<span style={{display:'inline-flex', alignItems:'center', gap:8}}><ProviderLogo p={provider} size={18}/>Connect {provider.label}</span>}
       primary="Connect" canSubmit={ok} onCancel={onCancel} onSubmit={()=>onConnect({provider:provider.key, email:email.trim()})}>
       <div>
-        <label style={fieldLabel}>Account Email</label>
+        <label style={fieldLabel}>Account Email<Req/></label>
         <input autoFocus type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="name@company.com" style={fieldInput}/>
       </div>
     </StModal>
@@ -451,7 +453,7 @@ function ConnectNumberModal({onCancel, onAdd}){
   return (
     <StModal title="Connect Phone Number" primary="Connect" canSubmit={ok} onCancel={onCancel} onSubmit={()=>onAdd({number:number.trim(), label:label.trim()})}>
       <div>
-        <label style={fieldLabel}>Phone Number</label>
+        <label style={fieldLabel}>Phone Number<Req/></label>
         <input autoFocus value={number} onChange={e=>setNumber(e.target.value)} placeholder="+92 300 0000000" style={fieldInput}/>
       </div>
       <div>
@@ -521,7 +523,7 @@ function TaskPipelineModal({initial, onCancel, onSave}){
       <StCta label={initial ? 'Save Changes' : 'Add Pipeline'} disabled={!ok} onClick={save}/>
     </>}>
       <div style={{display:'flex', flexDirection:'column', gap:16}}>
-        <Field label="Pipeline Name" wide><input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Document collection" style={fieldInput}/></Field>
+        <Field label="Pipeline Name" wide required><input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Document collection" style={fieldInput}/></Field>
         <Field label="Statuses" wide><div style={{paddingTop:7}}><TaskStatesLine/></div></Field>
       </div>
     </CreatePanelFrame>
@@ -597,11 +599,11 @@ function TasksSettings({data, setData}){
     <SettingsPage actions={can && actions}>
       <ReadOnlySettings on={can}>
       <div style={{display:'flex', flexDirection:'column', gap:20}}>
-        <StField label="Default Due Date"><StSelect value={d.dueDate} options={TASK_DUE_DATES} onChange={v=>set({dueDate:v})}/></StField>
-        <StField label="Default Due Time">
+        <StField label="Default Due Date" required><StSelect value={d.dueDate} options={TASK_DUE_DATES} onChange={v=>set({dueDate:v})}/></StField>
+        <StField label="Default Due Time" required>
           <TimeField required value={d.dueTime} onChange={v=>set({dueTime:v})} ariaLabel="Default due time" inputStyle={stInput}/>
         </StField>
-        <StField label="Default Reminder"><StSelect value={d.reminder} options={TASK_REMINDERS} onChange={v=>set({reminder:v})}/></StField>
+        <StField label="Default Reminder" required><StSelect value={d.reminder} options={TASK_REMINDERS} onChange={v=>set({reminder:v})}/></StField>
         {d.reminder === 'custom' && (
           <div style={{display:'flex', alignItems:'center', gap:8, width:310, marginTop:-8}}>
             <input type="number" min={1} value={d.customAmount} aria-label="Reminder amount"
@@ -636,12 +638,12 @@ function DefaultsSettings({data, setData}){
       actions={can && actions}>
       <ReadOnlySettings on={can}>
       <div style={{display:'flex', flexDirection:'column', gap:20}}>
-        <StField label="Time Zone"><StSelect value={d.timeZone} options={TIME_ZONES} onChange={v=>set({timeZone:v})}/></StField>
-        <StField label="Language"><StSelect value={d.language} options={LANGUAGES} onChange={v=>set({language:v})}/></StField>
-        <StField label="Currency"><StSelect value={d.currency} options={currencyOptions()} onChange={setCurrency}/></StField>
+        <StField label="Time Zone" required><StSelect value={d.timeZone} options={TIME_ZONES} onChange={v=>set({timeZone:v})}/></StField>
+        <StField label="Language" required><StSelect value={d.language} options={LANGUAGES} onChange={v=>set({language:v})}/></StField>
+        <StField label="Currency" required><StSelect value={d.currency} options={currencyOptions()} onChange={setCurrency}/></StField>
       </div>
       <div style={{display:'flex', flexDirection:'column', gap:12, marginTop:32, paddingTop:24, borderTop:`1px solid ${T.border}`}}>
-        <div style={{fontSize:14, fontWeight:600, color:T.attioText}}>Exchange Rates</div>
+        <div style={{fontSize:14, fontWeight:600, color:T.attioText}}>Exchange Rates<Req/></div>
         <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(230px, 1fr))', gap:'10px 24px'}}>
           {CURRENCY_LIST.filter(c => c.code !== d.currency).map(c => { const bad = !(Number(rates[c.code]) > 0);
             return (

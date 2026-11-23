@@ -7,13 +7,15 @@
    plain name (Total Cash Invoiced, Goals), a team's ending in Team (Total Cash Invoiced Team; Team
    Goals, Team Key Indicators), the person's own starting with My (My Cash Invoiced, My Goals, My
    Tasks, My Velocity).
-   Layout — configurable, not a fixed set: each person's own, set in their View Settings (which
+   An employee (a Personal-only dashboard) has it as two pages since 2026-11-20 — My Day and
+   Analytics (DashboardPage `part`; see dashAnalyticsOffer below and myDay.jsx MyDayPage).
+   Layout — configurable, not a fixed set: each person's own, set in their Layout Settings (which
    KPIs, which widgets, Rearrange) from what their permissions give them:
      Greeting            — the time of day and the signed-in person; under it, Ask Spring (the AI
                            prompt box).
      Controls            — the date filter; the team the Team level reads (only for someone who
                            may have the same figures for the whole company); All KPIs (every KPI
-                           and its value, in a side panel, level by level), View Settings and the
+                           and its value, in a side panel, level by level), Layout Settings and the
                            KPIs / Graph switcher.
      KPIs                — one KPI pinned first (blue, twice as wide) and up to four more, from the KPI
                            catalogue (DASH_KPI_DEFS) — or (Graph) a line graph of the three cash KPIs.
@@ -21,11 +23,13 @@
                            catalogue (DASH_WIDGET_DEFS), each spanning its width (1, 2 or 3 columns):
                            Key Indicator User (Revenue, Volume, Compliance, Speed — sales
                            professionals ranked — a team's or the company's, never Personal), My
-                           Tasks (the person's own only), Business Velocity, Deal Won, Deal
+                           Tasks (the person's own only), My Day (myDay.jsx — one sales professional's
+                           day: To Contact, Follow-ups, Contacted; it stands in for My Tasks),
+                           Business Velocity, Deal Won, Deal
                            Lost, Goals (goals.jsx: the company's with each team's and user's, a
                            team's with its members', or the person's own), Time Clock (the header's
                            own Time Clock as a Personal widget, on the same work session).
-     Rearrange           — from View Settings: the four KPIs after the pinned one and the widgets
+     Rearrange           — from Layout Settings: the four KPIs after the pinned one and the widgets
                            drag to reorder (live), and any of the four can be pinned as first; Done
                            saves and the dashboard returns to viewing.
    One date filter (Today / This Week / This Month / Custom range) drives the KPIs, trends and Key
@@ -525,7 +529,8 @@ function DashKpiRow({items, replay, arrange}){
    assistant): Spring's mark, a growing text area, and the ERP box's controls (attach, Auto, /, mic,
    send). Enter sends, Shift+Enter breaks the line. What Spring does with a question isn't defined
    yet: sending opens the placeholder. */
-function SpringAsk({onAsk}){
+// `placeholder`: what it asks for elsewhere (Reports: "Ask Spring to generate reports").
+function SpringAsk({onAsk, placeholder = 'Ask Spring what’s wrong and what can be improved in your business.'}){
   const [text, setText] = React.useState('');
   const [focus, setFocus] = React.useState(false);
   const ref = React.useRef(null);
@@ -543,7 +548,7 @@ function SpringAsk({onAsk}){
         </span>
         <textarea ref={ref} rows={2} value={text} onChange={e=>setText(e.target.value)} onFocus={()=>setFocus(true)} onBlur={()=>setFocus(false)}
           onKeyDown={e=>{ if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); send(); } }}
-          placeholder="Ask Spring what’s wrong and what can be improved in your business." aria-label="Ask Spring"
+          placeholder={placeholder} aria-label="Ask Spring"
           style={{flex:1, minWidth:0, border:'none', outline:'none', resize:'none', background:'transparent', fontFamily:'inherit', fontSize:15, lineHeight:1.55, color:T.attioText, padding:'4px 0', minHeight:52}}/>
       </div>
       <div onClick={e=>e.stopPropagation()} style={{display:'flex', alignItems:'center', justifyContent:'flex-end', gap:8, paddingTop:10, marginTop:8, borderTop:`1px solid ${T.border}`}}>
@@ -868,10 +873,14 @@ function DashSearch({value, onChange, placeholder, width = '100%'}){
 const dashNoMatch = (query) => <div style={{fontSize:13, color:T.attioMuted, padding:'14px 0'}}>Nothing matches "{query.trim()}"</div>;
 
 // A one-title widget card: the title (and count / controls on its right), then its content.
-function DashWidgetCard({title, right, children}){
+// `icon` ({name, color}): the widget's mark before its title — its icon in its colour on a soft tint of it (My Day's widgets).
+function DashWidgetCard({title, right, children, icon}){
   return (
     <section style={{...dashCard, borderRadius:22, padding:'20px 22px 22px', display:'flex', flexDirection:'column', gap:14, minWidth:0}}>
-      <div style={{display:'flex', alignItems:'center', gap:8, minHeight:32, flexWrap:'wrap'}}>
+      <div style={{display:'flex', alignItems:'center', gap:10, minHeight:32, flexWrap:'wrap'}}>
+        {/* The dashboard's icons are black on a quiet grey ground — no colour (Mohsin 2026-11-23; a mark's `color` isn't read). */}
+        {icon && <span aria-hidden="true" style={{width:30, height:30, borderRadius:10, flexShrink:0, display:'inline-flex', alignItems:'center', justifyContent:'center',
+          background:T.headerBg, boxShadow:`inset 0 0 0 1px ${T.attioLine}`}}><Icon name={icon.name} size={15} color={T.black}/></span>}
         <span style={{...dashTitle, fontSize:15, flex:1}}>{title}</span>
         {right}
       </div>
@@ -936,6 +945,24 @@ function DealOutcomeList({deals, type, tone, range, now, onOpen}){
    (the default; any status), Overdue (open and past due) or This week (due Monday to Sunday). Each
    opens the task (the Tasks page's task panel). */
 const DASH_TASK_FILTERS = [{id:'today', label:'Due today'}, {id:'overdue', label:'Overdue'}, {id:'week', label:'This week'}];
+// A task opened from a dashboard widget (My Tasks, My Day): the Tasks page's task panel.
+function DashTaskPanel({hub, actId, onClose}){
+  const entry = hubActivities(hub, 'task').find(e => e.act.id === actId) || null;
+  const team = (hub.data.users || []).filter(u => u.status === 'Activated').map(u => u.name);
+  return (
+    <PageSidePanel title={(entry && entry.act.title) || 'Task'}
+      onClose={onClose} menuItems={entry ? [{label:`Open ${HUB_NOUN[entry.object]}`, onClick:()=>hub.openRecord(entry.object, entry.recordId, 'panel')}] : undefined}>
+      <div style={{flex:1, minHeight:0, display:'flex', flexDirection:'column'}}>
+        {entry ? <RecordAccessCtx.Provider value={{object:entry.object, record:entry.record}}>
+          <ActivityDetail key={entry.act.id} a={entry.act} contact={{...entry.record, owner:userLabel(entry.record.owner) || entry.record.owner}} team={team}
+            acts={(hub.activities[entry.object] || {})[entry.recordId] || []}
+            onUpdate={(id, patch)=>hub.update(entry.object, entry.recordId, id, patch)} onAdd={(x)=>hub.add(entry.object, entry.recordId, x)}
+            onStub={hub.toast} onReassign={()=>{}}/>
+        </RecordAccessCtx.Provider> : <div style={{padding:24, fontSize:13, color:T.attioMuted}}>This task was deleted.</div>}
+      </div>
+    </PageSidePanel>
+  );
+}
 function DueTasksWidget({hub, title = 'My Tasks'}){
   const [open, setOpen] = React.useState(null);   // {object, recordId, actId}
   const [quick, setQuick] = React.useState('today');
@@ -944,8 +971,6 @@ function DueTasksWidget({hub, title = 'My Tasks'}){
   const inQuick = (a) => quick === 'overdue' ? taskState(a) === 'overdue' : dashIn(new Date(a.due).getTime(), dashPeriodRange(quick === 'week' ? 'week' : 'today', now));
   const tasks = hubActivities(hub, 'task').filter(e => e.act.assignee === me && e.act.due && inQuick(e.act))
     .sort((x, y) => new Date(x.act.due) - new Date(y.act.due));
-  const entry = open ? hubActivities(hub, 'task').find(e => e.act.id === open.actId) || null : null;
-  const team = (hub.data.users || []).filter(u => u.status === 'Activated').map(u => u.name);
   const empty = {today:'No tasks due today', overdue:'No overdue tasks', week:'No tasks due this week'}[quick];
   const page = useDashList(tasks, e => `${e.act.title || ''} ${(e.record && e.record.name) || ''}`, quick);
   return (
@@ -965,19 +990,7 @@ function DueTasksWidget({hub, title = 'My Tasks'}){
       ) : <div style={{fontSize:13, color:T.attioMuted}}>{empty}</div>}
       {page.q && !page.found.length && dashNoMatch(page.query)}
       {page.pager}
-      {open && (
-        <PageSidePanel title={(entry && entry.act.title) || 'Task'}
-          onClose={()=>setOpen(null)} menuItems={entry ? [{label:`Open ${HUB_NOUN[entry.object]}`, onClick:()=>hub.openRecord(entry.object, entry.recordId, 'panel')}] : undefined}>
-          <div style={{flex:1, minHeight:0, display:'flex', flexDirection:'column'}}>
-            {entry ? <RecordAccessCtx.Provider value={{object:entry.object, record:entry.record}}>
-              <ActivityDetail key={entry.act.id} a={entry.act} contact={{...entry.record, owner:userLabel(entry.record.owner) || entry.record.owner}} team={team}
-                acts={(hub.activities[entry.object] || {})[entry.recordId] || []}
-                onUpdate={(id, patch)=>hub.update(entry.object, entry.recordId, id, patch)} onAdd={(x)=>hub.add(entry.object, entry.recordId, x)}
-                onStub={hub.toast} onReassign={()=>{}}/>
-            </RecordAccessCtx.Provider> : <div style={{padding:24, fontSize:13, color:T.attioMuted}}>This task was deleted.</div>}
-          </div>
-        </PageSidePanel>
-      )}
+      {open && <DashTaskPanel hub={hub} actId={open.actId} onClose={()=>setOpen(null)}/>}
     </DashWidgetCard>
   );
 }
@@ -1000,6 +1013,8 @@ const DASH_WIDGET_DEFS = [
     render:(c) => <KeyIndicators title={c.title} data={c.data}
       range={c.range} rangeKey={c.rangeKey} violations={c.violations} onOpenUser={c.onOpenUser} onOpenDeal={c.onOpenDeal} onOpenViolation={c.onOpenViolation}/>},
   {id:'tasks', label:'Total Tasks', labels:{personal:'My Tasks'}, width:1, levels:['personal'], render:(c) => <DueTasksWidget hub={c.hub} title={c.title}/>},
+  // My Day (myDay.jsx): one sales professional's day — To Contact, Follow-ups, Contacted. It stands in for My Tasks (DASH_ALTERNATES).
+  {id:'myDay', label:'My Day', labels:{personal:'My Day'}, width:2, levels:['personal'], render:(c) => <MyDayWidget hub={c.hub} title={c.title}/>},
   {id:'businessVelocity', label:'Business Velocity', labels:{personal:'My Velocity'}, width:1,
     render:(c) => <DashWidgetCard title={c.title}><VelocityList velocity={companyVelocity(c.data, c.range)}/></DashWidgetCard>},
   {id:'dealWon', get label(){ return `${typeSingular('deals', 'Deal')} Won`; }, width:1,
@@ -1032,8 +1047,14 @@ const DASH_KPI_DEFAULTS = ['invoiced', 'received', 'forecast', 'closed:deals', '
 const DASH_WIDGET_ORDER = {
   company:['keyIndicatorUser', 'tasks', 'businessVelocity', 'dealWon', 'dealLost', 'goals', 'timeClock'],
   team:['goals', 'keyIndicatorUser', 'businessVelocity', 'dealWon', 'dealLost', 'tasks', 'timeClock'],
-  personal:['timeClock', 'goals', 'tasks', 'keyIndicatorUser', 'businessVelocity', 'dealWon', 'dealLost'],
+  personal:['timeClock', 'myDay', 'goals', 'keyIndicatorUser', 'businessVelocity', 'dealWon', 'dealLost'],
 };
+/* My Day stands in for My Tasks (2026-11-20): a dashboard shows one of the two — switching one on
+   switches the other off. A Personal-only dashboard starts with My Day (its tasks are in its
+   Follow-ups); one led by Team or Company keeps My Tasks, with My Day there to switch on. A layout
+   saved before My Day, with only Personal widgets on offer and My Tasks shown, takes My Day instead —
+   two columns wide, beside the Time Clock, which comes first (top left). */
+const DASH_ALTERNATES = {'personal/myDay':'personal/tasks', 'personal/tasks':'personal/myDay'};
 const DASH_OWN_WIDGETS = ['tasks', 'timeClock'];   // the person's own, whichever level leads
 // Every slot on offer — {kpis, widgets}, widest level first: what `can` gives (the person's own permissions, or a preset's) of what shows here.
 function dashOffer(can = dashboardCan){
@@ -1041,6 +1062,21 @@ function dashOffer(can = dashboardCan){
     widgets:DASH_LEVELS_WIDE.flatMap(l => DASH_WIDGET_DEFS.filter(w => dashWidgetVisible(w) && dashAllowed(w, l, can)).map(w => dashSlot(l, w.id)))};
 }
 const dashOfferLevels = (list) => DASH_LEVELS_WIDE.filter(l => list.some(sl => dashSlotOf(sl).level === l));
+// A Personal-only dashboard — what the person's permissions offer is all their own: it's their Home (nav.jsx).
+const dashIsHome = () => { const o = dashOffer(), levels = dashOfferLevels([...o.kpis, ...o.widgets]); return levels.length > 0 && levels.every(l => l === 'personal'); };
+/* An employee's dashboard is two pages (2026-11-20, nav.jsx): My Day — the Time Clock, Spring, the
+   day's numbers and My Day's lists (myDay.jsx MyDayPage; a fixed layout) — and Analytics: every other
+   KPI and widget, set in Layout Settings as before, with the team's ranking (Team Key Indicators)
+   there for them too. An employee is someone with a Personal-only dashboard (dashIsHome). */
+const DASH_DAY_WIDGETS = ['timeClock', 'myDay', 'tasks'];   // on My Day, not in Analytics
+const DASH_RANK_SLOT = 'team/keyIndicatorUser';
+const dashAnalyticsOffer = (o) => ({kpis:o.kpis, widgets:[...o.widgets.filter(sl => !DASH_DAY_WIDGETS.includes(dashSlotOf(sl).id) && sl !== DASH_RANK_SLOT), DASH_RANK_SLOT]});
+// Analytics' layout: the saved one; the ranking shows, first, until the person has placed or hidden it themself.
+function dashAnalyticsConfig(raw, offer){
+  const c = normalizeDashConfig(raw, offer);
+  if(raw && (raw.widgets || []).some(w => dashSlotKey(w.id) === DASH_RANK_SLOT)) return c;
+  return {...c, widgets:[{id:DASH_RANK_SLOT, hidden:false}, ...c.widgets.filter(w => w.id !== DASH_RANK_SLOT)]};
+}
 function dashDefaultConfig(offer){
   const lead = dashOfferLevels(offer.widgets)[0] || dashOfferLevels(offer.kpis)[0] || 'personal';
   const first = DASH_KPI_DEFAULTS.map(id => dashSlot(lead, id)).filter(sl => offer.kpis.includes(sl)), kpis = first.length ? first : offer.kpis.slice(0, DASH_KPI_MAX_OTHERS + 1);
@@ -1057,7 +1093,12 @@ function normalizeDashConfig(raw, offer = dashOffer()){
   const legacy = ![raw.prominent, ...(raw.kpis || []), ...(raw.widgets || []).map(w => w.id)].some(x => String(x || '').includes('/'));
   const pinned = raw.prominent ? dashSlotKey(raw.prominent) : null, prominent = offer.kpis.includes(pinned) ? pinned : dashDefaultConfig(offer).prominent;
   const kpis = [...new Set((raw.kpis || []).map(dashSlotKey))].filter(sl => offer.kpis.includes(sl) && sl !== prominent).slice(0, DASH_KPI_MAX_OTHERS);
-  const saved = (raw.widgets || []).map(w => ({id:dashSlotKey(w.id), hidden:!!w.hidden})).filter((w, i, all) => offer.widgets.includes(w.id) && all.findIndex(x => x.id === w.id) === i);
+  let saved = (raw.widgets || []).map(w => ({id:dashSlotKey(w.id), hidden:!!w.hidden})).filter((w, i, all) => offer.widgets.includes(w.id) && all.findIndex(x => x.id === w.id) === i);
+  // Saved before My Day, on a Personal-only dashboard showing My Tasks: My Day takes its place.
+  const myDay = dashSlot('personal', 'myDay'), myTasks = dashSlot('personal', 'tasks');
+  if(offer.widgets.includes(myDay) && !saved.some(w => w.id === myDay) && dashOfferLevels(offer.widgets).every(l => l === 'personal') && saved.some(w => w.id === myTasks && !w.hidden))
+  { const clock = dashSlot('personal', 'timeClock'), tc = saved.find(w => w.id === clock);   // the Time Clock first, My Day beside it
+    saved = [...(tc ? [tc] : []), {id:myDay, hidden:false}, ...saved.filter(w => w.id !== clock).map(w => w.id === myTasks ? {...w, hidden:true} : w)]; }
   const joins = legacy ? [dashSlot('company', 'goals'), dashSlot('personal', 'timeClock')] : [];
   return {prominent, kpis, widgets:[...saved, ...offer.widgets.filter(sl => !saved.some(w => w.id === sl)).map(id => ({id, hidden:!joins.includes(id)}))]};
 }
@@ -1129,7 +1170,7 @@ function DashWidgetGrid({items, ctx, arrange}){
 /* All KPIs — a side panel listing every KPI the viewer may have (`offer`; cash KPIs need View
    Payment Terms), grouped as in the catalogue: the KPI on the left, its value on the right — one
    level at a time where they have more than one (tabs). Its own date filter (starting from the
-   dashboard's) sets the period. Read-only; for everyone. Opened by its own button, beside View Settings. */
+   dashboard's) sets the period. Read-only; for everyone. Opened by its own button, beside Layout Settings. */
 const fmtKpiValue = (k, v) => v == null ? '—' : k.kind === 'money' ? `${defaultCurrency()} ${formatAmount(Math.round(v))}`
   : k.kind === 'percent' ? `${v}%` : k.kind === 'hours' ? fmtHours(v) : formatAmount(v);
 function AllKpisButton({onClick}){
@@ -1181,7 +1222,7 @@ function AllKpisPanel({ctxOf, offer, level: start, filter: initial, onClose}){
   );
 }
 
-/* Dashboard View Settings (SettingsModalShell) — the person's own dashboard: KPIs — pick the KPI
+/* Dashboard Layout Settings (SettingsModalShell) — the person's own dashboard: KPIs — pick the KPI
    pinned first and up to four more, from the catalogue by group, one level at a time (the levels
    they have: tabs); Widgets — show or hide each (its width shown), each by its name at its level.
    Only what their permissions give is offered (`offer`). Rearrange (both
@@ -1196,7 +1237,9 @@ function DashViewSettingsModal({config, offer, onApply, onRearrange, onClose}){
     : d.kpis.includes(id) ? {...d, kpis:d.kpis.filter(x => x !== id)} : d.kpis.length >= DASH_KPI_MAX_OTHERS ? d : {...d, kpis:[...d.kpis, id]});
   // The KPI pinned first is one of the selection; the one it replaces joins the others, if there's room.
   const makeProminent = (id) => setDraft(d => id === d.prominent ? d : ({...d, prominent:id, kpis:[d.prominent, ...d.kpis.filter(x => x !== id)].filter(Boolean).slice(0, DASH_KPI_MAX_OTHERS)}));
-  const toggleWidget = (id) => setDraft(d => ({...d, widgets:d.widgets.map(w => w.id === id ? {...w, hidden:!w.hidden} : w)}));
+  // Showing My Day hides My Tasks, and the other way round (DASH_ALTERNATES).
+  const toggleWidget = (id) => setDraft(d => { const showing = (d.widgets.find(w => w.id === id) || {}).hidden, other = DASH_ALTERNATES[id];
+    return {...d, widgets:d.widgets.map(w => w.id === id ? {...w, hidden:!w.hidden} : showing && w.id === other ? {...w, hidden:true} : w)}; });
   const radio = (on, onPick, label) => (
     <label style={{display:'flex', alignItems:'center', gap:6, fontSize:12.5, color: on ? T.attioText : T.attioMuted, cursor:'pointer', flexShrink:0}}>
       <input type="radio" checked={on} onChange={onPick} aria-label={label} style={{margin:0, width:14, height:14, accentColor:T.black, cursor:'pointer'}}/>Pin as first
@@ -1211,7 +1254,7 @@ function DashViewSettingsModal({config, offer, onApply, onRearrange, onClose}){
   );
   const pinned = draft.prominent && dashSlotOf(draft.prominent), pinnedDef = pinned && dashKpiDef(pinned.id);
   return (
-    <SettingsModalShell title="Dashboard Settings" sections={{kpis:'KPIs', widgets:'Widgets'}} order={[]} onReorder={()=>{}} fixed={['kpis', 'widgets']}
+    <SettingsModalShell title="Layout Settings" sections={{kpis:'KPIs', widgets:'Widgets'}} order={[]} onReorder={()=>{}} fixed={['kpis', 'widgets']}
       section={section} onSection={setSection} onClose={onClose} onApply={()=>onApply(draft)} toolbar={toolbar}
       footerNote={`Pinned first: ${pinnedDef ? dashLabel(pinnedDef, pinned.level) : '—'}`}>
       {section === 'kpis' ? DASH_KPI_GROUPS.map(g => {
@@ -1235,7 +1278,7 @@ function DashViewSettingsModal({config, offer, onApply, onRearrange, onClose}){
   );
 }
 
-/* The page, on the Workflow canvas's dot grid: the greeting (View Settings and the KPIs / Graph
+/* The page, on the Workflow canvas's dot grid: the greeting (Layout Settings and the KPIs / Graph
    switcher top right), the date filter, the KPI cards or the Graph, then Key Indicators beside
    Today's Tasks; generous side margins. */
 // The controls row's dropdown (the team), as its buttons.
@@ -1342,7 +1385,7 @@ function UserStatTrend({person, statKey, filter, setFilter, onBack}){
 }
 
 /* Pin another User Property or statistic in the pinned item's place — the Highlights pinning
-   modal (View settings), with one place to fill. */
+   modal (Layout Settings), with one place to fill. */
 function UserPinModal({pool, pinned, onApply, onClose}){
   const [query, setQuery] = React.useState('');
   const [draft, setDraft] = React.useState(pinned);
@@ -1374,7 +1417,20 @@ function UserPinModal({pool, pinned, onApply, onClose}){
   );
 }
 
-function DashboardPage(){
+/* An employee's Analytics (2026-11-23): two tabs — All Analytics (the page as it was) and Call
+   Performance, Spring AI's: a placeholder until the dev team defines it. */
+function AnalyticsPage(){
+  const [tab, setTab] = React.useState('all');
+  return (
+    <div style={{flex:1, minWidth:0, minHeight:0, display:'flex', flexDirection:'column', background:'#fff'}}>
+      <PrimaryTabs items={[{id:'all', name:'All Analytics'}, {id:'calls', name:'Call Performance'}]} active={tab} onSelect={setTab}/>
+      {tab === 'all' ? <DashboardPage part="analytics"/> : <SpringPlaceholder title="Call Performance"/>}
+    </div>
+  );
+}
+function DashboardPage({part}){
+  // An employee's two pages: 'day' (My Day) and 'analytics'; everyone else's dashboard is whole.
+  const mode = !dashIsHome() ? 'full' : part === 'analytics' ? 'analytics' : 'day';
   const today = new Date();
   const [filter, setFilter] = React.useState(() => ({id:'month', from:ymd(new Date(today.getFullYear(), today.getMonth(), 1)), to:ymd(today)}));
   const [view, setView] = React.useState('kpis');   // 'kpis' | 'graph'
@@ -1398,9 +1454,9 @@ function DashboardPage(){
   const firstName = String(CURRENT_USER.name || '').split(/\s+/)[0];
   // The person's own dashboard, of what their permissions give them.
   const me = accessUser(), users = (hub && hub.data.users) || [], teams = (hub && hub.data.teams) || [];
-  const offer = dashOffer();
+  const offer = mode === 'analytics' ? dashAnalyticsOffer(dashOffer()) : dashOffer();
   // The dashboard's configuration (KPIs and widgets) — while rearranging, the draft being arranged.
-  const saved = normalizeDashConfig(dashSavedFor(hub, me), offer), config = arranging || saved;
+  const saved = mode === 'analytics' ? dashAnalyticsConfig(dashSavedFor(hub, me), offer) : normalizeDashConfig(dashSavedFor(hub, me), offer), config = arranging || saved;
   const saveConfig = (c) => hub && hub.setOverviewSettings(st => ({...(st || {}), userDashboards:{...((st || {}).userDashboards || {}), [dashUserKey(me)]:c}}));
   const slots = [config.prominent, ...config.kpis, ...config.widgets.filter(w => !w.hidden).map(w => w.id)].filter(Boolean).map(dashSlotOf);
   /* The Team level reads the person's own team — or, for someone who may have the same figures
@@ -1434,21 +1490,25 @@ function DashboardPage(){
   return (
     <div style={{flex:1, minHeight:0, overflowY:'auto', ...WORKFLOW_CANVAS}}>
       <div style={{maxWidth:1280, margin:'0 auto', padding:'36px 56px 56px', display:'flex', flexDirection:'column', gap:28}}>
-        <div>
-          <div style={{fontSize:15, color:T.gray600}}>{dashGreeting(today)},</div>
-          <div style={{fontSize:32, fontWeight:600, color:T.attioText, letterSpacing:-.5, marginTop:4}}>{firstName}</div>
-        </div>
+        {mode === 'analytics' ? <div style={{fontSize:32, fontWeight:600, color:T.attioText, letterSpacing:-.5}}>Analytics</div> : <div style={{display:'flex', alignItems:'flex-end', gap:16, flexWrap:'wrap'}}>
+          <div style={{flex:1, minWidth:200}}>
+            <div style={{fontSize:15, color:T.gray600}}>{dashGreeting(today)},</div>
+            <div style={{fontSize:32, fontWeight:600, color:T.attioText, letterSpacing:-.5, marginTop:4}}>{firstName}</div>
+          </div>
+          {/* My Day: Call Next Lead, on the greeting's right (myDay.jsx). */}
+          {mode === 'day' && <MyDayCallNext hub={hub}/>}
+        </div>}
         {/* Ask Spring under the greeting; a separator, 30px either side, before the dashboard's controls. */}
         <div style={{display:'flex', flexDirection:'column', gap:30}}>
-          <SpringAsk onAsk={(q)=>setStub(`Spring · ${q.length > 60 ? q.slice(0, 57) + '…' : q}`)}/>
-          <div role="separator" style={{height:1, background:T.borderStrong}}/>
-        <div style={{display:'flex', flexDirection:'column', gap:16}}>
-          {/* The date filter on the left; View Settings and the KPIs / Graph switcher on the right of the same row. */}
+          {mode !== 'analytics' && <SpringAsk onAsk={(q)=>setStub(`Spring · ${q.length > 60 ? q.slice(0, 57) + '…' : q}`)}/>}
+          {mode === 'full' && <div role="separator" style={{height:1, background:T.borderStrong}}/>}
+        {mode !== 'day' && <div style={{display:'flex', flexDirection:'column', gap:16}}>
+          {/* The date filter on the left; Layout Settings and the KPIs / Graph switcher on the right of the same row. */}
           <div style={{display:'flex', alignItems:'center', gap:10, flexWrap:'wrap'}}>
             <DateFilter value={filter} onChange={setFilter}/>
             {pickTeam && !arranging && <div style={{width:180}}><Dropdown required value={teamId} ariaLabel="Team" options={teams.map(t => ({value:t.id, label:t.name}))} onChange={setTeamPick} controlStyle={dashSelect}/></div>}
             <div style={{flex:1}}/>
-            {/* Dashboard View Settings — everyone's own: KPIs, widgets and Rearrange. */}
+            {/* Dashboard Layout Settings — everyone's own: KPIs, widgets and Rearrange. */}
             {/* All KPIs — every KPI and its value, for everyone. */}
             {!arranging && !!offer.kpis.length && <AllKpisButton onClick={()=>setAllKpisOpen(true)}/>}
             {!arranging && <ViewSettingsButton onClick={()=>setSettingsOpen(true)}/>}
@@ -1466,10 +1526,10 @@ function DashboardPage(){
           {/* The Graph reads the level of the KPI pinned first. */}
           {view === 'graph' && accountingViewAny() && !arranging && kpiItems.length ? <TrendChart data={ctxOf(lead).data} range={range}/>
             : <DashKpiRow items={kpiItems} replay={`${range.join('-')}|${teamId || ''}`} arrange={arrangeKpis}/>}
+        </div>}
         </div>
-        </div>
-        {/* The widgets, in the three-column grid. */}
-        <DashWidgetGrid items={shownWidgets} ctx={pageCtx} arrange={arrangeWidgets}/>
+        {/* The widgets, in the three-column grid — on My Day, the day itself (myDay.jsx). */}
+        {mode === 'day' ? <MyDayPage hub={hub}/> : <DashWidgetGrid items={shownWidgets} ctx={pageCtx} arrange={arrangeWidgets}/>}
       </div>
       {allKpisOpen && <AllKpisPanel ctxOf={ctxOf} offer={offer} level={lead} filter={filter} onClose={()=>setAllKpisOpen(false)}/>}
       {settingsOpen && <DashViewSettingsModal config={saved} offer={offer} onClose={()=>setSettingsOpen(false)}

@@ -229,9 +229,9 @@ function FormFieldsList({fields, setFields, cells, below, onType, suggestions, r
             {iconBtn('trash', 'Remove field', ()=>setFields(fs => fs.filter(x => x.id !== f.id)))}
           </div>
           <div style={{display:'grid', gridTemplateColumns:'minmax(0, 1fr) minmax(0, 1fr)', gap:'14px 16px', alignItems:'end'}}>
-            {cell('Label', <FieldLabelInput value={f.label} onChange={v=>setField(f.id, {label:v})} suggestions={suggestions ? suggestions(f) : []} ariaLabel={`Field ${i + 1} label`}/>)}
+            {cell(<>Label<Req/></>, <FieldLabelInput value={f.label} onChange={v=>setField(f.id, {label:v})} suggestions={suggestions ? suggestions(f) : []} ariaLabel={`Field ${i + 1} label`}/>)}
             {extra}
-            {cell('Type', <Select value={f.type} options={FORM_FIELD_TYPES.map(t => ({value:t.type, label:t.label}))}
+            {cell(<>Type<Req/></>, <Select value={f.type} options={FORM_FIELD_TYPES.map(t => ({value:t.type, label:t.label}))}
               onChange={v=>v && setField(f.id, {type:v, options: fieldHasOptions(v) && !f.options.length ? ['', ''] : f.options, ...(onType ? onType(f, v) : {})})}/>)}
             {required ? (
               <label onClick={()=>setField(f.id, {required:!f.required})} style={{display:'flex', alignItems:'center', gap:8, height:34, fontSize:13, color:T.attioText, cursor:'pointer', alignSelf:'end'}}>
@@ -242,7 +242,7 @@ function FormFieldsList({fields, setFields, cells, below, onType, suggestions, r
           {formFieldType(f.type) === 'Custom Range' && <PropertyTypeConfig type={f.type} range={f.range} setRange={(r)=>setField(f.id, {range:r})}/>}
           {fieldHasOptions(f.type) && (
             <div style={{display:'flex', flexDirection:'column', gap:6}}>
-              <span style={label}>Options</span>
+              <span style={label}>Options<Req/></span>
               {f.options.map((o, j) => (
                 <div key={j} style={{display:'flex', alignItems:'center', gap:6}}>
                   <input value={o} onChange={e=>setField(f.id, {options:f.options.map((x, k) => k === j ? e.target.value : x)})} placeholder={`Option ${j + 1}`} style={{...fieldText, flex:1}}/>
@@ -311,13 +311,13 @@ function FormEditorPanel({form, onCancel, onSave}){
       <div style={{flex:1, minWidth:0, overflowY:'auto', padding:20, display:'flex', flexDirection:'column', gap:16}}>
         <span style={section}>Form details</span>
         {stack(<>
-          <Field label="Form Name" wide><input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Canada PR Eligibility" style={fieldText}/></Field>
+          <Field label="Form Name" wide required><input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Canada PR Eligibility" style={fieldText}/></Field>
           <Field label="Description" wide><textarea value={description} onChange={e=>setDescription(e.target.value)} rows={3} style={{...fieldText, resize:'vertical', lineHeight:1.5}}/></Field>
         </>)}
         <div style={{borderTop:`1px solid ${T.border}`, margin:'4px -20px 0'}}/>
         <span style={section}>Form builder</span>
         <div style={{display:'flex', flexDirection:'column', gap:8}}>
-          <span style={label}>Creates</span>
+          <span style={label}>Creates<Req/></span>
           <div role="radiogroup" aria-label="Record type" style={{display:'inline-flex', alignSelf:'flex-start', border:`1px solid ${T.borderStrong}`, borderRadius:8, overflow:'hidden'}}>
             {FORM_TARGETS.filter(workspaceHasType).map(o => <button key={o} type="button" role="radio" aria-checked={target === o} onClick={()=>pickTarget(o)}
               style={{border:'none', cursor:'pointer', padding:'5px 12px', fontSize:12.5, fontWeight:500, fontFamily:'inherit',
@@ -410,7 +410,7 @@ function FormConnectionsModal({form, saved, onClose, onToggle, onSetLink, onSimu
                 const valid = isFormUrl(linking.value), done = () => { if(on) onSetLink(c.id, linking.value.trim()); else onToggle(c.id, true, linking.value.trim()); setLinking(null); };
                 return (
                   <div style={{display:'flex', flexDirection:'column', gap:6, marginLeft:52}}>
-                    <label style={fieldLabel}>{FORM_CONNECTION_LINKS[c.id]}</label>
+                    <label style={fieldLabel}>{FORM_CONNECTION_LINKS[c.id]}<Req/></label>
                     <div style={{display:'flex', alignItems:'center', gap:8}}>
                       <input autoFocus value={linking.value} onChange={e=>setLinking({...linking, value:e.target.value})} placeholder="https://"
                         onKeyDown={e=>{ if(e.key === 'Enter' && valid) done(); if(e.key === 'Escape') setLinking(null); }} style={{...fieldInput, flex:1, minWidth:0}}/>
@@ -454,7 +454,35 @@ function FormSubmissionModal({form, via, onClose, onSubmit}){
 /* A form's detail — the record pages' detail pattern (as a Note or a Call log): the form's name
    and close, a separator, its properties (label on the left) — Description, Creates, Fields,
    Connections (Edit / Add connection), Created by, Created at, Total submissions — and at the
-   bottom ⋯, Share (copies its link), Preview Form and Edit Form. */
+   bottom ⋯, Share, Preview Form and Edit Form. */
+/* Share (2026-11-23): the share icon copies the form's link and opens this — it says the link was
+   copied, shows it (Copy Link copies it again) and sends the form to someone by their email
+   address (Send; nothing is really sent in the prototype). */
+// Copies the link; a browser that refuses (no permission) is left be — the link is shown to copy by hand.
+const copyFormLink = (link) => { try { const p = navigator.clipboard.writeText(link); if(p && p.catch) p.catch(() => {}); } catch(e){} };
+function FormShareModal({form, onClose}){
+  const hub = useRecordHub();
+  const link = formLink(form);
+  const [copied, setCopied] = React.useState(true), [to, setTo] = React.useState('');
+  const copy = () => { copyFormLink(link); setCopied(true); };
+  const address = to.trim(), ok = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address);
+  return ReactDOM.createPortal(
+    <StModal title="Share Form" primary="Send" canSubmit={ok} cancelLabel="Close" width={480} onCancel={onClose}
+      onSubmit={()=>{ if(!ok) return; hub.toast(`Form sent to ${address}`); onClose(); }}>
+      <div style={{display:'flex', flexDirection:'column', gap:16}}>
+        <div role="status" style={{display:'flex', alignItems:'center', gap:8, fontSize:13, fontWeight:500, color:T.attioText}}>
+          <span style={{width:20, height:20, borderRadius:9999, background:'#E7F6EC', display:'inline-flex', alignItems:'center', justifyContent:'center', flexShrink:0}}><Icon name="check" size={12} color="#12A150"/></span>
+          {copied ? 'Link copied' : 'Link'}
+        </div>
+        <div style={{display:'flex', alignItems:'center', gap:8}}>
+          <code style={{flex:1, minWidth:0, fontSize:12, background:T.headerBg, border:`1px solid ${T.attioLine}`, borderRadius:6, padding:'8px 10px', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{link}</code>
+          <StSecondary label="Copy Link" onClick={copy}/>
+        </div>
+        <div><label style={fieldLabel}>Send To<Req/></label>
+          <input type="email" value={to} onChange={e=>setTo(e.target.value)} placeholder="name@company.com" aria-label="Email address" style={fieldInput}/></div>
+      </div>
+    </StModal>, document.body);
+}
 function ShareMark({size = 14, color = T.gray600}){
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -468,7 +496,8 @@ function FormDetailPanel({form, menuItems, onClose, onEdit, onConnections, onPre
   const hub = useRecordHub();
   const connected = formConnectedNames(form);
   const iconBtn = {width:30, height:30, borderRadius:8, border:'none', background:'transparent', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center'};
-  const share = () => { try { navigator.clipboard.writeText(formLink(form)); } catch(e){} hub.toast('Form link copied'); };
+  const [sharing, setSharing] = React.useState(false);
+  const share = () => { copyFormLink(formLink(form)); setSharing(true); };
   return (
     <ContentSidePanel width={560} zIndex={75} style={{background:'#fff', borderLeft:`1px solid ${T.border}`, boxShadow:'-8px 0 24px rgba(16,24,40,.08)', display:'flex', flexDirection:'column'}}>
       <div style={{display:'flex', alignItems:'center', gap:10, padding:'16px 20px', borderBottom:`1px solid ${T.border}`, flexShrink:0}}>
@@ -500,7 +529,8 @@ function FormDetailPanel({form, menuItems, onClose, onEdit, onConnections, onPre
       </div>
       <div style={{display:'flex', alignItems:'center', justifyContent:'flex-end', gap:8, padding:'12px 20px', borderTop:`1px solid ${T.border}`, flexShrink:0}}>
         <RowActionsMenu title="Form Actions" width={MENU_W} items={menuItems}/>
-        <button title="Share — copy the form's link" onClick={share} style={iconBtn}><ShareMark size={15}/></button>
+        <button title="Share" aria-label="Share" onClick={share} style={iconBtn}><ShareMark size={15}/></button>
+        {sharing && <FormShareModal form={form} onClose={()=>setSharing(false)}/>}
         <StSecondary label="Preview Form" onClick={onPreview}/>
         <StCta label="Edit Form" onClick={onEdit}/>
       </div>

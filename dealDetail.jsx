@@ -4,8 +4,8 @@
    record (contactDetail.jsx is the reference and the shell — ContactDetail is reused, so side
    panel ⇄ full screen, the breadcrumb and the workspace behave the same):
      • Side panel / left column — name row (round avatar, deal name, the Avatar subtitle set in
-       View settings — Deal Stage by default), the deal's contact's email and phone (as on the
-       contact), then the sections in the order set in View settings: Quick Actions (Go to
+       Layout Settings — Deal Stage by default), the deal's contact's email and phone (as on the
+       contact), then the sections in the order set in Layout Settings: Quick Actions (Go to
        contact in place of the contact's Create deal), Smart Summary, Dropdowns, Deal Properties
        (PanelSettingsModal with the Deal kind).
      • ⋯ menu — the one record menu (DealActionsMenu → StandardRecordMenu), as on Contacts and
@@ -13,7 +13,9 @@
      • Workspace tabs — the Contact's, with Deals → Contacts and a Meetings tab. Activity tabs
        hold the deal's own history; Customer Profile is the associated contact's profile (one
        profile per person, shared with every deal of theirs — without Contacts, HOF Partners, the
-       lead's own, shared with its customer); Contacts lists the contact.
+       lead's own, shared with its customer); Contacts lists the contact; Referrals, the deals
+       created from this one (Create Referral Deal). Deal Properties show Referred By — the
+       deal it was created from, a link.
 
    A deal belongs to the contact it was created from (`contactId`). Records link to each other:
    the contact on a deal, and a contact's deals, open the other record (App switches page).
@@ -23,7 +25,7 @@
    owner is the contact's owner or another user. After it's saved, a contact without a Customer
    Profile is offered one (ProfilePromptModal). */
 
-/* Workspace tabs, in the default order (View Settings → Tab Settings may change it; overviewSettings.jsx). */
+/* Workspace tabs, in the default order (Layout Settings → Tab Settings may change it; overviewSettings.jsx). */
 const DEAL_TABS = [
   {id:'overview', label:'Overview',         icon:'overview',    list:false},
   {id:'calls',    label:'Calls',            icon:'call',        list:true},
@@ -36,18 +38,17 @@ const DEAL_TABS = [
   {id:'quotes',   label:'Quotes',           icon:'quote',       list:true},
   {id:'files',    label:'Files',            icon:'folder',      list:true},
   {id:'documents', label:'Documents',       icon:'files',    list:true},
-  {id:'supportNotes', label:'Support Notes', icon:'notepad', list:true},   // the record's Support Notes (2026-11-19)
   {id:'contacts', label:'Leads',            icon:'contacts',    list:true},
   {id:'customers', label:'Customers',       icon:'customers',   list:true},
+  {id:'referrals', label:'Referrals',       icon:'usersThree',  list:true},   // the deals created from this one (2026-11-23 — contactDetail.jsx ReferralsTab)
 ];
 
-/* ── Side panel sections and View Settings ─────────────────────────────────────────────── */
+/* ── Side panel sections and Layout Settings ─────────────────────────────────────────────── */
 
 const DEAL_PANEL_SECTIONS = {
   avatarSubtitle: 'Avatar subtitle',
   cardStyle: 'Card Style',
   quickActions:   'Quick Actions',
-  smartSummary:   'Smart Summary',
   dropdowns:      'Dropdowns',
   get dealProperties(){ return `${typeSingular('deals', 'Deal')} Properties`; },
 };
@@ -87,7 +88,7 @@ const dealSubtitle = (deal, view, contact, settings) => {
 };
 const defaultDealPanelSettings = (props) => ({
   subtitle: 'stage',
-  order: ['quickActions', 'smartSummary', 'dropdowns', 'dealProperties'],
+  order: ['quickActions', 'dropdowns', 'dealProperties'],
   quickActions: defaultQuickActions('deals', [...DEFAULT_QUICK_ON, 'goToContact']),
   smartSummary: {enabled:false},
   dropdowns: [{id:'d-all', type:'all', enabled:false, count:10}],
@@ -144,11 +145,14 @@ const nextActivityDate = (acts) => {
 function DealInfo({deal, view, acts, contacts = [], customers = [], keys, props, onOpenContact, onOpenCustomer, onStub}){
   const owner = ownerDates({owner:view.owner, created:dateOnly(deal.created), ownerSetBy:deal.ownerSetBy}, acts);
   const hub = useRecordHub();
+  // Referred By: the record this deal was created from (Create Referral Deal) — its name opens it.
+  const referrer = hub ? referrerOf(hub.records, deal) : null;
   const rows = {
     owner:         {value:view.owner, owner:true},
     ownerAssigned: {value:owner.assigned},
     ownerAssignedBy: {value:owner.assignedBy},
     ownerChanged:  {value:owner.changed},
+    referrer:      {value:referrer ? referrer.record.name || '' : '', open:() => hub.openRecord(referrer.object, referrer.record.id, 'full')},
     pipeline:      {value:view.pipeline},
     stage:         {value:view.stage},
     amount:        {value:view.amountText},
@@ -196,7 +200,7 @@ function RecordDetailBody({object, record, view, acts, email, phone, settings, d
   const sections = {
     quickActions: () => <QuickActionsBlock items={ps.quickActions} primaryKey={ps.primaryAction} object={object} record={record} onRun={(q)=>onQuick(q.key)}/>,
     // The card's Smart Summary: it opens with the record's stage and pipeline.
-    smartSummary: () => !ps.smartSummary.enabled ? null : (
+    smartSummary: () => true ? null : (   // gone from the side panel (2026-11-23): Smart Summary is on the Overview
       <div style={activityBox}><SummaryBlock contact={view} acts={acts} source="From activity" lead={`${view.stage || 'No stage'} · ${view.pipeline || 'No pipeline'}.`}/></div>
     ),
     dropdowns: () => {
@@ -242,13 +246,14 @@ function DealDetailBody({deal, view, acts, contact, contacts, customers, setting
 }
 
 /* The deal ⋯ menu — the one record menu (StandardRecordMenu): the tools · Create Customer (a
-   customer linked to this deal; a deal can't create a deal) · Copy Email and Copy Phone Number
-   (its contact's, else its own), Edit Deal, Edit Deal Owner, Copy Deal, Enrich Deal · View settings · Delete Deal. */
+   customer linked to this deal; a deal can't create a deal), Create Referral Deal (another person's
+   deal, referred by this one — 2026-11-23) · Copy Email and Copy Phone Number
+   (its contact's, else its own), Edit Deal, Edit Deal Owner, Copy Deal, Enrich Deal · Layout Settings · Delete Deal. */
 const dealCopyText = (deal, contact) => [deal.name, contact && contact.name, dealPhone(deal, contact), dealEmail(deal, contact)].filter(Boolean).join('\n');
-function DealActionsMenu({deal, contact, onTool, onCreateCustomer, onEdit, onOwner, onEnrich, onDelete, onCopied, onViewSettings, visible}){
+function DealActionsMenu({deal, contact, onTool, onCreateCustomer, onCreateReferral, onEdit, onOwner, onEnrich, onDelete, onCopied, onViewSettings, visible}){
   return (
     <StandardRecordMenu object="deals" record={deal} noun={typeSingular('deals', 'Deal')} email={dealEmail(deal, contact)} phone={dealPhone(deal, contact)} copyText={dealCopyText(deal, contact)}
-      onTool={onTool} onCreateCustomer={onCreateCustomer} onEdit={onEdit} onOwner={onOwner} onEnrich={onEnrich} onDelete={onDelete}
+      onTool={onTool} onCreateCustomer={onCreateCustomer} onCreateReferral={onCreateReferral} onEdit={onEdit} onOwner={onOwner} onEnrich={onEnrich} onDelete={onDelete}
       onCopied={onCopied} onViewSettings={onViewSettings} visible={visible}/>
   );
 }
