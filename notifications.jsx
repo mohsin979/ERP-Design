@@ -470,9 +470,9 @@ function withNotificationPresets(d){
    A special notification, apart from the presets: when the first payment on a record is recorded —
    any amount, in full or in part, of a One-Time, Installment or Recurring plan — everyone who isn't
    on a call or in a meeting sees one full white screen for five seconds: a hand-drawn bell rings
-   (with its sound), "Sale made by <the record's owner>", then a hand-drawn person dances, quick and
-   funny, and it's gone. Orange is its accent (2026-11-23): the name, the bell's ringing marks and a
-   scatter of faint orange doodles around the screen. Every activated user also gets "<name> made a
+   (with its music — saleMusic), "Sale made by <the record's owner>", then a hand-drawn person dances, quick and
+   funny, and it's gone. Orange is its accent (2026-11-23): the name and the bell's ringing marks
+   (the faint orange doodles were taken off on 2026-11-24 — too much). Every activated user also gets "<name> made a
    sale" in their bell, which sits on an orange ground until its panel is opened (WorkflowBell). First on the record: no payment before it on any plan the record shows —
    its own and those of the records above and below it (accounting.jsx planScopeOf). Without an
    owner, the name is whoever recorded the payment. A click or Escape ends it early; several in a
@@ -489,20 +489,47 @@ function saleIsFirstPayment(hub, acts, object, record){
 }
 // On a call (the call window is open) or in a meeting of theirs that's going on now.
 const saleBusy = (hub) => !!hub.onCall || hubActivities(hub, 'meeting').some(e => isOngoing(e.act) && e.act.by === CURRENT_USER.name);
-/* A bell: struck three times. Made here (Web Audio) — a strike is a handful of partials dying away. */
-function saleBellSound(){
+/* The sale's sound (2026-11-24): five seconds of an original beat, made here (Web Audio — no
+   recording, no copied song). Mohsin's pick from ten made for him: "Victory Horns" (it replaced
+   Trap Hype the same day) — a brass fanfare in C over a 92 BPM hip-hop beat: kick, claps on two
+   and four, eighth-note hi-hats and a bass under the horns; it fades out at the end.
+   → the AudioContext (saleMusic closes it when the screen closes), or null. */
+function saleBeatSound(){
   try {
-    const Ctx = window.AudioContext || window.webkitAudioContext; if(!Ctx) return;
+    const Ctx = window.AudioContext || window.webkitAudioContext; if(!Ctx) return null;
     const ctx = new Ctx(); if(ctx.state === 'suspended') ctx.resume();
-    const strike = (at, base, level) => [[1, 1], [2, .5], [2.76, .32], [4.07, .18], [5.4, .1]].forEach(([ratio, amp]) => {
-      const osc = ctx.createOscillator(), gain = ctx.createGain(), t = ctx.currentTime + at, life = 1.5 / Math.sqrt(ratio);
-      osc.type = 'sine'; osc.frequency.value = base * ratio;
-      gain.gain.setValueAtTime(0.0001, t); gain.gain.exponentialRampToValueAtTime(level * amp, t + 0.006); gain.gain.exponentialRampToValueAtTime(0.0001, t + life);
-      osc.connect(gain); gain.connect(ctx.destination); osc.start(t); osc.stop(t + life + 0.05);
-    });
-    strike(0.12, 1245, 0.2); strike(0.75, 1245, 0.17); strike(1.4, 1245, 0.14);
-    setTimeout(() => { try { ctx.close(); } catch(e){} }, SALE_MS + 400);
-  } catch(e){}
+    const out = ctx.createGain(), t0 = ctx.currentTime + 0.06, end = t0 + SALE_MS / 1000, step = 60 / 92 / 4;
+    out.gain.setValueAtTime(0.9, t0); out.gain.setValueAtTime(0.9, end - 0.5); out.gain.linearRampToValueAtTime(0.0001, end);
+    out.connect(ctx.destination);
+    const noise = (() => { const b = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate), d = b.getChannelData(0); for(let k = 0; k < d.length; k++) d[k] = Math.random() * 2 - 1; return b; })();
+    const env = (node, t, peak, decay, attack = 0.004) => { const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(peak, t + attack); g.gain.exponentialRampToValueAtTime(0.0001, t + decay); node.connect(g); g.connect(out); };
+    const osc = (type, hz, t, dur) => { const o = ctx.createOscillator(); o.type = type; o.frequency.setValueAtTime(hz, t); o.start(t); o.stop(t + dur + 0.05); return o; };
+    const filt = (node, type, hz, q = 0.7) => { const f = ctx.createBiquadFilter(); f.type = type; f.frequency.value = hz; f.Q.value = q; node.connect(f); return f; };
+    const hiss = (t, type, hz, peak, decay, q) => { const n = ctx.createBufferSource(); n.buffer = noise; n.start(t); n.stop(t + decay + 0.05); env(filt(n, type, hz, q), t, peak, decay); };
+    const kick = (t) => { const o = osc('sine', 140, t, 0.42); o.frequency.exponentialRampToValueAtTime(42, t + 0.16); env(o, t, 0.95, 0.42); };
+    const clap = (t) => { [0, 0.011, 0.022].forEach(d => hiss(t + d, 'bandpass', 1200, 0.32, 0.03, 0.8)); hiss(t + 0.03, 'bandpass', 1200, 0.45, 0.22, 0.8); };
+    const hat = (t) => hiss(t, 'highpass', 7500, 0.07, 0.05);
+    const bass = (t, hz, len) => env(filt(osc('sawtooth', hz, t, len), 'lowpass', 320), t, 0.3, len);
+    // A horn: three slightly detuned saws whose filter opens fast, then settles.
+    const brass = (t, freqs, len) => freqs.forEach(hz => [-6, 0, 6].forEach(c => { const o = osc('sawtooth', hz, t, len); o.detune.value = c;
+      const f = filt(o, 'lowpass', 500, 1.5); f.frequency.setValueAtTime(500, t); f.frequency.exponentialRampToValueAtTime(3200, t + 0.06); f.frequency.exponentialRampToValueAtTime(1400, t + len); env(f, t, 0.07, len, 0.02); }));
+    const note = (n) => { const m = n.match(/^([A-G])(#?)(\d)$/); return 440 * Math.pow(2, ({C:0, D:2, E:4, F:5, G:7, A:9, B:11}[m[1]] + (m[2] ? 1 : 0) - 9) / 12 + (Number(m[3]) - 4)); };
+    const seq = (pattern, fn) => { for(let b = 0; b < 2; b++) [...pattern].forEach((c, i) => { if(c !== '.') fn(t0 + (b * 16 + i) * step); }); };
+    seq('x.....x.x.......', kick);
+    seq('....x.......x...', clap);
+    seq('x.x.x.x.x.x.x.x.', hat);
+    [[0, ['C4', 'E4', 'G4'], 3], [3, ['C4', 'E4', 'G4'], 1], [4, ['D4', 'F4', 'A4'], 2], [8, ['E4', 'G4', 'C5'], 6], [16, ['F4', 'A4', 'C5'], 3], [20, ['G4', 'B4', 'D5'], 3], [24, ['C5', 'E5', 'G5'], 8]]
+      .forEach(([i, ns, len]) => brass(t0 + i * step, ns.map(note), len * step));
+    [[0, 'C2', 6], [8, 'C2', 6], [16, 'F1', 4], [20, 'G1', 4], [24, 'C2', 8]].forEach(([i, n, len]) => bass(t0 + i * step, note(n), len * step));
+    setTimeout(() => { try { ctx.close(); } catch(e){} }, SALE_MS + 600);
+    return ctx;
+  } catch(e){ return null; }
+}
+/* The sale's music (2026-11-24): the beat made here (saleBeatSound) — Mohsin tried his own clip and
+   chose to keep the browser's beat. Stopped when the screen closes. → {stop()} */
+function saleMusic(){
+  const ctx = saleBeatSound();
+  return {stop:() => { try { ctx && ctx.close(); } catch(e){} }};
 }
 /* The drawings — thick black line, white inside, drawn as strokes laid over one another so each
    figure reads as one outline. A dancer is a spine, two arms and two legs; its poses are flipped
@@ -531,27 +558,6 @@ function SaleDancer({pose, seed}){
         <g transform={`translate(${fx} ${fy}) rotate(${turn})`} stroke="#000" strokeWidth={4}>
           <path d="M-17 -4 q6 7 12 0"/><path d="M5 -4 q6 7 12 0"/><path d="M-9 12 q9 9 18 0"/>
         </g>
-      </g>
-    </svg>
-  );
-}
-/* The doodles: stars, squiggles, rings, crosses and dashes in faint orange, hand-drawn like the
-   rest, around the edges of the screen — the middle is the bell's and the dancer's. */
-function SaleDoodles(){
-  const star = (x, y, r) => { const pts = Array.from({length:10}, (_, i) => { const a = Math.PI / 5 * i - Math.PI / 2, d = i % 2 ? r * .45 : r; return `${(x + Math.cos(a) * d).toFixed(1)} ${(y + Math.sin(a) * d).toFixed(1)}`; }); return `M${pts.join(' L')} Z`; };
-  const cross = (x, y, r) => `M${x - r} ${y} L${x + r} ${y} M${x} ${y - r} L${x} ${y + r}`;
-  const squiggle = (x, y) => `M${x} ${y} q14 -22 28 0 t28 0 t28 0`;
-  const swirl = (x, y) => `M${x} ${y} c0 -26 36 -26 36 0 c0 20 -26 20 -26 2 c0 -10 14 -10 14 -1`;
-  return (
-    <svg aria-hidden="true" viewBox="0 0 1200 800" preserveAspectRatio="xMidYMid slice" style={{position:'absolute', inset:0, width:'100%', height:'100%', pointerEvents:'none'}}>
-      <defs><filter id="sale-rough-doodle" filterUnits="userSpaceOnUse" x="0" y="0" width="1200" height="800"><feTurbulence type="fractalNoise" baseFrequency="0.02" numOctaves="1" seed="7" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="5"/></filter></defs>
-      <g filter="url(#sale-rough-doodle)" fill="none" stroke={SALE_ORANGE} strokeWidth={3.5} strokeLinecap="round" strokeLinejoin="round" opacity={.38}>
-        <path d={star(120, 130, 30)}/><path d={star(1050, 180, 24)}/><path d={star(220, 640, 22)}/><path d={star(980, 660, 32)}/><path d={star(620, 70, 16)}/>
-        <path d={squiggle(260, 250)}/><path d={squiggle(860, 90)}/><path d={squiggle(90, 430)}/><path d={squiggle(1010, 420)}/><path d={squiggle(560, 730)}/>
-        <path d={swirl(380, 110)}/><path d={swirl(1090, 560)}/><path d={swirl(110, 720)}/><path d={swirl(800, 690)}/>
-        <path d={cross(450, 660, 13)}/><path d={cross(930, 290, 12)}/><path d={cross(190, 330, 11)}/><path d={cross(730, 150, 10)}/><path d={cross(1130, 330, 12)}/>
-        <circle cx="330" cy="520" r="14"/><circle cx="870" cy="540" r="11"/><circle cx="1140" cy="90" r="13"/><circle cx="60" cy="250" r="9"/><circle cx="700" cy="640" r="9"/>
-        <path d="M300 60 l26 -14 M320 86 l30 -6 M880 760 l28 -12 M40 560 l24 16 M1150 700 l-26 12 M520 150 l-10 -26"/>
       </g>
     </svg>
   );
@@ -592,20 +598,19 @@ function SaleMoment(){
   React.useEffect(() => {
     if(!cur) return;
     setFrame(-1);
-    saleBellSound();
+    const music = saleMusic();
     const timers = [setTimeout(done, SALE_MS)];
     let tick = null;
     if(!still) timers.push(setTimeout(() => { let i = 0; setFrame(0); tick = setInterval(() => { i += 1; if(i < SALE_DANCE.length) setFrame(i); }, 125); }, SALE_DANCE_AT));
     const key = (e) => { if(e.key === 'Escape') done(); };
     window.addEventListener('keydown', key);
-    return () => { timers.forEach(clearTimeout); clearInterval(tick); window.removeEventListener('keydown', key); };
+    return () => { timers.forEach(clearTimeout); clearInterval(tick); window.removeEventListener('keydown', key); music.stop(); };
   }, [cur && cur.id]);
   if(!cur) return null;
   return ReactDOM.createPortal(
     <div onClick={done} style={{position:'fixed', inset:0, zIndex:9999, background:'#fff', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:28,
       animation:`hof-sale-out .22s ease-in ${SALE_MS - 240}ms both`}}>
       <style>{SALE_CSS}</style>
-      <SaleDoodles/>
       <div style={{position:'relative', width:'min(300px, 46vh)', height:'min(300px, 46vh)'}}>
         {frame < 0 ? <div key="bell" className={still ? undefined : 'hof-sale-pop'} style={{width:'100%', height:'100%'}}><SaleBell still={still}/></div>
           : <div key="dance" className="hof-sale-pop" style={{width:'100%', height:'100%'}}><div className="hof-sale-hop" style={{width:'100%', height:'100%'}}><SaleDancer pose={SALE_DANCE[frame]} seed={frame % 3 + 1}/></div></div>}

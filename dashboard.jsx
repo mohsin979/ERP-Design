@@ -526,20 +526,22 @@ function DashKpiRow({items, replay, arrange}){
 }
 
 /* Ask Spring — the ERP home's prompt box, as the dashboard's entry point to Spring (the AI
-   assistant): Spring's mark, a growing text area, and the ERP box's controls (attach, Auto, /, mic,
-   send). Enter sends, Shift+Enter breaks the line. What Spring does with a question isn't defined
-   yet: sending opens the placeholder. */
+   assistant): Spring's mark, a growing text area, and three controls — Attach, Voice, Send
+   (spring.jsx SpringControls; Auto and / were taken off, 2026-11-24). Enter sends, Shift+Enter
+   breaks the line. `onAsk(text, files)`: the dashboard and Workflows open Spring full screen with
+   it (spring.jsx openSpring); Reports looks for the closest report. */
 // `placeholder`: what it asks for elsewhere (Reports: "Ask Spring to generate reports").
 function SpringAsk({onAsk, placeholder = 'Ask Spring what’s wrong and what can be improved in your business.'}){
   const [text, setText] = React.useState('');
+  const [files, setFiles] = React.useState([]);
   const [focus, setFocus] = React.useState(false);
   const ref = React.useRef(null);
+  const voice = useSpringVoice(ref, (said) => setText(t => springAppend(t, said)));
   React.useEffect(() => { const el = ref.current; if(el){ el.style.height = 'auto'; el.style.height = Math.min(160, el.scrollHeight) + 'px'; } }, [text]);
-  const send = () => { if(!text.trim()) return; onAsk(text.trim()); setText(''); };
-  const ctl = {width:32, height:32, borderRadius:8, border:'none', background:T.pageBg, display:'inline-flex', alignItems:'center', justifyContent:'center', cursor:'pointer', color:T.gray600, fontFamily:'inherit', flexShrink:0};
-  const ready = !!text.trim();
+  const ready = !!text.trim() || files.length > 0;
+  const send = () => { if(!ready) return; onAsk(text.trim(), files); setText(''); setFiles([]); };
   return (
-    <div onClick={()=>ref.current && ref.current.focus()} style={{background:'#fff', borderRadius:18, border:`1px solid ${focus ? '#C9CCD3' : T.borderStrong}`,
+    <div onClick={()=>ref.current && ref.current.focus()} data-no-dictation="1" style={{background:'#fff', borderRadius:18, border:`1px solid ${focus ? '#C9CCD3' : T.borderStrong}`,
       boxShadow: focus ? '0 0 0 4px rgba(58,91,249,.08), 0 8px 24px rgba(16,24,40,.06)' : '0 2px 10px rgba(16,24,40,.04)', padding:'18px 20px 12px', cursor:'text',
       transition:'border-color 140ms, box-shadow 140ms'}}>
       <div style={{display:'flex', alignItems:'flex-start', gap:12}}>
@@ -551,15 +553,8 @@ function SpringAsk({onAsk, placeholder = 'Ask Spring what’s wrong and what can
           placeholder={placeholder} aria-label="Ask Spring"
           style={{flex:1, minWidth:0, border:'none', outline:'none', resize:'none', background:'transparent', fontFamily:'inherit', fontSize:15, lineHeight:1.55, color:T.attioText, padding:'4px 0', minHeight:52}}/>
       </div>
-      <div onClick={e=>e.stopPropagation()} style={{display:'flex', alignItems:'center', justifyContent:'flex-end', gap:8, paddingTop:10, marginTop:8, borderTop:`1px solid ${T.border}`}}>
-        <button type="button" title="Attach" style={ctl}><Icon name="paperclip" size={16} color={T.gray600}/></button>
-        <button type="button" style={{...ctl, width:64, gap:4, fontSize:13, color:T.gray800}}>Auto <Icon name="chevDown" size={T.chevronSize} color={T.gray600}/></button>
-        <button type="button" style={ctl}>/</button>
-        <button type="button" title="Speak" style={ctl}><Icon name="mic" size={15} color={T.gray600}/></button>
-        <button type="button" title="Ask Spring" aria-label="Ask Spring" onClick={send} disabled={!ready}
-          style={{...ctl, background: ready ? DASH_BLUE : T.blueLight, cursor: ready ? 'pointer' : 'default', transition:'background 140ms'}}>
-          <Icon name="arrowUp" size={14} color={ready ? '#fff' : T.blue}/>
-        </button>
+      <div style={{paddingTop:10, marginTop:8, borderTop:`1px solid ${T.border}`}}>
+        <SpringControls blue voice={voice} files={files} setFiles={setFiles} ready={ready} onSend={send}/>
       </div>
     </div>
   );
@@ -1500,7 +1495,7 @@ function DashboardPage({part}){
         </div>}
         {/* Ask Spring under the greeting; a separator, 30px either side, before the dashboard's controls. */}
         <div style={{display:'flex', flexDirection:'column', gap:30}}>
-          {mode !== 'analytics' && <SpringAsk onAsk={(q)=>setStub(`Spring · ${q.length > 60 ? q.slice(0, 57) + '…' : q}`)}/>}
+          {mode !== 'analytics' && <SpringAsk onAsk={(q, files)=>openSpring(q, files)}/>}
           {mode === 'full' && <div role="separator" style={{height:1, background:T.borderStrong}}/>}
         {mode !== 'day' && <div style={{display:'flex', flexDirection:'column', gap:16}}>
           {/* The date filter on the left; Layout Settings and the KPIs / Graph switcher on the right of the same row. */}

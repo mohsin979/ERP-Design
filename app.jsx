@@ -638,8 +638,6 @@ function MainScreen({onOpenCrm, onOpenPeople, onOpenSettings}){
           <div style={{fontSize:14, color:'#9A9A9A', minHeight:80}}>What do you want to find or do?</div>
           <div style={{display:'flex', alignItems:'center', justifyContent:'flex-end', gap:8, paddingTop:12, borderTop:`1px solid ${T.border}`}}>
             <button style={iconBtnStyle}><Icon name="paperclip" size={16} color={T.gray600}/></button>
-            <button style={{...iconBtnStyle, width:64, gap:4, fontSize:13, color:T.gray800}}>Auto <Icon name="chevDown" size={T.chevronSize} color={T.gray600}/></button>
-            <button style={iconBtnStyle}>/</button>
             <button style={iconBtnStyle}><Icon name="mic" size={15} color={T.gray600}/></button>
             <button style={{...iconBtnStyle, background:T.blueLight}}><Icon name="arrowUp" size={14} color={T.blue} strokeWidth={2.2}/></button>
           </div>
@@ -1525,8 +1523,10 @@ function App(){
     <div style={{display: screen === 'crm' ? 'flex' : 'none', height:'100vh', width:'100vw', overflow:'hidden', background:T.pageBg}}>
       <CrmSidebar active={inSettings ? 'settings' : inReports ? 'reports' : crmActive === 'analytics' && !dashIsHome() ? 'dashboard' : crmActive} setActive={selectCrm} onBack={()=>setScreen('main')} nav={crmNavWithObjects} setNav={setCrmNav}/>
       {inSettings && settingsNavOpen && <CrmSettingsNav active={crmActive} setActive={setCrmActive} onClose={()=>setSettingsNavOpen(false)} data={settingsData} onOpenEntity={openSettingsEntity}/>}
-      <div style={{flex:1, display:'flex', flexDirection:'column', minWidth:0, minHeight:0}}>
+      <div style={{flex:1, display:'flex', flexDirection:'column', minWidth:0, minHeight:0, position:'relative'}}>
         <CrmHeader session={session} setSession={setSession}/>
+        {/* Spring full screen over the content, under the header; leaves when another page is picked (spring.jsx). */}
+        <SpringHost page={crmActive}/>
         {keepAlivePane('contacts', <ContactsModule contactProperties={objectFormProperties(settingsData, 'contacts')} contacts={contactsWithDeals} setContacts={engine.setContacts}
           activities={contactActivities} setActivities={setContactActivities} profileStore={profileStore}
           dealData={settingsData} deals={dealsView} dealsFor={dealsFor} onCreateDeal={createDeal} onLinkDeal={linkDeal} onOpenDeal={(id, mode)=>openRecord('deals', id, mode)}

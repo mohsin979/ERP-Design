@@ -818,7 +818,8 @@ function UsersTeamsSettings({data, setData}){
 /* `saveView:false` leaves out Save View (Layout Settings stays) — e.g. Settings → Pipelines. */
 /* `flushTop`: the page's top padding is cancelled too (a table that opens the page, with nothing
    above it), so the views row has the same space above and below. */
-function RecordViewsModule({schema, rows, defaultViews, columns, savedViews = true, saveView = true, viewCounts, actions, filterControls, overlay, initialFilters, initialViewId, focus, board, inset = 'settings', storeKey, flushTop, adaptSaved, children}){
+// `searchOnly`: one toolbar row, search and Filters — no view pills (Settings → Ads, 2026-11-24).
+function RecordViewsModule({schema, rows, defaultViews, columns, savedViews = true, saveView = true, viewCounts, actions, filterControls, overlay, initialFilters, initialViewId, focus, board, inset = 'settings', storeKey, flushTop, adaptSaved, searchOnly, children}){
   const makeDefault = (v, i) => makeRecordView(v.id, v.name, columns, {filters:v.filters || {nodes:[]}, sort:v.sort || null, isDefault:i === 0,
     ...(board ? {pipelineId:v.pipelineId || board.defaultPipelineId, ...(board.cardSettings ? {cardSettings:board.cardSettings.defaults()} : {})} : {})});
   /* A default view added later (`addOnce`, e.g. Quotes → Signed): views saved before it get it once
@@ -883,7 +884,7 @@ function RecordViewsModule({schema, rows, defaultViews, columns, savedViews = tr
           padding is cancelled so the toolbar and grid run flush to the Settings navigation. */}
       <div style={{display:'flex', flexDirection:'column', position:'relative', flex:1, minHeight:0, ...(inset === 'settings' ? {margin:`${flushTop ? -12 : 0}px -16px -16px`} : {minWidth:0, overflow:'hidden'})}}>
         {/* The one record toolbar (contacts.jsx), as on Contacts. */}
-        <RecordToolbar inset={inset} views={visibleViews} activeViewId={activeViewId} onSelectView={setActiveViewId} searchPlaceholder={recordSearchLabel(schema)}
+        <RecordToolbar inset={inset} views={searchOnly ? [] : visibleViews} oneRow={!!searchOnly} searchInRow={!!searchOnly} activeViewId={activeViewId} onSelectView={setActiveViewId} searchPlaceholder={recordSearchLabel(schema)}
           viewControls={savedViews && <>
             <ViewSettingsButton onClick={()=>setAllViewsOpen(true)}/>
             {saveView && <SaveViewMenu dirty={dirty} onSaveCopy={()=>setShowSaveAsCopy(true)} onSaveExisting={()=>setConfirmOverwrite(true)}/>}

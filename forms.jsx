@@ -11,8 +11,11 @@
                   type it fills in (Maps to); one field must map to Name — with the form's preview
                   beside it. Save and Connect (once the form is valid) saves it and opens
                   its connections.
-     Connections — Meta and Website RFQ. Mocked: Connect / Disconnect, and Simulate Lead, which
-                  fills in the form as that source; the website shows its embed snippet.
+     Connections — the form's link and the Website RFQ. Mocked: Connect / Disconnect, and Simulate
+                  Lead, which fills in the form as that source; the website shows its embed snippet.
+                  Meta is no longer connected here (2026-11-24): lead ads have their own Settings →
+                  Ads (ads.jsx) — Meta accounts, pages and forms. A form connected to Meta before
+                  keeps its submissions; the connection isn't shown or offered.
      Submission — a test submission (or a simulated lead) creates the record from the mapped
                   fields (hub.createRecord) and is kept on the form with the record it created.
 
@@ -38,7 +41,6 @@ function GlobeMark({size = 18, color = T.attioText}){
   );
 }
 const FORM_CONNECTIONS = [
-  {id:'meta',    name:'Meta',        Mark:MetaMark},
   {id:'website', name:'Website RFQ', Mark:GlobeMark},
 ];
 // Sources a form was connected to before (kept so their submissions still say where they came from).

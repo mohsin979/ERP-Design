@@ -66,6 +66,7 @@ const CRM_SETTINGS_NAV = [
     {id:'settings.goals',         label:'Goals',         icon:'target'},
     {id:'settings.commission',    label:'Commission',    icon:'coins'},
     {id:'settings.notifications', label:'Notifications', icon:'notification'},
+    {id:'settings.ads',           label:'Ads',           icon:'ads'},   // lead ads: Meta accounts, pages and forms (ads.jsx, 2026-11-24)
     {id:'settings.navigation',    label:'Navigation',    icon:'listBullets'},
     {id:'settings.brand',         label:'Brand',         icon:'brand'},
     {id:'settings.sequenceEnrollments', label:'Sequence Control', icon:'forward'},
@@ -228,6 +229,15 @@ const sidebarScroll = (collapsed) => ({flex:1, minHeight:0, overflowY:'auto', ma
 
 function CrmSidebar({active, setActive, onBack, nav, setNav}){
   const [collapsed, setCollapsed] = React.useState(false);
+  /* While Spring is open full screen the navigation folds to its icons (2026-11-24 — spring.jsx
+     sends 'hof-spring'); leaving Spring puts it back as it was. */
+  const before = React.useRef(null);
+  React.useEffect(() => {
+    const on = (e) => { const open = !!(e.detail && e.detail.open);
+      if(open){ setCollapsed(c => { if(before.current == null) before.current = c; return true; }); }
+      else if(before.current != null){ const was = before.current; before.current = null; setCollapsed(was); } };
+    window.addEventListener('hof-spring', on); return () => window.removeEventListener('hof-spring', on);
+  }, []);
   const [managing, setManaging] = React.useState(null);   // draft while Navigation Management is open
   // Workflows shows only to those with Workflows → View (Edit Permissions).
   const entries = navWithAnalytics((nav || CRM_NAV_DEFAULT()).filter(e => !e.hidden)

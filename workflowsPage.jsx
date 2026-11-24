@@ -4,7 +4,12 @@
    where all of them can be found and managed — including ones with no stage (a pipeline- or
    Object-level context), which no stage lists. + creates a workflow here (Company-wide until a
    context is chosen in the builder). The name opens the builder (full section, as from a
-   pipeline); ⋯ turns a workflow on or off, renames it or deletes it. */
+   pipeline); ⋯ turns a workflow on or off, renames it or deletes it.
+   Since 2026-11-24 the page opens on Spring (as Reports does — reports.jsx ReportsHome): "Ask
+   Spring to create a workflow", then Create Workflow Manually (the builder, as before) and All
+   Workflows (the list). The list's New Workflow brings Spring back; a workflow made by hand
+   lands on the list once the builder closes. A request to Spring opens Spring full screen with it
+   (spring.jsx). The two buttons sit under the box, from its left edge. */
 
 const WORKFLOW_LIST_COLS = [
   {key:'name', label:'Workflow', width:240}, {key:'typeName', label:'Type', width:150}, {key:'objectName', label:'Record', width:120}, {key:'pipelineName', label:'Pipeline', width:180},
@@ -12,8 +17,25 @@ const WORKFLOW_LIST_COLS = [
   {key:'status', label:'Status', width:110}, {key:'version', label:'Version', width:100}, {key:'lastRun', label:'Last Run', width:170}, {key:'createdBy', label:'Created By', width:170},
 ];
 
+/* The page's start: Ask Spring to create a workflow, or make one by hand, or see them all. */
+function WorkflowsHome({onManual, onAll, onAsk}){
+  return (
+    <div style={{flex:1, minWidth:0, minHeight:0, overflowY:'auto', background:T.pageBg}}>
+      <div style={{maxWidth:760, margin:'0 auto', padding:'72px 24px 40px', display:'flex', flexDirection:'column', gap:20}}>
+        <span style={{fontSize:22, fontWeight:600, color:T.attioText, textAlign:'center'}}>Workflows</span>
+        <SpringAsk onAsk={onAsk} placeholder="Ask Spring to create a workflow"/>
+        {/* Under the box, from its left edge (2026-11-24). */}
+        <div style={{display:'flex', justifyContent:'flex-start', gap:8}}>
+          {onManual && <StSecondary label="Create Workflow Manually" onClick={onManual}/>}
+          <StSecondary label="All Workflows" onClick={onAll}/>
+        </div>
+      </div>
+    </div>
+  );
+}
 function WorkflowsPage({data, setData}){
   const ctx = useWorkflowEngineCtx();
+  const [view, setView] = React.useState('home');         // 'home' (Spring) | 'list'
   const [editing, setEditing] = React.useState(null);     // a workflow
   const [deleting, setDeleting] = React.useState(null);   // a workflow
   const [renaming, setRenaming] = React.useState(null);   // a workflow
@@ -62,10 +84,13 @@ function WorkflowsPage({data, setData}){
   };
   return (
     <div style={{position:'relative', flex:1, minHeight:0, display:'flex', flexDirection:'column', overflow:'hidden'}}>
-      <RecordViewsModule inset="page" schema={schema} rows={rows} columns={WORKFLOW_LIST_COLS.map(c => c.key)} defaultViews={[{id:'wfl-all', name:'All Workflows'}]}
-        actions={() => workflowCan('create') && <NewButton label="New Workflow" onClick={()=>setEditing(newWorkflowDraft({}, {type:'workflows'}))}/>}/>
-      {/* The builder: a full section over the list, as from a pipeline stage. */}
-      {editing && <WorkflowEditorOverlay data={data} setData={setData} workflow={editing} onClose={()=>setEditing(null)} onStub={setStub}/>}
+      {view === 'home'
+        ? <WorkflowsHome onAll={()=>setView('list')} onAsk={(q, files)=>openSpring(q, files)}
+            onManual={workflowCan('create') ? ()=>setEditing(newWorkflowDraft({}, {type:'workflows'})) : null}/>
+        : <RecordViewsModule inset="page" schema={schema} rows={rows} columns={WORKFLOW_LIST_COLS.map(c => c.key)} defaultViews={[{id:'wfl-all', name:'All Workflows'}]}
+            actions={() => workflowCan('create') && <NewButton label="New Workflow" onClick={()=>setView('home')}/>}/>}
+      {/* The builder: a full section over the page, as from a pipeline stage; closed, the list shows. */}
+      {editing && <WorkflowEditorOverlay data={data} setData={setData} workflow={editing} onClose={()=>{ setEditing(null); setView('list'); }} onStub={setStub}/>}
       {renaming && <RenameWorkflowModal name={renaming.raw.name || renaming.name} onCancel={()=>setRenaming(null)}
         onSave={(name)=>{ renameWorkflowIn(setData, renaming.id, name); setRenaming(null); }}/>}
       {deleting && (
