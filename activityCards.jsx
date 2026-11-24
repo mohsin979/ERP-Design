@@ -455,7 +455,10 @@ function NoteDetail({a, contact, calls, onUpdate, onStub, across}){
       <div style={{display:'flex', flexDirection:'column', gap:12}}>
         {!editing && <NoteTypeTag a={a}/>}
         {/* A HubSpot note keeps its type. */}
-        {editing && noteTypeOf(a) !== 'hubspot' && <Field label="Note Type" required><NoteTypeRadios name={`note-type-${a.id}`} value={noteType} onChange={setNoteType}/></Field>}
+        {editing && noteTypeOf(a) !== 'hubspot' && <Field label="Note Type" required><div style={{display:'flex', flexDirection:'column', gap:12}}>
+          <NoteTypeRadios name={`note-type-${a.id}`} value={noteType} onChange={setNoteType}/>
+          {noteType === 'clientRequest' && <PullMessageButton onPull={(h)=>setText(x => richIsEmpty(x) ? h : `${x}${h}`)}/>}
+        </div></Field>}
         {!editing && recordFirst(across)}
         {/* A note saved from a call keeps that context. */}
         {!editing && a.callId && <div style={{fontSize:12, color:T.attioMuted}}>Linked to call{call ? ` · ${fmtActStamp(call.at)}` : ''}</div>}
@@ -1182,7 +1185,11 @@ function NewNote({onAdd, onDone}){
     <NewItemPanel title="Add Note" primary="Add Note" canSave={!richIsEmpty(html)} onCancel={()=>onDone(null)}
       onSave={()=>{ const id = newId('note'), body = sanitizeRichText(html);
         onAdd({id, type:'note', source:'you', by:null, body, ...noteTypePatch(noteType), ...withMentions(null, tagged('', body, 'a note'))}); onDone(id); }}>
-      <Field label="Note Type" required><NoteTypeRadios name="note-type-new" value={noteType} onChange={setNoteType}/></Field>
+      <Field label="Note Type" required><div style={{display:'flex', flexDirection:'column', gap:12}}>
+        <NoteTypeRadios name="note-type-new" value={noteType} onChange={setNoteType}/>
+        {/* Client Request: Pull Message adds a received email's text to the note (noteTools.jsx). */}
+        {noteType === 'clientRequest' && <PullMessageButton onPull={(h)=>setHtml(x => richIsEmpty(x) ? h : `${x}${h}`)}/>}
+      </div></Field>
       <Field label="Note" required><div data-mentions="1"><RichTextEditor value={html} onChange={setHtml} placeholder="Write a note" minHeight={180} ariaLabel="Note"/></div></Field>
     </NewItemPanel>
   );

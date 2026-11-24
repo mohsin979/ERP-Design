@@ -1115,9 +1115,9 @@ function NotificationSettingsPage({data, setData}){
     if(patch.on === c.on) delete next[`${key}.${ch}`]; else next[`${key}.${ch}`] = patch.on;
     set({overrides:next}); };
   return (
-    <SettingsPage actions={can ? actions : null}>
+    // The preset, top left, on Save's row (Mohsin 2026-11-24: no empty row above it).
+    <SettingsPage actions={can ? actions : null} title={<>Notification Preset<div style={{fontSize:13, fontWeight:400, color:T.attioText, marginTop:2}}>{preset.name}</div></>}>
       <div style={{display:'flex', flexDirection:'column', gap:20}}>
-        <StField label="Notification Preset"><span style={{fontSize:13, color:T.attioText}}>{preset.name}</span></StField>
         <NotificationGrid mode="user" readOnly={!can} note={can ? null : 'You can view these settings but not change them.'}
           cellOf={(key, ch) => ({on:notifEffective(preset, draft.overrides, key, ch), locked:notifCell(preset, key, ch).locked})} onCell={onCell}/>
       </div>

@@ -250,6 +250,59 @@ function NoteTypeRadios({value, onChange, name}){
   );
 }
 
+/* ── Pull Message (2026-11-24) ── a Client Request note can take its words from an email: Pull
+   Message (under the Note Type, only while Client Request is picked — Add Note and a note's Edit)
+   opens a window of the emails the record has received (sent through the CRM or logged; newest
+   first, with a search) — each its subject, who it's from, when, and two lines of it; one picked,
+   Pull Message adds its text to the end of the note (the note as written stays). The record is
+   the one the note is for (RecordAccessCtx); without one, no button. */
+const emailTextHtml = (a) => { const s = String(a.content || a.body || '');
+  if(!/<[a-z][\s\S]*>/i.test(s)) return richHtmlOf(s);
+  const d = document.createElement('div'); d.innerHTML = s.replace(/<\/(p|div|li|h\d|tr)>|<br\s*\/?>/gi, (m) => `${m}\n`);
+  return richHtmlOf(d.textContent.replace(/\n{3,}/g, '\n\n').trim()); };
+const receivedEmailsOf = (hub, object, id) => ((hub && (hub.activities[object] || {})[id]) || [])
+  .filter(a => a.type === 'email' && a.direction === 'received' && a.status !== 'scheduled')
+  .sort((x, y) => new Date(y.at) - new Date(x.at));
+function PullMessageButton({onPull}){
+  const hub = useRecordHub(), ra = useRecordAccess();
+  const [open, setOpen] = React.useState(false);
+  if(!ra || !ra.record) return null;
+  return (<>
+    <button type="button" onClick={()=>setOpen(true)} style={{...btnSecondarySm, alignSelf:'flex-start', display:'inline-flex', alignItems:'center', gap:6}}>
+      <Icon name="envelope" size={13} color={T.gray600}/> Pull Message</button>
+    {open && <PullMessageModal emails={receivedEmailsOf(hub, ra.object, ra.record.id)} onCancel={()=>setOpen(false)} onPull={(a)=>{ onPull(emailTextHtml(a)); setOpen(false); }}/>}
+  </>);
+}
+function PullMessageModal({emails, onCancel, onPull}){
+  const [picked, setPicked] = React.useState('');
+  const [q, setQ] = React.useState('');
+  const f = q.trim().toLowerCase(), plain = (a) => richTextPlain(a.content || a.body || '');
+  const shown = emails.filter(a => !f || `${a.title || ''} ${plain(a)} ${a.by || ''}`.toLowerCase().includes(f));
+  const from = (a) => a.source === 'other' ? a.by || 'Someone else' : 'Client';
+  const pick = () => { const a = emails.find(x => x.id === picked); a && onPull(a); };
+  return ReactDOM.createPortal(
+    <StModal title="Pull Message" primary="Pull Message" width={640} canSubmit={!!picked} onCancel={onCancel} onSubmit={pick}>
+      {emails.length > 0 && <div style={{position:'relative'}}>
+        <div style={{position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', display:'flex'}}><Icon name="search" size={13} color={T.gray400}/></div>
+        <input autoFocus value={q} onChange={e=>setQ(e.target.value)} placeholder="Search Emails" aria-label="Search emails" style={{...fieldInput, paddingLeft:30}}/>
+      </div>}
+      <div role="radiogroup" aria-label="Received emails" style={{display:'flex', flexDirection:'column', gap:8, maxHeight:'min(440px, calc(100vh - 300px))', overflowY:'auto', padding:2}}>
+        {shown.map(a => { const on = a.id === picked; return (
+          <div key={a.id} role="radio" aria-checked={on} tabIndex={0} onClick={()=>setPicked(a.id)} onDoubleClick={()=>onPull(a)}
+            onKeyDown={e=>{ if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); setPicked(a.id); } }}
+            style={{border:`1px solid ${on ? T.black : T.attioLine}`, boxShadow: on ? `0 0 0 1px ${T.black}` : 'none', borderRadius:10, padding:'10px 12px', cursor:'pointer', display:'flex', flexDirection:'column', gap:4, background:'#fff'}}>
+            <div style={{display:'flex', alignItems:'baseline', gap:10}}>
+              <span style={{flex:1, minWidth:0, fontSize:13.5, fontWeight:600, color:T.attioText, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{a.title || '(No subject)'}</span>
+              <span style={{fontSize:12, color:T.attioMuted, whiteSpace:'nowrap'}}>{fmtActStamp(a.at)}</span>
+            </div>
+            <span style={{fontSize:12, color:T.attioMuted}}>From {from(a)}</span>
+            <span style={{fontSize:12.5, color:T.gray600, lineHeight:1.45, display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', overflow:'hidden'}}>{plain(a)}</span>
+          </div>); })}
+        {!shown.length && <div style={{fontSize:13, color:T.attioMuted, padding:'16px 4px'}}>{emails.length ? 'No emails match' : 'No emails received'}</div>}
+      </div>
+    </StModal>, document.body);
+}
+
 /* ── Spring on notes (2026-11-23) ── tick a note, or Select All, and Ask Spring appears: Spring
    reads the ticked notes and gives a summary, suggests actions (Add Task, Call, Schedule Meeting,
    Draft Email — each opens the usual form, filled in) and answers questions about them, naming the
@@ -390,4 +443,4 @@ function SpringNotesPanel({items, onClose, onSource, onRun}){
     </PageSidePanel>
   );
 }
-Object.assign(window, {NoteTypeTag, NoteTypeRadios, NoteSelectBar, SpringNotesPanel, springNotesReview, springNotesAnswer, mentionUsers, mentionedIn, highlightMentionsHtml, MentionText, useMentionNotify, withMentions, MentionsHost, DictationHost, SupportNoteTag, SupportNoteDivider, SupportNoteSwitch});
+Object.assign(window, {NoteTypeTag, NoteTypeRadios, PullMessageButton, PullMessageModal, receivedEmailsOf, emailTextHtml, NoteSelectBar, SpringNotesPanel, springNotesReview, springNotesAnswer, mentionUsers, mentionedIn, highlightMentionsHtml, MentionText, useMentionNotify, withMentions, MentionsHost, DictationHost, SupportNoteTag, SupportNoteDivider, SupportNoteSwitch});

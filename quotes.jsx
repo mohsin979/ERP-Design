@@ -711,7 +711,8 @@ function QuoteBuilder({mode, id, object, onClose, placement = 'fixed', template}
   const section = QUOTE_SECTION;
   const preview = isTpl ? sampleQuoteOf({...q, name:q.name.trim() || 'Quote Template'})
     : {...draft(), number: existing ? existing.number : quoteNumber(hub.quotes, true), createdAt: existing ? existing.createdAt : new Date(), status:'draft'};
-  const last = QUOTE_STEPS.length - 1, filled = isTpl && !!tpl0;
+  // A template or a quote already made (a draft or a sent one — 2026-11-24): every step reads as done and any can be opened.
+  const last = QUOTE_STEPS.length - 1, filled = (isTpl && !!tpl0) || !!existing;
   return (
     <CreatePanelFrame title={isTpl ? (tpl0 ? 'Edit Quote Template' : 'Add Quote Template') : existing ? 'Edit Quote' : 'Add Quote'} onClose={()=>onClose()} placement={placement} width={QUOTE_PANEL_W} flush
       actions={<>
@@ -722,7 +723,7 @@ function QuoteBuilder({mode, id, object, onClose, placement = 'fixed', template}
           : <>{templateCan('quoteTemplates', 'create') && <StSecondary label="Save as Template" onClick={()=>setTemplating(q.title.trim() || (q.items[0] && q.items[0].name) || '')}/>}
               <StSecondary label={existing ? 'Save Changes' : 'Save as Draft'} onClick={()=>save(false)}/><StCta label={resend ? 'Send Again' : 'Send Quote'} busy={sending} disabled={!!q.validUntil && q.validUntil < ymdOf(new Date())} onClick={()=>save(true)}/></>}
       </>}>
-      {/* The steps, in their own column on the left. A template already made (`filled`): every step reads as done — no progress to show — and the open one is the light grey row. */}
+      {/* The steps, in their own column on the left. A template or quote already made (`filled`): every step reads as done — no progress to show — and the open one is the light grey row. */}
       <div style={{width:QUOTE_STEPPER_W, flexShrink:0, borderRight:`1px solid ${T.border}`, padding:'16px 12px', display:'flex', flexDirection:'column', gap:2}}>
         {QUOTE_STEPS.map((st, i) => {
           const reachable = i <= step || stepOk.slice(0, i).every(Boolean);
