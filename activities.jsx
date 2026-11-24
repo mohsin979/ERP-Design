@@ -535,7 +535,7 @@ function activityLines(a, contact, context = 'all'){
       ? {lead:act(all ? 'File received' : 'Received', 'from'), detail:a.name, when}
       : {lead:act(all ? 'File added' : 'Added', 'by'), detail:a.name, when};
     case 'fileChange': return {lead:act('File deleted', 'by'), detail:a.fileName, when};
-    case 'quote': return {lead:act(a.status === 'signed' ? 'Quote signed' : a.status === 'sent' ? 'Quote sent' : a.status === 'viewed' ? 'Quote viewed' : a.status === 'expired' ? 'Quote expired' : 'Quote created', 'by'), detail:a.title, when};
+    case 'quote': return {lead:act(a.status === 'signed' ? 'Quote signed' : a.status === 'sent' ? 'Quote sent' : a.status === 'viewed' ? 'Quote viewed' : a.status === 'expired' ? 'Quote expired' : a.status === 'edited' ? 'Quote edited' : 'Quote created', 'by'), detail:a.title, when};
     case 'document': return {lead:act(a.status === 'signed' ? 'Document signed' : a.status === 'sent' ? 'Document sent' : a.status === 'viewed' ? 'Document viewed' : 'Document created', 'by'), detail:a.title, when};
   }
   return {lead:{prefix: ACTIVITY_TYPES[a.type] ? ACTIVITY_TYPES[a.type].label : '', name:'', owner:false, cc:''}, detail:'', when};

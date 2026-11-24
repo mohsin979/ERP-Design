@@ -20,7 +20,20 @@
        or a custom number of days before (1 day by default). Edit on the schedule sets each amount
        and date, names an installment (the Deposit stays the Deposit; unnamed: "Installment N")
        and adds or deletes installments: the schedule then bills what's set, whether or not it
-       adds up to the total.
+       adds up to the total. Since 2026-11-24 an edited installment's Invoice Issue Date and
+       Payment Due Date are each optional — empty, a Day (N days from Day 0: the signing or the
+       fixed date) or a Date (DayOrDateField: a menu, Day and Date each opening a panel beside it);
+       Edit starts with the dates the schedule had, as Days until the plan is dated. Empty: no date,
+       no invoice until one is set.
+   Discount & Tax (2026-11-24): every plan has Amount, Discount (% or an amount) and VAT (%; 5 on a
+   new plan, none on one saved before) down to its Total (planMoney) — the Total its payments split.
+   A plan and a quote link (2026-11-24): Add Payment Plan's Quote pulls a draft or sent quote in
+   (its terms, its services subtotal as the Amount, its discount — a Referral Discount added in as
+   an amount — and its VAT: the same Total), and a quote's Payment Plan step can start from one of
+   its record's plans (quotes.jsx). Linked (`linkedPlanId` on the quote, `quoteId` on the plan,
+   "From Q-…"), signing the quote updates that plan — the next revision (revisePlan) — and makes
+   no other. A plan made from a signed quote can still be edited; its changed invoices are
+   archived and issued again.
      Recurring Payment   — a subscription: the same amount every month (30 days) or year, its first
        invoice issued when the quote is signed or on a fixed date, each due by its terms; for a
        number of years, or until cancelled (Cancel Subscription).
@@ -164,13 +177,20 @@ function migratePlans(list){
   const num = new Map(kept.filter(s => !s.number).sort((a, b) => time(a) - time(b)).map(s => [s.id, nextPlanNumber(kept, s.createdAt)]));
   return num.size ? kept.map(s => num.has(s.id) ? {...s, number:num.get(s.id), revision:s.revision || 1} : s) : kept;
 }
-/* A quote's Payment Plan, made when it's signed (plansOnQuoteSigned): its plan (the quote's total, in
+/* A quote's money as a plan's (2026-11-24): Amount = the services subtotal, Discount = the quote's
+   (with a Referral Discount: the two together, as an amount), VAT = the quote's rate — so the plan's
+   Total is the quote's total. The quote's payment terms with it, in the quote's currency. */
+const quotePlanMoney = (q) => { const t = quoteTotals(q), d = q.discount || {};
+  return {amount:t.subtotal, vatRate:t.vatRate, discount: t.referralDiscount > 0 ? {type:'amount', value:r2(t.discount + t.referralDiscount)}
+    : {type:d.type === 'amount' ? 'amount' : 'percent', value:Number(d.value) || 0}}; };
+const planFromQuote = (q) => newPaymentPlan({...(q.payment || {}), ...quotePlanMoney(q), currency:quoteCurrency(q)});
+/* A quote's Payment Plan, made when it's signed (plansOnQuoteSigned): its plan (the quote's money, in
    its currency), dated from the day it was signed. A quote saved before plans: its installments as
    they were. */
 const scheduleFromQuote = (q, object, record) => {
   const head = {id:`qs-${q.id}`, source:'quote', quoteId:q.id, quoteNumber:q.number, quoteTitle:q.title, object, recordId:record.id, createdAt:q.createdAt, createdBy:q.createdBy, total:quoteTotal(q), currency:quoteCurrency(q)};
   if(q.payment){
-    const plan = newPaymentPlan({...q.payment, amount:quoteTotal(q), currency:quoteCurrency(q)}), signedOn = q.status === 'signed' ? dayOf(q.signedAt) : '';
+    const plan = planFromQuote(q), signedOn = q.status === 'signed' ? dayOf(q.signedAt) : '';
     const installments = planSchedule(plan, {id:head.id, signedOn});
     return {...head, paymentType:plan.paymentType, plan, ...(signedOn ? {signedOn} : {}), total:r2(installments.reduce((a, x) => a + x.amount, 0)), installments};
   }
@@ -222,9 +242,17 @@ const INSTALLMENT_INTERVAL = 30, PLAN_MAX_COUNT = 120, PLAN_MAX_YEARS = 10, PLAN
 const newPaymentPlan = (p = {}) => {
   const months = (p.paymentType === 'recurring' || p.paymentType === 'subscription') && (p.duration === 'months' || (!p.duration && p.frequency !== 'yearly' && Number(p.count) > 0));
   const years = months && Number(p.count) % 12 === 0;
-  return {paymentType:'one-time', currency:defaultCurrency(), amount:'', issue:{type:'signed'}, due:{type:'net', days:0}, lead:1,
+  return {paymentType:'one-time', currency:defaultCurrency(), amount:'', discount:{type:'percent', value:''}, issue:{type:'signed'}, due:{type:'net', days:0}, lead:1,
     depositBy:'percent', depositPercent:'', count:'', schedule:'every30', rows:[], frequency:'monthly', ...p,
     duration: months && !years ? 'months' : p.duration === 'ongoing' ? 'ongoing' : 'years', ...(years ? {count:Number(p.count) / 12} : {})}; };
+/* A plan's money (2026-11-24): its Amount, less its Discount (a percentage of the amount, or an
+   amount — never more than it), plus VAT on what's left (`vatRate`, %; a plan saved before VAT has
+   none) = the Total its payments split. A quote's plan takes the quote's total instead (`total`). */
+const planMoney = (plan) => { const amount = r2((plan || {}).amount), d = (plan || {}).discount || {}, dv = Math.max(0, Number(d.value) || 0);
+  const discount = r2(d.type === 'amount' ? Math.min(dv, amount) : amount * Math.min(dv, 100) / 100);
+  const discounted = r2(amount - discount), vatRate = Number((plan || {}).vatRate) || 0, vat = r2(discounted * vatRate / 100);
+  return {amount, discount, discounted, vatRate, vat, total:r2(discounted + vat)}; };
+const discountWithin = (d, base) => !d || d.value === '' || d.value == null || (Number(d.value) >= 0 && (d.type === 'amount' ? Number(d.value) <= base : Number(d.value) <= 100));
 const dayOf = (v) => !v ? '' : typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : ymdOf(new Date(v));
 const addDays = (ymd, n) => ymdOf(new Date(new Date(`${ymd}T00:00:00`).getTime() + n * 86400000));
 const addMonths = (ymd, n) => { const [y, m, d] = ymd.split('-').map(Number), last = new Date(y, m - 1 + n + 1, 0).getDate(); return ymdOf(new Date(y, m - 1 + n, Math.min(d, last))); };
@@ -238,7 +266,7 @@ const planCycles = (plan) => { const c = planCount(plan), yearly = plan.frequenc
    of a subscription until cancelled. `cancelledOn`: no invoice after it. `locked`: payments with
    something paid on them, by id — they keep their amount and dates ({amount, invoiceDate, dueDate}). */
 function planSchedule(plan, {id = 'pt', signedOn = '', total, asOf = ymdOf(new Date()), preview = 1, cancelledOn = '', locked} = {}){
-  const type = paymentTypeOf(plan), amount = r2(total != null ? total : plan.amount), byDate = (plan.issue || {}).type === 'date';
+  const type = paymentTypeOf(plan), amount = r2(total != null ? total : planMoney(plan).total), byDate = (plan.issue || {}).type === 'date';
   // A date and whether it's known (else counted from day 0: today, until the signing).
   const at = (date, fixed) => ({date, fixed});
   const signedDay = byDate ? '' : dayOf(signedOn), start = byDate ? at(plan.issue.date || '', true) : at(signedDay || asOf, !!signedDay);
@@ -267,10 +295,15 @@ function planSchedule(plan, {id = 'pt', signedOn = '', total, asOf = ymdOf(new D
     // Edited: each installment's own amount (none set yet: 0) and dates.
     const depositDue = dueAfter(start), custom = plan.schedule === 'custom', over = custom ? plan.rows || [] : [];
     rows = [row(`${id}-d`, 'Deposit', deposit, start, depositDue)];
+    /* An edited installment's dates (2026-11-24, `rowDates:'own'`): each a Date, a Day (N days from
+       Day 0 — the deposit's invoice day: the signing or the fixed date) or nothing — then it has no
+       date and isn't invoiced until one is set. Edited before: a date not set is the 30-day one. */
+    const ownDates = custom && plan.rowDates === 'own', dayAt = (d) => at(start.date ? addDays(start.date, Number(d)) : '', start.fixed);
     for(let k = 1; k <= n; k++){
       const o = over[k - 1] || {}, set = (v) => v !== '' && v != null;
-      const du = set(o.dueDate) ? at(o.dueDate, true) : at(depositDue.date ? addDays(depositDue.date, INSTALLMENT_INTERVAL * k) : '', depositDue.fixed);
-      const inv = set(o.invoiceDate) ? at(o.invoiceDate, true) : after(du, -lead);
+      const pickDate = (date, d, fallback) => set(date) ? at(date, true) : set(d) ? dayAt(d) : ownDates ? at('', false) : fallback();
+      const du = pickDate(o.dueDate, o.dueDay, () => at(depositDue.date ? addDays(depositDue.date, INSTALLMENT_INTERVAL * k) : '', depositDue.fixed));
+      const inv = pickDate(o.invoiceDate, o.invoiceDay, () => after(du, -lead));
       rows.push(row(`${id}-i${k}`, String(o.name || '').trim() || `Installment ${k}`, set(o.amount) ? r2(o.amount) : custom ? 0 : k === n ? r2(rest - each * (n - 1)) : each, inv, du));
     }
   }
@@ -284,19 +317,26 @@ const countOk = (v, max = PLAN_MAX_COUNT) => v !== '' && v != null && Number.isI
 const daysOk = (v, max) => /^\d+$/.test(String(v ?? '')) && Number(v) <= max;
 // Complete: an amount, its dates set, a deposit under the total, a number; an edited schedule's every amount set.
 function planOk(plan, total){
-  const amount = Number(total != null ? total : plan.amount), issue = plan.issue || {}, due = plan.due || {}, type = paymentTypeOf(plan);
+  const amount = Number(total != null ? total : planMoney(plan).total), issue = plan.issue || {}, due = plan.due || {}, type = paymentTypeOf(plan);
   if(!(amount > 0) || (issue.type === 'date' && !ymdOk(issue.date))) return false;
+  // A plan's own discount (not a quote's): within its amount (or 100%); VAT a percentage.
+  if(total == null && (!discountWithin(plan.discount, r2(plan.amount)) || !(plan.vatRate == null || plan.vatRate === '' || (Number(plan.vatRate) >= 0 && Number(plan.vatRate) <= 100)))) return false;
   const dueOk = due.type === 'date' ? ymdOk(due.date) && !(issue.type === 'date' && due.date < issue.date) : due.type !== 'days' || daysOk(due.days, 3650);
   if(type === 'recurring') return dueOk && (plan.duration === 'ongoing' || countOk(plan.count, plan.duration === 'months' ? PLAN_MAX_COUNT : PLAN_MAX_YEARS));
   if(type === 'one-time') return dueOk;
   const pct = Number(plan.depositPercent);
   if(!(dueOk && daysOk(plan.lead, PLAN_MAX_LEAD) && pct > 0 && pct < 100 && countOk(plan.count))) return false;
-  return plan.schedule !== 'custom' || planSchedule(plan, {total}).every(x => x.amount > 0 && !(x.invoiceDate && x.dueDate && x.invoiceDate > x.dueDate));
+  // An edited schedule: every amount set; an invoice never after its payment's due date (as Days too).
+  const dayOk = (plan.rows || []).every(o => !(o.invoiceDay !== '' && o.invoiceDay != null && o.dueDay !== '' && o.dueDay != null && Number(o.invoiceDay) > Number(o.dueDay)));
+  return plan.schedule !== 'custom' || (dayOk && planSchedule(plan, {total}).every(x => x.amount > 0 && !(x.invoiceDate && x.dueDate && x.invoiceDate > x.dueDate)));
 }
 // A plan as saved: numbers as numbers; an edited schedule's rows, as many as the installments.
-const normalizePlan = (p) => ({...p, amount:r2(p.amount), depositPercent:p.depositPercent === '' ? '' : Number(p.depositPercent), count:p.count === '' ? '' : Number(p.count), lead:Number(p.lead) || 0,
+const dayNumOrEmpty = (v) => v === '' || v == null || !Number.isFinite(Number(v)) ? '' : Math.round(Number(v));
+const normalizePlan = (p) => ({...p, amount:r2(p.amount), discount:{type:(p.discount || {}).type === 'amount' ? 'amount' : 'percent', value:Number((p.discount || {}).value) || 0},
+  ...(p.vatRate == null || p.vatRate === '' ? {vatRate:undefined} : {vatRate:Number(p.vatRate) || 0}), depositPercent:p.depositPercent === '' ? '' : Number(p.depositPercent), count:p.count === '' ? '' : Number(p.count), lead:Number(p.lead) || 0,
   issue:p.issue.type === 'date' ? {type:'date', date:p.issue.date || ''} : {type:'signed'}, due:p.due.type === 'date' ? {type:'date', date:p.due.date || ''} : {type:p.due.type, days:Number(p.due.days) || 0},
-  rows:p.schedule === 'custom' ? (p.rows || []).slice(0, planCount(p)).map(x => ({amount:x.amount === '' || x.amount == null ? '' : r2(x.amount), invoiceDate:x.invoiceDate || '', dueDate:x.dueDate || '', ...(String(x.name || '').trim() ? {name:String(x.name).trim()} : {})})) : []});
+  rows:p.schedule === 'custom' ? (p.rows || []).slice(0, planCount(p)).map(x => ({amount:x.amount === '' || x.amount == null ? '' : r2(x.amount), invoiceDate:x.invoiceDate || '', dueDate:x.dueDate || '',
+    invoiceDay:x.invoiceDate ? '' : dayNumOrEmpty(x.invoiceDay), dueDay:x.dueDate ? '' : dayNumOrEmpty(x.dueDay), ...(String(x.name || '').trim() ? {name:String(x.name).trim()} : {})})) : []});
 /* Terms saved before plans, as a plan to edit (saved again, they're the plan's): a Subscription is
    Recurring from its first due date; installments a deposit (the first) and the rest in equal parts;
    a One-Time payment its amount. `x`: a payment structure, a document's payment term or a plan. */
@@ -318,8 +358,10 @@ const planOfShares = (list) => !(list || []).length ? newPaymentPlan()
 // An installment's invoice: issued on its invoice date once that's come (or recorded, before plans).
 const invoicedOn = (inst, today = ymdOf(new Date())) => inst.invoicedAt || (inst.invoiceDate && inst.invoiceDate <= today ? inst.invoiceDate : '');
 // The day a "Quote Signed" plan counts from: its quote's signing, else the record's latest signed quote.
+// A plan linked to a quote (made from it, or pulled from it — 2026-11-24) waits for that quote only.
 const quoteSignedOn = (quotes, s) => { const signed = (quotes || []).filter(q => q.status === 'signed' && q.signedAt);
   const own = signed.find(q => q.id === s.quoteId); if(own) return dayOf(own.signedAt);
+  if(s.quoteId) return '';
   return signed.filter(q => q.object === s.object && String(q.recordId) === String(s.recordId)).map(q => dayOf(q.signedAt)).sort().pop() || ''; };
 /* A plan's rows as it makes them now (`patch`: dated from a signing, cancelled) — a row kept keeps
    everything but its dates (payments, invoices, balances), and a dated one with something paid on
@@ -345,16 +387,57 @@ const rollSubscription = (s) => s && planOngoing(s.plan) && !s.archived ? refres
    its record, dated from the signing — its invoices due by then are issued at
    once (invoices.jsx). A quote saved before plans has no invoice dates: each payment is invoiced on
    its due date. */
+/* A quote linked to a plan (`linkedPlanId` — the quote started from the plan, or the plan was pulled
+   from the quote; 2026-11-24): signing updates that plan instead — the signed quote's terms and money
+   as its next revision (revisePlan: what's paid stays), dated from the signing, its changed invoices
+   archived and issued again. A linked plan that can't take it (cancelled, or paid on with another
+   payment type) leaves the quote to make its own plan, as before. */
 function plansOnQuoteSigned(hub, quote, signedAt){
-  const on = dayOf(signedAt), holder = hubRecord(hub, quote.object, quote.recordId);
-  const make = holder && (quote.payment || (quote.installments || []).length) && quoteTotal(quote) > 0 && !(hub.accounting || []).some(s => s.quoteId === quote.id);
-  const made = make ? scheduleFromQuote({...quote, status:'signed', signedAt}, quote.object, holder) : null;
+  const on = dayOf(signedAt), holder = hubRecord(hub, quote.object, quote.recordId), signedQuote = {...quote, status:'signed', signedAt};
+  const linked0 = quote.linkedPlanId && quote.payment ? (hub.accounting || []).find(s => s.id === quote.linkedPlanId) : null;
+  const plan1 = linked0 ? planFromQuote(signedQuote) : null;
+  const revised = linked0 ? revisePlan(linked0, plan1, {signedOn: plan1.issue.type === 'signed' ? on : '', by:'System'}) : null;
+  const linked = revised ? {...revised, source:'quote', quoteId:quote.id, quoteNumber:quote.number, quoteTitle:quote.title} : null;
+  const make = !linked && holder && (quote.payment || (quote.installments || []).length) && quoteTotal(quote) > 0 && !(hub.accounting || []).some(s => s.quoteId === quote.id && s.id !== quote.linkedPlanId);
+  const made = make ? scheduleFromQuote(signedQuote, quote.object, holder) : null;
   const plan = made ? {...made, number:nextPlanNumber(hub.accounting), revision:1, createdAt:new Date(), createdBy:'System',
     ...(made.plan ? {} : {installments:made.installments.map(x => x.dueDate && !x.invoiceDate ? {...x, invoiceDate:x.dueDate} : x)})} : null;
-  hub.setAccounting(list => [...list.map(s => !s.plan || (s.plan.issue || {}).type === 'date' || s.signedOn
+  // Plans waiting for "Quote Signed" on its record are dated from it — not one linked to another quote.
+  hub.setAccounting(list => [...list.map(s => linked && s.id === linked.id ? linked : !s.plan || (s.plan.issue || {}).type === 'date' || s.signedOn || (s.quoteId && s.quoteId !== quote.id)
     || !(s.quoteId === quote.id || (s.object === quote.object && String(s.recordId) === String(quote.recordId))) ? s : withSignedOn(s, on)),
     ...(plan && !list.some(s => s.quoteId === quote.id) ? [plan] : [])]);
+  if(linked){
+    hub.setInvoices && hub.setInvoices(list => archiveChangedInvoices(list, linked));
+    hub.add(linked.object, linked.recordId, {type:'payment', action:'Payment plan edited', detail:`${planTitle(linked)} · revision ${linked.revision} · from ${quote.number}`, source:'you', by:'System'});
+  }
   if(plan) hub.add(plan.object, plan.recordId, {type:'payment', action:'Payment plan created', detail:`${planTitle(plan)} · from ${quote.number}`, source:'you', by:'System'});
+}
+/* A plan's next revision (2026-11-24, out of RecordAccounting's edit so a signed linked quote can
+   make one too): its payments are made by the new plan (planSchedule), except those with something
+   paid on them, which stay as they are (with their balances); a payment kept through the edit keeps
+   the invoice it had issued before plans. A paid One-Time payment stays: One-Time, as it is;
+   Installment, the deposit. Reversed payments stay. The revision before is kept in `revisions`.
+   Null when it can't be made: cancelled, or paid on and the type changed (not from One-Time). */
+function revisePlan(s0, plan, {signedOn = '', by = CURRENT_USER.name, at = new Date()} = {}){
+  if(!s0 || s0.cancelledOn) return null;
+  const was = paymentTypeOf(s0), first = s0.installments[0], paidOne = was === 'one-time' && hasPayments(s0) ? first : null;
+  if(was !== 'one-time' && hasPayments(s0) && plan.paymentType !== was) return null;
+  const old = s0.installments || [], used = new Set(), tops = old.filter(x => !x.parentId);
+  // Saved before plans: the plan's payments take theirs, by place (their payments and invoices stay with them).
+  const fresh = planSchedule(plan, {id:s0.id, signedOn, locked:paidOne ? null : lockedOf(s0)}).map((f, i) => !s0.plan && tops[i] ? {...f, id:tops[i].id} : f);
+  const kids = (x) => old.filter(b => b.parentId === x.id).flatMap(b => [b, ...kids(b)]);
+  const paidTree = (x) => (x.payments || []).length > 0 || kids(x).some(k => (k.payments || []).length);
+  const rows = fresh.flatMap((f, i) => {
+    if(paidOne && i === 0){ used.add(first.id); return [{...first, description: plan.paymentType === 'one-time' ? first.description : 'Deposit'}]; }
+    const o = old.find(x => x.id === f.id && !x.parentId);
+    if(o && paidTree(o)){ used.add(o.id); return [o, ...kids(o)]; }
+    return [o && o.invoicedAt ? {...f, invoicedAt:o.invoicedAt} : f];
+  });
+  const installments = [...rows, ...old.filter(x => !x.parentId && !used.has(x.id) && paidTree(x)).flatMap(x => [x, ...kids(x)])];
+  const total = r2(installments.filter(x => !x.parentId).reduce((a, x) => a + x.amount, 0));
+  const {signedOn: _was, ...keep} = s0;
+  return {...keep, paymentType:plan.paymentType, currency:plan.currency, total, plan, ...(signedOn ? {signedOn} : {}), installments, revision:(s0.revision || 1) + 1,
+    revisions:[...(s0.revisions || []), {revision:s0.revision || 1, paymentType:was, currency:scheduleCurrency(s0), total:s0.total, plan:s0.plan || null, savedAt:at, savedBy:by}]};
 }
 
 /* A schedule as a table: each payment's name, invoice date, due date (or Day N) and amount, then
@@ -401,9 +484,111 @@ function PaymentPlanTable({rows, currency, rule, ongoing}){
    (its payments' ids). `signedOn`: the day it's already signed (Accounting: the record's quote), so
    the schedule shows its dates. */
 const PT_W = 280, PT_H = 36;
-function PaymentTermsFields({plan, onChange, total, currency, signedLabel = 'Quote Signed', paid, signedOn, locked, scheduleId}){
+/* A discount's control (a quote's Discount and Referral Discount, a plan's Discount): % or an amount
+   in `currency`, then the value; red while it's out of range (`ok`). */
+function DiscountControl({label, value, onChange, currency, ok = true}){
+  const d = value || {type:'percent', value:''};
+  return (
+    <div style={{display:'flex', alignItems:'center', gap:10, padding:'6px 0'}}>
+      <span style={{flex:1, fontSize:13, color:T.attioText}}>{label}</span>
+      <div role="radiogroup" aria-label={`${label} type`} style={{display:'inline-flex', border:`1px solid ${T.borderStrong}`, borderRadius:8, overflow:'hidden'}}>
+        {[['percent', '%'], ['amount', currency]].map(([k, l]) => (
+          <button key={k} type="button" role="radio" aria-checked={d.type === k} onClick={()=>onChange({...d, type:k})}
+            style={{border:'none', cursor:'pointer', padding:'5px 10px', fontSize:12.5, fontWeight:500, fontFamily:'inherit', background: d.type === k ? T.black : 'transparent', color: d.type === k ? '#fff' : T.gray600}}>{l}</button>
+        ))}
+      </div>
+      <input value={d.value ?? ''} onChange={e=>onChange({...d, value:e.target.value.replace(/[^0-9.]/g, '')})} inputMode="decimal" placeholder="0" aria-label={label}
+        style={{...fieldText, width:110, textAlign:'right', fontVariantNumeric:'tabular-nums', borderColor: ok ? T.borderStrong : T.red}}/>
+    </div>);
+}
+/* An edited installment's invoice or due date (2026-11-24): empty, a Day (N days from Day 0 — the
+   signing or the plan's fixed date) or a Date. The field opens a menu — Day and Date, each opening
+   its own panel beside it (a number of days; a month calendar), and Clear once something's set.
+   `value` {day, date}; `onChange({day, date})` — one of them set, or both ''. */
+const fmtDayOrDate = (v) => v && v.date ? fmtQuoteDate(v.date) : v && v.day !== '' && v.day != null ? `Day ${v.day}` : '';
+function DayOrDateField({value, onChange, ariaLabel}){
+  const [pos, setPos] = React.useState(null);           // the menu: {top, left, up}
+  const [sub, setSub] = React.useState(null);           // 'day' | 'date': the panel open beside the menu
+  const [days, setDays] = React.useState('');
+  const [month, setMonth] = React.useState(null);
+  const ref = React.useRef(null), menuRef = React.useRef(null);
+  const z = useFloatZ(!!pos);
+  const v = value || {}, shown = fmtDayOrDate(v);
+  const MENU_W = 168, PANEL_W = 264, PANEL_H = 300;
+  // Under (or above) the field, from its left edge; the panel opens on the menu's right, or its left when there's no room.
+  const open = () => { const r = ref.current.getBoundingClientRect(), up = window.innerHeight - r.bottom < PANEL_H + 8;
+    const flip = r.left + MENU_W + PANEL_W + 12 > window.innerWidth, left = Math.max(8, Math.min(r.left, window.innerWidth - MENU_W - 8));
+    setPos({top: up ? Math.max(8, r.top - 4) : r.bottom + 4, up, flip, ...(flip ? {right:window.innerWidth - left - MENU_W} : {left})});
+    setSub(null); setDays(v.day !== '' && v.day != null ? String(v.day) : ''); const d = fromYmd(v.date) || new Date(); setMonth(new Date(d.getFullYear(), d.getMonth(), 1)); };
+  const close = () => { setPos(null); setSub(null); };
+  React.useEffect(() => {
+    if(!pos) return;
+    const down = (e) => { if(!(menuRef.current && menuRef.current.contains(e.target)) && !(ref.current && ref.current.contains(e.target))) close(); };
+    const key = (e) => { if(e.key === 'Escape'){ e.stopPropagation(); close(); } };
+    const onScroll = (e) => { if(!(menuRef.current && menuRef.current.contains(e.target))) close(); };
+    document.addEventListener('mousedown', down); document.addEventListener('keydown', key, true); window.addEventListener('scroll', onScroll, true);
+    return () => { document.removeEventListener('mousedown', down); document.removeEventListener('keydown', key, true); window.removeEventListener('scroll', onScroll, true); };
+  }, [pos]);
+  const setDay = () => { if(days === '') return; onChange({day:Math.round(Number(days)), date:''}); close(); };
+  const pickDate = (d) => { onChange({day:'', date:d}); close(); };
+  const item = (id, label) => (
+    <div role="menuitem" aria-haspopup="true" aria-expanded={sub === id} onMouseEnter={()=>setSub(id)} onClick={()=>setSub(id)}
+      style={{display:'flex', alignItems:'center', gap:8, padding:'7px 10px', borderRadius:6, fontSize:13, color:T.attioText, cursor:'pointer', background: sub === id ? T.headerBg : 'transparent'}}>
+      <span style={{flex:1}}>{label}</span><Icon name="chevDown" size={11} color={T.gray600} style={{transform:`rotate(${pos && pos.flip ? 90 : -90}deg)`}}/>
+    </div>);
+  const cells = [];
+  if(month){ const first = month.getDay(), n = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
+    for(let i = 0; i < first; i++) cells.push(null);
+    for(let d = 1; d <= n; d++) cells.push(ymd(new Date(month.getFullYear(), month.getMonth(), d))); }
+  const step = (n) => setMonth(m => new Date(m.getFullYear(), m.getMonth() + n, 1));
+  const nav = (dir) => <button type="button" aria-label={dir < 0 ? 'Previous month' : 'Next month'} onClick={()=>step(dir)} style={{width:28, height:28, border:'none', borderRadius:6, background:'transparent',
+    cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center'}}><Icon name="chevDown" size={12} color={T.gray600} style={{transform:`rotate(${dir < 0 ? 90 : -90}deg)`}}/></button>;
+  const floating = {background:'#fff', border:`1px solid ${T.border}`, borderRadius:10, boxShadow:'0 4px 16px rgba(16,24,40,.12)', boxSizing:'border-box', fontFamily:"'DM Sans', sans-serif"};
+  return (
+    <div style={{position:'relative', minWidth:0}}>
+      <button ref={ref} type="button" aria-label={ariaLabel} aria-haspopup="menu" aria-expanded={!!pos} onClick={()=>pos ? close() : open()}
+        style={{...fieldInput, height:PT_H, boxSizing:'border-box', width:'100%', display:'flex', alignItems:'center', gap:8, cursor:'pointer', textAlign:'left',
+          borderColor: pos ? T.blue : T.borderStrong, color: shown ? T.attioText : T.gray400}}>
+        <span style={{flex:1, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', fontVariantNumeric:'tabular-nums'}}>{shown || 'Not set'}</span>
+        <Icon name="calendar" size={14} color={T.gray600}/>
+      </button>
+      {pos && ReactDOM.createPortal(
+        <div ref={menuRef} data-hof-floating="" style={{position:'fixed', zIndex:z, ...(pos.flip ? {right:pos.right, flexDirection:'row-reverse'} : {left:pos.left}),
+          ...(pos.up ? {bottom:window.innerHeight - pos.top} : {top:pos.top}), display:'flex', alignItems: pos.up ? 'flex-end' : 'flex-start', gap:4}}>
+          <div role="menu" aria-label={ariaLabel} style={{...floating, width:MENU_W, padding:6}}>
+            {item('day', 'Day')}{item('date', 'Date')}
+            {shown && <>
+              <div style={{height:1, background:T.border, margin:'4px 0'}}/>
+              <div role="menuitem" onMouseEnter={()=>setSub(null)} onClick={()=>{ onChange({day:'', date:''}); close(); }}
+                style={{padding:'7px 10px', borderRadius:6, fontSize:13, color:T.attioText, cursor:'pointer'}}>Clear</div>
+            </>}
+          </div>
+          {sub === 'day' && (
+            <div style={{...floating, width:PANEL_W, padding:12, display:'flex', flexDirection:'column', gap:10}}>
+              <div style={{display:'flex', alignItems:'center', gap:8, border:`1px solid ${T.borderStrong}`, borderRadius:8, padding:'0 10px', height:PT_H}}>
+                <span style={{fontSize:12.5, color:T.attioMuted}}>Day</span>
+                <input autoFocus value={days} onChange={e=>setDays(e.target.value.replace(/[^0-9]/g, '').slice(0, 4))} onKeyDown={e=>{ if(e.key === 'Enter'){ e.preventDefault(); setDay(); } }}
+                  inputMode="numeric" placeholder="30" aria-label="Day number" style={{flex:1, minWidth:0, border:'none', outline:'none', fontSize:13, fontFamily:'inherit', color:T.attioText, background:'transparent', textAlign:'right', fontVariantNumeric:'tabular-nums'}}/>
+              </div>
+              <StCta label="Set Day" disabled={days === ''} onClick={setDay}/>
+            </div>)}
+          {sub === 'date' && month && (
+            <div style={{...floating, width:PANEL_W, padding:8, display:'flex', flexDirection:'column', gap:4}}>
+              <div style={{display:'flex', alignItems:'center', gap:4}}>{nav(-1)}
+                <span style={{flex:1, textAlign:'center', fontSize:13, fontWeight:600, color:T.attioText}}>{month.toLocaleDateString('en-US', {month:'long', year:'numeric', timeZone:LOCAL_TZ})}</span>{nav(1)}</div>
+              <div style={{display:'grid', gridTemplateColumns:'repeat(7, 1fr)', gap:2, fontSize:12, color:T.attioMuted, textAlign:'center', padding:'2px 0 4px', borderBottom:`1px solid ${T.border}`}}>
+                {DATE_WEEKDAYS.map(d => <span key={d}>{d}</span>)}</div>
+              <div style={{display:'grid', gridTemplateColumns:'repeat(7, 1fr)', gap:2, paddingTop:2}}>
+                {cells.map((c, i) => c ? <DateOption key={c} label={Number(c.slice(8))} on={c === v.date} today={c === ymd(new Date())} onPick={()=>pickDate(c)}/> : <span key={`b${i}`}/>)}</div>
+            </div>)}
+        </div>, document.body)}
+    </div>
+  );
+}
+// `head`: a field above Payment Type, in its column (Add Payment Plan's Quote).
+function PaymentTermsFields({plan, onChange, total, currency, signedLabel = 'Quote Signed', paid, signedOn, locked, scheduleId, head}){
   const set = (p) => onChange({...plan, ...p}), type = paymentTypeOf(plan), inQuote = total != null;
-  const amount = Number(inQuote ? total : plan.amount) || 0, cur = currency || plan.currency, unit = RECURRING_UNIT[plan.frequency] || 'Month';
+  const money = planMoney(plan), amount = Number(inQuote ? total : money.total) || 0, cur = currency || plan.currency, unit = RECURRING_UNIT[plan.frequency] || 'Month';
   const section = {fontSize:11, fontWeight:600, color:T.attioFaint, textTransform:'uppercase', letterSpacing:.4};
   const divider = <div style={{borderTop:`1px solid ${T.border}`, margin:'8px -20px 4px'}}/>;
   const control = {...fieldControl, height:PT_H, boxSizing:'border-box'}, dateInput = {...fieldInput, height:PT_H, boxSizing:'border-box'};
@@ -445,14 +630,20 @@ function PaymentTermsFields({plan, onChange, total, currency, signedLabel = 'Quo
   const custom = type === 'installments' && plan.schedule === 'custom';
   // Edit: the schedule as it stands, each installment's amount set on its row (its dates the 30-day ones until changed).
   const [editOn, setEditing] = React.useState(false), editing = editOn && custom;
-  const edit = () => { if(!custom) set({schedule:'custom', rows:rows.slice(1).map(x => ({amount:String(x.amount), invoiceDate:'', dueDate:''}))}); setEditing(true); };
+  /* Each installment's dates as the schedule has them now (2026-11-24): a date once the plan is
+     dated, else its Day — each one can be changed or cleared. Edited before (no `rowDates`): the
+     same, so nothing moves. */
+  const dayNum = (t) => { const m = /^Day (-?\d+)$/.exec(t || ''); return m ? Number(m[1]) : ''; };
+  const edit = () => { if(!custom || plan.rowDates !== 'own') set({schedule:'custom', rowDates:'own', rows:rows.slice(1).map((x, k) => ({...((plan.rows || [])[k] || {}), amount:String(x.amount),
+    invoiceDate:x.invoiceDate || '', dueDate:x.dueDate || '', invoiceDay: x.invoiceDate ? '' : dayNum(x.invoiceTentative), dueDay: x.dueDate ? '' : dayNum(x.tentative)}))}); setEditing(true); };
   const own = () => Array.from({length:planCount(plan)}, (_, i) => (plan.rows || [])[i] || {});
   const setRow = (k, p) => set({rows:own().map((o, i) => i === k ? {...o, ...p} : o)});
-  const addRow = () => set({count:planCount(plan) + 1, rows:[...own(), {amount:'', invoiceDate:'', dueDate:''}]});
+  const addRow = () => set({count:planCount(plan) + 1, rows:[...own(), {amount:'', invoiceDate:'', dueDate:'', invoiceDay:'', dueDay:''}]});
   const deleteRow = (k) => set({count:planCount(plan) - 1, rows:own().filter((_, i) => i !== k)});
   const cols = 'minmax(0, 1fr) 170px 170px 170px 28px';
   return (<>
     {stack(<>
+      {head}
       <Field label="Payment Type" required>{(
         <div role="radiogroup" aria-label="Payment type" style={{display:'inline-flex', border:`1px solid ${T.borderStrong}`, borderRadius:8, overflow:'hidden', background:'#fff'}}>
           {PAYMENT_TYPES.map(([id, l]) => { const off = id !== type && (paid ? id === 'recurring' : lockedAny); return (
@@ -462,8 +653,8 @@ function PaymentTermsFields({plan, onChange, total, currency, signedLabel = 'Quo
         </div>)}</Field>
       {!inQuote && <>
         {F('Currency', paid || lockedAny ? fixed(cur) : pick(cur, currencyOptions(), (c)=>c && set({currency:c}), 'Currency'), null, !(paid || lockedAny))}
-        {F(type === 'installments' ? 'Total Amount' : 'Amount', paidOneTime ? fixed(fmtMoney(paid.amount, cur), 'paid')
-          : num(plan.amount, (v)=>set({amount:v}), type === 'installments' ? 'Total amount' : 'Amount', cur, null, true), null, !paidOneTime)}
+        {F('Amount', paidOneTime ? fixed(fmtMoney(paid.amount, cur), 'paid')
+          : num(plan.amount, (v)=>set({amount:v}), 'Amount', cur, null, true), null, !paidOneTime)}
       </>}
       {type === 'one-time' && (paidOneTime ? <>{F('Invoice Issue Date', fixed(fmtQuoteDate(paid.invoiceDate) || '—'), null, false)}{F('Due Date', fixed(fmtQuoteDate(paid.dueDate) || '—'), null, false)}</>
         : <>{issueField('Invoice Issue Date')}{dueField('Due Date')}</>)}
@@ -476,6 +667,25 @@ function PaymentTermsFields({plan, onChange, total, currency, signedLabel = 'Quo
           plan.duration !== 'ongoing' && num(plan.count, (v)=>set({count:v}), plan.duration === 'months' ? 'Number of months' : 'Number of years', null, plan.duration === 'months' ? 'months' : 'years'))}
       </>}
     </>)}
+    {/* Discount & Tax (2026-11-24; a plan's own — a quote has its own under its plan): the quote's
+        summary — Amount, Discount, Discounted amount, VAT, Total — the Total what the payments split. */}
+    {!inQuote && !paidOneTime && <>
+      {divider}<span style={section}>Discount & Tax</span>
+      <div style={{maxWidth:420, width:'100%', alignSelf:'flex-end'}}>
+        {quoteSumRow('Amount', fmtMoney(money.amount, cur))}
+        <DiscountControl label="Discount" value={plan.discount} currency={cur} ok={discountWithin(plan.discount, money.amount)} onChange={(d)=>set({discount:d})}/>
+        {quoteSumRow('Discount amount', `− ${fmtMoney(money.discount, cur)}`)}
+        {quoteSumRow('Discounted amount', fmtMoney(money.discounted, cur))}
+        <div style={{display:'flex', alignItems:'center', gap:10, padding:'6px 0'}}>
+          <span style={{flex:1, fontSize:13, color:T.attioText}}>VAT</span>
+          <div style={{...box, width:110, height:32}}>
+            <input value={plan.vatRate ?? ''} onChange={e=>set({vatRate:e.target.value.replace(/[^0-9.]/g, '')})} inputMode="decimal" placeholder="0" aria-label="VAT percentage" style={bare}/>
+            <span style={affix}>%</span></div>
+        </div>
+        {quoteSumRow('VAT amount', fmtMoney(money.vat, cur))}
+        <div style={{borderTop:`2px solid ${T.attioText}`, marginTop:6, paddingTop:4}}>{quoteSumRow('Total', fmtMoney(money.total, cur), true)}</div>
+      </div>
+    </>}
     {type === 'installments' && <>
       {divider}<span style={section}>Deposit</span>
       {stack(<>
@@ -485,7 +695,7 @@ function PaymentTermsFields({plan, onChange, total, currency, signedLabel = 'Quo
           {F('Invoice Issue Date', fixed(fmtQuoteDate(paid ? paid.invoiceDate : rows[0].invoiceDate) || '—'), null, false)}
           {F('Due Date', fixed(fmtQuoteDate(paid ? paid.dueDate : rows[0].dueDate) || '—'), null, false)}
         </> : <>
-          {F('Amount', pick(byAmount ? 'amount' : 'percent', [{value:'amount', label:'Fixed Amount'}, {value:'percent', label:'Percentage of Total Amount'}], (v)=>{ setTyped(null); set({depositBy:v}); }, 'Deposit type'), depositInput)}
+          {F('Amount', pick(byAmount ? 'amount' : 'percent', [{value:'amount', label:'Fixed Amount'}, {value:'percent', label:'Percentage of Total'}], (v)=>{ setTyped(null); set({depositBy:v}); }, 'Deposit type'), depositInput)}
           {issueField('Invoice Issue Date')}
           {dueField('Due Date')}
         </>}
@@ -521,10 +731,11 @@ function PaymentTermsFields({plan, onChange, total, currency, signedLabel = 'Quo
                 ? paid ? <span style={{fontSize:13, color:T.attioText, fontVariantNumeric:'tabular-nums'}}>{fmtMoney(x.amount, cur)}</span>
                   : num(typed != null && byAmount ? typed : String(x.amount), (v)=>{ setTyped(v); set({depositBy:'amount', depositPercent: v === '' || !(amount > 0) ? '' : Number(v) / amount * 100}); }, 'Deposit amount', cur, null, true)
                 : num(((plan.rows || [])[i - 1] || {}).amount ?? (x.amount ? String(x.amount) : ''), (v)=>setRow(i - 1, {amount:v}), `${x.description} amount`, cur, null, true)}
-              {date(i === 0 ? (issue.type === 'date' ? issue.date : x.invoiceDate) : ((plan.rows || [])[i - 1] || {}).invoiceDate || x.invoiceDate,
-                (v)=>i === 0 ? set({issue:{type:'date', date:v}}) : setRow(i - 1, {invoiceDate:v}), `${x.description} invoice issue date`, x.invoiceTentative)}
-              {date(i === 0 ? (due.type === 'date' ? due.date : x.dueDate) : ((plan.rows || [])[i - 1] || {}).dueDate || x.dueDate,
-                (v)=>i === 0 ? set({due:{type:'date', date:v}}) : setRow(i - 1, {dueDate:v}), `${x.description} payment due date`, x.tentative)}
+              {/* The deposit's dates are the plan's; an installment's: empty, a Day or a Date (DayOrDateField). */}
+              {i === 0 ? date(issue.type === 'date' ? issue.date : x.invoiceDate, (v)=>set({issue:{type:'date', date:v}}), `${x.description} invoice issue date`, x.invoiceTentative)
+                : (o => <DayOrDateField value={{day:o.invoiceDay ?? '', date:o.invoiceDate || ''}} onChange={(d)=>setRow(i - 1, {invoiceDay:d.day, invoiceDate:d.date})} ariaLabel={`${x.description} invoice issue date`}/>)((plan.rows || [])[i - 1] || {})}
+              {i === 0 ? date(due.type === 'date' ? due.date : x.dueDate, (v)=>set({due:{type:'date', date:v}}), `${x.description} payment due date`, x.tentative)
+                : (o => <DayOrDateField value={{day:o.dueDay ?? '', date:o.dueDate || ''}} onChange={(d)=>setRow(i - 1, {dueDay:d.day, dueDate:d.date})} ariaLabel={`${x.description} payment due date`}/>)((plan.rows || [])[i - 1] || {})}
               {/* The deposit stays; an installment can go while one is left (not one before a paid one). */}
               {i > 0 && i > lastLocked && rows.length > 2 ? <button type="button" title={`Delete ${x.description}`} onClick={()=>deleteRow(i - 1)}
                 style={{border:'none', background:'transparent', cursor:'pointer', display:'flex', justifyContent:'center', padding:4}}><Icon name="trash" size={14} color={T.gray600}/></button> : <span/>}
@@ -544,16 +755,22 @@ function PaymentTermsFields({plan, onChange, total, currency, signedLabel = 'Quo
    Save and Freeze. An existing plan: Freeze Plan / Unfreeze Plan at the top (`frozen`, `onFreeze`),
    at once. `locked` / `scheduleId` / `signedOn`: PaymentTermsFields'. `heading` / `zIndex` /
    `signedLabel`: Documents' Add Payment Plan, over its builder. */
-function PaymentStructurePanel({initial, onCancel, onSave, heading, zIndex, signedLabel, signedOn, locked, scheduleId, isNew, frozen, onFreeze}){
+/* `quotes` (Add Payment Plan, 2026-11-24): the quotes it can be pulled from — picking one fills the
+   plan with the quote's terms and money (planFromQuote) and links the two (`onSave(plan, {freeze,
+   quoteId})`): signing that quote then updates this plan. */
+function PaymentStructurePanel({initial, onCancel, onSave, heading, zIndex, signedLabel, signedOn, locked, scheduleId, isNew, frozen, onFreeze, quotes}){
   const paid = initial && initial.paid;
   const [plan, setPlan] = React.useState(() => newPaymentPlan(initial ? (({paid: _, ...p}) => p)(initial) : undefined));
+  const [quoteId, setQuoteId] = React.useState('');
+  const pullQuote = (id) => { const q = (quotes || []).find(x => x.id === id); if(!q) return; setQuoteId(id); setPlan(planFromQuote(q)); };
   // A paid One-Time payment as the deposit: its amount, the total more than it.
-  const view = paid && plan.paymentType === 'installments' ? {...plan, depositBy:'amount', depositPercent: Number(plan.amount) > 0 ? paid.amount / Number(plan.amount) * 100 : ''} : plan;
+  const net = planMoney(plan).total;
+  const view = paid && plan.paymentType === 'installments' ? {...plan, depositBy:'amount', depositPercent: net > 0 ? paid.amount / net * 100 : ''} : plan;
   const def = () => normalizePlan(view);
-  const ok = planOk(paid && view.paymentType === 'one-time' ? {...view, amount:paid.amount} : view);
+  const ok = planOk(paid && view.paymentType === 'one-time' ? {...view, amount:paid.amount, discount:null, vatRate:0} : view);
   // Saved untouched, an existing plan stays exactly as it is (a quote's stay the quote's, invoices and all).
   const opened = React.useRef(JSON.stringify(plan)).current;
-  const save = (freeze) => ok && (!isNew && JSON.stringify(plan) === opened ? onCancel() : onSave(def(), {freeze}));
+  const save = (freeze) => ok && (!isNew && JSON.stringify(plan) === opened ? onCancel() : onSave(def(), {freeze, quoteId:quoteId || undefined}));
   return (
     <CreatePanelFrame title={heading || (isNew ? 'Add Payment Plan' : 'Edit Payment Plan')} onClose={onCancel} placement="fixed" width={920} zIndex={zIndex}
       headerActions={onFreeze && <button type="button" onClick={onFreeze} style={{...btnSecondarySm, display:'inline-flex', alignItems:'center', gap:6}}>
@@ -563,7 +780,10 @@ function PaymentStructurePanel({initial, onCancel, onSave, heading, zIndex, sign
         {isNew && <StSecondary label="Save and Freeze" disabled={!ok} onClick={()=>save(true)}/>}
         <StCta label="Save" disabled={!ok} onClick={()=>save(false)}/>
       </>}>
-      <PaymentTermsFields plan={view} onChange={setPlan} signedLabel={signedLabel} paid={paid} signedOn={signedOn} locked={locked} scheduleId={scheduleId}/>
+      <PaymentTermsFields plan={view} onChange={setPlan} signedLabel={signedLabel} paid={paid} signedOn={signedOn} locked={locked} scheduleId={scheduleId}
+        head={isNew && (quotes || []).length > 0 && <Field label="Quote" wide><div style={{display:'grid', gridTemplateColumns:`${PT_W}px ${PT_W}px`, gap:12}}>
+          <Dropdown value={quoteId} placeholder="Select quote" ariaLabel="Quote" controlStyle={{...fieldControl, height:PT_H, boxSizing:'border-box'}}
+            options={quotes.map(q => ({value:q.id, label:`${q.number} · ${q.title} · ${fmtMoney(quoteTotal(q), quoteCurrency(q))}`}))} onChange={pullQuote}/><span/></div></Field>}/>
     </CreatePanelFrame>
   );
 }
@@ -960,46 +1180,38 @@ function RecordAccounting({object, record}){
   };
   // The day a plan's Quote Signed / Document Signed counts from: its document's signing, else the record's quote.
   const signedOnOf = (s) => s && s.source === 'document' ? s.signedOn || '' : quoteSignedOn(hub.quotes, s || {object, recordId:record.id});
+  /* The quotes a new plan can be pulled from (2026-11-24): on the records whose plans this one shows,
+     a draft or sent quote (not expired, not signed — signing makes its own) with a payment plan and a
+     total, not linked to a plan already. */
+  const scope = new Set(planScopeOf(object, record, hub.records));
+  const pullableQuotes = (hub.quotes || []).filter(q => scope.has(`${q.object}|${q.recordId}`) && (q.status === 'draft' || q.status === 'sent') && !quoteExpired(q)
+    && q.payment && quoteTotal(q) > 0 && !(q.linkedPlanId && (hub.accounting || []).some(s => s.id === q.linkedPlanId)));
   // Add Payment Plan: a new plan on the record — numbered, frozen at once with Save and Freeze.
-  const createPlan = (plan, {freeze} = {}) => {
-    const id = acId('ps'), signedOn = plan.issue.type === 'signed' ? signedOnOf(null) : '', at = new Date();
+  /* Pulled from a quote (`quoteId`, 2026-11-24): linked to it — "From <quote>", waiting for that
+     quote's signing (not another's), and the quote's `linkedPlanId` this plan, so signing it updates
+     this plan rather than making another. */
+  const createPlan = (plan, {freeze, quoteId} = {}) => {
+    const q = quoteId && (hub.quotes || []).find(x => x.id === quoteId);
+    const id = acId('ps'), signedOn = plan.issue.type === 'signed' ? (q ? '' : signedOnOf(null)) : '', at = new Date();
     const installments = planSchedule(plan, {id, signedOn});
-    const s = {id, number:nextPlanNumber(hub.accounting), source:'manual', object, recordId:record.id, createdAt:at, createdBy:CURRENT_USER.name,
+    const s = {id, number:nextPlanNumber(hub.accounting), source: q ? 'quote' : 'manual', ...(q ? {quoteId:q.id, quoteNumber:q.number, quoteTitle:q.title} : {}),
+      object, recordId:record.id, createdAt:at, createdBy:CURRENT_USER.name,
       paymentType:plan.paymentType, currency:plan.currency, total:r2(installments.reduce((a, x) => a + x.amount, 0)), plan, ...(signedOn ? {signedOn} : {}), installments, revision:1,
       ...(freeze ? {frozen:{at, by:CURRENT_USER.name}, freezes:[{action:'frozen', at, by:CURRENT_USER.name}]} : {})};
     hub.setAccounting(list => [...list, s]);
-    logPayment(s, 'Payment plan created', {detail:`${planTitle(s)} · ${fmtMoney(s.total, s.currency)}${freeze ? ' · frozen' : ''}`});
+    if(q) hub.setQuotes(qs => qs.map(x => x.id === q.id ? {...x, linkedPlanId:id} : x));
+    logPayment(s, 'Payment plan created', {detail:`${planTitle(s)} · ${fmtMoney(s.total, s.currency)}${q ? ` · from ${q.number}` : ''}${freeze ? ' · frozen' : ''}`});
     setEditing(null); setTab(freeze ? 'frozen' : 'active');
     hub.toast(freeze ? `${s.number} saved and frozen` : `${s.number} saved`);
   };
-  /* Saving a plan's edit: a new revision (the one before kept in `revisions`). Its payments are made
-     by the plan (planSchedule), except those with something paid on them, which stay as they are
-     (with their balances); a payment kept through the edit keeps the invoice it had issued before
-     plans. A paid One-Time payment stays: One-Time, as it is; Installment, the deposit. Issued,
-     unpaid invoices whose payment changed are archived (archiveChangedInvoices) and invoiced
-     again. Reversed payments (`reversed`) stay whatever the type. */
+  /* Saving a plan's edit: a new revision (revisePlan). Issued, unpaid invoices whose payment changed
+     are archived (archiveChangedInvoices) and invoiced again. */
   const editPlan = (plan) => {
     const s0 = all.find(s => s.id === (editing && editing.id));
-    if(!s0 || s0.cancelledOn) return;
-    const was = paymentTypeOf(s0), first = s0.installments[0], paidOne = was === 'one-time' && hasPayments(s0) ? first : null;
-    if(was !== 'one-time' && hasPayments(s0) && plan.paymentType !== was) return;
-    const signedOn = plan.issue.type === 'signed' ? signedOnOf(s0) : '';
-    const old = s0.installments || [], used = new Set(), tops = old.filter(x => !x.parentId);
-    // Saved before plans: the plan's payments take theirs, by place (their payments and invoices stay with them).
-    const fresh = planSchedule(plan, {id:s0.id, signedOn, locked:paidOne ? null : lockedOf(s0)}).map((f, i) => !s0.plan && tops[i] ? {...f, id:tops[i].id} : f);
-    const kids = (x) => old.filter(b => b.parentId === x.id).flatMap(b => [b, ...kids(b)]);
-    const paidTree = (x) => (x.payments || []).length > 0 || kids(x).some(k => (k.payments || []).length);
-    const rows = fresh.flatMap((f, i) => {
-      if(paidOne && i === 0){ used.add(first.id); return [{...first, description: plan.paymentType === 'one-time' ? first.description : 'Deposit'}]; }
-      const o = old.find(x => x.id === f.id && !x.parentId);
-      if(o && paidTree(o)){ used.add(o.id); return [o, ...kids(o)]; }
-      return [o && o.invoicedAt ? {...f, invoicedAt:o.invoicedAt} : f];
-    });
-    const installments = [...rows, ...old.filter(x => !x.parentId && !used.has(x.id) && paidTree(x)).flatMap(x => [x, ...kids(x)])];
-    const total = r2(installments.filter(x => !x.parentId).reduce((a, x) => a + x.amount, 0)), at = new Date();
-    const {signedOn: _was, ...keep} = s0;
-    const next = {...keep, paymentType:plan.paymentType, currency:plan.currency, total, plan, ...(signedOn ? {signedOn} : {}), installments, revision:(s0.revision || 1) + 1,
-      revisions:[...(s0.revisions || []), {revision:s0.revision || 1, paymentType:was, currency:scheduleCurrency(s0), total:s0.total, plan:s0.plan || null, savedAt:at, savedBy:CURRENT_USER.name}]};
+    const was = s0 && paymentTypeOf(s0);
+    const next = revisePlan(s0, plan, {signedOn: plan.issue.type === 'signed' ? signedOnOf(s0) : ''});
+    if(!next) return;
+    const total = next.total;
     hub.setAccounting(list => list.map(s => s.id === s0.id ? next : s));
     hub.setInvoices(list => archiveChangedInvoices(list, next));
     if(was !== plan.paymentType) logPayment(s0, 'Payment type changed', {from:PAYMENT_TYPE_LABEL[was], to:PAYMENT_TYPE_LABEL[plan.paymentType]});
@@ -1064,7 +1276,7 @@ function RecordAccounting({object, record}){
         onSave={(v)=>savePayment(payingSchedule.id, payingInst.id, v)} onReverse={()=>reversePayment(payingSchedule.id, payingInst.id)}/>}
       {cancelling && <CancelSubscriptionModal onCancel={()=>setCancelling(null)} onSave={(on)=>cancelSubscription(cancelling, on)}/>}
       {viewingInst && <PaymentVerificationModal inst={viewingInst} currency={scheduleCurrency(viewingSchedule)} onClose={()=>setViewing(null)}/>}
-      {editing && editing.isNew && <PaymentStructurePanel key="new" isNew initial={newPaymentPlan()} signedOn={signedOnOf(null)} onCancel={()=>setEditing(null)} onSave={createPlan}/>}
+      {editing && editing.isNew && <PaymentStructurePanel key="new" isNew initial={newPaymentPlan({vatRate:QUOTE_VAT_RATE})} signedOn={signedOnOf(null)} quotes={pullableQuotes} onCancel={()=>setEditing(null)} onSave={createPlan}/>}
       {editing && editingPlan && <PaymentStructurePanel key={editing.id} initial={editingPlan} signedOn={signedOnOf(editingSchedule)} scheduleId={editingSchedule.id}
         locked={editingPaid ? null : lockedOf(editingSchedule)} signedLabel={editingSchedule.source === 'document' ? 'Document Signed' : undefined}
         frozen={!!editingSchedule.frozen} onFreeze={canEdit ? ()=>freezePlan(editingSchedule.id, !editingSchedule.frozen) : null}

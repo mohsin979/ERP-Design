@@ -64,7 +64,15 @@
    both off before VAT (quoteTotals), so the Payment Plan is for the lowered total. The quotation —
    Preview, the view, the client's page, the PDF — and the quote's email show it as its own line,
    "Referral Discount", under Discount, only when it's above zero. A quote template never carries
-   one; a saved quote keeps the one it was saved with. */
+   one; a saved quote keeps the one it was saved with.
+
+   Payment plans and sent quotes (2026-11-24): the Payment Plan step's Existing Plan starts the
+   quote from one of its record's running plans — its terms, discount and VAT — and links them
+   (`linkedPlanId`); Add Payment Plan can pull a quote in the other way (accounting.jsx). Signing a
+   linked quote updates that plan (plansOnQuoteSigned). A sent quote can be edited: it stays Sent,
+   a change makes its next version (`version`, the ones before in `versions`, "Quote edited" on the
+   record), the quotation shows Version from 2 on; Send Again sends the latest (its email's subject
+   names the version). A signed quote can't be edited. */
 
 const QUOTE_STATUS = {draft:{label:'Draft', tone:'neutral'}, sent:{label:'Sent', tone:'info'}, signed:{label:'Signed', tone:'success'}, expired:{label:'Expired', tone:'danger'}};
 /* Expired: a draft or sent quote past its Valid Until date — it can't be sent, signed or pulled into
@@ -236,6 +244,7 @@ function QuoteDocument({quote, flat, brand:given}){
         <div><div style={muted}>{HUB_NOUN[quote.object]}</div><div style={{fontSize:13.5, color:T.attioText}}>{record ? record.name : '—'}</div></div>
         <div><div style={muted}>Date</div><div style={{fontSize:13.5, color:T.attioText}}>{fmtQuoteDate(quote.sentAt || quote.createdAt)}</div></div>
         <div><div style={muted}>Valid until</div><div style={{fontSize:13.5, color:T.attioText}}>{fmtQuoteDate(quote.validUntil) || '—'}</div></div>
+        {(quote.version || 1) > 1 && <div><div style={muted}>Version</div><div style={{fontSize:13.5, color:T.attioText}}>{quote.version}</div></div>}
       </div>
       <div style={{padding:'20px 24px', display:'flex', flexDirection:'column', gap:22}}>
         <div>
@@ -418,10 +427,12 @@ async function sendQuoteVia(hub, q){
   const sentAt = new Date();
   const t = quoteTotals(q), cur = quoteCurrency(q);
   const brandId = keepQuoteBrand();
+  // Sent again (2026-11-24): the latest version, named in the activity and the email's subject from version 2 on.
+  const v = (q.version || 1) > 1 ? ` · version ${q.version}` : '';
   hub.setQuotes(qs => qs.map(x => x.id === q.id ? {...x, status:'sent', sentAt, brandId} : x));
-  hub.add(q.object, q.recordId, {type:'quote', status:'sent', title:`${q.number} · ${q.title}`, quoteId:q.id, total:t.total, source:'you', by:null});
+  hub.add(q.object, q.recordId, {type:'quote', status:'sent', title:`${q.number} · ${q.title}${v}`, quoteId:q.id, total:t.total, source:'you', by:null});
   hub.add(q.object, q.recordId, {type:'email', direction:'sent', status:'sent', to:[q.recipient.email].filter(Boolean), source:'you', by:null, quoteId:q.id, ...(pdf ? {attachments:[pdf]} : {}),
-    title:`Quotation ${q.number}: ${q.title}`,
+    title:`Quotation ${q.number}${v ? ` (version ${q.version})` : ''}: ${q.title}`,
     body:`Hi ${emailFirstName(q.recipient.name) || 'there'},\n\nPlease find your quotation ${q.number} for ${q.title} below.\n\n`
       + (q.items || []).map(it => `${it.name} — ${fmtMoney(quoteItemTotal(it), cur)}`).join('\n')
       + `\n\nSubtotal: ${fmtMoney(t.subtotal, cur)}` + (t.discount ? `\nDiscount: − ${fmtMoney(t.discount, cur)}` : '') + (t.referralDiscount ? `\nReferral Discount: − ${fmtMoney(t.referralDiscount, cur)}` : '') + (q.vatRate != null ? `\nVAT (${t.vatRate}%): ${fmtMoney(t.vat, cur)}` : '')
@@ -453,7 +464,7 @@ function quoteConfigChecks(q){
 // The services, payment terms and discount as saved: prices as numbers; the plan without an amount or currency (the quote's).
 const normalizeQuoteConfig = (q) => ({
   items:(q.items || []).map(it => ({...it, price:Number(it.price) || 0, milestones:(it.milestones || []).map(m => ({...m, price:Number(m.price)}))})),
-  payment:(({amount, currency, ...p}) => p)(normalizePlan(quotePlanOf(q))), installments:undefined,
+  payment:(({amount, currency, discount, vatRate, ...p}) => p)(normalizePlan(quotePlanOf(q))), installments:undefined,
   discount:{type:(q.discount || {}).type || 'percent', value:Number((q.discount || {}).value) || 0},
 });
 const QUOTE_SECTION = {fontSize:11, fontWeight:600, color:T.attioFaint, textTransform:'uppercase', letterSpacing:.4};
@@ -554,29 +565,33 @@ function QuoteServicesFields({q, set, checks, template}){
    (PaymentTermsFields), then the discount on the services subtotal (a percentage or an amount)
    and VAT on the discounted subtotal, down to the total. `referral`: the quote's record has a
    referral link — the Referral Discount is offered under the Discount, with the same control. */
-function QuotePaymentFields({q, set, checks, referral}){
+/* `plans` (2026-11-24): the record's payment plans the quote can start from — Existing Payment Plan,
+   first: picking one puts its terms, discount and VAT on the quote and links them (`linkedPlanId`;
+   signing the quote then updates that plan — plansOnQuoteSigned); None unlinks, keeping what's set. */
+function QuotePaymentFields({q, set, checks, referral, plans}){
   const {totals, discountOk, referralOk} = checks, cur = quoteCurrency(q);
   // Another currency restates every price (and an amount discount) in it.
   const setCurrency = (c) => c && c !== cur && set({currency:c, items:itemsIn(q.items, cur, c), discount:discountIn(q.discount, cur, c),
     ...(q.referralDiscount ? {referralDiscount:discountIn(q.referralDiscount, cur, c)} : {})});
-  // A discount's control — Discount and Referral Discount alike: % or an amount, then the value.
-  const discountField = (label, key, ok) => { const d = q[key] || {type:'percent', value:''}; return (
-    <div style={{display:'flex', alignItems:'center', gap:10, padding:'6px 0'}}>
-      <span style={{flex:1, fontSize:13, color:T.attioText}}>{label}</span>
-      <div role="radiogroup" aria-label={`${label} type`} style={{display:'inline-flex', border:`1px solid ${T.borderStrong}`, borderRadius:8, overflow:'hidden'}}>
-        {[['percent', '%'], ['amount', cur]].map(([k, l]) => (
-          <button key={k} type="button" role="radio" aria-checked={d.type === k} onClick={()=>set({[key]:{...d, type:k}})}
-            style={{border:'none', cursor:'pointer', padding:'5px 10px', fontSize:12.5, fontWeight:500, fontFamily:'inherit', background: d.type === k ? T.black : 'transparent', color: d.type === k ? '#fff' : T.gray600}}>{l}</button>
-        ))}
-      </div>
-      <input value={d.value} onChange={e=>set({[key]:{...d, value:e.target.value.replace(/[^0-9.]/g, '')}})} inputMode="decimal" placeholder="0" aria-label={label}
-        style={{...fieldText, width:110, textAlign:'right', fontVariantNumeric:'tabular-nums', borderColor: ok ? T.borderStrong : T.red}}/>
-    </div>); };
+  // A discount's control — Discount and Referral Discount alike (accounting.jsx DiscountControl).
+  const discountField = (label, key, ok) => <DiscountControl label={label} value={q[key]} currency={cur} ok={ok} onChange={(d)=>set({[key]:d})}/>;
+  // A plan's terms on the quote: its payment terms; its discount (an amount restated in the quote's currency) and VAT.
+  const usePlan = (id) => {
+    if(!id){ set({linkedPlanId:undefined}); return; }
+    const s = (plans || []).find(x => x.id === id); if(!s) return;
+    const p = planOf(s), pc = s.currency || p.currency, {amount, currency, discount, vatRate, ...terms} = p;
+    set({linkedPlanId:id, payment:newPaymentPlan(terms), discount:discountIn({type:(discount || {}).type || 'percent', value:(discount || {}).value || ''}, pc, cur),
+      ...(vatRate != null && vatRate !== '' ? {vatRate:Number(vatRate) || 0} : {})});
+  };
   return (<>
     {/* The plan's first field, laid out as its own (accounting.jsx PaymentTermsFields). */}
-    {stack(<Field label="Currency" wide required><div style={{display:'grid', gridTemplateColumns:`${PT_W}px ${PT_W}px`, gap:12}}>
-      <Dropdown required value={cur} options={currencyOptions()} controlStyle={{...fieldControl, height:PT_H, boxSizing:'border-box'}} ariaLabel="Currency" onChange={setCurrency}/><span/></div></Field>)}
-    <PaymentTermsFields plan={quotePlanOf(q)} onChange={(p)=>set({payment:p})} total={totals.total} currency={cur}/>
+    <PaymentTermsFields plan={quotePlanOf(q)} onChange={(p)=>set({payment:p})} total={totals.total} currency={cur} head={<>
+      {(plans || []).length > 0 && <Field label="Existing Plan" wide><div style={{display:'grid', gridTemplateColumns:`${PT_W}px ${PT_W}px`, gap:12}}>
+        <Dropdown value={q.linkedPlanId || ''} placeholder="Select payment plan" controlStyle={{...fieldControl, height:PT_H, boxSizing:'border-box'}} ariaLabel="Existing payment plan"
+          options={[{value:'', label:'None'}, ...plans.map(s => ({value:s.id, label:`${s.number} · ${PAYMENT_TYPE_LABEL[paymentTypeOf(s)]} · ${fmtMoney(s.total, scheduleCurrency(s))}`}))]} onChange={usePlan}/><span/></div></Field>}
+      <Field label="Currency" wide required><div style={{display:'grid', gridTemplateColumns:`${PT_W}px ${PT_W}px`, gap:12}}>
+        <Dropdown required value={cur} options={currencyOptions()} controlStyle={{...fieldControl, height:PT_H, boxSizing:'border-box'}} ariaLabel="Currency" onChange={setCurrency}/><span/></div></Field>
+    </>}/>
     <div style={{borderTop:`1px solid ${T.border}`, margin:'4px -20px 0'}}/>
     <span style={QUOTE_SECTION}>Discount & tax</span>
     <div style={{maxWidth:420, width:'100%', alignSelf:'flex-end'}}>
@@ -642,11 +657,27 @@ function QuoteBuilder({mode, id, object, onClose, placement = 'fixed', template}
   const referralValue = referralOn && q.referralDiscount ? Number(q.referralDiscount.value) || 0 : 0;
   const checks = quoteConfigChecks(referralOn ? q : {...q, referralDiscount:undefined}), totals = checks.totals;
   const stepOk = [isTpl ? !!q.name.trim() : target.id != null && !!q.recipient.name.trim() && validEmail, checks.itemsOk, checks.discountOk && checks.referralOk && checks.paymentOk, true, true, true];
+  // The payment plans the quote can start from (2026-11-24): the ones its record shows, still running.
+  const linkablePlans = React.useMemo(() => { const record = !isTpl && target.id != null ? hubRecord(hub, target.object, target.id) : null;
+    return record ? recordPlansOf(hub.accounting, target.object, record, hub.records).filter(s => planState(s) !== 'paid' && !s.cancelledOn) : []; },
+    [hub.accounting, hub.records, target.object, target.id, isTpl]);
   const draft = () => ({...q, title:q.title.trim() || (q.items[0] && q.items[0].name) || 'Quotation', recipient:{name:q.recipient.name.trim(), email:q.recipient.email.trim()},
-    ...normalizeQuoteConfig(q), referralDiscount: referralValue > 0 ? {type:q.referralDiscount.type || 'percent', value:referralValue} : undefined, object:target.object, recordId:target.id});
+    ...normalizeQuoteConfig(q), referralDiscount: referralValue > 0 ? {type:q.referralDiscount.type || 'percent', value:referralValue} : undefined, object:target.object, recordId:target.id,
+    linkedPlanId: q.linkedPlanId && linkablePlans.some(s => s.id === q.linkedPlanId) ? q.linkedPlanId : undefined});
+  // A sent quote edited (2026-11-24): it stays Sent; a change makes its next version (the one before kept in `versions`).
+  const resend = !!existing && existing.status === 'sent';
+  const QUOTE_CONTENT = ['title', 'recipient', 'description', 'items', 'payment', 'discount', 'referralDiscount', 'vatRate', 'terms', 'eSignature', 'currency', 'validUntil', 'showBankDetails', 'linkedPlanId'];
+  const contentOf = (x) => JSON.stringify(QUOTE_CONTENT.map(k => x[k] === undefined ? null : x[k]));
   const save = (andSend) => {
     let saved;
-    if(existing){ saved = {...existing, ...draft()}; hub.setQuotes(qs => qs.map(x => x.id === existing.id ? saved : x)); }
+    if(existing && resend){
+      const d = draft(), changed = contentOf(d) !== contentOf(existing);
+      const {versions: _v, ...before} = existing;
+      saved = changed ? {...existing, ...d, version:(existing.version || 1) + 1, versions:[...(existing.versions || []), {...before, version:existing.version || 1, replacedAt:new Date(), replacedBy:CURRENT_USER.name}]} : existing;
+      if(changed){ hub.setQuotes(qs => qs.map(x => x.id === existing.id ? saved : x));
+        hub.add(saved.object, saved.recordId, {type:'quote', status:'edited', title:`${saved.number} · ${saved.title} · version ${saved.version}`, quoteId:saved.id, total:quoteTotal(saved), source:'you', by:null}); }
+    }
+    else if(existing){ saved = {...existing, ...draft()}; hub.setQuotes(qs => qs.map(x => x.id === existing.id ? saved : x)); }
     else {
       saved = {...draft(), id:`q-${Date.now().toString(36)}`, number:quoteNumber(hub.quotes), status:'draft', createdAt:new Date(), createdBy:CURRENT_USER.name};
       hub.setQuotes(qs => [...qs, saved]);
@@ -689,7 +720,7 @@ function QuoteBuilder({mode, id, object, onClose, placement = 'fixed', template}
         {step < last ? <StCta label="Next" disabled={!stepOk[step]} onClick={()=>setStep(s => s + 1)}/>
           : isTpl ? <StCta label={tpl0 ? 'Save Changes' : 'Add Quote Template'} disabled={!stepOk.every(Boolean)} onClick={saveAsTemplate}/>
           : <>{templateCan('quoteTemplates', 'create') && <StSecondary label="Save as Template" onClick={()=>setTemplating(q.title.trim() || (q.items[0] && q.items[0].name) || '')}/>}
-              <StSecondary label={existing ? 'Save Changes' : 'Save as Draft'} onClick={()=>save(false)}/><StCta label="Send Quote" busy={sending} disabled={!!q.validUntil && q.validUntil < ymdOf(new Date())} onClick={()=>save(true)}/></>}
+              <StSecondary label={existing ? 'Save Changes' : 'Save as Draft'} onClick={()=>save(false)}/><StCta label={resend ? 'Send Again' : 'Send Quote'} busy={sending} disabled={!!q.validUntil && q.validUntil < ymdOf(new Date())} onClick={()=>save(true)}/></>}
       </>}>
       {/* The steps, in their own column on the left. A template already made (`filled`): every step reads as done — no progress to show — and the open one is the light grey row. */}
       <div style={{width:QUOTE_STEPPER_W, flexShrink:0, borderRight:`1px solid ${T.border}`, padding:'16px 12px', display:'flex', flexDirection:'column', gap:2}}>
@@ -732,7 +763,7 @@ function QuoteBuilder({mode, id, object, onClose, placement = 'fixed', template}
           {step === 1 && <QuoteServicesFields q={q} set={set} checks={checks} template={isTpl}/>}
 
           {/* 3 · Payment Terms — the payment terms, then the discount and VAT. */}
-          {step === 2 && <QuotePaymentFields q={q} set={set} checks={checks} referral={referralOn}/>}
+          {step === 2 && <QuotePaymentFields q={q} set={set} checks={checks} referral={referralOn} plans={linkablePlans}/>}
 
           {/* 4 · Terms & Conditions */}
           {step === 3 && <>
@@ -830,14 +861,17 @@ function QuoteSignaturePreview({name, brand = orgBrand()}){
   );
 }
 
-/* A quote's actions, wherever it's shown: Edit (drafts), Send (drafts not expired), Mark as signed
+/* A quote's actions, wherever it's shown: Edit (drafts and sent — 2026-11-24), Send (drafts not
+   expired), Send Again (sent, not expired), Mark as signed
    (sent, not expired), Download PDF (any — 2026-11-19), Delete (anything not signed — a signed quote is kept). */
 function quoteActions(hub, q, {onDelete, onEdit, onSign} = {}){
   const expired = quoteExpired(q);
   return [
     ...(q.status === 'sent' && !expired && onSign ? [{label:'Mark as Signed', onClick:()=>onSign(q)}] : []),
-    ...(q.status === 'draft' ? [{label:'Edit Quote', onClick:()=>onEdit ? onEdit(q.id) : hub.editQuote(q.id)}] : []),
+    // A sent quote can be edited too (2026-11-24) — it stays Sent, as its next version — and sent again; a signed one can't.
+    ...(q.status === 'draft' || q.status === 'sent' ? [{label:'Edit Quote', onClick:()=>onEdit ? onEdit(q.id) : hub.editQuote(q.id)}] : []),
     ...(q.status === 'draft' && !expired ? [{label:'Send Quote', onClick:()=>sendQuoteVia(hub, q)}] : []),
+    ...(q.status === 'sent' && !expired ? [{label:'Send Again', onClick:()=>sendQuoteVia(hub, q)}] : []),
     {label:'Download PDF', onClick:()=>{ hub.toast('Preparing the PDF'); downloadQuotePdf(hub, q); }},
     // The client's link to view it (the quote's sent email carries it too).
     ...(q.status !== 'draft' ? [{label:'Copy Link', onClick:()=>copyText(quoteLink(q)).then(ok => hub.toast(ok ? 'Quote link copied' : 'Copy failed'))}] : []),
@@ -959,12 +993,12 @@ function RecordQuotesTab({contact}){
         <div style={{flex:1, minWidth:0, minHeight:0, display:'flex', flexDirection:'column'}}>
           {selected && (
             <DetailFrame head={<span style={{fontSize:13, color:T.attioMuted}}>{selected.number} · created by {selected.createdBy}{selected.status === 'signed' ? ` · signed ${fmtQuoteDate(selected.signedAt)}` : ''}</span>}
-              actions={<>{selected.status === 'draft' && can('edit') && headerBtn('Edit', ()=>setBuilder({mode:'edit', id:selected.id}))}
+              actions={<>{(selected.status === 'draft' || selected.status === 'sent') && can('edit') && headerBtn('Edit', ()=>setBuilder({mode:'edit', id:selected.id}))}
                 {selected.status === 'draft' && !quoteExpired(selected) && <button onClick={()=>send(selected)} disabled={sendingId === selected.id}
                   style={{...btnPrimarySm(), display:'inline-flex', alignItems:'center', gap:6, cursor: sendingId === selected.id ? 'default' : 'pointer'}}>{sendingId === selected.id && <Spinner size={13} color="#fff"/>}Send</button>}
                 {selected.status === 'sent' && !quoteExpired(selected) && can('edit') && <button onClick={()=>setSigning(selected)} style={btnPrimarySm()}>Mark as signed</button>}
                 {selected.signedCopy && <a href={selected.signedCopy.dataUrl} download={selected.signedCopy.name} style={{...btnSecondarySm, textDecoration:'none'}}><Icon name="paperclip" size={13} color={T.gray600}/> Signed copy</a>}
-                {actions.some(it => !/^(Edit|Send|Mark)/.test(it.label)) && <DetailMoreMenu items={actions.filter(it => !/^(Edit|Send|Mark)/.test(it.label))}/>}</>}>
+                {actions.some(it => !/^(Edit Quote|Send Quote|Mark)/.test(it.label)) && <DetailMoreMenu items={actions.filter(it => !/^(Edit Quote|Send Quote|Mark)/.test(it.label))}/>}</>}>
               <QuoteDocument quote={selected}/>
             </DetailFrame>
           )}
