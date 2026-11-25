@@ -24,6 +24,35 @@
    at the bottom right while it continues — the rest of the CRM stays usable; the bar restores it.
    Rendered into <body>, so the call stays on screen whichever page is open. */
 
+/* Spring Copilot (2026-11-24, for the product video; mocked like every Spring feature): while the
+   call is live, one Spring card above the controls coaches the salesperson — a single tip at a time,
+   read from what's been said and the record (`springCallTip`). The latest words decide it; before
+   anything is said, how to open. A stand-in for the real model. */
+const SPRING_CALL_TIPS = [
+  [/price|fee|cost|expensive|afford|budget/, 'They’re weighing the fee. Offer the installment plan: a deposit now, the rest monthly.'],
+  [/ielts|celpip|english|language test|score/, 'Ask for their test scores. Language points move their CRS more than anything else.'],
+  [/wife|husband|spouse|partner|married/, 'Ask about the spouse’s education and English. It can add points to the profile.'],
+  [/think about|later|not sure|busy|call back/, 'Don’t end it open. Book a ten-minute follow-up before you hang up.'],
+  [/job|work|experience|years/, 'Confirm how many years were skilled work. It decides the program they qualify for.'],
+  [/canada|express entry|pr\b|permanent/, 'Lead with timelines. Express Entry draws every two weeks; tell them where they’d stand.'],
+];
+const springCallTip = (segments, contact) => {
+  for(const s of [...(segments || [])].reverse()){ const hit = SPRING_CALL_TIPS.find(([re]) => re.test(String(s.text).toLowerCase())); if(hit) return hit[1]; }
+  return `Open with ${String((contact && contact.name) || 'their').split(/\s+/)[0]}’s goal: which country, and by when.`;
+};
+function SpringCallCopilot({segments, contact}){
+  return (
+    <div role="status" aria-live="polite" style={{margin:'0 20px 12px', display:'flex', alignItems:'flex-start', gap:12, padding:'12px 14px', borderRadius:12,
+      background:SPRING.tint, border:`1px solid ${SPRING.line}`}}>
+      <span style={{paddingTop:3}}><SpringMark w={22}/></span>
+      <div style={{minWidth:0, flex:1}}>
+        <div style={{fontSize:12, fontWeight:600, color:SPRING.deep, marginBottom:2}}>Spring</div>
+        <div style={{fontSize:13.5, color:T.attioText, lineHeight:1.5}}>{springCallTip(segments, contact)}</div>
+      </div>
+    </div>
+  );
+}
+
 const SPEECH_LANGS = [
   {id:'en-US', label:'English (US)'},
   {id:'en-GB', label:'English (UK)'},
@@ -349,6 +378,8 @@ function CallPanel({contact, onEnded, onClose, onRunProfile}){
           )}
         </div>
 
+        {/* Spring Copilot: one tip at a time while the call is live. */}
+        {phase === 'live' && <SpringCallCopilot segments={interim ? [...segments, {text:interim}] : segments} contact={contact}/>}
 
         {/* Controls */}
         <div style={{display:'flex', alignItems:'center', gap:8, padding:'12px 20px', borderTop:`1px solid ${T.border}`}}>
@@ -417,4 +448,4 @@ function CallPanel({contact, onEnded, onClose, onRunProfile}){
   </>, document.body);
 }
 
-Object.assign(window, {CallPanel});
+Object.assign(window, {CallPanel, SpringCallCopilot, springCallTip});

@@ -3609,6 +3609,8 @@ const EventSection = ({title, children}) => (
 const eventBtn = (primary) => ({alignSelf:'flex-start', display:'inline-flex', alignItems:'center', gap:8, height:32, padding:'0 14px', borderRadius:8, fontSize:13, fontWeight:500,
   fontFamily:'inherit', cursor:'pointer', whiteSpace:'nowrap', ...(primary ? {border:'none', background:T.black, color:'#fff'} : {border:`1px solid ${T.borderStrong}`, background:'#fff', color:T.attioText})});
 const eventBtnDisabled = {background:T.gray400, cursor:'default'};
+// A move a workflow still keeps out (Enforce Rules): locked, not just dimmed.
+const eventBtnLocked = {background:'#F5F5F5', color:T.gray400, border:`1px solid ${T.borderStrong}`, cursor:'not-allowed'};
 /* A violation's actions (Action Required): Edit <property> as the primary when the workflow watches
    one a person can edit, then the required action (its icon and name); alone, the required action
    is the primary. */
@@ -4048,7 +4050,9 @@ function ExplainWorkflow({children}){
 }
 /* An Automatic Action (the reference): the record and workflow; Automation — the action it ran, in
    one line; Is this workflow blocking you? — the suggested actions as underlined links; then
-   Explain This Workflow, collapsed. */
+   Explain This Workflow, collapsed. A block's own message (why the move stopped) stands out in the
+   block's red on its tint; while the record is still kept out, "Move to <stage>" is locked — a lock
+   icon, greyed, a not-allowed pointer (2026-11-24). */
 function AutomaticActionModal({event, onClose, hidden}){
   const ctx = useWorkflowEngineCtx();
   const facts = ctx ? eventFacts(ctx, event) : {trace:event.trace, now:{}, actions:[], deal:null};
@@ -4081,7 +4085,8 @@ function AutomaticActionModal({event, onClose, hidden}){
         {key:'blocking', title:'Is this workflow blocking you?', body: isBlock
           ? <div style={{display:'flex', flexDirection:'column', gap:10}}>
               {/* What's missing, as the workflow's Block Entry says it. */}
-              {event.message && <div style={{fontSize:13.5, color:T.attioText, lineHeight:1.5}}>{event.message}</div>}
+              {/* In the block's red, on its tint, with the left line "Workflow Triggered" has: this is why the move stopped. */}
+              {event.message && <div style={{fontSize:13.5, fontWeight:500, color:VIOLATION_TONE.color, lineHeight:1.5, background:VIOLATION_TONE.bg, borderLeft:`2px solid ${VIOLATION_TONE.color}`, borderRadius:'0 8px 8px 0', padding:'10px 12px'}}>{event.message}</div>}
               <EventRemedies trace={facts.trace} name={name} onPick={remedies.pick} met={met} include={mine ? mine.held : []}/>
               {pending && (
                 <div style={{display:'flex', flexDirection:'column', gap:8, marginTop:6, paddingTop:14, borderTop:`1px solid ${T.border}`}}>
@@ -4091,8 +4096,9 @@ function AutomaticActionModal({event, onClose, hidden}){
                       : `Once these are done, you can move ${name} to ${toLabel}.`}
                   </div>
                   <div style={{display:'flex', gap:8, flexWrap:'wrap'}}>
-                    <button onClick={blockers.length ? undefined : resume} disabled={!!blockers.length} style={{...eventBtn(true), ...(blockers.length ? eventBtnDisabled : {})}}>
-                      <Icon name="forward" size={14} color="#fff"/>Move to {toLabel}</button>
+                    {/* Still kept out: the move reads as locked — a lock, greyed, no pointer. */}
+                    <button onClick={blockers.length ? undefined : resume} disabled={!!blockers.length} title={blockers.length ? 'Blocked by this workflow' : undefined} style={{...eventBtn(true), ...(blockers.length ? eventBtnLocked : {})}}>
+                      <Icon name={blockers.length ? 'lock' : 'forward'} size={14} color={blockers.length ? T.gray400 : '#fff'}/>Move to {toLabel}</button>
                     <button onClick={()=>{ ctx.api.dismissMove(facts.deal.id); onClose(); }} style={eventBtn(false)}>Don’t move</button>
                   </div>
                 </div>

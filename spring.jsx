@@ -85,6 +85,13 @@ function SpringControls({voice, files, setFiles, ready, onSend, blue}){
 /* Spring's answer (a stand-in for the model): a few words and, where it fits, a CRM piece. → {text, block} */
 function springReply(text){
   const q = String(text || '').toLowerCase();
+  /* The Lost story (2026-11-24, the product video): why deals are lost — the lost deals and how
+     hard they were tried; then a rule keeping deals out of Lost until they've really been tried. */
+  if(/(don.?t|do not|stop|never)\b.*\blost\b|\bbefore\b.*\blost\b|\blost\b.*\b(rule|until)\b/.test(q)) return {text:"Here's the workflow. It's off until you turn it on.", block:{kind:'workflow', context:'Deals',
+    triggers:[['call', 'Calls Not Answered', 'fewer than 3'], ['envelope', 'Emails Received', 'at least 1'], ['envelope', 'Email Sequence', 'still running']], triggerMode:'any',
+    actions:[['lock', 'Block Stage Entry', 'Lost']]}};
+  if(/^(please )?(turn|switch) it on\b|^enable it\b/.test(q.trim())) return {text:'Done. It’s on.'};
+  if(/\b(why|reason)\b.*\blos(e|ing|t)\b|\blosing\b/.test(q)) return {text:'Most lost deals were dropped early:', block:{kind:'lostPattern'}};
   if(/workflow|automat|trigger/.test(q)) return {text:'I can draft that in the workflow builder. Which record and stage does it start from?'};
   if(/report|source/.test(q)) return {text:'Leads by Source', block:{kind:'leadsBySource'}};
   if(/win|lost|rate/.test(q)) return {text:'Across all deals:', block:{kind:'winLoss'}};
@@ -119,7 +126,11 @@ function SpringBlock({b, hub, me}){
     <div style={{...WORKFLOW_CANVAS, border:`1px solid ${T.borderStrong}`, borderRadius:12, padding:'20px 16px', display:'flex', flexDirection:'column', alignItems:'center'}}>
       <WorkflowCard tab="CONTEXT" icon="cube"><span style={{fontSize:12.5, fontWeight:500, color:T.attioText}}><span style={{fontWeight:600}}>{branchLabel(ACTIVE_CRM.name, 'CRM')}</span> → {b.context}</span></WorkflowCard>
       <WorkflowConnector/>
-      <WorkflowCard tab="TRIGGER" icon="workflows" accent>{blockLine(b.trigger[0], b.trigger[1], b.trigger[2])}</WorkflowCard>
+      <WorkflowCard tab="TRIGGER" icon="workflows" accent>{b.triggers
+        ? <div style={{display:'flex', flexDirection:'column', gap:10}}>
+            {b.triggers.map((t, i) => <React.Fragment key={i}>{i > 0 && <div style={{fontSize:11, fontWeight:600, color:T.attioMuted, letterSpacing:.4}}>{b.triggerMode === 'any' ? 'OR' : 'AND'}</div>}{blockLine(t[0], t[1], t[2])}</React.Fragment>)}
+          </div>
+        : blockLine(b.trigger[0], b.trigger[1], b.trigger[2])}</WorkflowCard>
       <WorkflowConnector/>
       <WorkflowCard tab="ACTION" icon="listBullets">{b.actions.map((a, i) => <React.Fragment key={i}>{blockLine(a[0], a[1], a[2])}</React.Fragment>)}</WorkflowCard>
     </div>);
@@ -129,6 +140,23 @@ function SpringBlock({b, hub, me}){
     const tile = (label, value) => <div style={{flex:'1 1 140px', border:`1px solid ${T.borderStrong}`, borderRadius:12, padding:'12px 14px', background:'#fff'}}>
       <div style={{fontSize:12.5, color:T.gray600}}>{label}</div><div style={{fontSize:24, fontWeight:600, color:T.attioText, marginTop:6, fontVariantNumeric:'tabular-nums'}}>{value}</div></div>;
     return <div style={{display:'flex', flexWrap:'wrap', gap:10}}>{tile('Deals Won', won)}{tile('Deals Lost', lost)}{tile('Win Rate', won + lost ? `${Math.round(won / (won + lost) * 100)}%` : '—')}</div>; }
+  /* Lost deals and how hard each was tried (2026-11-24): tiles — Deals Lost, lost with fewer than 3
+     unanswered calls, lost with no reply — then the latest lost deals with their unanswered calls, emails
+     received and whether a sequence ran (the deal's own activity and its leads'). */
+  if(b.kind === 'lostPattern'){ const pls = hub.data.pipelines || [];
+    const lostOf = (d) => { const pl = pls.find(p => p.id === d.pipeline), st = pl && (pl.stages || []).find(x => x.id === d.stage); return stageTypeOf(st) === 'lost'; };
+    const actsOf = (d) => [...((hub.activities.deals || {})[d.id] || []), ...contactIdsOf(d).flatMap(c => (hub.activities.contacts || {})[c] || [])];
+    const lost = (hub.records.deals || []).filter(lostOf).map(d => { const acts = actsOf(d);
+      return {d, calls:acts.filter(a => a.type === 'call' && !callReached(a)).length, received:acts.filter(a => a.type === 'email' && a.direction === 'received').length, seq:acts.some(a => a.sequenceId)}; });
+    const early = lost.filter(x => x.calls < 3).length, noReply = lost.filter(x => !x.received).length;
+    const tile = (label, value) => <div style={{flex:'1 1 140px', border:`1px solid ${T.borderStrong}`, borderRadius:12, padding:'12px 14px', background:'#fff'}}>
+      <div style={{fontSize:12.5, color:T.gray600}}>{label}</div><div style={{fontSize:24, fontWeight:600, color:T.attioText, marginTop:6, fontVariantNumeric:'tabular-nums'}}>{value}</div></div>;
+    const pct = (n) => lost.length ? `${Math.round(n / lost.length * 100)}%` : '—';
+    return <div style={{display:'flex', flexDirection:'column', gap:10}}>
+      <div style={{display:'flex', flexWrap:'wrap', gap:10}}>{tile('Deals Lost', lost.length)}{tile('Under 3 Unanswered Calls', pct(early))}{tile('No Reply Received', pct(noReply))}</div>
+      <SpringTable columns={[{key:'name', label:'Deal'}, {key:'calls', label:'Unanswered Calls', num:true}, {key:'received', label:'Emails Received', num:true}, {key:'seq', label:'Sequence'}]}
+        rows={lost.sort((x, y) => x.calls - y.calls).slice(0, 5).map(x => ({name:springName('deals', x.d), calls:x.calls, received:x.received, seq:x.seq ? 'Yes' : 'No'}))}/>
+    </div>; }
   if(b.kind === 'leadsBySource'){ const custs = hub.records.customers || [], leads = hub.records.contacts || [];
     const by = new Map(); leads.forEach(r => { const k = r.source || 'Unknown'; by.set(k, [...(by.get(k) || []), r]); });
     const rows = [...by].map(([src, list]) => { const won = list.filter(r => custs.some(c => contactIdsOf(c).some(id => String(id) === String(r.id)))).length;
